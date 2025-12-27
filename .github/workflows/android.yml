@@ -1,4 +1,4 @@
-name: Android Debug APK (download libnode via GH release)
+name: Build APK (auto wrapper + download libnode)
 
 on:
   workflow_dispatch:
@@ -18,29 +18,38 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Unzip project
+      # 提供 gradle 命令（因为你 zip 里没有 gradlew）
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.4.2"
+
+      - name: Unzip project and locate root
         run: |
           rm -rf project
           mkdir -p project
           unzip -q DanmuApiApp.zip -d project
-          ROOT="$(find project -maxdepth 4 -type f -name gradlew -print -quit | xargs -r dirname)"
+
+          echo "=== unzip tree (top) ==="
+          find project -maxdepth 3 -print | sed -n '1,200p'
+
+          ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 gradlew。请确认 DanmuApiApp.zip 是完整 Android 工程。"
+            echo "❌ 没找到 settings.gradle / settings.gradle.kts。你的 zip 不是完整工程根目录。"
             exit 1
           fi
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      - name: Download nodejs-mobile Android release (android.zip)
+      - name: Download nodejs-mobile android.zip (reliable)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/nodejs-mobile
-          # 这里的 tag / repo 是关键：nodejs-mobile/nodejs-mobile 的 v18.20.4
           gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "android.zip" -D /tmp/nodejs-mobile
           ls -lh /tmp/nodejs-mobile
-          # 简单校验一下是不是 zip（不是的话直接失败，避免后面 unzip 迷惑报错）
           file /tmp/nodejs-mobile/android.zip | grep -i zip
+          unzip -t /tmp/nodejs-mobile/android.zip >/dev/null
 
       - name: Install libnode into project
         run: |
@@ -54,16 +63,25 @@ jobs:
           cp -R /tmp/nodejs-mobile/out/bin/* app/libnode/bin/
 
           if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
-            echo "❌ libnode.so 没拷进去（期望路径如 app/libnode/bin/arm64-v8a/libnode.so）"
+            echo "❌ libnode.so 没拷进去（期望 app/libnode/bin/arm64-v8a/libnode.so 等）"
             exit 1
           fi
+
+      - name: Generate Gradle Wrapper (if missing)
+        run: |
+          cd "$PROJECT_ROOT"
+          if [ ! -f "./gradlew" ]; then
+            echo "⚠️ gradlew not found, generating wrapper..."
+            gradle wrapper --gradle-version 8.4.2 --distribution-type bin
+          fi
+          chmod +x ./gradlew
+          ls -la gradlew gradle/wrapper || true
 
       - name: Build Debug APK
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           cd "$PROJECT_ROOT"
-          chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
       - name: Upload APK artifact
