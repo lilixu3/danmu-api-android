@@ -1,0 +1,46 @@
+name: Android Debug APK (from ZIP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Unzip project
+        run: |
+          mkdir -p project
+          unzip -q DanmuApiApp.zip -d project
+          ls -la project
+
+      - name: Download nodejs-mobile Android
+        run: |
+          mkdir -p /tmp/nodejs-mobile
+          curl -L -o /tmp/nodejs-mobile/android.zip https://github.com/JaneaSystems/nodejs-mobile/releases/download/nodejs-mobile-v18.20.4/android.zip
+          unzip -q /tmp/nodejs-mobile/android.zip -d /tmp/nodejs-mobile/out
+          mkdir -p project/app/libnode/include project/app/libnode/bin
+          cp -R /tmp/nodejs-mobile/out/include/* project/app/libnode/include/
+          cp -R /tmp/nodejs-mobile/out/bin/* project/app/libnode/bin/
+
+      - name: Build Debug APK
+        run: |
+          cd project
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: project/app/build/outputs/apk/debug/*.apk
