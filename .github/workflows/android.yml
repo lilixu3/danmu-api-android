@@ -1,4 +1,4 @@
-name: Android Debug APK (from ZIP)
+name: Android Debug APK (download libnode via GH release)
 
 on:
   workflow_dispatch:
@@ -13,34 +13,61 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Unzip project
         run: |
+          rm -rf project
           mkdir -p project
           unzip -q DanmuApiApp.zip -d project
-          ls -la project
+          ROOT="$(find project -maxdepth 4 -type f -name gradlew -print -quit | xargs -r dirname)"
+          if [ -z "$ROOT" ]; then
+            echo "❌ 没找到 gradlew。请确认 DanmuApiApp.zip 是完整 Android 工程。"
+            exit 1
+          fi
+          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+          echo "Project root: $ROOT"
 
-      - name: Download nodejs-mobile Android
+      - name: Download nodejs-mobile Android release (android.zip)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/nodejs-mobile
-          curl -L -o /tmp/nodejs-mobile/android.zip https://github.com/JaneaSystems/nodejs-mobile/releases/download/nodejs-mobile-v18.20.4/android.zip
+          # 这里的 tag / repo 是关键：nodejs-mobile/nodejs-mobile 的 v18.20.4
+          gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "android.zip" -D /tmp/nodejs-mobile
+          ls -lh /tmp/nodejs-mobile
+          # 简单校验一下是不是 zip（不是的话直接失败，避免后面 unzip 迷惑报错）
+          file /tmp/nodejs-mobile/android.zip | grep -i zip
+
+      - name: Install libnode into project
+        run: |
+          rm -rf /tmp/nodejs-mobile/out
+          mkdir -p /tmp/nodejs-mobile/out
           unzip -q /tmp/nodejs-mobile/android.zip -d /tmp/nodejs-mobile/out
-          mkdir -p project/app/libnode/include project/app/libnode/bin
-          cp -R /tmp/nodejs-mobile/out/include/* project/app/libnode/include/
-          cp -R /tmp/nodejs-mobile/out/bin/* project/app/libnode/bin/
+
+          cd "$PROJECT_ROOT"
+          mkdir -p app/libnode/include app/libnode/bin
+          cp -R /tmp/nodejs-mobile/out/include/* app/libnode/include/
+          cp -R /tmp/nodejs-mobile/out/bin/* app/libnode/bin/
+
+          if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
+            echo "❌ libnode.so 没拷进去（期望路径如 app/libnode/bin/arm64-v8a/libnode.so）"
+            exit 1
+          fi
 
       - name: Build Debug APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
-          cd project
+          cd "$PROJECT_ROOT"
           chmod +x ./gradlew
-          ./gradlew :app:assembleDebug
+          ./gradlew --no-daemon :app:assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: project/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*.apk
