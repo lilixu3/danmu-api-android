@@ -38,20 +38,33 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      - name: Download nodejs-mobile android.zip
+      - name: Fetch & install libnode (robust)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/nodejs-mobile
-          gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "android.zip" -D /tmp/nodejs-mobile
-          file /tmp/nodejs-mobile/android.zip | grep -i zip
-          unzip -t /tmp/nodejs-mobile/android.zip >/dev/null
 
-      - name: Install libnode into project
-        run: |
+          echo "=== Release assets ==="
+          gh release view v18.20.4 -R nodejs-mobile/nodejs-mobile --json assets --jq '.assets[].name'
+
+          # 用通配符下载：不再假设附件一定叫 android.zip
+          gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "*android*.zip" -D /tmp/nodejs-mobile
+
+          echo "=== Downloaded files ==="
+          ls -lh /tmp/nodejs-mobile
+
+          ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
+          if [ -z "$ANDROID_ZIP" ]; then
+            echo "❌ 没找到 *android*.zip，说明这个 release 的附件命名更特殊。请看上面打印的 assets 列表。"
+            exit 1
+          fi
+
+          echo "Using zip: $ANDROID_ZIP"
+          unzip -t "$ANDROID_ZIP" >/dev/null
+
           rm -rf /tmp/nodejs-mobile/out
           mkdir -p /tmp/nodejs-mobile/out
-          unzip -q /tmp/nodejs-mobile/android.zip -d /tmp/nodejs-mobile/out
+          unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
 
           cd "$PROJECT_ROOT"
           mkdir -p app/libnode/include app/libnode/bin
@@ -59,9 +72,10 @@ jobs:
           cp -R /tmp/nodejs-mobile/out/bin/* app/libnode/bin/
 
           if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
-            echo "❌ libnode.so 没拷进去"
+            echo "❌ libnode.so 没拷进去（期望 app/libnode/bin/arm64-v8a/libnode.so 等）"
             exit 1
           fi
+
 
       - name: Build Debug APK (wrapper if present else gradle)
         env:
