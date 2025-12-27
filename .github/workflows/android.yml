@@ -1,4 +1,4 @@
-name: Build APK (auto wrapper + download libnode)
+name: Build APK (no fixed gradle version)
 
 on:
   workflow_dispatch:
@@ -18,11 +18,8 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # 提供 gradle 命令（因为你 zip 里没有 gradlew）
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.4.2"
 
       - name: Unzip project and locate root
         run: |
@@ -35,19 +32,18 @@ jobs:
 
           ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 settings.gradle / settings.gradle.kts。你的 zip 不是完整工程根目录。"
+            echo "❌ 没找到 settings.gradle / settings.gradle.kts。"
             exit 1
           fi
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      - name: Download nodejs-mobile android.zip (reliable)
+      - name: Download nodejs-mobile android.zip
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/nodejs-mobile
           gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "android.zip" -D /tmp/nodejs-mobile
-          ls -lh /tmp/nodejs-mobile
           file /tmp/nodejs-mobile/android.zip | grep -i zip
           unzip -t /tmp/nodejs-mobile/android.zip >/dev/null
 
@@ -63,26 +59,22 @@ jobs:
           cp -R /tmp/nodejs-mobile/out/bin/* app/libnode/bin/
 
           if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
-            echo "❌ libnode.so 没拷进去（期望 app/libnode/bin/arm64-v8a/libnode.so 等）"
+            echo "❌ libnode.so 没拷进去"
             exit 1
           fi
 
-      - name: Generate Gradle Wrapper (if missing)
-        run: |
-          cd "$PROJECT_ROOT"
-          if [ ! -f "./gradlew" ]; then
-            echo "⚠️ gradlew not found, generating wrapper..."
-            gradle wrapper --gradle-version 8.4.2 --distribution-type bin
-          fi
-          chmod +x ./gradlew
-          ls -la gradlew gradle/wrapper || true
-
-      - name: Build Debug APK
+      - name: Build Debug APK (wrapper if present else gradle)
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           cd "$PROJECT_ROOT"
-          ./gradlew --no-daemon :app:assembleDebug
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon :app:assembleDebug
+          else
+            echo "⚠️ gradlew not found, using system gradle"
+            gradle --no-daemon :app:assembleDebug
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
