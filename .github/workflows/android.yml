@@ -1,4 +1,4 @@
-name: Build APK (DanmuTermuxLauncher)
+name: Build APK (Auto Termux Launcher)
 
 on:
   workflow_dispatch:
@@ -22,90 +22,475 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Unzip project and locate root
+      - name: Prepare Android project (use zip if valid, else generate)
         run: |
+          set -euo pipefail
+
           rm -rf project
           mkdir -p project
 
-          set +e
-          unzip -q DanmuTermuxLauncher.zip -d project
-          UNZIP_RC=$?
-          set -e
+          # 1) 如果 DanmuTermuxLauncher.zip 真的是 Android Studio 工程（包含 settings.gradle/.kts），就用它
+          if [ -f "DanmuTermuxLauncher.zip" ] && unzip -l "DanmuTermuxLauncher.zip" | grep -qE 'settings\.gradle(\.kts)?'; then
+            echo "✅ Zip contains Android project, extracting..."
+            set +e
+            unzip -q DanmuTermuxLauncher.zip -d project
+            UNZIP_RC=$?
+            set -e
+            if [ "$UNZIP_RC" -ge 2 ]; then
+              echo "❌ unzip failed, rc=$UNZIP_RC"
+              exit "$UNZIP_RC"
+            fi
 
-          # unzip 返回码：0=成功，1=警告(通常也解压好了)，2+=错误
-          if [ "$UNZIP_RC" -ge 2 ]; then
-            echo "❌ unzip 失败，退出码: $UNZIP_RC"
-            exit "$UNZIP_RC"
+            ROOT="$(find project -maxdepth 12 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
+            echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+            echo "Project root: $ROOT"
+            exit 0
           fi
 
-          echo "=== unzip tree (top) ==="
-          find project -maxdepth 4 -print | sed -n '1,200p'
+          # 2) 否则：自动生成一个 Android 工程（Termux 启动器）
+          echo "⚠️ Zip is NOT an Android project. Auto-generating launcher project..."
+          ROOT="project/DanmuTermuxLauncher"
+          PKG="vip.yesmail.danmu.termuxlauncher"
+          APPID="vip.yesmail.danmu.termuxlauncher"
 
-          ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
-          if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 settings.gradle / settings.gradle.kts"
-            exit 1
+          mkdir -p "$ROOT/app/src/main/java/$(echo $PKG | tr . /)"
+          mkdir -p "$ROOT/app/src/main/res/layout"
+          mkdir -p "$ROOT/app/src/main/res/values"
+          mkdir -p "$ROOT/app/src/main/assets"
+
+          # ---- 把仓库内容打成 payload（排除 node_modules，避免 APK 巨大）----
+          PAYLOAD_ZIP="$ROOT/app/src/main/assets/danmu_payload.zip"
+          rm -f "$PAYLOAD_ZIP"
+          tmp_list="/tmp/payload_files.txt"
+          : > "$tmp_list"
+
+          # 常见根目录脚本（存在就打进去）
+          for f in module.prop service.sh post-fs-data.sh customize.sh uninstall.sh; do
+            [ -f "$f" ] && echo "$f" >> "$tmp_list"
+          done
+
+          # app/ defaults/（存在就打进去；排除任何 node_modules）
+          if [ -d "app" ]; then
+            find app -path "*/node_modules/*" -prune -o -type f -print >> "$tmp_list"
           fi
+          if [ -d "defaults" ]; then
+            find defaults -type f -print >> "$tmp_list"
+          fi
+
+          sort -u "$tmp_list" > /tmp/payload_files_sorted.txt
+
+          # 用文件清单创建 zip（相对路径）
+          (cd "$GITHUB_WORKSPACE" && cat /tmp/payload_files_sorted.txt | zip -q -@ "$GITHUB_WORKSPACE/$PAYLOAD_ZIP")
+
+          echo "✅ payload created at: $PAYLOAD_ZIP"
+          ls -lh "$PAYLOAD_ZIP"
+
+          # ---- 生成 Gradle 工程 ----
+          cat > "$ROOT/settings.gradle.kts" <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "DanmuTermuxLauncher"
+          include(":app")
+          EOF
+
+          cat > "$ROOT/build.gradle.kts" <<'EOF'
+          plugins {
+              id("com.android.application") version "8.10.0" apply false
+              id("org.jetbrains.kotlin.android") version "2.3.0" apply false
+          }
+          EOF
+
+          cat > "$ROOT/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          EOF
+
+          cat > "$ROOT/app/build.gradle.kts" <<'EOF'
+          import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "vip.yesmail.danmu.termuxlauncher"
+              compileSdk = 36
+
+              defaultConfig {
+                  applicationId = "vip.yesmail.danmu.termuxlauncher"
+                  minSdk = 29
+                  targetSdk = 36
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlin {
+                  compilerOptions {
+                      jvmTarget.set(JvmTarget.JVM_17)
+                  }
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+          }
+          EOF
+
+          cat > "$ROOT/app/proguard-rules.pro" <<'EOF'
+          # no-op
+          EOF
+
+          cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+              <queries>
+                  <package android:name="com.termux" />
+              </queries>
+
+              <application
+                  android:label="弹幕启动器"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.App">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > "$ROOT/app/src/main/res/values/strings.xml" <<'EOF'
+          <resources>
+              <string name="app_name">弹幕启动器</string>
+              <string name="title">弹幕项目启动器（Termux）</string>
+              <string name="btn_init">① 初始化/更新环境</string>
+              <string name="btn_start">② 启动服务</string>
+              <string name="btn_stop">③ 停止服务</string>
+              <string name="hint">
+          使用前请先：
+          1) 打开 Termux 一次；
+          2) Termux 执行 termux-setup-storage；
+          3) ~/.termux/termux.properties 加 allow-external-apps=true 并 termux-reload-settings；
+          4) 系统设置里给本 App 授权 “Run commands in Termux environment”（额外权限）。
+              </string>
+          </resources>
+          EOF
+
+          cat > "$ROOT/app/src/main/res/values/themes.xml" <<'EOF'
+          <resources xmlns:tools="http://schemas.android.com/tools">
+              <style name="Theme.App" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:padding="16dp">
+
+              <TextView
+                  android:id="@+id/title"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:text="@string/title"
+                  android:textSize="18sp"
+                  android:textStyle="bold"
+                  app:layout_constraintTop_toTopOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/hint"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="12dp"
+                  android:text="@string/hint"
+                  app:layout_constraintTop_toBottomOf="@id/title"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <Button
+                  android:id="@+id/btnInit"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="16dp"
+                  android:text="@string/btn_init"
+                  app:layout_constraintTop_toBottomOf="@id/hint"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <Button
+                  android:id="@+id/btnStart"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="10dp"
+                  android:text="@string/btn_start"
+                  app:layout_constraintTop_toBottomOf="@id/btnInit"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <Button
+                  android:id="@+id/btnStop"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="10dp"
+                  android:text="@string/btn_stop"
+                  app:layout_constraintTop_toBottomOf="@id/btnStart"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/status"
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:layout_marginTop="12dp"
+                  android:textSize="14sp"
+                  android:textIsSelectable="true"
+                  app:layout_constraintTop_toBottomOf="@id/btnStop"
+                  app:layout_constraintBottom_toBottomOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          cat > "$ROOT/app/src/main/java/vip/yesmail/danmu/termuxlauncher/MainActivity.kt" <<'EOF'
+          package vip.yesmail.danmu.termuxlauncher
+
+          import android.content.ContentValues
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.MediaStore
+          import android.widget.Button
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import java.io.OutputStream
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var status: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  status = findViewById(R.id.status)
+
+                  findViewById<Button>(R.id.btnInit).setOnClickListener {
+                      append("开始：初始化/更新环境…")
+                      Thread {
+                          try {
+                              copyPayloadToDownloads("danmu_payload.zip")
+                              runTermux("""
+                                  set -e
+                                  termux-setup-storage >/dev/null 2>&1 || true
+                                  pkg update -y && pkg upgrade -y
+                                  pkg install -y nodejs unzip
+                                  mkdir -p ~/danmu_android
+                                  cd ~/danmu_android
+                                  rm -rf project
+                                  mkdir -p project
+                                  unzip -o /sdcard/Download/danmu_payload.zip -d project
+                                  cd ~/danmu_android/project/app/danmu_api
+                                  npm install
+                                  npm update
+                                  echo "INIT_OK"
+                              """.trimIndent())
+                              runOnUiThread { append("完成：初始化/更新环境（看 Termux 输出/日志）") }
+                          } catch (e: Exception) {
+                              runOnUiThread { append("初始化失败: ${'$'}{e.message}") }
+                          }
+                      }.start()
+                  }
+
+                  findViewById<Button>(R.id.btnStart).setOnClickListener {
+                      append("开始：启动服务…")
+                      Thread {
+                          try {
+                              runTermux("""
+                                  set -e
+                                  cd ~/danmu_android/project/app/danmu_api
+                                  nohup node server.js > ~/danmu_android/server.log 2>&1 &
+                                  echo ${'$'}! > ~/danmu_android/server.pid
+                                  echo "START_OK"
+                              """.trimIndent())
+                              runOnUiThread { append("完成：已启动（日志：~/danmu_android/server.log）") }
+                          } catch (e: Exception) {
+                              runOnUiThread { append("启动失败: ${'$'}{e.message}") }
+                          }
+                      }.start()
+                  }
+
+                  findViewById<Button>(R.id.btnStop).setOnClickListener {
+                      append("开始：停止服务…")
+                      Thread {
+                          try {
+                              runTermux("""
+                                  set +e
+                                  if [ -f ~/danmu_android/server.pid ]; then
+                                    kill $(cat ~/danmu_android/server.pid) 2>/dev/null
+                                    rm -f ~/danmu_android/server.pid
+                                  fi
+                                  echo "STOP_OK"
+                              """.trimIndent())
+                              runOnUiThread { append("完成：已停止") }
+                          } catch (e: Exception) {
+                              runOnUiThread { append("停止失败: ${'$'}{e.message}") }
+                          }
+                      }.start()
+                  }
+              }
+
+              private fun append(msg: String) {
+                  runOnUiThread {
+                      status.append(msg + "\n")
+                  }
+              }
+
+              private fun toast(msg: String) {
+                  runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+              }
+
+              private fun isTermuxInstalled(): Boolean {
+                  return try {
+                      packageManager.getPackageInfo("com.termux", 0)
+                      true
+                  } catch (_: Exception) {
+                      false
+                  }
+              }
+
+              private fun runTermux(script: String) {
+                  if (!isTermuxInstalled()) {
+                      toast("未检测到 Termux（包名 com.termux）。请先安装并打开一次 Termux。")
+                      throw IllegalStateException("Termux not installed")
+                  }
+
+                  val intent = Intent().apply {
+                      setClassName("com.termux", "com.termux.app.RunCommandService")
+                      action = "com.termux.RUN_COMMAND"
+                      putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+                      putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", script))
+                      putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+                      putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+                  }
+                  startService(intent)
+              }
+
+              private fun copyPayloadToDownloads(fileName: String) {
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                      throw IllegalStateException("minSdk=29, should not happen")
+                  }
+
+                  val existing = findDownloadByName(fileName)
+                  if (existing != null) {
+                      // 已存在则不重复写
+                      return
+                  }
+
+                  val collection: Uri = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                  val values = ContentValues().apply {
+                      put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                      put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                      put(MediaStore.Downloads.IS_PENDING, 1)
+                  }
+                  val uri = contentResolver.insert(collection, values)
+                      ?: throw IllegalStateException("无法写入 Download（insert 失败）")
+
+                  contentResolver.openOutputStream(uri).use { out: OutputStream? ->
+                      if (out == null) throw IllegalStateException("无法打开输出流")
+                      assets.open(fileName).use { input ->
+                          input.copyTo(out)
+                      }
+                  }
+
+                  values.clear()
+                  values.put(MediaStore.Downloads.IS_PENDING, 0)
+                  contentResolver.update(uri, values, null, null)
+              }
+
+              private fun findDownloadByName(fileName: String): Uri? {
+                  val collection: Uri = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                  val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
+                  contentResolver.query(collection, projection, null, null, null)?.use { c ->
+                      val idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                      val nameCol = c.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                      while (c.moveToNext()) {
+                          val name = c.getString(nameCol)
+                          if (name == fileName) {
+                              val id = c.getLong(idCol)
+                              return Uri.withAppendedPath(collection, id.toString())
+                          }
+                      }
+                  }
+                  return null
+              }
+          }
+          EOF
+
+          # 生成 gradle wrapper（避免你 repo 没带 gradlew）
+          (cd "$ROOT" && gradle wrapper --gradle-version 8.13 --distribution-type=bin)
+          chmod +x "$ROOT/gradlew"
 
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "Project root: $ROOT"
 
-
-      - name: Accept licenses & install SDK packages (compileSdk 36)
+      - name: Accept licenses & install SDK packages (API 36)
         run: |
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-
-      - name: Patch Kotlin jvmTarget (kotlinOptions -> compilerOptions)
-        run: |
-          FILE="$PROJECT_ROOT/app/build.gradle.kts"
-          if [ ! -f "$FILE" ]; then
-            echo "❌ 找不到 $FILE"
-            exit 1
-          fi
-
-          python3 - <<'PY'
-          import os, re
-          from pathlib import Path
-
-          file_path = Path(os.environ["PROJECT_ROOT"]) / "app" / "build.gradle.kts"
-          t = file_path.read_text(encoding="utf-8")
-
-          # 移除旧 DSL：kotlinOptions { jvmTarget = "17" }
-          t2 = re.sub(
-              r"\n\s*kotlinOptions\s*\{\s*\n\s*jvmTarget\s*=\s*\"17\"\s*\n\s*\}\s*\n",
-              "\n",
-              t,
-              count=1
-          )
-
-          # 插入新 DSL：kotlin { compilerOptions { jvmTarget.set(...) } }
-          if "compilerOptions" not in t2:
-            marker = re.search(r"\n\s*dependencies\s*\{", t2)
-            if not marker:
-              raise SystemExit("❌ 没找到 dependencies { 位置，无法插入 compilerOptions")
-            insert = (
-              "\n\nkotlin {\n"
-              "    compilerOptions {\n"
-              "        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n"
-              "    }\n"
-              "}\n"
-            )
-            t2 = t2[:marker.start()] + insert + t2[marker.start():]
-
-          file_path.write_text(t2, encoding="utf-8")
-          print("✅ patched:", file_path)
-          PY
-
-          echo "=== patched build.gradle.kts (first 140 lines) ==="
-          sed -n '1,140p' "$FILE"
 
       - name: Build Debug APK
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           cd "$PROJECT_ROOT"
-          chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
       - name: Upload APK artifact
