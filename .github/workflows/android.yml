@@ -12,19 +12,23 @@ on:
         required: true
         default: "main"
       app_version_name:
-        description: "APP 版本号 versionName（例如 0.2.1）"
+        description: "APP versionName（例如 0.2.1）"
         required: true
         default: "0.1.0"
       app_version_code:
-        description: "APP 版本号 versionCode（整数，例如 10）"
+        description: "APP versionCode（整数，例如 21）"
         required: true
         default: "1"
+      release_tag:
+        description: "发行版 Tag（留空则用 v{versionName}）"
+        required: false
+        default: ""
       nodejs_mobile_tag:
-        description: "nodejs-mobile core library tag（例如 v18.20.4）"
+        description: "nodejs-mobile tag（例如 v18.20.4）"
         required: true
         default: "v18.20.4"
       build_variant:
-        description: "构建类型：release 或 debug"
+        description: "release 或 debug"
         required: true
         default: "release"
 
@@ -55,7 +59,7 @@ jobs:
           ref: ${{ inputs.danmu_ref }}
           path: ${{ env.DANMU_PATH }}
 
-      - name: Setup Node.js (build-time)
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
@@ -63,15 +67,25 @@ jobs:
       - name: Install node deps (nodejs-project)
         working-directory: app/src/main/assets/nodejs-project
         run: |
+          set -e
           if [ -f package.json ]; then
-            npm install --omit=dev
+            if [ -f package-lock.json ]; then
+              npm ci --omit=dev
+            else
+              npm install --omit=dev
+            fi
           fi
 
       - name: Install node deps (danmu_api)
         working-directory: app/src/main/assets/nodejs-project/danmu_api
         run: |
+          set -e
           if [ -f package.json ]; then
-            npm install --omit=dev
+            if [ -f package-lock.json ]; then
+              npm ci --omit=dev
+            else
+              npm install --omit=dev
+            fi
           fi
 
       - name: Setup JDK 17
@@ -86,22 +100,12 @@ jobs:
 
       - name: Install Android components (platform/build-tools/ndk/cmake)
         run: |
+          set -e
           sdkmanager "platforms;android-${ANDROID_API}" \
                      "build-tools;${BUILD_TOOLS}" \
                      "platform-tools" \
                      "ndk;${NDK_VERSION}" \
                      "cmake;${CMAKE_VERSION}"
-
-      # 可选：如果你想让 release APK 使用“固定签名”，就在 Secrets 里配置这些（见下方）
-      - name: Prepare keystore (optional)
-        if: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
-        run: |
-          set -e
-          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > /tmp/ci.keystore
-          echo "ANDROID_KEYSTORE_PATH=/tmp/ci.keystore" >> $GITHUB_ENV
-          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Download nodejs-mobile Android release zip and place into app/libnode
         env:
@@ -124,14 +128,30 @@ jobs:
           cp -R extracted/include "$GITHUB_WORKSPACE/app/libnode/include"
           cp -R extracted/bin     "$GITHUB_WORKSPACE/app/libnode/bin"
 
+      # ✅ 不在 if 表达式里用 secrets：脚本内部判断，有就准备，没有就跳过
+      - name: Prepare keystore (optional)
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
+            echo "No keystore secrets provided, skip signing setup."
+            exit 0
+          fi
+          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > /tmp/ci.keystore
+          echo "ANDROID_KEYSTORE_PATH=/tmp/ci.keystore" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=${ANDROID_KEY_ALIAS}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}" >> $GITHUB_ENV
+          echo "Keystore prepared."
+
       - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
 
       - name: Build APK
-        env:
-          # 你的 app/build.gradle 已支持 APP_VERSION_NAME/APP_VERSION_CODE 覆盖
-          APP_VERSION_NAME: ${{ inputs.app_version_name }}
-          APP_VERSION_CODE: ${{ inputs.app_version_code }}
         run: |
           set -e
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
@@ -151,30 +171,38 @@ jobs:
         run: |
           set -e
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
-            APK_PATH=$(ls -1 app/build/outputs/apk/debug/*.apk | head -n 1)
+            APK_PATH="$(ls -1 app/build/outputs/apk/debug/*.apk | head -n 1)"
           else
-            APK_PATH=$(ls -1 app/build/outputs/apk/release/*.apk | head -n 1)
+            # 可能是 app-release.apk 或 app-release-unsigned.apk，统一取第一个
+            APK_PATH="$(ls -1 app/build/outputs/apk/release/*.apk | head -n 1)"
           fi
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "APK: $APK_PATH"
 
-      - name: Compute release tag/name
+      - name: Compute release tag/name/body
         id: rel
         run: |
           set -e
-          TAG="v${{ inputs.app_version_name }}"
-          NAME="DanmuApiApp ${{ inputs.app_version_name }} (${{
-            inputs.build_variant
-          }})"
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            TAG="v${{ inputs.app_version_name }}"
+          fi
+          NAME="DanmuApiApp ${{ inputs.app_version_name }} (${{ inputs.build_variant }})"
+          BODY=$'danmu_api: '${{ inputs.danmu_repo }}$'\nref: '${{ inputs.danmu_ref }}$'\nversionName: '${{ inputs.app_version_name }}$'\nversionCode: '${{ inputs.app_version_code }}
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release (upload APK)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
           name: ${{ steps.rel.outputs.name }}
-          target_commitish: ${{ github.sha }}
+          body: ${{ steps.rel.outputs.body }}
           generate_release_notes: true
           files: |
             ${{ steps.apk.outputs.apk_path }}
