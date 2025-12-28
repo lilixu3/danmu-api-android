@@ -7,7 +7,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -27,21 +28,19 @@ jobs:
           mkdir -p project
           unzip -q DanmuTermuxLauncher.zip -d project
 
-          echo "=== unzip tree (top) ==="
-          find project -maxdepth 3 -print | sed -n '1,200p'
-
           ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 settings.gradle / settings.gradle.kts。"
+            echo "❌ 没找到 settings.gradle / settings.gradle.kts"
             exit 1
           fi
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "Project root: $ROOT"
 
-      - name: Install Android SDK packages (API 36)
+      - name: Accept licenses & install SDK packages (compileSdk 36)
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Patch Kotlin jvmTarget (kotlinOptions -> compilerOptions)
         run: |
@@ -52,37 +51,40 @@ jobs:
           fi
 
           python3 - <<'PY'
-          import os, re, pathlib
+          import os, re
+          from pathlib import Path
 
-          file_path = pathlib.Path(os.environ["PROJECT_ROOT"]) / "app" / "build.gradle.kts"
-          txt = file_path.read_text(encoding="utf-8")
+          file_path = Path(os.environ["PROJECT_ROOT"]) / "app" / "build.gradle.kts"
+          t = file_path.read_text(encoding="utf-8")
 
-          # 1) 移除 kotlinOptions { jvmTarget = "17" }（旧 DSL）
-          new = re.sub(
+          # 移除旧 DSL：kotlinOptions { jvmTarget = "17" }
+          t2 = re.sub(
               r"\n\s*kotlinOptions\s*\{\s*\n\s*jvmTarget\s*=\s*\"17\"\s*\n\s*\}\s*\n",
               "\n",
-              txt,
+              t,
               count=1
           )
 
-          # 2) 如果还没插入 compilerOptions DSL，就插入到 dependencies 前面
-          if "compilerOptions" not in new:
-              insert = """
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
-}
+          # 插入新 DSL：kotlin { compilerOptions { jvmTarget.set(...) } }
+          if "compilerOptions" not in t2:
+            marker = re.search(r"\n\s*dependencies\s*\{", t2)
+            if not marker:
+              raise SystemExit("❌ 没找到 dependencies { 位置，无法插入 compilerOptions")
+            insert = (
+              "\n\nkotlin {\n"
+              "    compilerOptions {\n"
+              "        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n"
+              "    }\n"
+              "}\n"
+            )
+            t2 = t2[:marker.start()] + insert + t2[marker.start():]
 
-"""
-              new = re.sub(r"\n\s*dependencies\s*\{", "\n\n" + insert + "dependencies {", new, count=1)
-
-          file_path.write_text(new, encoding="utf-8")
+          file_path.write_text(t2, encoding="utf-8")
           print("✅ patched:", file_path)
           PY
 
-          echo "=== Preview patched file ==="
-          sed -n '1,120p' "$FILE"
+          echo "=== patched build.gradle.kts (first 140 lines) ==="
+          sed -n '1,140p' "$FILE"
 
       - name: Build Debug APK
         env:
