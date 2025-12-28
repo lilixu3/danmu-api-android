@@ -1,4 +1,3 @@
-\
 #include <jni.h>
 #include <string>
 #include <vector>
@@ -7,11 +6,6 @@
 #include "node.h"
 
 // Entry: com.example.danmuapiapp.NodeBridge.startNodeWithArguments(String[] args)
-//
-// NOTE:
-// The GitHub Actions workflow you provided will patch the node::Start call to cast away const:
-//   return node::Start(argc, const_cast<char**>(argv.data()));
-// So keep the original line (without const_cast) here on purpose.
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_example_danmuapiapp_NodeBridge_startNodeWithArguments(
@@ -32,21 +26,22 @@ Java_com_example_danmuapiapp_NodeBridge_startNodeWithArguments(
         args.emplace_back(cstr ? cstr : "");
         env->ReleaseStringUTFChars(jstr, cstr);
         totalBytes += args.back().size() + 1; // +1 for '\0'
+        env->DeleteLocalRef(jstr);
     }
 
     // 2) Create one contiguous buffer holding all args.
     std::vector<char> buffer(totalBytes);
-    std::vector<const char*> argv;
+    std::vector<char*> argv;     // ✅ 修复：char* 而不是 const char*
     argv.reserve(argc);
 
     char* cursor = buffer.data();
     for (const auto& s : args) {
         std::memcpy(cursor, s.c_str(), s.size());
         cursor[s.size()] = '\0';
-        argv.push_back(cursor);
+        argv.push_back(cursor);  // cursor 本来就是 char*
         cursor += s.size() + 1;
     }
 
     // 3) Start Node.js (blocks until Node exits)
-    return node::Start(argc, argv.data());
+    return node::Start(argc, argv.data()); // ✅ 现在类型匹配：char**
 }
