@@ -108,7 +108,7 @@ jobs:
                      "ndk;${NDK_VERSION}" \
                      "cmake;${CMAKE_VERSION}"
 
-      - name: Download nodejs-mobile Android zip and place into app/libnode (FIX include path)
+      - name: Download nodejs-mobile Android zip and place into app/libnode (include mirror fix)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -123,25 +123,28 @@ jobs:
 
           unzip -q *.zip -d extracted
 
-          # 定位 include/node/node.h
           NODE_H="$(find extracted -type f -path "*/include/node/node.h" | head -n 1 || true)"
           if [ -z "$NODE_H" ]; then
             echo "❌ 没找到 include/node/node.h，zip 结构异常："
-            find extracted -maxdepth 5 -type d | sed -n '1,150p'
+            find extracted -maxdepth 6 -type d | sed -n '1,200p'
             exit 1
           fi
 
           INCLUDE_ROOT="$(dirname "$(dirname "$NODE_H")")"  # .../include
 
-          # 清理并创建目标目录
           rm -rf "$GITHUB_WORKSPACE/app/libnode"
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
 
-          # ✅ 关键修复：把 include 目录的“内容”同步到 app/libnode/include
-          # 这样最终一定是 app/libnode/include/node/node.h（不会出现 include/include）
+          # 1) 把 include 的“内容”同步到 app/libnode/include
           rsync -a "$INCLUDE_ROOT"/ "$GITHUB_WORKSPACE/app/libnode/include/"
 
-          # ABI libnode.so 放到 app/libnode/bin/<abi>/libnode.so
+          # 2) 兼容修复：如果工程只加了 -I .../include/node
+          #    那么 v8/、libplatform/、uv 等头文件也必须能从 include/node 下找到
+          #    这里把 include 下除 node/ 以外的内容镜像到 include/node/
+          mkdir -p "$GITHUB_WORKSPACE/app/libnode/include/node"
+          rsync -a --exclude 'node/' "$GITHUB_WORKSPACE/app/libnode/include/" "$GITHUB_WORKSPACE/app/libnode/include/node/"
+
+          # 3) ABI libnode.so -> app/libnode/bin/<abi>/libnode.so
           for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
             LIB="$(find extracted -type f -path "*/${ABI}/libnode.so" | head -n 1 || true)"
             if [ -n "$LIB" ]; then
@@ -154,14 +157,15 @@ jobs:
           done
 
           echo "==== verify headers ===="
-          ls -la "$GITHUB_WORKSPACE/app/libnode/include/node" | sed -n '1,80p'
-
-          # ✅ 关键断言：CMake 传的是 -I .../include/node，所以这里必须有 node.h
           test -f "$GITHUB_WORKSPACE/app/libnode/include/node/node.h" || {
-            echo "❌ 缺少 app/libnode/include/node/node.h，编译会报 node.h not found"
-            find "$GITHUB_WORKSPACE/app/libnode/include" -maxdepth 4 -type f | sed -n '1,200p'
+            echo "❌ 缺少 app/libnode/include/node/node.h"
+            find "$GITHUB_WORKSPACE/app/libnode/include" -maxdepth 3 -type f | sed -n '1,120p'
             exit 1
           }
+
+          # 兼容检查：v8 头一般会在 include/v8* 或 include/v8/ 下
+          echo "==== quick check (v8 headers under include/node) ===="
+          find "$GITHUB_WORKSPACE/app/libnode/include/node" -maxdepth 3 -type f -iname "*v8*.h" | sed -n '1,60p'
 
           test -f "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so" || {
             echo "❌ 缺少 app/libnode/bin/arm64-v8a/libnode.so"
@@ -185,7 +189,6 @@ jobs:
           echo "ANDROID_KEYSTORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}" >> $GITHUB_ENV
           echo "ANDROID_KEY_ALIAS=${ANDROID_KEY_ALIAS}" >> $GITHUB_ENV
           echo "ANDROID_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}" >> $GITHUB_ENV
-          echo "Keystore prepared."
 
       - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
@@ -195,30 +198,46 @@ jobs:
           set -euo pipefail
           rm -rf app/.cxx || true
 
-      - name: Build APK
+      # ✅ 让失败后还能继续跑“提取错误/上传日志”的步骤
+      - name: Build APK (tee log)
+        id: build
+        continue-on-error: true
         run: |
           set -euo pipefail
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
             ./gradlew :app:assembleDebug \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --stacktrace --info
+              --console=plain --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
           else
             ./gradlew :app:assembleRelease \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --stacktrace --info
+              --console=plain --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
           fi
 
-      - name: Upload native logs if failed
-        if: failure()
+      - name: Extract first native errors (print)
+        if: always()
+        run: |
+          echo "==== first error candidates (top 60) ===="
+          grep -nE "FAILED:|fatal error:|error:|undefined reference|ld:|ninja: build stopped" /tmp/gradle-build.log | head -n 60 || true
+
+      - name: Upload logs (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-build-logs
+          name: build-logs
           path: |
+            /tmp/gradle-build.log
             app/.cxx/**/*
             app/build/reports/**/*
             app/CMakeLists.txt
+
+      - name: Fail job if build failed
+        if: ${{ steps.build.outcome != 'success' }}
+        run: |
+          echo "Build failed (see build-logs artifact)."
+          exit 1
 
       - name: Collect APK
         id: apk
