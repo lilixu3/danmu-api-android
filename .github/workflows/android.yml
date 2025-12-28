@@ -485,6 +485,70 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Locate root & fix Kotlin jvmTarget DSL
+        run: |
+          set -e
+
+          # 重新定位真正的工程根目录（哪里有 settings.gradle/.kts 哪里就是 root）
+          ROOT="$(find project -maxdepth 12 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
+          if [ -z "$ROOT" ]; then
+            echo "❌ 仍然找不到 settings.gradle / settings.gradle.kts"
+            find project -maxdepth 4 -print | sed -n '1,200p'
+            exit 1
+          fi
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "Project root: $ROOT"
+
+          FILE="$ROOT/app/build.gradle.kts"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ 找不到 $FILE"
+            find "$ROOT" -maxdepth 3 -print | sed -n '1,200p'
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import re, os
+          from pathlib import Path
+
+          file_path = Path(os.environ["FILE"])
+          txt = file_path.read_text(encoding="utf-8")
+
+          # 1) 移除旧 DSL：kotlinOptions { jvmTarget = "17" }（允许多种缩进/空白）
+          txt2 = re.sub(
+              r"\n\s*kotlinOptions\s*\{\s*\n\s*jvmTarget\s*=\s*\"17\"\s*\n\s*\}\s*\n",
+              "\n",
+              txt,
+              count=1
+          )
+
+          # 2) 确保有 JvmTarget import（如果我们要插入 compilerOptions）
+          if "compilerOptions" not in txt2:
+              if "import org.jetbrains.kotlin.gradle.dsl.JvmTarget" not in txt2:
+                  # 插到文件最前面（在 plugins 前也没问题）
+                  txt2 = 'import org.jetbrains.kotlin.gradle.dsl.JvmTarget\n' + txt2
+
+              insert = (
+                  "\n\nkotlin {\n"
+                  "    compilerOptions {\n"
+                  "        jvmTarget.set(JvmTarget.JVM_17)\n"
+                  "    }\n"
+                  "}\n"
+              )
+              # 插入到 dependencies { 前
+              m = re.search(r"\n\s*dependencies\s*\{", txt2)
+              if not m:
+                  raise SystemExit("❌ 没找到 dependencies {，无法自动插入 compilerOptions")
+              txt2 = txt2[:m.start()] + insert + txt2[m.start():]
+
+          file_path.write_text(txt2, encoding="utf-8")
+          print("✅ patched:", file_path)
+          PY
+
+          echo "=== show around jvmTarget / compilerOptions ==="
+          grep -n "jvmTarget" -n "$FILE" || true
+          grep -n "compilerOptions" -n "$FILE" || true
+        env:
+          FILE: ${{ env.PROJECT_ROOT }}/app/build.gradle.kts
 
       - name: Build Debug APK
         env:
