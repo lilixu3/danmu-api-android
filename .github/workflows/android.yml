@@ -5,7 +5,7 @@ on:
 
 env:
   # 把我给你的优化包放在仓库根目录；如果你改名为 DanmuApiApp.zip，这里也可以一起改
-  PROJECT_ZIP: DanmuApiApp_optimized.zip
+  PROJECT_ZIP: DanmuApiApp.zip
 
 jobs:
   build:
