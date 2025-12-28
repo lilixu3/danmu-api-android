@@ -1,16 +1,23 @@
-name: "Restore node_modules into assets (manual, robust)"
+name: "Restore node_modules into assets (manual, persist via artifact/optional push)"
 
 on:
   workflow_dispatch:
+    inputs:
+      archive_name:
+        description: "仓库根目录的压缩包文件名（.zip 或 .tar.gz/.tgz）"
+        required: true
+        default: "node_modules.zip"
+        type: string
+      commit_back:
+        description: "是否把解压后的 node_modules 提交回仓库（会很大，不推荐）"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 env:
-  # ✅ 你的压缩包文件名（放在仓库根目录）
-  NODE_MODULES_ARCHIVE: "node_modules.zip"
-
-  # ✅ nodejs-project 目录
   NODEJS_PROJECT_DIR: "app/src/main/assets/nodejs-project"
 
 jobs:
@@ -19,12 +26,15 @@ jobs:
     steps:
       - name: "Checkout repo"
         uses: "actions/checkout@v4"
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: "Restore node_modules from archive into assets"
         run: |
           set -euo pipefail
 
-          ARCH="${NODE_MODULES_ARCHIVE}"
+          ARCH="${{ inputs.archive_name }}"
           DEST_BASE="${NODEJS_PROJECT_DIR}"
           DEST_NM="${DEST_BASE}/node_modules"
 
@@ -40,8 +50,7 @@ jobs:
           mkdir -p "$DEST_NM"
 
           TMP="$(mktemp -d)"
-          echo "TMP=$TMP"
-          echo "✅ Extracting archive -> $TMP"
+          echo "✅ Extracting $ARCH -> $TMP"
 
           case "$ARCH" in
             *.zip)
@@ -56,10 +65,9 @@ jobs:
               ;;
           esac
 
-          echo "==== top-level in TMP (first 120) ===="
-          ls -lah "$TMP" | sed -n '1,120p'
-
-          # 1) 优先在解压结果里找 node_modules 目录（兼容：有外层目录/路径前缀）
+          # 兼容两种压缩结构：
+          # A) 顶层包含 node_modules/
+          # B) 顶层就是 node_modules 的内容（你现在这种：argparse/ ms/ .bin/ ...）
           FOUND_NM="$(find "$TMP" -maxdepth 6 -type d -name node_modules | head -n 1 || true)"
 
           if [ -n "$FOUND_NM" ]; then
@@ -67,26 +75,48 @@ jobs:
             rsync -a "$FOUND_NM"/ "$DEST_NM"/
           else
             echo "⚠️ Archive has NO node_modules/ folder; treating archive root as node_modules CONTENT."
-            # 2) 你的情况：压缩包顶层就是 node_modules 的内容（.bin、@scope、各种包名）
             rsync -a "$TMP"/ "$DEST_NM"/
-          fi
-
-          # 基础校验：node_modules 里至少要有一些内容
-          if [ ! -d "$DEST_NM" ]; then
-            echo "❌ restore failed: $DEST_NM not created"
-            exit 1
           fi
 
           COUNT="$(find "$DEST_NM" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
           echo "✅ Restored node_modules to: $DEST_NM"
           echo "Top-level entries count: $COUNT"
-
           if [ "$COUNT" -lt 5 ]; then
             echo "❌ node_modules 内容太少，疑似压缩包不对"
-            echo "Top-level entries:"
-            ls -lah "$DEST_NM"
+            ls -lah "$DEST_NM" || true
             exit 1
           fi
 
           echo "==== node_modules top-level dirs (first 80) ===="
           find "$DEST_NM" -maxdepth 1 -mindepth 1 -type d | head -n 80
+
+      - name: "Upload restored node_modules as artifact"
+        uses: "actions/upload-artifact@v4"
+        with:
+          name: "node_modules_restored"
+          path: "app/src/main/assets/nodejs-project/node_modules"
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: "Commit back to repo (optional)"
+        if: ${{ inputs.commit_back == true }}
+        run: |
+          set -euo pipefail
+
+          # node_modules 通常在 .gitignore 里，所以必须强制 add
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH="restore-node-modules-${GITHUB_RUN_ID}"
+          git checkout -b "$BRANCH"
+
+          git add -f "app/src/main/assets/nodejs-project/node_modules"
+          if git diff --cached --quiet; then
+            echo "ℹ️ 没有变更可提交"
+            exit 0
+          fi
+
+          git commit -m "Restore node_modules into assets from archive"
+          git push origin "$BRANCH"
+
+          echo "✅ 已推送到分支：$BRANCH（到仓库里就能看到文件夹了）"
