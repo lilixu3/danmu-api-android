@@ -491,7 +491,9 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           cd "$PROJECT_ROOT"
+          chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
+
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
