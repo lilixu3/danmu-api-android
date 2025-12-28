@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  # 把我给你的优化包放在仓库根目录；如果你改名为 DanmuApiApp.zip，这里也可以一起改
-  PROJECT_ZIP: DanmuApiApp.zip
+  PROJECT_ZIP: DanmuApiApp_optimized_fix2.zip
 
 jobs:
   build:
@@ -30,8 +29,6 @@ jobs:
           rm -rf project
           mkdir -p project
           unzip -q -DD "$PROJECT_ZIP" -d project
-          echo "=== unzip tree (top) ==="
-          find project -maxdepth 3 -print | sed -n '1,200p'
 
           ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then
@@ -41,59 +38,45 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
+      # ✅ 新增：固定签名（可选）
+      - name: Prepare signing keystore (optional)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$PROJECT_ROOT/ci_keystore.jks"
+            echo "ANDROID_KEYSTORE_PATH=$PROJECT_ROOT/ci_keystore.jks" >> $GITHUB_ENV
+            echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
+            echo "✅ Keystore prepared"
+          else
+            echo "ℹ️ 未配置 keystore secrets，将使用默认 debug 签名（每个 runner 都不同，签名会变）"
+          fi
+
       - name: Fetch & install libnode (ARM only)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/nodejs-mobile
-
-          echo "=== Release assets ==="
-          gh release view v18.20.4 -R nodejs-mobile/nodejs-mobile --json assets --jq '.assets[].name'
-
-          # 下载 android 相关 zip（不假设具体文件名）
           gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "*android*.zip" -D /tmp/nodejs-mobile
-
-          echo "=== Downloaded files ==="
-          ls -lh /tmp/nodejs-mobile
-
           ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
-          if [ -z "${ANDROID_ZIP:-}" ]; then
-            echo "❌ 没找到 *android*.zip"
-            exit 1
-          fi
-
-          echo "Using zip: $ANDROID_ZIP"
-          unzip -t "$ANDROID_ZIP" >/dev/null
-
-          rm -rf /tmp/nodejs-mobile/out
-          mkdir -p /tmp/nodejs-mobile/out
           unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
 
           cd "$PROJECT_ROOT"
           rm -rf app/libnode/include app/libnode/bin
           mkdir -p app/libnode/include app/libnode/bin
-
           cp -R /tmp/nodejs-mobile/out/include/* app/libnode/include/
 
-          # 只拷贝 ARM 两个 ABI，避免 x86_64 混进 APK
           for ABI in arm64-v8a armeabi-v7a; do
-            if [ ! -d "/tmp/nodejs-mobile/out/bin/$ABI" ]; then
-              echo "❌ release 里没有 /bin/$ABI"
-              ls -la /tmp/nodejs-mobile/out/bin || true
-              exit 1
-            fi
             mkdir -p "app/libnode/bin/$ABI"
             cp -R "/tmp/nodejs-mobile/out/bin/$ABI/"* "app/libnode/bin/$ABI/"
           done
-
-          echo "=== Copied libnode bins ==="
-          find app/libnode/bin -maxdepth 2 -type f -name "libnode.so" -print
-
-          if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
-            echo "❌ libnode.so 没拷进去"
-            exit 1
-          fi
 
       - name: Normalize timestamps (fix ninja dirty loop)
         run: |
@@ -103,18 +86,7 @@ jobs:
       - name: Patch native-lib.cpp (argv const -> non-const)
         run: |
           FILE="$PROJECT_ROOT/app/src/main/cpp/native-lib.cpp"
-          if [ ! -f "$FILE" ]; then
-            echo "❌ 找不到 $FILE"
-            exit 1
-          fi
-
-          echo "=== Before patch (node::Start lines) ==="
-          grep -n "node::Start" "$FILE" || true
-
           sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
-
-          echo "=== After patch (node::Start lines) ==="
-          grep -n "node::Start" "$FILE" || true
 
       - name: Build Debug APK (split by ABI)
         env:
@@ -123,8 +95,6 @@ jobs:
           cd "$PROJECT_ROOT"
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
-
-          echo "=== APK outputs ==="
           ls -lh app/build/outputs/apk/debug || true
 
       - name: Upload APK artifact (arm64-v8a)
