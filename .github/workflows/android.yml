@@ -1,4 +1,4 @@
-name: Manual Build APK + Publish Release (pull danmu_api)
+name: Manual Build APK + Publish Release (pull danmu_api dir only, fixed signing)
 
 on:
   workflow_dispatch:
@@ -36,7 +36,9 @@ permissions:
   contents: write
 
 env:
+  # 目标：把“另一个仓库里的 danmu_api/ 子目录内容”同步到这里
   DANMU_PATH: app/src/main/assets/nodejs-project/danmu_api
+
   ANDROID_API: "34"
   BUILD_TOOLS: "34.0.0"
   NDK_VERSION: "25.1.8937393"
@@ -52,41 +54,69 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Checkout danmu_api into assets
+      # ✅ 固定签名：强制用你设置的这 4 个 secrets（名字必须一致）
+      - name: Prepare signing keystore (REQUIRED, reproducible)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "❌ Missing secret: ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/ci_keystore.jks"
+          KEYSTORE_PATH="$(realpath "$GITHUB_WORKSPACE/ci_keystore.jks")"
+
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
+
+          echo "✅ Keystore: $KEYSTORE_PATH"
+
+      # ✅ 只取另一个仓库的 danmu_api/ 子目录（不要把 .git 带进 assets）
+      - name: Checkout danmu_repo (sparse checkout danmu_api dir)
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.danmu_repo }}
           ref: ${{ inputs.danmu_ref }}
-          path: ${{ env.DANMU_PATH }}
+          path: danmu_tmp
           fetch-depth: 1
+          sparse-checkout: |
+            danmu_api
+          sparse-checkout-cone-mode: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-
-      - name: Install node deps (nodejs-project)
-        working-directory: app/src/main/assets/nodejs-project
+      - name: Sync danmu_api dir into assets (NO .git, NO nesting)
         run: |
           set -euo pipefail
-          if [ -f package.json ]; then
-            if [ -f package-lock.json ]; then
-              npm ci --omit=dev
-            else
-              npm install --omit=dev
-            fi
+          if [ ! -d "danmu_tmp/danmu_api" ]; then
+            echo "❌ danmu_tmp/danmu_api 不存在（检查仓库结构/分支）"
+            ls -lah danmu_tmp || true
+            exit 1
           fi
 
-      - name: Install node deps (danmu_api)
-        working-directory: app/src/main/assets/nodejs-project/danmu_api
-        run: |
-          set -euo pipefail
-          if [ -f package.json ]; then
-            if [ -f package-lock.json ]; then
-              npm ci --omit=dev
-            else
-              npm install --omit=dev
-            fi
+          rm -rf "${DANMU_PATH}"
+          mkdir -p "${DANMU_PATH}"
+
+          # 把 danmu_tmp/danmu_api/ 的“内容”同步到目标目录（避免出现 danmu_api/danmu_api 这种双层）
+          rsync -a --delete "danmu_tmp/danmu_api/" "${DANMU_PATH}/"
+
+          # 安全兜底：assets 内绝对不要出现 git 元数据
+          rm -rf "${DANMU_PATH}/.git" "${DANMU_PATH}/.github" || true
+
+          echo "==== verify danmu_api layout ===="
+          test -f "${DANMU_PATH}/worker.js" || {
+            echo "❌ 缺少 ${DANMU_PATH}/worker.js（说明还是目录不对）"
+            find "${DANMU_PATH}" -maxdepth 3 -type f | sed -n '1,200p'
+            exit 1
+          }
+          # 防止双层
+          if [ -d "${DANMU_PATH}/danmu_api" ]; then
+            echo "❌ 检测到 ${DANMU_PATH}/danmu_api（双层嵌套），会导致 import 路径错误"
+            exit 1
           fi
 
       - name: Setup JDK 17
@@ -94,7 +124,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -108,7 +137,10 @@ jobs:
                      "ndk;${NDK_VERSION}" \
                      "cmake;${CMAKE_VERSION}"
 
-      - name: Download nodejs-mobile Android zip and place into app/libnode (include mirror fix)
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Download nodejs-mobile Android zip and place into app/libnode (ARM only + include mirror)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -129,127 +161,90 @@ jobs:
             find extracted -maxdepth 6 -type d | sed -n '1,200p'
             exit 1
           fi
-
           INCLUDE_ROOT="$(dirname "$(dirname "$NODE_H")")"  # .../include
 
           rm -rf "$GITHUB_WORKSPACE/app/libnode"
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
 
-          # 1) 把 include 的“内容”同步到 app/libnode/include
+          # 1) include/ -> app/libnode/include/
           rsync -a "$INCLUDE_ROOT"/ "$GITHUB_WORKSPACE/app/libnode/include/"
 
-          # 2) 兼容修复：如果工程只加了 -I .../include/node
-          #    那么 v8/、libplatform/、uv 等头文件也必须能从 include/node 下找到
-          #    这里把 include 下除 node/ 以外的内容镜像到 include/node/
+          # 2) 兼容：工程只加了 -I include/node，所以把 include 下除 node/ 外的头镜像到 include/node/
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/include/node"
           rsync -a --exclude 'node/' "$GITHUB_WORKSPACE/app/libnode/include/" "$GITHUB_WORKSPACE/app/libnode/include/node/"
 
-          # 3) ABI libnode.so -> app/libnode/bin/<abi>/libnode.so
-          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+          # 3) 仅 ARM 两个 ABI 的 libnode.so
+          for ABI in armeabi-v7a arm64-v8a; do
             LIB="$(find extracted -type f -path "*/${ABI}/libnode.so" | head -n 1 || true)"
-            if [ -n "$LIB" ]; then
-              mkdir -p "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}"
-              cp -f "$LIB" "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}/libnode.so"
-              echo "✅ libnode.so for ${ABI}: $LIB"
-            else
-              echo "⚠️ 没找到 ${ABI}/libnode.so（如果你未启用该 ABI 可忽略）"
+            if [ -z "$LIB" ]; then
+              echo "❌ 没找到 ${ABI}/libnode.so"
+              exit 1
             fi
+            mkdir -p "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}"
+            cp -f "$LIB" "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}/libnode.so"
+            echo "✅ libnode.so for ${ABI}: $LIB"
           done
 
-          echo "==== verify headers ===="
-          test -f "$GITHUB_WORKSPACE/app/libnode/include/node/node.h" || {
-            echo "❌ 缺少 app/libnode/include/node/node.h"
-            find "$GITHUB_WORKSPACE/app/libnode/include" -maxdepth 3 -type f | sed -n '1,120p'
-            exit 1
-          }
+          test -f "$GITHUB_WORKSPACE/app/libnode/include/node/node.h"
+          test -f "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so"
 
-          # 兼容检查：v8 头一般会在 include/v8* 或 include/v8/ 下
-          echo "==== quick check (v8 headers under include/node) ===="
-          find "$GITHUB_WORKSPACE/app/libnode/include/node" -maxdepth 3 -type f -iname "*v8*.h" | sed -n '1,60p'
-
-          test -f "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so" || {
-            echo "❌ 缺少 app/libnode/bin/arm64-v8a/libnode.so"
-            exit 1
-          }
-
-      - name: Prepare keystore (optional)
-        env:
-          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Normalize timestamps (fix ninja dirty loop)
         run: |
           set -euo pipefail
-          if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
-            echo "No keystore secrets provided, skip signing setup."
-            exit 0
+          find . -type f -exec touch {} +
+
+      - name: Patch native-lib.cpp (argv const -> non-const)
+        run: |
+          set -euo pipefail
+          FILE="app/src/main/cpp/native-lib.cpp"
+          if [ -f "$FILE" ]; then
+            sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
           fi
-          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > /tmp/ci.keystore
-          echo "ANDROID_KEYSTORE_PATH=/tmp/ci.keystore" >> $GITHUB_ENV
-          echo "ANDROID_KEYSTORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}" >> $GITHUB_ENV
-          echo "ANDROID_KEY_ALIAS=${ANDROID_KEY_ALIAS}" >> $GITHUB_ENV
-          echo "ANDROID_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}" >> $GITHUB_ENV
+
+      - name: Clean native build cache (.cxx)
+        run: rm -rf app/.cxx || true
 
       - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
 
-      - name: Clean native build cache (.cxx)
-        run: |
-          set -euo pipefail
-          rm -rf app/.cxx || true
-
-      # ✅ 让失败后还能继续跑“提取错误/上传日志”的步骤
-      - name: Build APK (tee log)
-        id: build
-        continue-on-error: true
+      - name: Build APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           set -euo pipefail
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
-            ./gradlew :app:assembleDebug \
+            ./gradlew :app:clean :app:assembleDebug \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --console=plain --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
+              --no-daemon --stacktrace
           else
-            ./gradlew :app:assembleRelease \
+            ./gradlew :app:clean :app:assembleRelease \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --console=plain --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
+              --no-daemon --stacktrace
           fi
 
-      - name: Extract first native errors (print)
-        if: always()
-        run: |
-          echo "==== first error candidates (top 60) ===="
-          grep -nE "FAILED:|fatal error:|error:|undefined reference|ld:|ninja: build stopped" /tmp/gradle-build.log | head -n 60 || true
-
-      - name: Upload logs (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            /tmp/gradle-build.log
-            app/.cxx/**/*
-            app/build/reports/**/*
-            app/CMakeLists.txt
-
-      - name: Fail job if build failed
-        if: ${{ steps.build.outcome != 'success' }}
-        run: |
-          echo "Build failed (see build-logs artifact)."
-          exit 1
-
-      - name: Collect APK
+      - name: Collect APKs (split by ABI)
         id: apk
         run: |
           set -euo pipefail
-          if [ "${{ inputs.build_variant }}" = "debug" ]; then
-            APK_PATH="$(ls -1 app/build/outputs/apk/debug/*.apk | head -n 1)"
-          else
-            APK_PATH="$(ls -1 app/build/outputs/apk/release/*.apk | head -n 1)"
-          fi
-          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
-          echo "APK: $APK_PATH"
+          VARIANT="${{ inputs.build_variant }}"
+          APK_DIR="app/build/outputs/apk/${VARIANT}"
+          mkdir -p dist
+
+          for ABI in arm64-v8a armeabi-v7a; do
+            SRC="$(find "$APK_DIR" -maxdepth 2 -type f -name "*.apk" | grep "$ABI" | head -n 1 || true)"
+            if [ -z "$SRC" ]; then
+              echo "❌ 没找到 ${ABI} 的 APK"
+              find "$APK_DIR" -maxdepth 2 -type f -name "*.apk" || true
+              exit 1
+            fi
+            OUT="dist/DanmuApiApp-${{ inputs.app_version_name }}-${VARIANT}-${ABI}.apk"
+            cp -f "$SRC" "$OUT"
+            echo "✅ ${ABI}: $OUT"
+          done
+
+          ls -lh dist
 
       - name: Compute release tag/name/body
         id: rel
@@ -269,12 +264,19 @@ jobs:
           echo "$BODY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub Release (upload APK)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.rel.outputs.tag }}
-          name: ${{ steps.rel.outputs.name }}
-          body: ${{ steps.rel.outputs.body }}
-          generate_release_notes: true
-          files: |
-            ${{ steps.apk.outputs.apk_path }}
+      - name: Create / update GitHub Release and upload APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.rel.outputs.tag }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" -R "$REPO" --title "${{ steps.rel.outputs.name }}" --notes "${{ steps.rel.outputs.body }}"
+          else
+            gh release create "$TAG" -R "$REPO" --title "${{ steps.rel.outputs.name }}" --notes "${{ steps.rel.outputs.body }}"
+          fi
+
+          gh release upload "$TAG" -R "$REPO" dist/*.apk --clobber
+          echo "✅ Uploaded: https://github.com/${REPO}/releases/tag/${TAG}"
