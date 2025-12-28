@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  # 如果你把我给的优化包在仓库根目录改名为 DanmuApiApp.zip，这里就不用动
-  PROJECT_ZIP: DanmuApiApp.zip
+  # 把我给你的优化包放在仓库根目录；如果你改名为 DanmuApiApp.zip，这里也可以一起改
+  PROJECT_ZIP: DanmuApiApp_optimized.zip
 
 jobs:
   build:
