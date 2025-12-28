@@ -1,0 +1,65 @@
+name: "Restore node_modules into assets (manual)"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # ✅ 你上传到仓库根目录的压缩包文件名（支持 .zip 或 .tar.gz/.tgz）
+  NODE_MODULES_ARCHIVE: "node_modules.zip"
+
+  # ✅ 目标目录：解压后的 node_modules 要放到这里
+  NODEJS_PROJECT_DIR: "app/src/main/assets/nodejs-project"
+
+jobs:
+  restore:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout repo"
+        uses: "actions/checkout@v4"
+
+      - name: "Restore node_modules from archive into assets"
+        run: |
+          set -euo pipefail
+
+          ARCH="${NODE_MODULES_ARCHIVE}"
+          DEST_BASE="${NODEJS_PROJECT_DIR}"
+          DEST_NM="${DEST_BASE}/node_modules"
+
+          if [ ! -f "$ARCH" ]; then
+            echo "❌ 找不到压缩包：$ARCH（应在仓库根目录）"
+            echo "仓库根目录文件："
+            ls -lah
+            exit 1
+          fi
+
+          mkdir -p "$DEST_BASE"
+          rm -rf "$DEST_NM"
+
+          echo "✅ Extracting $ARCH -> $DEST_BASE (expect top-level node_modules/)..."
+
+          case "$ARCH" in
+            *.zip)
+              unzip -q "$ARCH" -d "$DEST_BASE"
+              ;;
+            *.tar.gz|*.tgz)
+              tar -xzf "$ARCH" -C "$DEST_BASE"
+              ;;
+            *)
+              echo "❌ 不支持的压缩格式：$ARCH（请用 .zip 或 .tar.gz/.tgz）"
+              exit 1
+              ;;
+          esac
+
+          if [ ! -d "$DEST_NM" ]; then
+            echo "❌ 解压后未找到：$DEST_NM"
+            echo "当前 $DEST_BASE 目录结构（最多 2 层）："
+            find "$DEST_BASE" -maxdepth 2 -type d | sed -n '1,200p'
+            exit 1
+          fi
+
+          echo "✅ Restored: $DEST_NM"
+          echo "Top-level dirs under node_modules (first 60):"
+          find "$DEST_NM" -maxdepth 1 -mindepth 1 -type d | head -n 60
