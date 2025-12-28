@@ -26,7 +26,20 @@ jobs:
         run: |
           rm -rf project
           mkdir -p project
+
+          set +e
           unzip -q DanmuTermuxLauncher.zip -d project
+          UNZIP_RC=$?
+          set -e
+
+          # unzip 返回码：0=成功，1=警告(通常也解压好了)，2+=错误
+          if [ "$UNZIP_RC" -ge 2 ]; then
+            echo "❌ unzip 失败，退出码: $UNZIP_RC"
+            exit "$UNZIP_RC"
+          fi
+
+          echo "=== unzip tree (top) ==="
+          find project -maxdepth 4 -print | sed -n '1,200p'
 
           ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then
@@ -36,6 +49,7 @@ jobs:
 
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "Project root: $ROOT"
+
 
       - name: Accept licenses & install SDK packages (compileSdk 36)
         run: |
