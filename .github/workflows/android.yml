@@ -186,6 +186,13 @@ jobs:
 
           rm -rf "$TARGET/.git" "$TARGET/.github" || true
 
+          # ✅ 强制补齐 ESM 标记，避免 Node 把 worker.js 当 CJS 解析导致启动崩溃
+          cat > "$TARGET/package.json" <<'EOF'
+          {
+            "type": "module"
+          }
+          EOF
+
           if [ ! -f "$TARGET/worker.js" ]; then
             echo "❌ 缺少 $TARGET/worker.js（目录结构仍不对）"
             find "$TARGET" -maxdepth 3 -type f | sed -n '1,200p'
@@ -195,6 +202,10 @@ jobs:
             echo "❌ 检测到双层 $TARGET/danmu_api（会导致 import 路径错）"
             exit 1
           fi
+
+          echo "✅ package.json written: $TARGET/package.json"
+          cat "$TARGET/package.json"
+
 
       - name: "Fetch & install libnode (ARM only)"
         env:
