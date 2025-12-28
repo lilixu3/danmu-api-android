@@ -549,6 +549,39 @@ jobs:
           grep -n "compilerOptions" -n "$FILE" || true
         env:
           FILE: ${{ env.PROJECT_ROOT }}/app/build.gradle.kts
+      - name: Patch MainActivity.kt (escape $HOME/$LOG/$BASE/$PID/$P)
+        run: |
+          set -e
+
+          # 找到 MainActivity.kt（兼容你 PROJECT_ROOT=project 的情况）
+          FILE="$(find "$PROJECT_ROOT" -type f -name "MainActivity.kt" -print -quit)"
+          if [ -z "$FILE" ]; then
+            echo "❌ 找不到 MainActivity.kt"
+            find "$PROJECT_ROOT" -maxdepth 5 -print | sed -n '1,200p'
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          p = Path(os.environ["FILE"])
+          t = p.read_text(encoding="utf-8")
+
+          # 这些是你日志里报的未解析变量
+          vars_ = ["HOME","LOG","BASE","PID","OLD_PID","P"]
+
+          for v in vars_:
+              t = t.replace(f"${v}", "${'$'}" + v)
+
+          p.write_text(t, encoding="utf-8")
+          print("✅ patched:", p)
+          PY
+
+          echo "=== verify ==="
+          grep -n "\$HOME\|\$LOG\|\$BASE\|\$PID\|\$OLD_PID\|\$P" "$FILE" || true
+        env:
+          FILE: ${{ env.PROJECT_ROOT }}/app/src/main/java/vip/yesmail/danmu/termuxlauncher/MainActivity.kt
 
       - name: Build Debug APK
         env:
