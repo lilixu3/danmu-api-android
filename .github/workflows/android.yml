@@ -1,7 +1,11 @@
-name: Build APK (no fixed gradle version)
+name: Build APK (ARM only, split by ABI)
 
 on:
   workflow_dispatch:
+
+env:
+  # 如果你把我给的优化包在仓库根目录改名为 DanmuApiApp.zip，这里就不用动
+  PROJECT_ZIP: DanmuApiApp.zip
 
 jobs:
   build:
@@ -25,7 +29,7 @@ jobs:
         run: |
           rm -rf project
           mkdir -p project
-          unzip -q -DD DanmuApiApp.zip -d project
+          unzip -q -DD "$PROJECT_ZIP" -d project
           echo "=== unzip tree (top) ==="
           find project -maxdepth 3 -print | sed -n '1,200p'
 
@@ -37,24 +41,25 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      - name: Fetch & install libnode (robust)
+      - name: Fetch & install libnode (ARM only)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p /tmp/nodejs-mobile
 
           echo "=== Release assets ==="
           gh release view v18.20.4 -R nodejs-mobile/nodejs-mobile --json assets --jq '.assets[].name'
 
-          # 用通配符下载：不再假设附件一定叫 android.zip
+          # 下载 android 相关 zip（不假设具体文件名）
           gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "*android*.zip" -D /tmp/nodejs-mobile
 
           echo "=== Downloaded files ==="
           ls -lh /tmp/nodejs-mobile
 
           ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
-          if [ -z "$ANDROID_ZIP" ]; then
-            echo "❌ 没找到 *android*.zip，说明这个 release 的附件命名更特殊。请看上面打印的 assets 列表。"
+          if [ -z "${ANDROID_ZIP:-}" ]; then
+            echo "❌ 没找到 *android*.zip"
             exit 1
           fi
 
@@ -66,18 +71,33 @@ jobs:
           unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
 
           cd "$PROJECT_ROOT"
+          rm -rf app/libnode/include app/libnode/bin
           mkdir -p app/libnode/include app/libnode/bin
+
           cp -R /tmp/nodejs-mobile/out/include/* app/libnode/include/
-          cp -R /tmp/nodejs-mobile/out/bin/* app/libnode/bin/
+
+          # 只拷贝 ARM 两个 ABI，避免 x86_64 混进 APK
+          for ABI in arm64-v8a armeabi-v7a; do
+            if [ ! -d "/tmp/nodejs-mobile/out/bin/$ABI" ]; then
+              echo "❌ release 里没有 /bin/$ABI"
+              ls -la /tmp/nodejs-mobile/out/bin || true
+              exit 1
+            fi
+            mkdir -p "app/libnode/bin/$ABI"
+            cp -R "/tmp/nodejs-mobile/out/bin/$ABI/"* "app/libnode/bin/$ABI/"
+          done
+
+          echo "=== Copied libnode bins ==="
+          find app/libnode/bin -maxdepth 2 -type f -name "libnode.so" -print
 
           if ! find app/libnode/bin -name "libnode.so" | grep -q .; then
-            echo "❌ libnode.so 没拷进去（期望 app/libnode/bin/arm64-v8a/libnode.so 等）"
+            echo "❌ libnode.so 没拷进去"
             exit 1
           fi
+
       - name: Normalize timestamps (fix ninja dirty loop)
         run: |
           cd "$PROJECT_ROOT"
-          # 把所有文件时间戳改成当前时间（关键：避免未来时间戳）
           find . -type f -exec touch {} +
 
       - name: Patch native-lib.cpp (argv const -> non-const)
@@ -91,28 +111,30 @@ jobs:
           echo "=== Before patch (node::Start lines) ==="
           grep -n "node::Start" "$FILE" || true
 
-          # 把：return node::Start(argc, argv.data());
-          # 改为：return node::Start(argc, const_cast<char**>(argv.data()));
           sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
 
           echo "=== After patch (node::Start lines) ==="
           grep -n "node::Start" "$FILE" || true
 
-      - name: Build Debug APK (wrapper if present else gradle)
+      - name: Build Debug APK (split by ABI)
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           cd "$PROJECT_ROOT"
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon :app:assembleDebug
-          else
-            echo "⚠️ gradlew not found, using system gradle"
-            gradle --no-daemon :app:assembleDebug
-          fi
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Upload APK artifact
+          echo "=== APK outputs ==="
+          ls -lh app/build/outputs/apk/debug || true
+
+      - name: Upload APK artifact (arm64-v8a)
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*.apk
+          name: app-debug-arm64-v8a
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*arm64-v8a*.apk
+
+      - name: Upload APK artifact (armeabi-v7a)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-armeabi-v7a
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*armeabi-v7a*.apk
