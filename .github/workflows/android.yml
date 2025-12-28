@@ -50,7 +50,7 @@ jobs:
       - name: Checkout app repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Checkout danmu_api into assets
         uses: actions/checkout@v4
@@ -58,6 +58,7 @@ jobs:
           repository: ${{ inputs.danmu_repo }}
           ref: ${{ inputs.danmu_ref }}
           path: ${{ env.DANMU_PATH }}
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -67,7 +68,7 @@ jobs:
       - name: Install node deps (nodejs-project)
         working-directory: app/src/main/assets/nodejs-project
         run: |
-          set -e
+          set -euo pipefail
           if [ -f package.json ]; then
             if [ -f package-lock.json ]; then
               npm ci --omit=dev
@@ -79,7 +80,7 @@ jobs:
       - name: Install node deps (danmu_api)
         working-directory: app/src/main/assets/nodejs-project/danmu_api
         run: |
-          set -e
+          set -euo pipefail
           if [ -f package.json ]; then
             if [ -f package-lock.json ]; then
               npm ci --omit=dev
@@ -100,18 +101,18 @@ jobs:
 
       - name: Install Android components (platform/build-tools/ndk/cmake)
         run: |
-          set -e
+          set -euo pipefail
           sdkmanager "platforms;android-${ANDROID_API}" \
                      "build-tools;${BUILD_TOOLS}" \
                      "platform-tools" \
                      "ndk;${NDK_VERSION}" \
                      "cmake;${CMAKE_VERSION}"
 
-      - name: Download nodejs-mobile Android release zip and place into app/libnode
+      - name: Download nodejs-mobile Android zip and place into app/libnode (robust)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
+          set -euo pipefail
           rm -rf /tmp/nodejs-mobile
           mkdir -p /tmp/nodejs-mobile
           cd /tmp/nodejs-mobile
@@ -120,15 +121,45 @@ jobs:
             -R nodejs-mobile/nodejs-mobile \
             -p "*android*.zip"
 
+          ls -la
           unzip -q *.zip -d extracted
 
-          rm -rf "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
-          mkdir -p "$GITHUB_WORKSPACE/app/libnode"
+          # 1) headers: 找到 include/node/node.h 所在
+          NODE_H="$(find extracted -type f -path "*/include/node/node.h" | head -n 1 || true)"
+          if [ -z "$NODE_H" ]; then
+            echo "❌ 没找到 include/node/node.h，说明 zip 结构与预期不同。"
+            echo "已解压目录概览："
+            find extracted -maxdepth 4 -type d | sed -n '1,120p'
+            exit 1
+          fi
+          INCLUDE_DIR="$(dirname "$(dirname "$NODE_H")")"  # .../include
 
-          cp -R extracted/include "$GITHUB_WORKSPACE/app/libnode/include"
-          cp -R extracted/bin     "$GITHUB_WORKSPACE/app/libnode/bin"
+          # 2) libs: 为每个 ABI 定位 libnode.so，然后拷到 app/libnode/bin/<abi>/libnode.so
+          rm -rf "$GITHUB_WORKSPACE/app/libnode"
+          mkdir -p "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
 
-      # ✅ 不在 if 表达式里用 secrets：脚本内部判断，有就准备，没有就跳过
+          cp -R "$INCLUDE_DIR" "$GITHUB_WORKSPACE/app/libnode/include"
+
+          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+            LIB="$(find extracted -type f -path "*/${ABI}/libnode.so" | head -n 1 || true)"
+            if [ -n "$LIB" ]; then
+              mkdir -p "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}"
+              cp -f "$LIB" "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}/libnode.so"
+              echo "✅ libnode.so for ${ABI}: $LIB"
+            else
+              echo "⚠️ 没找到 ${ABI}/libnode.so（如果你没启用该 ABI 可忽略）"
+            fi
+          done
+
+          echo "==== libnode tree ===="
+          find "$GITHUB_WORKSPACE/app/libnode" -maxdepth 4 -type f | sed -n '1,200p'
+
+          # 最关键：arm64-v8a 必须存在（你日志里就是在 arm64-v8a 上失败）
+          test -f "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so" || {
+            echo "❌ 缺少 app/libnode/bin/arm64-v8a/libnode.so，ninja 必炸。"
+            exit 1
+          }
+
       - name: Prepare keystore (optional)
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -136,7 +167,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          set -e
+          set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
             echo "No keystore secrets provided, skip signing setup."
             exit 0
@@ -151,29 +182,45 @@ jobs:
       - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
 
-      - name: Build APK
+      - name: Clean native build cache (.cxx)
         run: |
-          set -e
+          set -euo pipefail
+          rm -rf app/.cxx || true
+
+      - name: Build APK (verbose)
+        run: |
+          set -euo pipefail
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
             ./gradlew :app:assembleDebug \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --stacktrace
+              -Pandroid.native.buildOutput=verbose \
+              --stacktrace --info
           else
             ./gradlew :app:assembleRelease \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              --stacktrace
+              -Pandroid.native.buildOutput=verbose \
+              --stacktrace --info
           fi
+
+      - name: Upload native logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-logs
+          path: |
+            app/.cxx/**/*
+            app/build/reports/**/*
+            app/CMakeLists.txt
 
       - name: Collect APK
         id: apk
         run: |
-          set -e
+          set -euo pipefail
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
             APK_PATH="$(ls -1 app/build/outputs/apk/debug/*.apk | head -n 1)"
           else
-            # 可能是 app-release.apk 或 app-release-unsigned.apk，统一取第一个
             APK_PATH="$(ls -1 app/build/outputs/apk/release/*.apk | head -n 1)"
           fi
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
@@ -182,12 +229,13 @@ jobs:
       - name: Compute release tag/name/body
         id: rel
         run: |
-          set -e
+          set -euo pipefail
           if [ -n "${{ inputs.release_tag }}" ]; then
             TAG="${{ inputs.release_tag }}"
           else
             TAG="v${{ inputs.app_version_name }}"
           fi
+
           NAME="DanmuApiApp ${{ inputs.app_version_name }} (${{ inputs.build_variant }})"
           BODY=$'danmu_api: '${{ inputs.danmu_repo }}$'\nref: '${{ inputs.danmu_ref }}$'\nversionName: '${{ inputs.app_version_name }}$'\nversionCode: '${{ inputs.app_version_code }}
 
