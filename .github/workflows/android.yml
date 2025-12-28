@@ -1,16 +1,53 @@
-name: Build APK (ARM only, split by ABI)
+name: Build APK (ARM only, split by ABI) + Publish Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version_name:
+        description: "App 版本号（用于 versionName 和 Release tag，比如 0.2.0）"
+        required: true
+        type: string
+      version_code:
+        description: "versionCode（可选；留空则使用 GITHUB_RUN_NUMBER）"
+        required: false
+        type: string
+      release_notes:
+        description: "发行版说明（可选）"
+        required: false
+        type: string
+
+permissions:
+  contents: write
 
 env:
-  PROJECT_ZIP: DanmuApiApp_optimized_fix2.zip
+  # ⚠️ 这里填你仓库里项目 zip 的文件名
+  PROJECT_ZIP: DanmuApiApp_optimized_fix2_updated.zip
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve version inputs
+        run: |
+          set -euo pipefail
+          VN="${{ inputs.version_name }}"
+          VN="${VN#v}"
+          VN="${VN#V}"
+          echo "APP_VERSION_NAME=$VN" >> $GITHUB_ENV
+          if [ -n "${{ inputs.version_code }}" ]; then
+            echo "APP_VERSION_CODE=${{ inputs.version_code }}" >> $GITHUB_ENV
+          else
+            echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+          fi
+          NOTES="${{ inputs.release_notes }}"
+          if [ -z "$NOTES" ]; then
+            NOTES="Automated build for v$VN"
+          fi
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+          echo "$NOTES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -26,6 +63,7 @@ jobs:
 
       - name: Unzip project and locate root
         run: |
+          set -euo pipefail
           rm -rf project
           mkdir -p project
           unzip -q -DD "$PROJECT_ZIP" -d project
@@ -38,7 +76,7 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      # ✅ 新增：固定签名（可选）
+      # ✅ 固定签名（可选）
       - name: Prepare signing keystore (optional)
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -55,7 +93,7 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
             echo "✅ Keystore prepared"
           else
-            echo "ℹ️ 未配置 keystore secrets，将使用默认 debug 签名（每个 runner 都不同，签名会变）"
+            echo "ℹ️ 未配置 keystore secrets，将使用 debug key 签名（release 也会 fallback 到 debug，保证可安装）"
           fi
 
       - name: Fetch & install libnode (ARM only)
@@ -86,25 +124,55 @@ jobs:
       - name: Patch native-lib.cpp (argv const -> non-const)
         run: |
           FILE="$PROJECT_ROOT/app/src/main/cpp/native-lib.cpp"
-          sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
+          if [ -f "$FILE" ]; then
+            sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
+          fi
 
-      - name: Build Debug APK (split by ABI)
+      - name: Build Release APK (split by ABI)
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
+          APP_VERSION_NAME: ${{ env.APP_VERSION_NAME }}
+          APP_VERSION_CODE: ${{ env.APP_VERSION_CODE }}
         run: |
+          set -euo pipefail
           cd "$PROJECT_ROOT"
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:assembleDebug
-          ls -lh app/build/outputs/apk/debug || true
+          ./gradlew --no-daemon :app:clean :app:assembleRelease -PAPP_VERSION_NAME="$APP_VERSION_NAME" -PAPP_VERSION_CODE="$APP_VERSION_CODE"
+          ls -lh app/build/outputs/apk/release || true
 
-      - name: Upload APK artifact (arm64-v8a)
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-arm64-v8a
-          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*arm64-v8a*.apk
+      - name: Collect APKs
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_ROOT"
+          APK_DIR="app/build/outputs/apk/release"
+          mkdir -p dist
 
-      - name: Upload APK artifact (armeabi-v7a)
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-armeabi-v7a
-          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*armeabi-v7a*.apk
+          for ABI in arm64-v8a armeabi-v7a; do
+            SRC="$(ls -1 "$APK_DIR"/*"$ABI"*.apk 2>/dev/null | head -n 1 || true)"
+            if [ -z "$SRC" ]; then
+              echo "❌ 没找到 $ABI 的 APK（检查 splits 输出路径/命名）"
+              ls -R "$APK_DIR" || true
+              exit 1
+            fi
+            cp "$SRC" "dist/DanmuApiApp-${APP_VERSION_NAME}-${ABI}.apk"
+          done
+
+          ls -lh dist
+
+      - name: Create / update GitHub Release and upload APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v${APP_VERSION_NAME}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            echo "ℹ️ Release $TAG 已存在，将覆盖上传 APK"
+            gh release edit "$TAG" -R "$REPO" --title "$TAG" --notes "$RELEASE_NOTES"
+          else
+            gh release create "$TAG" -R "$REPO" --title "$TAG" --notes "$RELEASE_NOTES"
+          fi
+
+          gh release upload "$TAG" -R "$REPO" "$PROJECT_ROOT/dist/"*.apk --clobber
+          echo "✅ Uploaded to https://github.com/${REPO}/releases/tag/${TAG}"
