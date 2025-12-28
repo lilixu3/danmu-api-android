@@ -39,7 +39,7 @@ env:
   DANMU_PATH: app/src/main/assets/nodejs-project/danmu_api
   ANDROID_API: "34"
   BUILD_TOOLS: "34.0.0"
-  NDK_VERSION: "26.1.10909125"
+  NDK_VERSION: "25.1.8937393"
   CMAKE_VERSION: "3.22.1"
 
 jobs:
@@ -108,7 +108,7 @@ jobs:
                      "ndk;${NDK_VERSION}" \
                      "cmake;${CMAKE_VERSION}"
 
-      - name: Download nodejs-mobile Android zip and place into app/libnode (robust)
+      - name: Download nodejs-mobile Android zip and place into app/libnode (FIX include path)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -121,25 +121,27 @@ jobs:
             -R nodejs-mobile/nodejs-mobile \
             -p "*android*.zip"
 
-          ls -la
           unzip -q *.zip -d extracted
 
-          # 1) headers: 找到 include/node/node.h 所在
+          # 定位 include/node/node.h
           NODE_H="$(find extracted -type f -path "*/include/node/node.h" | head -n 1 || true)"
           if [ -z "$NODE_H" ]; then
-            echo "❌ 没找到 include/node/node.h，说明 zip 结构与预期不同。"
-            echo "已解压目录概览："
-            find extracted -maxdepth 4 -type d | sed -n '1,120p'
+            echo "❌ 没找到 include/node/node.h，zip 结构异常："
+            find extracted -maxdepth 5 -type d | sed -n '1,150p'
             exit 1
           fi
-          INCLUDE_DIR="$(dirname "$(dirname "$NODE_H")")"  # .../include
 
-          # 2) libs: 为每个 ABI 定位 libnode.so，然后拷到 app/libnode/bin/<abi>/libnode.so
+          INCLUDE_ROOT="$(dirname "$(dirname "$NODE_H")")"  # .../include
+
+          # 清理并创建目标目录
           rm -rf "$GITHUB_WORKSPACE/app/libnode"
           mkdir -p "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
 
-          cp -R "$INCLUDE_DIR" "$GITHUB_WORKSPACE/app/libnode/include"
+          # ✅ 关键修复：把 include 目录的“内容”同步到 app/libnode/include
+          # 这样最终一定是 app/libnode/include/node/node.h（不会出现 include/include）
+          rsync -a "$INCLUDE_ROOT"/ "$GITHUB_WORKSPACE/app/libnode/include/"
 
+          # ABI libnode.so 放到 app/libnode/bin/<abi>/libnode.so
           for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
             LIB="$(find extracted -type f -path "*/${ABI}/libnode.so" | head -n 1 || true)"
             if [ -n "$LIB" ]; then
@@ -147,16 +149,22 @@ jobs:
               cp -f "$LIB" "$GITHUB_WORKSPACE/app/libnode/bin/${ABI}/libnode.so"
               echo "✅ libnode.so for ${ABI}: $LIB"
             else
-              echo "⚠️ 没找到 ${ABI}/libnode.so（如果你没启用该 ABI 可忽略）"
+              echo "⚠️ 没找到 ${ABI}/libnode.so（如果你未启用该 ABI 可忽略）"
             fi
           done
 
-          echo "==== libnode tree ===="
-          find "$GITHUB_WORKSPACE/app/libnode" -maxdepth 4 -type f | sed -n '1,200p'
+          echo "==== verify headers ===="
+          ls -la "$GITHUB_WORKSPACE/app/libnode/include/node" | sed -n '1,80p'
 
-          # 最关键：arm64-v8a 必须存在（你日志里就是在 arm64-v8a 上失败）
+          # ✅ 关键断言：CMake 传的是 -I .../include/node，所以这里必须有 node.h
+          test -f "$GITHUB_WORKSPACE/app/libnode/include/node/node.h" || {
+            echo "❌ 缺少 app/libnode/include/node/node.h，编译会报 node.h not found"
+            find "$GITHUB_WORKSPACE/app/libnode/include" -maxdepth 4 -type f | sed -n '1,200p'
+            exit 1
+          }
+
           test -f "$GITHUB_WORKSPACE/app/libnode/bin/arm64-v8a/libnode.so" || {
-            echo "❌ 缺少 app/libnode/bin/arm64-v8a/libnode.so，ninja 必炸。"
+            echo "❌ 缺少 app/libnode/bin/arm64-v8a/libnode.so"
             exit 1
           }
 
@@ -187,20 +195,18 @@ jobs:
           set -euo pipefail
           rm -rf app/.cxx || true
 
-      - name: Build APK (verbose)
+      - name: Build APK
         run: |
           set -euo pipefail
           if [ "${{ inputs.build_variant }}" = "debug" ]; then
             ./gradlew :app:assembleDebug \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              -Pandroid.native.buildOutput=verbose \
               --stacktrace --info
           else
             ./gradlew :app:assembleRelease \
               -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
               -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
-              -Pandroid.native.buildOutput=verbose \
               --stacktrace --info
           fi
 
@@ -235,7 +241,6 @@ jobs:
           else
             TAG="v${{ inputs.app_version_name }}"
           fi
-
           NAME="DanmuApiApp ${{ inputs.app_version_name }} (${{ inputs.build_variant }})"
           BODY=$'danmu_api: '${{ inputs.danmu_repo }}$'\nref: '${{ inputs.danmu_ref }}$'\nversionName: '${{ inputs.app_version_name }}$'\nversionCode: '${{ inputs.app_version_code }}
 
