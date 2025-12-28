@@ -1,4 +1,4 @@
-name: "Restore node_modules into assets (manual)"
+name: "Restore node_modules into assets (manual, robust)"
 
 on:
   workflow_dispatch:
@@ -7,10 +7,10 @@ permissions:
   contents: read
 
 env:
-  # ✅ 你上传到仓库根目录的压缩包文件名（支持 .zip 或 .tar.gz/.tgz）
+  # ✅ 你的压缩包文件名（放在仓库根目录）
   NODE_MODULES_ARCHIVE: "node_modules.zip"
 
-  # ✅ 目标目录：解压后的 node_modules 要放到这里
+  # ✅ nodejs-project 目录
   NODEJS_PROJECT_DIR: "app/src/main/assets/nodejs-project"
 
 jobs:
@@ -30,22 +30,25 @@ jobs:
 
           if [ ! -f "$ARCH" ]; then
             echo "❌ 找不到压缩包：$ARCH（应在仓库根目录）"
-            echo "仓库根目录文件："
+            echo "根目录文件："
             ls -lah
             exit 1
           fi
 
           mkdir -p "$DEST_BASE"
           rm -rf "$DEST_NM"
+          mkdir -p "$DEST_NM"
 
-          echo "✅ Extracting $ARCH -> $DEST_BASE (expect top-level node_modules/)..."
+          TMP="$(mktemp -d)"
+          echo "TMP=$TMP"
+          echo "✅ Extracting archive -> $TMP"
 
           case "$ARCH" in
             *.zip)
-              unzip -q "$ARCH" -d "$DEST_BASE"
+              unzip -q "$ARCH" -d "$TMP"
               ;;
             *.tar.gz|*.tgz)
-              tar -xzf "$ARCH" -C "$DEST_BASE"
+              tar -xzf "$ARCH" -C "$TMP"
               ;;
             *)
               echo "❌ 不支持的压缩格式：$ARCH（请用 .zip 或 .tar.gz/.tgz）"
@@ -53,13 +56,37 @@ jobs:
               ;;
           esac
 
+          echo "==== top-level in TMP (first 120) ===="
+          ls -lah "$TMP" | sed -n '1,120p'
+
+          # 1) 优先在解压结果里找 node_modules 目录（兼容：有外层目录/路径前缀）
+          FOUND_NM="$(find "$TMP" -maxdepth 6 -type d -name node_modules | head -n 1 || true)"
+
+          if [ -n "$FOUND_NM" ]; then
+            echo "✅ Found node_modules dir in archive: $FOUND_NM"
+            rsync -a "$FOUND_NM"/ "$DEST_NM"/
+          else
+            echo "⚠️ Archive has NO node_modules/ folder; treating archive root as node_modules CONTENT."
+            # 2) 你的情况：压缩包顶层就是 node_modules 的内容（.bin、@scope、各种包名）
+            rsync -a "$TMP"/ "$DEST_NM"/
+          fi
+
+          # 基础校验：node_modules 里至少要有一些内容
           if [ ! -d "$DEST_NM" ]; then
-            echo "❌ 解压后未找到：$DEST_NM"
-            echo "当前 $DEST_BASE 目录结构（最多 2 层）："
-            find "$DEST_BASE" -maxdepth 2 -type d | sed -n '1,200p'
+            echo "❌ restore failed: $DEST_NM not created"
             exit 1
           fi
 
-          echo "✅ Restored: $DEST_NM"
-          echo "Top-level dirs under node_modules (first 60):"
-          find "$DEST_NM" -maxdepth 1 -mindepth 1 -type d | head -n 60
+          COUNT="$(find "$DEST_NM" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+          echo "✅ Restored node_modules to: $DEST_NM"
+          echo "Top-level entries count: $COUNT"
+
+          if [ "$COUNT" -lt 5 ]; then
+            echo "❌ node_modules 内容太少，疑似压缩包不对"
+            echo "Top-level entries:"
+            ls -lah "$DEST_NM"
+            exit 1
+          fi
+
+          echo "==== node_modules top-level dirs (first 80) ===="
+          find "$DEST_NM" -maxdepth 1 -mindepth 1 -type d | head -n 80
