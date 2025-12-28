@@ -1,0 +1,127 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.example.danmuapiapp'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.danmuapiapp"
+        minSdk 21
+        targetSdk 34
+        def baseVersionCode = 1
+
+        def baseVersionName = "0.1"
+
+        def overrideVersionName = (project.findProperty("APP_VERSION_NAME") ?: System.getenv("APP_VERSION_NAME"))?.toString()
+
+        def overrideVersionCodeStr = (project.findProperty("APP_VERSION_CODE") ?: System.getenv("APP_VERSION_CODE"))?.toString()
+
+        def overrideVersionCode = overrideVersionCodeStr ? overrideVersionCodeStr.toInteger() : null
+
+
+        versionCode (overrideVersionCode ?: baseVersionCode)
+
+        versionName (overrideVersionName ?: baseVersionName)
+        externalNativeBuild {
+            cmake {
+                // nodejs-mobile uses libc++ shared STL
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    // -----------------------------
+    // Reproducible signing (CI-friendly)
+    //
+    // GitHub Actions 的临时 Runner 每次都会生成不同的 debug keystore，导致 APK 签名不一致。
+    // 如果你提供同一个 keystore（通过 Secrets 解码到 ANDROID_KEYSTORE_PATH），
+    // 这里会让 debug/release 都使用该 keystore，从而每次构建的签名一致，方便覆盖安装。
+    // -----------------------------
+    def ciStoreFilePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    def ciStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    def ciKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+    def ciKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    def enableCiSigning = ciStoreFilePath && ciStorePassword && ciKeyAlias && ciKeyPassword && file(ciStoreFilePath).exists()
+
+    if (enableCiSigning) {
+        signingConfigs {
+            ci {
+                storeFile file(ciStoreFilePath)
+                storePassword ciStorePassword
+                keyAlias ciKeyAlias
+                keyPassword ciKeyPassword
+            }
+        }
+    }
+
+    
+    // 只产出 ARM 两个 ABI 的 APK，并按 ABI 拆分成两个更小的 APK（不生成通用包）
+    splits {
+        abi {
+            enable true
+            reset()
+            include "armeabi-v7a", "arm64-v8a"
+            universalApk false
+        }
+    }
+
+    // 进一步减小 APK：把 native .so 按 legacy 方式打包（会压缩 .so）
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (enableCiSigning) {
+                signingConfig signingConfigs.ci
+            } else {
+                signingConfig signingConfigs.debug
+            }
+        }
+        debug {
+            // keep debug friendly
+            if (enableCiSigning) {
+                signingConfig signingConfigs.ci
+            } else {
+                signingConfig signingConfigs.debug
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+
+    // Package prebuilt native libraries (libnode.so) into the APK
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['libnode/bin']
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+}
