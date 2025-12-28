@@ -1,4 +1,4 @@
-name: "Build APK (zip base + pull danmu_api dir) + Publish Release (fixed signing)"
+name: "Build APK (repo + restore node_modules archive) + Publish Release"
 
 on:
   workflow_dispatch:
@@ -32,8 +32,13 @@ permissions:
   contents: write
 
 env:
-  # ⚠️ 这里填你仓库根目录里 zip 的文件名（zip 里要包含 node_modules）
-  PROJECT_ZIP: "DanmuApiApp_optimized_fix2_updated.zip"
+  # ✅ 这里填你上传到仓库根目录的“node_modules 压缩包文件名”
+  #    支持 .zip 或 .tar.gz
+  NODE_MODULES_ARCHIVE: "node_modules.zip"
+
+  NODEJS_PROJECT_DIR: "app/src/main/assets/nodejs-project"
+  DANMU_TARGET_DIR: "app/src/main/assets/nodejs-project/danmu_api"
+
   ANDROID_API: "34"
   BUILD_TOOLS: "34.0.0"
 
@@ -49,8 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           VN="${{ inputs.version_name }}"
-          VN="${VN#v}"
-          VN="${VN#V}"
+          VN="${VN#v}"; VN="${VN#V}"
           echo "APP_VERSION_NAME=$VN" >> "$GITHUB_ENV"
 
           if [ -n "${{ inputs.version_code }}" ]; then
@@ -60,14 +64,35 @@ jobs:
           fi
 
           NOTES="${{ inputs.release_notes }}"
-          if [ -z "$NOTES" ]; then
-            NOTES="Automated build for v$VN"
-          fi
+          if [ -z "$NOTES" ]; then NOTES="Automated build for v$VN"; fi
           {
             echo "RELEASE_NOTES<<EOF"
             echo "$NOTES"
             echo "EOF"
           } >> "$GITHUB_ENV"
+
+      - name: "Prepare signing keystore (REQUIRED, fixed secrets)"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || (echo "❌ Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] || (echo "❌ Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          [ -n "${ANDROID_KEY_ALIAS:-}" ] || (echo "❌ Missing ANDROID_KEY_ALIAS" && exit 1)
+          [ -n "${ANDROID_KEY_PASSWORD:-}" ] || (echo "❌ Missing ANDROID_KEY_PASSWORD" && exit 1)
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/ci_keystore.jks"
+          KEYSTORE_PATH="$(realpath "$GITHUB_WORKSPACE/ci_keystore.jks")"
+
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+          echo "✅ Keystore prepared at: $KEYSTORE_PATH"
 
       - name: "Set up JDK 17"
         uses: "actions/setup-java@v4"
@@ -88,58 +113,54 @@ jobs:
       - name: "Set up Gradle"
         uses: "gradle/actions/setup-gradle@v4"
 
-      - name: "Unzip project and locate root"
-        run: |
-          set -euo pipefail
-          rm -rf project
-          mkdir -p project
-          unzip -q -DD "$PROJECT_ZIP" -d project
-
-          ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
-          if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 settings.gradle / settings.gradle.kts。"
-            exit 1
-          fi
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-          echo "Project root: $ROOT"
-
-      - name: "Prepare signing keystore (REQUIRED)"
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # ✅ 核心：解压你上传的 node_modules 压缩包到 assets/nodejs-project 下
+      - name: "Restore node_modules from archive into assets"
         run: |
           set -euo pipefail
 
-          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "❌ Missing secret: ANDROID_KEYSTORE_BASE64"
-            exit 1
-          fi
-          if [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
-            echo "❌ Missing secret: ANDROID_KEYSTORE_PASSWORD"
-            exit 1
-          fi
-          if [ -z "${ANDROID_KEY_ALIAS:-}" ]; then
-            echo "❌ Missing secret: ANDROID_KEY_ALIAS"
-            exit 1
-          fi
-          if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
-            echo "❌ Missing secret: ANDROID_KEY_PASSWORD"
+          mkdir -p "${NODEJS_PROJECT_DIR}"
+
+          ARCH="${NODE_MODULES_ARCHIVE}"
+          if [ ! -f "$ARCH" ]; then
+            echo "❌ 找不到压缩包：$ARCH（应在仓库根目录）"
+            echo "当前根目录文件："
+            ls -lah
             exit 1
           fi
 
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$PROJECT_ROOT/ci_keystore.jks"
-          KEYSTORE_PATH="$(realpath "$PROJECT_ROOT/ci_keystore.jks")"
+          echo "Using archive: $ARCH"
 
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          # 清理旧的 node_modules
+          rm -rf "${NODEJS_PROJECT_DIR}/node_modules"
 
-          echo "✅ Keystore prepared: $KEYSTORE_PATH"
+          # 解压：要求压缩包内顶层就是 node_modules/
+          case "$ARCH" in
+            *.zip)
+              unzip -q "$ARCH" -d "${NODEJS_PROJECT_DIR}"
+              ;;
+            *.tar.gz|*.tgz)
+              tar -xzf "$ARCH" -C "${NODEJS_PROJECT_DIR}"
+              ;;
+            *)
+              echo "❌ 不支持的压缩格式：$ARCH（请用 .zip 或 .tar.gz/.tgz）"
+              exit 1
+              ;;
+          esac
 
-      # ✅ 只拉取另一个仓库的 danmu_api/ 目录（不带全仓库）
+          # 校验：必须出现 node_modules 文件夹
+          if [ ! -d "${NODEJS_PROJECT_DIR}/node_modules" ]; then
+            echo "❌ 解压后未找到 ${NODEJS_PROJECT_DIR}/node_modules"
+            echo "解压目录结构（最多 2 层）："
+            find "${NODEJS_PROJECT_DIR}" -maxdepth 2 -type d | sed -n '1,200p'
+            exit 1
+          fi
+
+          echo "✅ node_modules restored:"
+          echo "Path: ${NODEJS_PROJECT_DIR}/node_modules"
+          echo "Top level dirs (first 60):"
+          find "${NODEJS_PROJECT_DIR}/node_modules" -maxdepth 1 -mindepth 1 -type d | head -n 60
+
+      # ✅ 只拉取另一个仓库的 danmu_api/ 子目录（不拉全仓库）
       - name: "Checkout danmu repo (sparse: danmu_api dir only)"
         uses: "actions/checkout@v4"
         with:
@@ -151,43 +172,27 @@ jobs:
             danmu_api
           sparse-checkout-cone-mode: true
 
-      - name: "Overlay danmu_api into assets (keep node_modules from zip)"
+      - name: "Overlay danmu_api into assets (NO nesting, NO .git)"
         run: |
           set -euo pipefail
-
           SRC="danmu_tmp/danmu_api"
-          TARGET="$PROJECT_ROOT/app/src/main/assets/nodejs-project/danmu_api"
+          TARGET="${DANMU_TARGET_DIR}"
 
-          if [ ! -d "$SRC" ]; then
-            echo "❌ sparse checkout 后没找到 $SRC"
-            ls -lah danmu_tmp || true
-            exit 1
-          fi
+          [ -d "$SRC" ] || (echo "❌ missing $SRC" && exit 1)
 
           rm -rf "$TARGET"
           mkdir -p "$TARGET"
           rsync -a --delete "$SRC/" "$TARGET/"
 
-          # 兜底：assets 内别带 git 元数据
           rm -rf "$TARGET/.git" "$TARGET/.github" || true
 
-          echo "==== verify danmu_api layout ===="
           if [ ! -f "$TARGET/worker.js" ]; then
-            echo "❌ 缺少 $TARGET/worker.js"
+            echo "❌ 缺少 $TARGET/worker.js（目录结构仍不对）"
             find "$TARGET" -maxdepth 3 -type f | sed -n '1,200p'
             exit 1
           fi
           if [ -d "$TARGET/danmu_api" ]; then
             echo "❌ 检测到双层 $TARGET/danmu_api（会导致 import 路径错）"
-            exit 1
-          fi
-
-          echo "==== verify node_modules exists (from zip base) ===="
-          BASE_NODE_MODULES="$PROJECT_ROOT/app/src/main/assets/nodejs-project/node_modules"
-          if [ ! -d "$BASE_NODE_MODULES" ]; then
-            echo "❌ node_modules 不存在：$BASE_NODE_MODULES"
-            echo "（说明 zip 底座本身不含 node_modules 或解压不完整）"
-            find "$PROJECT_ROOT/app/src/main/assets/nodejs-project" -maxdepth 2 -type d | sed -n '1,160p'
             exit 1
           fi
 
@@ -205,7 +210,6 @@ jobs:
           ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
           unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
 
-          cd "$PROJECT_ROOT"
           rm -rf app/libnode/include app/libnode/bin
           mkdir -p app/libnode/include app/libnode/bin
           cp -R /tmp/nodejs-mobile/out/include/* app/libnode/include/
@@ -218,13 +222,12 @@ jobs:
       - name: "Normalize timestamps (fix ninja dirty loop)"
         run: |
           set -euo pipefail
-          cd "$PROJECT_ROOT"
           find . -type f -exec touch {} +
 
       - name: "Patch native-lib.cpp (argv const -> non-const)"
         run: |
           set -euo pipefail
-          FILE="$PROJECT_ROOT/app/src/main/cpp/native-lib.cpp"
+          FILE="app/src/main/cpp/native-lib.cpp"
           if [ -f "$FILE" ]; then
             sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
           fi
@@ -234,7 +237,6 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
           set -euo pipefail
-          cd "$PROJECT_ROOT"
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:clean :app:assembleRelease \
             -PAPP_VERSION_NAME="$APP_VERSION_NAME" \
@@ -243,7 +245,6 @@ jobs:
       - name: "Collect APKs + verify node_modules packed"
         run: |
           set -euo pipefail
-          cd "$PROJECT_ROOT"
           APK_DIR="app/build/outputs/apk/release"
           mkdir -p dist
 
@@ -258,9 +259,8 @@ jobs:
             OUT="dist/DanmuApiApp-${APP_VERSION_NAME}-${ABI}.apk"
             cp "$SRC" "$OUT"
 
-            echo "==== check node_modules in $OUT ===="
             if ! unzip -l "$OUT" | grep -q "assets/nodejs-project/node_modules"; then
-              echo "❌ APK 里没包含 node_modules（检查打包是否过滤 assets）"
+              echo "❌ APK 里没包含 node_modules（说明 assets 打包被过滤）"
               exit 1
             fi
           done
@@ -271,7 +271,7 @@ jobs:
         run: |
           set -euo pipefail
           APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
-          for f in "$PROJECT_ROOT"/dist/*.apk; do
+          for f in dist/*.apk; do
             echo "==== $f ===="
             "$APKSIGNER" verify --print-certs "$f" | sed -n '1,80p'
           done
@@ -290,5 +290,5 @@ jobs:
             gh release create "$TAG" -R "$REPO" --title "$TAG" --notes "$RELEASE_NOTES"
           fi
 
-          gh release upload "$TAG" -R "$REPO" "$PROJECT_ROOT/dist/"*.apk --clobber
+          gh release upload "$TAG" -R "$REPO" dist/*.apk --clobber
           echo "✅ Uploaded to https://github.com/${REPO}/releases/tag/${TAG}"
