@@ -25,8 +25,7 @@ jobs:
         run: |
           rm -rf project
           mkdir -p project
-          unzip -q DanmuApiApp.zip -d project
-
+          unzip -q -DD DanmuApiApp.zip -d project
           echo "=== unzip tree (top) ==="
           find project -maxdepth 3 -print | sed -n '1,200p'
 
@@ -75,6 +74,11 @@ jobs:
             echo "❌ libnode.so 没拷进去（期望 app/libnode/bin/arm64-v8a/libnode.so 等）"
             exit 1
           fi
+      - name: Normalize timestamps (fix ninja dirty loop)
+        run: |
+          cd "$PROJECT_ROOT"
+          # 把所有文件时间戳改成当前时间（关键：避免未来时间戳）
+          find . -type f -exec touch {} +
 
       - name: Patch native-lib.cpp (argv const -> non-const)
         run: |
