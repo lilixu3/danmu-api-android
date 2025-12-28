@@ -76,7 +76,7 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
-      # ✅ 固定签名（可选）
+      # ✅ 固定签名（可选）——修复点：写入绝对路径，避免 Gradle 在 app 模块目录解析相对路径导致找不到 keystore
       - name: Prepare signing keystore (optional)
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -87,11 +87,16 @@ jobs:
           set -euo pipefail
           if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
             echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$PROJECT_ROOT/ci_keystore.jks"
-            echo "ANDROID_KEYSTORE_PATH=$PROJECT_ROOT/ci_keystore.jks" >> $GITHUB_ENV
+
+            # ⭐ 关键修复：转绝对路径（Gradle 在不同工作目录解析也不会错）
+            KEYSTORE_PATH="$(realpath "$PROJECT_ROOT/ci_keystore.jks")"
+
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
             echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
             echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
-            echo "✅ Keystore prepared"
+
+            echo "✅ Keystore prepared at $KEYSTORE_PATH"
           else
             echo "ℹ️ 未配置 keystore secrets，将使用 debug key 签名（release 也会 fallback 到 debug，保证可安装）"
           fi
