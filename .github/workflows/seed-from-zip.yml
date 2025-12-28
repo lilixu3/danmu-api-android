@@ -1,0 +1,154 @@
+name: Seed repo from uploaded ZIP (unzip + commit)
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_name:
+        description: "ZIP 文件名（留空则自动找根目录第一个 .zip）"
+        required: false
+        default: ""
+      keep_zip:
+        description: "是否保留 ZIP 文件（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect zip file
+        id: z
+        shell: bash
+        run: |
+          set -e
+          ZIP_INPUT="${{ inputs.zip_name }}"
+          if [ -n "$ZIP_INPUT" ]; then
+            if [ ! -f "$ZIP_INPUT" ]; then
+              echo "❌ 找不到你指定的 zip：$ZIP_INPUT"
+              echo "当前根目录文件："
+              ls -la
+              exit 1
+            fi
+            ZIP="$ZIP_INPUT"
+          else
+            # 优先找你之前提到的文件名；找不到就取根目录第一个 .zip
+            if [ -f "DanmuApiApp_optimized_fix2_updated.zip" ]; then
+              ZIP="DanmuApiApp_optimized_fix2_updated.zip"
+            else
+              ZIP="$(ls -1 *.zip 2>/dev/null | head -n 1 || true)"
+            fi
+          fi
+
+          if [ -z "$ZIP" ]; then
+            echo "❌ 根目录没找到 .zip 文件。请先把压缩包上传到仓库根目录。"
+            echo "当前根目录文件："
+            ls -la
+            exit 1
+          fi
+
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "✅ 使用 zip：$ZIP"
+
+      - name: Unzip into temp
+        shell: bash
+        run: |
+          set -e
+          ZIP="${{ steps.z.outputs.zip }}"
+          rm -rf /tmp/seed_unzip
+          mkdir -p /tmp/seed_unzip
+          unzip -q "$ZIP" -d /tmp/seed_unzip
+          echo "解压完成，顶层内容："
+          ls -la /tmp/seed_unzip
+
+      - name: Choose extracted root (handle extra top folder)
+        id: root
+        shell: bash
+        run: |
+          set -e
+          # 如果解压后只有一个顶层目录（常见：多包了一层文件夹），就进入那层
+          COUNT_DIR=$(find /tmp/seed_unzip -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          COUNT_FILE=$(find /tmp/seed_unzip -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')
+          if [ "$COUNT_DIR" = "1" ] && [ "$COUNT_FILE" = "0" ]; then
+            ONE_DIR="$(find /tmp/seed_unzip -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+            echo "src_root=$ONE_DIR" >> "$GITHUB_OUTPUT"
+            echo "✅ 检测到单一顶层目录，使用：$ONE_DIR"
+          else
+            echo "src_root=/tmp/seed_unzip" >> "$GITHUB_OUTPUT"
+            echo "✅ 顶层不是单目录结构，使用：/tmp/seed_unzip"
+          fi
+
+      - name: Rsync project into repo root (preserve workflows)
+        shell: bash
+        run: |
+          set -e
+          SRC="${{ steps.root.outputs.src_root }}"
+
+          # 用 rsync “覆盖式合并”到仓库根目录
+          # 关键：保护 .git 和 .github/workflows（避免把本工作流覆盖掉）
+          rsync -a --delete \
+            --exclude ".git/" \
+            --exclude ".github/workflows/" \
+            "$SRC"/ ./ 
+
+          echo "✅ 同步完成，当前仓库根目录："
+          ls -la
+
+      - name: Ensure .gitignore (optional but recommended)
+        shell: bash
+        run: |
+          set -e
+          touch .gitignore
+
+          add_line() {
+            LINE="$1"
+            grep -qxF "$LINE" .gitignore || echo "$LINE" >> .gitignore
+          }
+
+          add_line ".gradle/"
+          add_line "**/build/"
+          add_line ".idea/"
+          add_line ".DS_Store"
+          add_line "node_modules/"
+          add_line "*.apk"
+          add_line "*.aab"
+          add_line "*.log"
+          add_line "local.properties"
+
+          echo "✅ .gitignore 已确保包含常见忽略项"
+
+      - name: Optionally remove zip
+        if: ${{ inputs.keep_zip != 'true' }}
+        shell: bash
+        run: |
+          set -e
+          ZIP="${{ steps.z.outputs.zip }}"
+          # 避免把种子 zip 长期留在仓库（仓库更干净，也更省空间）
+          if [ -f "$ZIP" ]; then
+            rm -f "$ZIP"
+            echo "✅ 已删除 zip：$ZIP"
+          fi
+
+      - name: Commit & push
+        shell: bash
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git status --porcelain | grep -q .; then
+            git add -A
+            git commit -m "Seed project from zip"
+            git push
+            echo "✅ 已提交并推送解压后的工程源码"
+          else
+            echo "ℹ️ 没有检测到变更（可能 zip 内容和仓库一致）"
+          fi
