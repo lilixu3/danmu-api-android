@@ -32,9 +32,8 @@ permissions:
   contents: write
 
 env:
-  # ⚠️ 这里填你仓库根目录里“那个能跑的项目 zip”的文件名（zip 里要包含 node_modules）
+  # 这里填你仓库根目录里 zip 的文件名（zip 里要包含 node_modules）
   PROJECT_ZIP: DanmuApiApp_optimized_fix2_updated.zip
-
   ANDROID_API: "34"
   BUILD_TOOLS: "34.0.0"
 
@@ -43,24 +42,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Resolve version inputs
         run: |
           set -euo pipefail
           VN="${{ inputs.version_name }}"
-          VN="${VN#v}"; VN="${VN#V}"
-          echo "APP_VERSION_NAME=$VN" >> $GITHUB_ENV
+          VN="${VN#v}"
+          VN="${VN#V}"
+          echo "APP_VERSION_NAME=$VN" >> "$GITHUB_ENV"
+
           if [ -n "${{ inputs.version_code }}" ]; then
-            echo "APP_VERSION_CODE=${{ inputs.version_code }}" >> $GITHUB_ENV
+            echo "APP_VERSION_CODE=${{ inputs.version_code }}" >> "$GITHUB_ENV"
           else
-            echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+            echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
+
           NOTES="${{ inputs.release_notes }}"
-          if [ -z "$NOTES" ]; then NOTES="Automated build for v$VN"; fi
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "$NOTES" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          if [ -z "$NOTES" ]; then
+            NOTES="Automated build for v$VN"
+          fi
+          {
+            echo "RELEASE_NOTES<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -74,7 +81,9 @@ jobs:
       - name: Install build-tools (for apksigner)
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS}" "platform-tools"
+          sdkmanager "platforms;android-${ANDROID_API}" \
+                     "build-tools;${BUILD_TOOLS}" \
+                     "platform-tools"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -91,10 +100,10 @@ jobs:
             echo "❌ 没找到 settings.gradle / settings.gradle.kts。"
             exit 1
           fi
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "Project root: $ROOT"
 
-      # ✅ 强制固定签名：只认你设置的这 4 个 secrets（名字完全一致）
+      # ✅ 强制固定签名：只认这 4 个 secrets（缺任何一个直接失败）
       - name: Prepare signing keystore (REQUIRED)
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -103,23 +112,36 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
           if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "❌ 缺少 secret: ANDROID_KEYSTORE_BASE64"
+            echo "❌ Missing secret: ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+          if [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+            echo "❌ Missing secret: ANDROID_KEYSTORE_PASSWORD"
+            exit 1
+          fi
+          if [ -z "${ANDROID_KEY_ALIAS:-}" ]; then
+            echo "❌ Missing secret: ANDROID_KEY_ALIAS"
+            exit 1
+          fi
+          if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "❌ Missing secret: ANDROID_KEY_PASSWORD"
             exit 1
           fi
 
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$PROJECT_ROOT/ci_keystore.jks"
           KEYSTORE_PATH="$(realpath "$PROJECT_ROOT/ci_keystore.jks")"
 
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
-          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> $GITHUB_ENV
-          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
-          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
 
-          echo "✅ Keystore prepared at $KEYSTORE_PATH"
+          echo "✅ Keystore prepared: $KEYSTORE_PATH"
 
-      # ✅ 只拉取另一个仓库的 danmu_api/ 目录（不拉全仓库）
-      - name: Checkout danmu_repo (sparse: danmu_api dir only)
+      # ✅ 只拉取另一个仓库的 danmu_api/ 目录（不带全仓库）
+      - name: Checkout danmu repo (sparse: danmu_api dir only)
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.danmu_repo }}
@@ -133,8 +155,9 @@ jobs:
       - name: Overlay danmu_api into assets (keep node_modules from zip)
         run: |
           set -euo pipefail
-          TARGET="$PROJECT_ROOT/app/src/main/assets/nodejs-project/danmu_api"
+
           SRC="danmu_tmp/danmu_api"
+          TARGET="$PROJECT_ROOT/app/src/main/assets/nodejs-project/danmu_api"
 
           if [ ! -d "$SRC" ]; then
             echo "❌ sparse checkout 后没找到 $SRC"
@@ -146,22 +169,28 @@ jobs:
           mkdir -p "$TARGET"
           rsync -a --delete "$SRC/" "$TARGET/"
 
-          # 安全：assets 里绝对不要出现 git 元数据
+          # 兜底：assets 内别带 git 元数据
           rm -rf "$TARGET/.git" "$TARGET/.github" || true
 
           echo "==== verify danmu_api layout ===="
-          test -f "$TARGET/worker.js" || (echo "❌ 缺少 worker.js" && exit 1)
+          if [ ! -f "$TARGET/worker.js" ]; then
+            echo "❌ 缺少 $TARGET/worker.js"
+            find "$TARGET" -maxdepth 3 -type f | sed -n '1,200p'
+            exit 1
+          fi
           if [ -d "$TARGET/danmu_api" ]; then
-            echo "❌ 检测到双层 danmu_api/danmu_api（会导致 import 路径错）"
+            echo "❌ 检测到双层 $TARGET/danmu_api（会导致 import 路径错）"
             exit 1
           fi
 
           echo "==== verify node_modules exists (from zip base) ===="
-          test -d "$PROJECT_ROOT/app/src/main/assets/nodejs-project/node_modules" || {
-            echo "❌ node_modules 不存在（说明 zip 底座里也没带，或解压不完整）"
+          BASE_NODE_MODULES="$PROJECT_ROOT/app/src/main/assets/nodejs-project/node_modules"
+          if [ ! -d "$BASE_NODE_MODULES" ]; then
+            echo "❌ node_modules 不存在：$BASE_NODE_MODULES"
+            echo "（说明 zip 底座本身不含 node_modules 或解压不完整）"
             find "$PROJECT_ROOT/app/src/main/assets/nodejs-project" -maxdepth 2 -type d | sed -n '1,120p'
             exit 1
-          }
+          fi
 
       - name: Fetch & install libnode (ARM only)
         env:
@@ -169,7 +198,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/nodejs-mobile
-          gh release download "${{ inputs.nodejs_mobile_tag }}" -R nodejs-mobile/nodejs-mobile -p "*android*.zip" -D /tmp/nodejs-mobile
+          gh release download "${{ inputs.nodejs_mobile_tag }}" \
+            -R nodejs-mobile/nodejs-mobile \
+            -p "*android*.zip" \
+            -D /tmp/nodejs-mobile
+
           ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
           unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
 
@@ -207,9 +240,8 @@ jobs:
           ./gradlew --no-daemon :app:clean :app:assembleRelease \
             -PAPP_VERSION_NAME="$APP_VERSION_NAME" \
             -PAPP_VERSION_CODE="$APP_VERSION_CODE"
-          ls -lh app/build/outputs/apk/release || true
 
-      - name: Collect APKs + verify assets(node_modules) packed
+      - name: Collect APKs + verify node_modules packed
         run: |
           set -euo pipefail
           cd "$PROJECT_ROOT"
@@ -223,13 +255,15 @@ jobs:
               ls -R "$APK_DIR" || true
               exit 1
             fi
+
             OUT="dist/DanmuApiApp-${APP_VERSION_NAME}-${ABI}.apk"
             cp "$SRC" "$OUT"
-            echo "==== check node_modules in $OUT (first 30 hits) ===="
-            unzip -l "$OUT" | grep -E "assets/nodejs-project/node_modules" | head -n 30 || {
-              echo "❌ APK 里没打进 node_modules（需要检查 gradle 是否忽略了 assets）"
+
+            echo "==== check node_modules in $OUT ===="
+            if ! unzip -l "$OUT" | grep -q "assets/nodejs-project/node_modules"; then
+              echo "❌ APK 里没包含 node_modules（需要检查打包是否过滤 assets）"
               exit 1
-            }
+            fi
           done
 
           ls -lh dist
