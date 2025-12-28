@@ -1,183 +1,180 @@
-name: Build APK (ARM only, split by ABI) + Publish Release
+name: Manual Build APK + Publish Release (pull danmu_api)
 
 on:
   workflow_dispatch:
     inputs:
-      version_name:
-        description: "App 版本号（用于 versionName 和 Release tag，比如 0.2.0）"
+      danmu_repo:
+        description: "danmu_api 仓库（owner/repo）"
         required: true
-        type: string
-      version_code:
-        description: "versionCode（可选；留空则使用 GITHUB_RUN_NUMBER）"
-        required: false
-        type: string
-      release_notes:
-        description: "发行版说明（可选）"
-        required: false
-        type: string
+        default: "lilixu3/danmu_api"
+      danmu_ref:
+        description: "danmu_api 分支/Tag/提交（ref）"
+        required: true
+        default: "main"
+      app_version_name:
+        description: "APP 版本号 versionName（例如 0.2.1）"
+        required: true
+        default: "0.1.0"
+      app_version_code:
+        description: "APP 版本号 versionCode（整数，例如 10）"
+        required: true
+        default: "1"
+      nodejs_mobile_tag:
+        description: "nodejs-mobile core library tag（例如 v18.20.4）"
+        required: true
+        default: "v18.20.4"
+      build_variant:
+        description: "构建类型：release 或 debug"
+        required: true
+        default: "release"
 
 permissions:
   contents: write
 
 env:
-  # ⚠️ 这里填你仓库里项目 zip 的文件名
-  PROJECT_ZIP: DanmuApiApp_optimized_fix2_updated.zip
+  DANMU_PATH: app/src/main/assets/nodejs-project/danmu_api
+  ANDROID_API: "34"
+  BUILD_TOOLS: "34.0.0"
+  NDK_VERSION: "26.1.10909125"
+  CMAKE_VERSION: "3.22.1"
 
 jobs:
-  build:
+  build_and_release:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Resolve version inputs
+      - name: Checkout danmu_api into assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.danmu_repo }}
+          ref: ${{ inputs.danmu_ref }}
+          path: ${{ env.DANMU_PATH }}
+
+      - name: Setup Node.js (build-time)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install node deps (nodejs-project)
+        working-directory: app/src/main/assets/nodejs-project
         run: |
-          set -euo pipefail
-          VN="${{ inputs.version_name }}"
-          VN="${VN#v}"
-          VN="${VN#V}"
-          echo "APP_VERSION_NAME=$VN" >> $GITHUB_ENV
-          if [ -n "${{ inputs.version_code }}" ]; then
-            echo "APP_VERSION_CODE=${{ inputs.version_code }}" >> $GITHUB_ENV
-          else
-            echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+          if [ -f package.json ]; then
+            npm install --omit=dev
           fi
-          NOTES="${{ inputs.release_notes }}"
-          if [ -z "$NOTES" ]; then
-            NOTES="Automated build for v$VN"
-          fi
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "$NOTES" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
 
-      - name: Set up JDK 17
+      - name: Install node deps (danmu_api)
+        working-directory: app/src/main/assets/nodejs-project/danmu_api
+        run: |
+          if [ -f package.json ]; then
+            npm install --omit=dev
+          fi
+
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Unzip project and locate root
+      - name: Install Android components (platform/build-tools/ndk/cmake)
         run: |
-          set -euo pipefail
-          rm -rf project
-          mkdir -p project
-          unzip -q -DD "$PROJECT_ZIP" -d project
+          sdkmanager "platforms;android-${ANDROID_API}" \
+                     "build-tools;${BUILD_TOOLS}" \
+                     "platform-tools" \
+                     "ndk;${NDK_VERSION}" \
+                     "cmake;${CMAKE_VERSION}"
 
-          ROOT="$(find project -maxdepth 10 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
-          if [ -z "$ROOT" ]; then
-            echo "❌ 没找到 settings.gradle / settings.gradle.kts。"
-            exit 1
-          fi
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
-          echo "Project root: $ROOT"
-
-      # ✅ 固定签名（可选）——修复点：写入绝对路径，避免 Gradle 在 app 模块目录解析相对路径导致找不到 keystore
-      - name: Prepare signing keystore (optional)
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # 可选：如果你想让 release APK 使用“固定签名”，就在 Secrets 里配置这些（见下方）
+      - name: Prepare keystore (optional)
+        if: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
         run: |
-          set -euo pipefail
-          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$PROJECT_ROOT/ci_keystore.jks"
+          set -e
+          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > /tmp/ci.keystore
+          echo "ANDROID_KEYSTORE_PATH=/tmp/ci.keystore" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
 
-            # ⭐ 关键修复：转绝对路径（Gradle 在不同工作目录解析也不会错）
-            KEYSTORE_PATH="$(realpath "$PROJECT_ROOT/ci_keystore.jks")"
-
-            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
-            echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> $GITHUB_ENV
-            echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
-            echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
-
-            echo "✅ Keystore prepared at $KEYSTORE_PATH"
-          else
-            echo "ℹ️ 未配置 keystore secrets，将使用 debug key 签名（release 也会 fallback 到 debug，保证可安装）"
-          fi
-
-      - name: Fetch & install libnode (ARM only)
+      - name: Download nodejs-mobile Android release zip and place into app/libnode
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -e
+          rm -rf /tmp/nodejs-mobile
           mkdir -p /tmp/nodejs-mobile
-          gh release download v18.20.4 -R nodejs-mobile/nodejs-mobile -p "*android*.zip" -D /tmp/nodejs-mobile
-          ANDROID_ZIP="$(ls /tmp/nodejs-mobile/*android*.zip | head -n 1)"
-          unzip -q "$ANDROID_ZIP" -d /tmp/nodejs-mobile/out
+          cd /tmp/nodejs-mobile
 
-          cd "$PROJECT_ROOT"
-          rm -rf app/libnode/include app/libnode/bin
-          mkdir -p app/libnode/include app/libnode/bin
-          cp -R /tmp/nodejs-mobile/out/include/* app/libnode/include/
+          gh release download "${{ inputs.nodejs_mobile_tag }}" \
+            -R nodejs-mobile/nodejs-mobile \
+            -p "*android*.zip"
 
-          for ABI in arm64-v8a armeabi-v7a; do
-            mkdir -p "app/libnode/bin/$ABI"
-            cp -R "/tmp/nodejs-mobile/out/bin/$ABI/"* "app/libnode/bin/$ABI/"
-          done
+          unzip -q *.zip -d extracted
 
-      - name: Normalize timestamps (fix ninja dirty loop)
-        run: |
-          cd "$PROJECT_ROOT"
-          find . -type f -exec touch {} +
+          rm -rf "$GITHUB_WORKSPACE/app/libnode/include" "$GITHUB_WORKSPACE/app/libnode/bin"
+          mkdir -p "$GITHUB_WORKSPACE/app/libnode"
 
-      - name: Patch native-lib.cpp (argv const -> non-const)
-        run: |
-          FILE="$PROJECT_ROOT/app/src/main/cpp/native-lib.cpp"
-          if [ -f "$FILE" ]; then
-            sed -i 's/return node::Start(argc, argv.data());/return node::Start(argc, const_cast<char**>(argv.data()));/g' "$FILE"
-          fi
+          cp -R extracted/include "$GITHUB_WORKSPACE/app/libnode/include"
+          cp -R extracted/bin     "$GITHUB_WORKSPACE/app/libnode/bin"
 
-      - name: Build Release APK (split by ABI)
+      - name: Grant execute permission to gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build APK
         env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
-          APP_VERSION_NAME: ${{ env.APP_VERSION_NAME }}
-          APP_VERSION_CODE: ${{ env.APP_VERSION_CODE }}
+          # 你的 app/build.gradle 已支持 APP_VERSION_NAME/APP_VERSION_CODE 覆盖
+          APP_VERSION_NAME: ${{ inputs.app_version_name }}
+          APP_VERSION_CODE: ${{ inputs.app_version_code }}
         run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-          chmod +x ./gradlew
-          ./gradlew --no-daemon :app:clean :app:assembleRelease -PAPP_VERSION_NAME="$APP_VERSION_NAME" -PAPP_VERSION_CODE="$APP_VERSION_CODE"
-          ls -lh app/build/outputs/apk/release || true
-
-      - name: Collect APKs
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-          APK_DIR="app/build/outputs/apk/release"
-          mkdir -p dist
-
-          for ABI in arm64-v8a armeabi-v7a; do
-            SRC="$(ls -1 "$APK_DIR"/*"$ABI"*.apk 2>/dev/null | head -n 1 || true)"
-            if [ -z "$SRC" ]; then
-              echo "❌ 没找到 $ABI 的 APK（检查 splits 输出路径/命名）"
-              ls -R "$APK_DIR" || true
-              exit 1
-            fi
-            cp "$SRC" "dist/DanmuApiApp-${APP_VERSION_NAME}-${ABI}.apk"
-          done
-
-          ls -lh dist
-
-      - name: Create / update GitHub Release and upload APKs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="v${APP_VERSION_NAME}"
-          REPO="${GITHUB_REPOSITORY}"
-
-          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-            echo "ℹ️ Release $TAG 已存在，将覆盖上传 APK"
-            gh release edit "$TAG" -R "$REPO" --title "$TAG" --notes "$RELEASE_NOTES"
+          set -e
+          if [ "${{ inputs.build_variant }}" = "debug" ]; then
+            ./gradlew :app:assembleDebug \
+              -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
+              -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
+              --stacktrace
           else
-            gh release create "$TAG" -R "$REPO" --title "$TAG" --notes "$RELEASE_NOTES"
+            ./gradlew :app:assembleRelease \
+              -PAPP_VERSION_NAME="${{ inputs.app_version_name }}" \
+              -PAPP_VERSION_CODE="${{ inputs.app_version_code }}" \
+              --stacktrace
           fi
 
-          gh release upload "$TAG" -R "$REPO" "$PROJECT_ROOT/dist/"*.apk --clobber
-          echo "✅ Uploaded to https://github.com/${REPO}/releases/tag/${TAG}"
+      - name: Collect APK
+        id: apk
+        run: |
+          set -e
+          if [ "${{ inputs.build_variant }}" = "debug" ]; then
+            APK_PATH=$(ls -1 app/build/outputs/apk/debug/*.apk | head -n 1)
+          else
+            APK_PATH=$(ls -1 app/build/outputs/apk/release/*.apk | head -n 1)
+          fi
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "APK: $APK_PATH"
+
+      - name: Compute release tag/name
+        id: rel
+        run: |
+          set -e
+          TAG="v${{ inputs.app_version_name }}"
+          NAME="DanmuApiApp ${{ inputs.app_version_name }} (${{
+            inputs.build_variant
+          }})"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release (upload APK)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.apk.outputs.apk_path }}
