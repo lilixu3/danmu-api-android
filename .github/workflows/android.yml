@@ -38,6 +38,52 @@ jobs:
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           echo "Project root: $ROOT"
 
+      - name: Install Android SDK packages (API 36)
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Patch Kotlin jvmTarget (kotlinOptions -> compilerOptions)
+        run: |
+          FILE="$PROJECT_ROOT/app/build.gradle.kts"
+          if [ ! -f "$FILE" ]; then
+            echo "❌ 找不到 $FILE"
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os, re, pathlib
+
+          file_path = pathlib.Path(os.environ["PROJECT_ROOT"]) / "app" / "build.gradle.kts"
+          txt = file_path.read_text(encoding="utf-8")
+
+          # 1) 移除 kotlinOptions { jvmTarget = "17" }（旧 DSL）
+          new = re.sub(
+              r"\n\s*kotlinOptions\s*\{\s*\n\s*jvmTarget\s*=\s*\"17\"\s*\n\s*\}\s*\n",
+              "\n",
+              txt,
+              count=1
+          )
+
+          # 2) 如果还没插入 compilerOptions DSL，就插入到 dependencies 前面
+          if "compilerOptions" not in new:
+              insert = """
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+"""
+              new = re.sub(r"\n\s*dependencies\s*\{", "\n\n" + insert + "dependencies {", new, count=1)
+
+          file_path.write_text(new, encoding="utf-8")
+          print("✅ patched:", file_path)
+          PY
+
+          echo "=== Preview patched file ==="
+          sed -n '1,120p' "$FILE"
+
       - name: Build Debug APK
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
