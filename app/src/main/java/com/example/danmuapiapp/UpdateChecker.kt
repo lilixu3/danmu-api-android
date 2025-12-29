@@ -14,8 +14,9 @@ import java.util.concurrent.Executors
 
 object UpdateChecker {
 
-    private const val LATEST_RELEASE_API = "https://api.github.com/repos/lilixu3/Private/releases/latest"
-    private const val FALLBACK_LATEST_PAGE = "https://github.com/lilixu3/Private/releases/latest"
+    // App 项目仓库（与项目主页一致）
+    private const val LATEST_RELEASE_API = "https://api.github.com/repos/lilixu3/danmu-api-android/releases/latest"
+    private const val FALLBACK_LATEST_PAGE = "https://github.com/lilixu3/danmu-api-android/releases/latest"
 
     private val executor = Executors.newSingleThreadExecutor()
 
