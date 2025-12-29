@@ -362,8 +362,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUiError(message: String) {
-        tvStatus.text = "启动失败：
-$message"
+        // Kotlin 字符串不能直接换行写在引号里，否则会导致编译报错。
+        // 这里用 \n 拼接详细错误信息，便于用户排查。
+        tvStatus.text = "启动失败：\n$message"
         btnStart.text = "启用"
         btnStart.isEnabled = true
         btnStop.isEnabled = false
