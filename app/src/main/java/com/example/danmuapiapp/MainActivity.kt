@@ -26,7 +26,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import android.content.res.ColorStateList
 import java.net.Inet4Address
 import java.net.HttpURLConnection
 import java.net.NetworkInterface
@@ -37,13 +40,18 @@ class MainActivity : AppCompatActivity() {
     companion object {
         // Keep in sync with assets/nodejs-project/android-server.mjs defaults.
         private const val MAIN_PORT = 9321
+
+        private const val PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
+        private const val UPSTREAM_URL = "https://github.com/huangxd-/danmu_api"
     }
 
+    private lateinit var toolbar: MaterialToolbar
+
+    private lateinit var chipStatus: Chip
     private lateinit var tvStatus: TextView
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
     private lateinit var btnBattery: MaterialButton
-    private lateinit var btnCheckUpdate: MaterialButton
 
     private lateinit var groupUrls: View
     private lateinit var tvLanUrl: TextView
@@ -104,11 +112,12 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        toolbar = findViewById(R.id.toolbar)
+        chipStatus = findViewById(R.id.chipStatus)
         tvStatus = findViewById(R.id.tvStatus)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnBattery = findViewById(R.id.btnBattery)
-        btnCheckUpdate = findViewById(R.id.btnCheckUpdate)
 
         groupUrls = findViewById(R.id.groupUrls)
         tvLanUrl = findViewById(R.id.tvLanUrl)
@@ -128,12 +137,6 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
             }
-            // 防止重复点击：若服务已在运行/启动中，则直接提示并刷新 UI
-            if (NodeService.isRunning()) {
-                setUiRunning("已启用（查看通知栏状态）")
-                Toast.makeText(this, "已启用，无需重复点击", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
             startNodeServiceWithUiHint()
         }
 
@@ -145,8 +148,18 @@ class MainActivity : AppCompatActivity() {
             openBatteryOptimization()
         }
 
-        btnCheckUpdate.setOnClickListener {
-            UpdateChecker.check(this, userInitiated = true)
+        toolbar.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_check_update -> {
+                    UpdateChecker.check(this, userInitiated = true)
+                    true
+                }
+                R.id.action_project -> {
+                    showProjectJump()
+                    true
+                }
+                else -> false
+            }
         }
 
 
@@ -184,14 +197,14 @@ class MainActivity : AppCompatActivity() {
         if (NodeService.isRunning()) {
             setUiRunning("Node 正在运行（前台服务）")
         } else {
-            setUiStopped("未运行。点击“启用”后，Node 会在后台跑起来。")
+            setUiStopped("未运行。点击“启动服务”后，Node 会在后台跑起来。")
         }
     }
 
     private fun startNodeServiceWithUiHint() {
         setUiStarting("启动中…请稍候（可在通知栏看到运行状态）")
         startNodeService()
-        Toast.makeText(this, "已发起启用，请稍候…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已启动：后台服务运行中", Toast.LENGTH_SHORT).show()
         maybePromptBatteryOptimization()
     }
 
@@ -338,38 +351,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUiStarting(message: String) {
+        updateStatusChip("启动中", R.color.status_warn)
         tvStatus.text = message
-        btnStart.text = "启用中…"
         btnStart.isEnabled = false
         btnStop.isEnabled = true
         updateUrls(false)
     }
 
     private fun setUiRunning(message: String) {
+        updateStatusChip("运行中", R.color.status_ok)
         tvStatus.text = message
-        btnStart.text = "已启用"
         btnStart.isEnabled = false
         btnStop.isEnabled = true
         updateUrls(true)
     }
 
     private fun setUiStopped(message: String) {
+        updateStatusChip("未运行", R.color.status_neutral)
         tvStatus.text = message
-        btnStart.text = "启用"
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
     }
 
     private fun setUiError(message: String) {
-        // Kotlin 字符串不能直接换行写在引号里，否则会导致编译报错。
-        // 这里用 \n 拼接详细错误信息，便于用户排查。
+        updateStatusChip("出错", R.color.status_error)
         tvStatus.text = "启动失败：\n$message"
-        btnStart.text = "启用"
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
         Toast.makeText(this, "启动失败（详情见页面）", Toast.LENGTH_LONG).show()
+    }
+
+    private fun updateStatusChip(text: String, colorRes: Int) {
+        chipStatus.text = text
+        val color = ContextCompat.getColor(this, colorRes)
+        // 背景使用低透明度，文字/图标用纯色，保持现代感且不刺眼
+        val bg = (color and 0x00FFFFFF) or 0x22000000
+        chipStatus.chipBackgroundColor = ColorStateList.valueOf(bg)
+        chipStatus.setTextColor(color)
+        chipStatus.chipIconTint = ColorStateList.valueOf(color)
+    }
+
+    private fun showProjectJump() {
+        val items = arrayOf(
+            "打开项目主页（App）",
+            "打开上游项目（danmu_api）"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("项目跳转")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> openUrlSafely(PROJECT_URL)
+                    1 -> openUrlSafely(UPSTREAM_URL)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     @SuppressLint("ObsoleteSdkInt")
