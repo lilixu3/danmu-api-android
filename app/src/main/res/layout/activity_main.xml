@@ -266,7 +266,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="提示：停止前台服务不一定能结束 Node 进程（取决于你的 JS 代码）。"
+                android:text="提示：不要在国内平台宣传本项目。"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:alpha="0.85" />
