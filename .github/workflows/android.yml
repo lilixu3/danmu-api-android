@@ -6,27 +6,44 @@ on:
       danmu_repo:
         description: "danmu_api 仓库（owner/repo）"
         required: true
+        type: choice
+        options:
+          - "huangxd-/danmu_api"
+          - "lilixu3/danmu_api"
         default: "huangxd-/danmu_api"
+
       danmu_ref:
         description: "danmu_api 分支/Tag/提交（ref）"
         required: true
+        type: string
         default: "main"
+
       version_name:
         description: "App 版本号（用于 versionName 和 Release tag，比如 0.2.0）"
         required: true
         type: string
+
       version_code:
         description: "versionCode（可选；留空则使用 GITHUB_RUN_NUMBER）"
         required: false
         type: string
+
       release_notes:
         description: "发行版说明（可选）"
         required: false
         type: string
+
       nodejs_mobile_tag:
         description: "nodejs-mobile tag（例如 v18.20.4）"
         required: true
+        type: string
         default: "v18.20.4"
+
+      upload_release:
+        description: "是否上传到 GitHub Release"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -51,20 +68,25 @@ jobs:
         uses: "actions/checkout@v4"
 
       - name: "Resolve version inputs"
+        shell: bash
         run: |
           set -euo pipefail
+
           VN="${{ inputs.version_name }}"
           VN="${VN#v}"; VN="${VN#V}"
           echo "APP_VERSION_NAME=$VN" >> "$GITHUB_ENV"
 
-          if [ -n "${{ inputs.version_code }}" ]; then
-            echo "APP_VERSION_CODE=${{ inputs.version_code }}" >> "$GITHUB_ENV"
+          VC="${{ inputs.version_code }}"
+          if [ -n "${VC:-}" ]; then
+            echo "APP_VERSION_CODE=$VC" >> "$GITHUB_ENV"
           else
             echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
 
           NOTES="${{ inputs.release_notes }}"
-          if [ -z "$NOTES" ]; then NOTES="Automated build for v$VN"; fi
+          if [ -z "${NOTES:-}" ]; then
+            NOTES="Automated build for v$VN"
+          fi
           {
             echo "RELEASE_NOTES<<EOF"
             echo "$NOTES"
@@ -72,6 +94,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Prepare signing keystore (REQUIRED, fixed secrets)"
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -104,6 +127,7 @@ jobs:
         uses: "android-actions/setup-android@v3"
 
       - name: "Install build-tools (for apksigner)"
+        shell: bash
         run: |
           set -euo pipefail
           sdkmanager "platforms;android-${ANDROID_API}" \
@@ -115,6 +139,7 @@ jobs:
 
       # ✅ 核心：解压你上传的 node_modules 压缩包到 assets/nodejs-project 下
       - name: "Restore node_modules from archive into assets"
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -173,6 +198,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: "Overlay danmu_api into assets (NO nesting, NO .git)"
+        shell: bash
         run: |
           set -euo pipefail
           SRC="danmu_tmp/danmu_api"
@@ -206,8 +232,8 @@ jobs:
           echo "✅ package.json written: $TARGET/package.json"
           cat "$TARGET/package.json"
 
-
       - name: "Fetch & install libnode (ARM only)"
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -231,11 +257,13 @@ jobs:
           done
 
       - name: "Normalize timestamps (fix ninja dirty loop)"
+        shell: bash
         run: |
           set -euo pipefail
           find . -type f -exec touch {} +
 
       - name: "Patch native-lib.cpp (argv const -> non-const)"
+        shell: bash
         run: |
           set -euo pipefail
           FILE="app/src/main/cpp/native-lib.cpp"
@@ -244,6 +272,7 @@ jobs:
           fi
 
       - name: "Build Release APK (split by ABI)"
+        shell: bash
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g -Dkotlin.daemon.jvm.options=-Xmx1g"
         run: |
@@ -254,6 +283,7 @@ jobs:
             -PAPP_VERSION_CODE="$APP_VERSION_CODE"
 
       - name: "Collect APKs + verify node_modules packed"
+        shell: bash
         run: |
           set -euo pipefail
           APK_DIR="app/build/outputs/apk/release"
@@ -279,6 +309,7 @@ jobs:
           ls -lh dist
 
       - name: "Print signing cert (stability check)"
+        shell: bash
         run: |
           set -euo pipefail
           APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
@@ -287,7 +318,18 @@ jobs:
             "$APKSIGNER" verify --print-certs "$f" | sed -n '1,80p'
           done
 
+      # ✅ 无论是否发 Release，都上传到 Actions Artifact，方便直接下载
+      - name: "Upload APKs as workflow artifact"
+        uses: "actions/upload-artifact@v4"
+        with:
+          name: "APKs-${{ github.run_number }}-v${{ env.APP_VERSION_NAME }}"
+          path: dist/*.apk
+          if-no-files-found: error
+
+      # ✅ 可选：创建/更新 Release 并上传
       - name: "Create / update GitHub Release and upload APKs"
+        if: ${{ inputs.upload_release }}
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
