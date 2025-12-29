@@ -6,7 +6,7 @@ on:
       danmu_repo:
         description: "danmu_api 仓库（owner/repo）"
         required: true
-        default: "lilixu3/danmu_api"
+        default: "huangxd-/danmu_api"
       danmu_ref:
         description: "danmu_api 分支/Tag/提交（ref）"
         required: true
