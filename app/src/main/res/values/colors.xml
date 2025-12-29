@@ -3,4 +3,10 @@
     <color name="brand_accent">#22D3EE</color>
     <color name="text_primary">#E5E7EB</color>
     <color name="text_secondary">#9CA3AF</color>
+
+    <!-- 状态色（用于 Chip / 提示） -->
+    <color name="status_ok">#22D3EE</color>
+    <color name="status_warn">#FBBF24</color>
+    <color name="status_error">#FF4D4F</color>
+    <color name="status_neutral">#9CA3AF</color>
 </resources>
