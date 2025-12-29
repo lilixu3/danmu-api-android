@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_project"
+        android:title="项目"
+        android:icon="@drawable/ic_link_24"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_check_update"
+        android:title="检查更新"
+        android:icon="@drawable/ic_update_24"
+        app:showAsAction="ifRoom" />
+
+</menu>
