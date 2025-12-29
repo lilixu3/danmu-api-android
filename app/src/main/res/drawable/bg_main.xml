@@ -1,7 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:angle="135"
-        android:startColor="#0B1220"
-        android:endColor="#111827"/>
-</shape>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Base deep gradient -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="#0B1220"
+                android:endColor="#0F172A" />
+        </shape>
+    </item>
+
+    <!-- Top-left soft accent glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="520dp"
+                android:centerX="0.15"
+                android:centerY="0.05"
+                android:startColor="#3322D3EE"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <!-- Bottom-right secondary glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="560dp"
+                android:centerX="0.90"
+                android:centerY="0.95"
+                android:startColor="#2216A34A"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+</layer-list>
