@@ -128,6 +128,12 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
             }
+            // 防止重复点击：若服务已在运行/启动中，则直接提示并刷新 UI
+            if (NodeService.isRunning()) {
+                setUiRunning("已启用（查看通知栏状态）")
+                Toast.makeText(this, "已启用，无需重复点击", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             startNodeServiceWithUiHint()
         }
 
@@ -178,14 +184,14 @@ class MainActivity : AppCompatActivity() {
         if (NodeService.isRunning()) {
             setUiRunning("Node 正在运行（前台服务）")
         } else {
-            setUiStopped("未运行。点击“启动服务”后，Node 会在后台跑起来。")
+            setUiStopped("未运行。点击“启用”后，Node 会在后台跑起来。")
         }
     }
 
     private fun startNodeServiceWithUiHint() {
         setUiStarting("启动中…请稍候（可在通知栏看到运行状态）")
         startNodeService()
-        Toast.makeText(this, "已启动：后台服务运行中", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已发起启用，请稍候…", Toast.LENGTH_SHORT).show()
         maybePromptBatteryOptimization()
     }
 
@@ -333,6 +339,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUiStarting(message: String) {
         tvStatus.text = message
+        btnStart.text = "启用中…"
         btnStart.isEnabled = false
         btnStop.isEnabled = true
         updateUrls(false)
@@ -340,6 +347,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUiRunning(message: String) {
         tvStatus.text = message
+        btnStart.text = "已启用"
         btnStart.isEnabled = false
         btnStop.isEnabled = true
         updateUrls(true)
@@ -347,13 +355,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUiStopped(message: String) {
         tvStatus.text = message
+        btnStart.text = "启用"
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
     }
 
     private fun setUiError(message: String) {
-        tvStatus.text = "启动失败：\n$message"
+        tvStatus.text = "启动失败：
+$message"
+        btnStart.text = "启用"
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
