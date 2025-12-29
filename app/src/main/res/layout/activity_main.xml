@@ -202,7 +202,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="启动服务"
+        android:text="启用"
         android:textAllCaps="false"
         android:textStyle="bold"
         android:paddingTop="14dp"
