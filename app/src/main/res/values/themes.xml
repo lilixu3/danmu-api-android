@@ -1,6 +1,13 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Immersive status bar: content will draw under system bars, handled in MainActivity with insets. -->
     <style name="Theme.DanmuApiApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorPrimaryContainer">@color/surface_variant</item>
+        <item name="colorSecondary">@color/brand_accent</item>
+        <item name="colorSurface">@color/surface_container</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:colorBackground">@color/background_primary</item>
+        
         <item name="android:statusBarColor" tools:targetApi="l">@android:color/transparent</item>
         <item name="android:navigationBarColor" tools:targetApi="l">@android:color/transparent</item>
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
