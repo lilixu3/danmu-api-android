@@ -1,65 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Text Appearances -->
-    <style name="TextAppearance.App.TitleLarge" parent="TextAppearance.Material3.TitleLarge">
-        <item name="android:textColor">@color/text_primary</item>
-    </style>
 
-    <style name="TextAppearance.App.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
-        <item name="android:textColor">@color/text_primary</item>
-    </style>
+    <!--
+      说明：
+      CI 构建失败的原因是 activity_main.xml 引用了自定义的 TextAppearance / Widget 样式，
+      但仓库中缺少对应的 style 定义，导致 aapt2 资源链接阶段报错。
 
-    <style name="TextAppearance.App.HeadlineMedium" parent="TextAppearance.Material3.HeadlineMedium">
-        <item name="android:textColor">@color/text_primary</item>
-    </style>
+      这里补齐缺失的 style 名称，并尽量映射到 Material3 的默认样式，
+      保证既能编译通过，也能维持 Material3 的排版与控件行为。
+    -->
 
-    <style name="TextAppearance.App.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
-        <item name="android:textColor">@color/text_primary</item>
-    </style>
+    <!-- ========== TextAppearance ========== -->
+    <style name="TextAppearance.App.TitleLarge" parent="TextAppearance.Material3.TitleLarge" />
+    <style name="TextAppearance.App.TitleMedium" parent="TextAppearance.Material3.TitleMedium" />
 
-    <style name="TextAppearance.App.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+    <style name="TextAppearance.App.HeadlineMedium" parent="TextAppearance.Material3.HeadlineMedium" />
+
+    <style name="TextAppearance.App.BodyLarge" parent="TextAppearance.Material3.BodyLarge" />
+    <style name="TextAppearance.App.BodyMedium" parent="TextAppearance.Material3.BodyMedium" />
+    <style name="TextAppearance.App.BodySmall" parent="TextAppearance.Material3.BodySmall" />
+
+    <style name="TextAppearance.App.LabelLarge" parent="TextAppearance.Material3.LabelLarge" />
+    <style name="TextAppearance.App.LabelMedium" parent="TextAppearance.Material3.LabelMedium" />
+    <style name="TextAppearance.App.LabelSmall" parent="TextAppearance.Material3.LabelSmall" />
+
+
+    <!-- ========== Chip ========== -->
+    <style name="Widget.App.Chip.Status" parent="Widget.Material3.Chip">
+        <item name="android:textAllCaps">false</item>
+        <item name="chipMinHeight">28dp</item>
+        <item name="chipCornerRadius">14dp</item>
+        <item name="chipBackgroundColor">@color/surface_container_high</item>
         <item name="android:textColor">@color/text_secondary</item>
+        <item name="chipIconTint">@color/text_tertiary</item>
+        <item name="chipStrokeWidth">0dp</item>
+        <item name="rippleColor">#1AFFFFFF</item>
     </style>
 
-    <style name="TextAppearance.App.BodySmall" parent="TextAppearance.Material3.BodySmall">
-        <item name="android:textColor">@color/text_tertiary</item>
+
+    <!-- ========== Buttons ========== -->
+    <style name="Widget.App.Button.Base" parent="Widget.Material3.Button">
+        <item name="android:textAllCaps">false</item>
+        <item name="cornerRadius">16dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minHeight">48dp</item>
     </style>
 
-    <style name="TextAppearance.App.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
-        <item name="android:textColor">@color/text_secondary</item>
-    </style>
-
-    <style name="TextAppearance.App.LabelMedium" parent="TextAppearance.Material3.LabelMedium">
-        <item name="android:textColor">@color/text_tertiary</item>
-    </style>
-
-    <style name="TextAppearance.App.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
-        <item name="android:textColor">@color/text_tertiary</item>
-    </style>
-
-    <!-- Button Styles -->
-    <style name="Widget.App.Button.Primary" parent="Widget.Material3.Button">
+    <!-- 主按钮：Filled -->
+    <style name="Widget.App.Button.Primary" parent="Widget.App.Button.Base">
         <item name="backgroundTint">@color/brand_accent</item>
         <item name="android:textColor">@color/background_primary</item>
+        <item name="iconTint">@color/background_primary</item>
+        <item name="rippleColor">#33000000</item>
     </style>
 
-    <style name="Widget.App.Button.Danger" parent="Widget.Material3.Button">
+    <!-- 危险按钮：Filled（红色） -->
+    <style name="Widget.App.Button.Danger" parent="Widget.App.Button.Base">
         <item name="backgroundTint">@color/status_error</item>
         <item name="android:textColor">@color/text_primary</item>
+        <item name="iconTint">@color/text_primary</item>
+        <item name="rippleColor">#33FFFFFF</item>
     </style>
 
-    <style name="Widget.App.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
-        <item name="backgroundTint">@color/surface_container_high</item>
+    <!-- Tonal 按钮：柔和填充（不依赖 Material3 的 TonalButton 具体命名，提升兼容性） -->
+    <style name="Widget.App.Button.Tonal" parent="Widget.App.Button.Base">
+        <item name="backgroundTint">@color/surface_variant</item>
         <item name="android:textColor">@color/brand_accent</item>
+        <item name="iconTint">@color/brand_accent</item>
+        <item name="rippleColor">#1AFFFFFF</item>
     </style>
 
-    <style name="Widget.App.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="strokeColor">@color/outline</item>
-        <item name="android:textColor">@color/text_primary</item>
-    </style>
-
-    <!-- Chip Style -->
-    <style name="Widget.App.Chip.Status" parent="Widget.Material3.Chip.Assist">
-        <item name="chipBackgroundColor">@color/surface_container</item>
+    <!-- Outlined 按钮：描边（不依赖 Material3 的 OutlinedButton 具体命名，提升兼容性） -->
+    <style name="Widget.App.Button.Outlined" parent="Widget.App.Button.Base">
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="strokeColor">@color/outline_variant</item>
+        <item name="strokeWidth">1dp</item>
         <item name="android:textColor">@color/text_secondary</item>
+        <item name="iconTint">@color/text_secondary</item>
+        <item name="rippleColor">#1AFFFFFF</item>
     </style>
+
 </resources>
