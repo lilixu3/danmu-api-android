@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.button.MaterialButton
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/btnActionProject"
+    style="@style/Widget.App.Button.ToolbarIcon"
+    android:layout_width="40dp"
+    android:layout_height="40dp"
+    android:contentDescription="项目"
+    android:text=""
+    app:icon="@drawable/ic_link_24"
+    app:iconSize="20dp"
+    app:iconGravity="textStart"
+    app:tooltipText="项目" />
