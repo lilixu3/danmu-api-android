@@ -25,8 +25,8 @@
             app:subtitleTextAppearance="@style/TextAppearance.App.BodySmall"
             app:title="@string/app_name"
             app:subtitle="本机局域网弹幕 API 服务"
-            app:titleTextColor="@color/text_primary"
-            app:subtitleTextColor="@color/text_tertiary" />
+            app:titleTextColor="?attr/colorOnSurface"
+            app:subtitleTextColor="?attr/colorOnSurfaceVariant" />
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -54,8 +54,9 @@
                 android:layout_marginBottom="16dp"
                 app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/surface_variant"
-                app:strokeWidth="0dp">
+                app:cardBackgroundColor="@color/background_secondary"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -85,7 +86,7 @@
                             android:layout_weight="1"
                             android:text="服务状态"
                             android:textAppearance="@style/TextAppearance.App.LabelLarge"
-                            android:textColor="@color/text_secondary" />
+                            android:textColor="?attr/colorOnSurfaceVariant" />
 
                         <com.google.android.material.chip.Chip
                             android:id="@+id/chipStatus"
@@ -104,7 +105,7 @@
                         android:layout_height="wrap_content"
                         android:text="准备就绪"
                         android:textAppearance="@style/TextAppearance.App.HeadlineMedium"
-                        android:textColor="@color/text_primary"
+                        android:textColor="?attr/colorOnSurface"
                         android:layout_marginBottom="8dp" />
 
                     <TextView
@@ -113,7 +114,7 @@
                         android:layout_height="wrap_content"
                         android:text="点击下方启动按钮，开始运行弹幕 API 服务"
                         android:textAppearance="@style/TextAppearance.App.BodyMedium"
-                        android:textColor="@color/text_secondary"
+                        android:textColor="?attr/colorOnSurfaceVariant"
                         android:lineSpacingExtra="4dp"
                         android:layout_marginBottom="20dp" />
 
@@ -162,7 +163,7 @@
                 android:visibility="gone"
                 app:cardCornerRadius="24dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/surface_container"
+                app:cardBackgroundColor="@color/background_secondary"
                 app:strokeWidth="1dp"
                 app:strokeColor="@color/outline_variant">
 
@@ -183,7 +184,7 @@
                             android:layout_width="20dp"
                             android:layout_height="20dp"
                             android:src="@drawable/ic_link_24"
-                            android:tint="@color/brand_accent"
+                            android:tint="?attr/colorSecondary"
                             android:layout_marginEnd="10dp" />
 
                         <TextView
@@ -191,7 +192,7 @@
                             android:layout_height="wrap_content"
                             android:text="访问地址"
                             android:textAppearance="@style/TextAppearance.App.TitleMedium"
-                            android:textColor="@color/text_primary" />
+                            android:textColor="?attr/colorOnSurface" />
                     </LinearLayout>
 
                     <!-- 局域网地址 -->
@@ -211,7 +212,7 @@
                             android:layout_height="wrap_content"
                             android:text="局域网地址"
                             android:textAppearance="@style/TextAppearance.App.LabelSmall"
-                            android:textColor="@color/text_tertiary"
+                            android:textColor="?attr/colorOnSurfaceVariant"
                             android:layout_marginBottom="6dp" />
 
                         <TextView
@@ -220,7 +221,7 @@
                             android:layout_height="wrap_content"
                             android:text="http://192.168.1.100:9321/"
                             android:textAppearance="@style/TextAppearance.App.BodyLarge"
-                            android:textColor="@color/brand_accent"
+                            android:textColor="?attr/colorSecondary"
                             android:fontFamily="monospace"
                             android:singleLine="true"
                             android:ellipsize="end" />
@@ -243,7 +244,7 @@
                             android:layout_height="wrap_content"
                             android:text="本机地址"
                             android:textAppearance="@style/TextAppearance.App.LabelSmall"
-                            android:textColor="@color/text_tertiary"
+                            android:textColor="?attr/colorOnSurfaceVariant"
                             android:layout_marginBottom="6dp" />
 
                         <TextView
@@ -252,7 +253,7 @@
                             android:layout_height="wrap_content"
                             android:text="http://127.0.0.1:9321/"
                             android:textAppearance="@style/TextAppearance.App.BodyLarge"
-                            android:textColor="@color/text_secondary"
+                            android:textColor="?attr/colorOnSurfaceVariant"
                             android:fontFamily="monospace"
                             android:singleLine="true"
                             android:ellipsize="end" />
@@ -297,7 +298,7 @@
                 android:layout_marginBottom="16dp"
                 app:cardCornerRadius="24dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/surface_container"
+                app:cardBackgroundColor="@color/background_secondary"
                 app:strokeWidth="1dp"
                 app:strokeColor="@color/outline_variant">
 
@@ -318,7 +319,7 @@
                             android:layout_width="20dp"
                             android:layout_height="20dp"
                             android:src="@drawable/ic_settings_24"
-                            android:tint="@color/brand_accent"
+                            android:tint="?attr/colorSecondary"
                             android:layout_marginEnd="10dp" />
 
                         <TextView
@@ -326,7 +327,65 @@
                             android:layout_height="wrap_content"
                             android:text="快捷设置"
                             android:textAppearance="@style/TextAppearance.App.TitleMedium"
-                            android:textColor="@color/text_primary" />
+                            android:textColor="?attr/colorOnSurface" />
+
+                    </LinearLayout>
+
+                    <!-- 外观模式（浅色/深色） -->
+                    <LinearLayout
+                        android:id="@+id/rowTheme"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="?attr/selectableItemBackground"
+                        android:padding="16dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:layout_marginBottom="6dp">
+
+                        <LinearLayout
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="@drawable/bg_icon_container"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:src="@drawable/ic_theme_24"
+                                android:tint="?attr/colorSecondary" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginStart="16dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="外观模式"
+                                android:textAppearance="@style/TextAppearance.App.BodyLarge"
+                                android:textColor="?attr/colorOnSurface" />
+
+                            <TextView
+                                android:id="@+id/tvThemeHint"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="深色模式"
+                                android:textAppearance="@style/TextAppearance.App.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switchTheme"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            app:useMaterialThemeColors="true" />
                     </LinearLayout>
 
                     <!-- 电池优化选项 -->
@@ -351,7 +410,7 @@
                                 android:layout_width="20dp"
                                 android:layout_height="20dp"
                                 android:src="@drawable/ic_battery_24"
-                                android:tint="@color/brand_accent" />
+                                android:tint="?attr/colorSecondary" />
                         </LinearLayout>
 
                         <LinearLayout
@@ -366,14 +425,14 @@
                                 android:layout_height="wrap_content"
                                 android:text="后台常驻设置"
                                 android:textAppearance="@style/TextAppearance.App.BodyLarge"
-                                android:textColor="@color/text_primary" />
+                                android:textColor="?attr/colorOnSurface" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="优化电池策略，确保服务稳定运行"
                                 android:textAppearance="@style/TextAppearance.App.BodySmall"
-                                android:textColor="@color/text_tertiary"
+                                android:textColor="?attr/colorOnSurfaceVariant"
                                 android:layout_marginTop="2dp" />
                         </LinearLayout>
 
@@ -381,7 +440,7 @@
                             android:layout_width="20dp"
                             android:layout_height="20dp"
                             android:src="@drawable/ic_chevron_right_24"
-                            android:tint="@color/text_tertiary" />
+                            android:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -400,7 +459,7 @@
                     android:layout_width="16dp"
                     android:layout_height="16dp"
                     android:src="@drawable/ic_info_24"
-                    android:tint="@color/text_tertiary"
+                    android:tint="?attr/colorOnSurfaceVariant"
                     android:layout_marginEnd="8dp" />
 
                 <TextView
@@ -408,7 +467,7 @@
                     android:layout_height="wrap_content"
                     android:text="请勿在国内平台宣传本项目"
                     android:textAppearance="@style/TextAppearance.App.LabelMedium"
-                    android:textColor="@color/text_tertiary" />
+                    android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
         </LinearLayout>
