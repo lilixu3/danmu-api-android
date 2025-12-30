@@ -26,7 +26,9 @@
 
 
     <!-- ========== Chip ========== -->
-    <style name="Widget.App.Chip.Status" parent="Widget.Material3.Chip">
+    <!-- Material Components 在部分版本中不提供 Widget.Material3.Chip，
+         这里改用长期存在的 MaterialComponents Chip 样式，避免 aapt2 资源链接失败。 -->
+    <style name="Widget.App.Chip.Status" parent="Widget.MaterialComponents.Chip.Choice">
         <item name="android:textAllCaps">false</item>
         <item name="chipMinHeight">28dp</item>
         <item name="chipCornerRadius">14dp</item>
