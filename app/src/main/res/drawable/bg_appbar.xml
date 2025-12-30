@@ -5,10 +5,26 @@
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 主背景：半透明表面色 -->
+    <!--
+      更“沉浸”的 AppBar：去掉厚重黑底，改为更轻的玻璃感叠层
+      - 让主背景渐变/高光透出，整体更通透
+    -->
+
+    <!-- 主背景：更低不透明度的 surface -->
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#CC141824" />
+            <solid android:color="#66141824" />
+        </shape>
+    </item>
+
+    <!-- 顶部高光：轻微提亮，模拟磨砂反射 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="90"
+                android:startColor="#26FFFFFF"
+                android:endColor="#00FFFFFF"
+                android:type="linear" />
         </shape>
     </item>
 
@@ -16,7 +32,7 @@
     <item android:gravity="bottom">
         <shape android:shape="rectangle">
             <size android:height="1dp" />
-            <solid android:color="#1A353D4F" />
+            <solid android:color="#14353D4F" />
         </shape>
     </item>
 
