@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AppBar 纯透明背景 -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <!-- 完全透明（不绘制任何可见层） -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-        </shape>
-    </item>
-
-</layer-list>
+<!-- AppBar subtle scrim (keeps content readable, feels "glass" without being heavy) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/appbar_bg" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/appbar_stroke" />
+</shape>
