@@ -1,38 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  AppBar 半透明“毛玻璃”效果背景（不依赖 RenderEffect，保证在 aapt2 资源链接阶段可用）
-  - 使用半透明 surface 色 + 细描边，模拟磨砂层次
--->
+<!-- AppBar 纯透明背景 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!--
-      更“沉浸”的 AppBar：去掉厚重黑底，改为更轻的玻璃感叠层
-      - 让主背景渐变/高光透出，整体更通透
-    -->
-
-    <!-- 主背景：更低不透明度的 surface -->
+    <!-- 完全透明（不绘制任何可见层） -->
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#66141824" />
-        </shape>
-    </item>
-
-    <!-- 顶部高光：轻微提亮，模拟磨砂反射 -->
-    <item>
-        <shape android:shape="rectangle">
-            <gradient
-                android:angle="90"
-                android:startColor="#26FFFFFF"
-                android:endColor="#00FFFFFF"
-                android:type="linear" />
-        </shape>
-    </item>
-
-    <!-- 底部分隔线 -->
-    <item android:gravity="bottom">
-        <shape android:shape="rectangle">
-            <size android:height="1dp" />
-            <solid android:color="#14353D4F" />
+            <solid android:color="#00000000" />
         </shape>
     </item>
 
