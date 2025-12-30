@@ -206,67 +206,117 @@
                     android:orientation="vertical"
                     android:padding="18dp">
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnStart"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="启动服务"
-                        android:textAllCaps="false"
+                        android:text="快捷操作"
                         android:textStyle="bold"
-                        android:paddingTop="14dp"
-                        android:paddingBottom="14dp"
-                        android:backgroundTint="@color/brand_accent"
-                        android:textColor="#06131A"
-                        app:cornerRadius="18dp"
-                        app:icon="@drawable/ic_play_24"
-                        app:iconTint="#06131A"
-                        app:iconPadding="10dp" />
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary"/>
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnStop"
+                    <TextView
+                        android:id="@+id/tvActionSub"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="关闭并退出"
-                        android:textAllCaps="false"
-                        android:paddingTop="14dp"
-                        android:paddingBottom="14dp"
-                        android:backgroundTint="@android:color/transparent"
-                        app:strokeColor="#33FFFFFF"
-                        app:strokeWidth="1dp"
-                        android:textColor="@color/text_primary"
-                        app:cornerRadius="18dp"
-                        app:icon="@drawable/ic_stop_24"
-                        app:iconTint="@color/text_primary"
-                        app:iconPadding="10dp" />
+                        android:layout_marginTop="6dp"
+                        android:text="启动后可在上方查看并复制访问地址。"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:alpha="0.9"/>
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnBattery"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="后台常驻设置（电池优化）"
-                        android:textAllCaps="false"
-                        android:paddingTop="14dp"
-                        android:paddingBottom="14dp"
-                        android:backgroundTint="@android:color/transparent"
-                        app:strokeColor="#33FFFFFF"
-                        app:strokeWidth="1dp"
-                        android:textColor="@color/text_primary"
-                        app:cornerRadius="18dp"
-                        app:icon="@drawable/ic_battery_24"
-                        app:iconTint="@color/text_primary"
-                        app:iconPadding="10dp" />
+                        android:layout_marginTop="14dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnStart"
+                            android:layout_width="0dp"
+                            android:layout_height="98dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_action_primary"
+                            app:backgroundTint="@null"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="启动"
+                            android:textAllCaps="false"
+                            android:textStyle="bold"
+                            android:textColor="#06131A"
+                            android:paddingTop="16dp"
+                            android:paddingBottom="14dp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            app:icon="@drawable/ic_play_24"
+                            app:iconTint="#06131A"
+                            app:iconGravity="textTop"
+                            app:iconPadding="10dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnStop"
+                            android:layout_width="0dp"
+                            android:layout_height="98dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="10dp"
+                            android:background="@drawable/bg_action_danger"
+                            app:backgroundTint="@null"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="停止"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:paddingTop="16dp"
+                            android:paddingBottom="14dp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            app:icon="@drawable/ic_stop_24"
+                            app:iconTint="@color/text_primary"
+                            app:iconGravity="textTop"
+                            app:iconPadding="10dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnBattery"
+                            android:layout_width="0dp"
+                            android:layout_height="98dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="10dp"
+                            android:background="@drawable/bg_action_secondary"
+                            app:backgroundTint="@null"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="后台常驻"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_primary"
+                            android:paddingTop="16dp"
+                            android:paddingBottom="14dp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            app:icon="@drawable/ic_battery_24"
+                            app:iconTint="@color/text_primary"
+                            app:iconGravity="textTop"
+                            app:iconPadding="10dp" />
+
+                    </LinearLayout>
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
+
 
             <TextView
                 android:id="@+id/tvFooter"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="提示：不要在国内平台宣传本项目。"
+                android:text="提示：停止前台服务不一定能结束 Node 进程（取决于你的 JS 代码）。"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:alpha="0.85" />
