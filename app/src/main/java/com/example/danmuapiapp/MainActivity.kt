@@ -367,6 +367,7 @@ class MainActivity : AppCompatActivity() {
     private fun setUiStarting(message: String) {
         updateStatusChip("启动中", R.color.status_warn)
         tvStatus.text = message
+        btnStart.text = "启动中…"
         setActionEnabled(btnStart, false)
         setActionEnabled(btnStop, true)
         updateUrls(false)
@@ -375,6 +376,7 @@ class MainActivity : AppCompatActivity() {
     private fun setUiRunning(message: String) {
         updateStatusChip("运行中", R.color.status_ok)
         tvStatus.text = message
+        btnStart.text = "已启用"
         setActionEnabled(btnStart, false)
         setActionEnabled(btnStop, true)
         updateUrls(true)
@@ -383,6 +385,7 @@ class MainActivity : AppCompatActivity() {
     private fun setUiStopped(message: String) {
         updateStatusChip("未运行", R.color.status_neutral)
         tvStatus.text = message
+        btnStart.text = "启动"
         setActionEnabled(btnStart, true)
         setActionEnabled(btnStop, false)
         updateUrls(false)
@@ -391,6 +394,7 @@ class MainActivity : AppCompatActivity() {
     private fun setUiError(message: String) {
         updateStatusChip("出错", R.color.status_error)
         tvStatus.text = "启动失败：\n$message"
+        btnStart.text = "启动"
         setActionEnabled(btnStart, true)
         setActionEnabled(btnStop, false)
         updateUrls(false)
