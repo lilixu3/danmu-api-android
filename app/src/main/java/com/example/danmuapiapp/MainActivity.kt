@@ -194,10 +194,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshUiFromServiceState() {
+        updateBatteryActionVisibility()
         if (NodeService.isRunning()) {
             setUiRunning("Node 正在运行（前台服务）")
         } else {
-            setUiStopped("未运行。点击“启动服务”后，Node 会在后台跑起来。")
+            setUiStopped("未运行。点击“启动”后，Node 会在后台跑起来。")
         }
     }
 
@@ -225,8 +226,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun stopAndExitApp() {
         // 防止重复点击
-        btnStart.isEnabled = false
-        btnStop.isEnabled = false
+        setActionEnabled(btnStart, false)
+        setActionEnabled(btnStop, false)
         tvStatus.text = "正在关闭…"
 
         Thread {
@@ -350,38 +351,48 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+
+
+    private fun updateBatteryActionVisibility() {
+        // 已经是“不受限制/忽略电池优化”时，不再显示入口，界面更干净。
+        btnBattery.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
+    }
+
+    private fun setActionEnabled(btn: MaterialButton, enabled: Boolean) {
+        btn.isEnabled = enabled
+        // 自定义背景时，禁用态需要手动降透明度，避免“看起来还能点”。
+        btn.alpha = if (enabled) 1f else 0.45f
+    }
+
     private fun setUiStarting(message: String) {
         updateStatusChip("启动中", R.color.status_warn)
         tvStatus.text = message
-        btnStart.isEnabled = false
-        btnStop.isEnabled = true
+        setActionEnabled(btnStart, false)
+        setActionEnabled(btnStop, true)
         updateUrls(false)
     }
 
     private fun setUiRunning(message: String) {
         updateStatusChip("运行中", R.color.status_ok)
         tvStatus.text = message
-        btnStart.text = "已启用"
-        btnStart.isEnabled = false
-        btnStop.isEnabled = true
+        setActionEnabled(btnStart, false)
+        setActionEnabled(btnStop, true)
         updateUrls(true)
     }
 
     private fun setUiStopped(message: String) {
         updateStatusChip("未运行", R.color.status_neutral)
         tvStatus.text = message
-        btnStart.text = "启动服务"
-        btnStart.isEnabled = true
-        btnStop.isEnabled = false
+        setActionEnabled(btnStart, true)
+        setActionEnabled(btnStop, false)
         updateUrls(false)
     }
 
     private fun setUiError(message: String) {
         updateStatusChip("出错", R.color.status_error)
         tvStatus.text = "启动失败：\n$message"
-        btnStart.text = "启动服务"
-        btnStart.isEnabled = true
-        btnStop.isEnabled = false
+        setActionEnabled(btnStart, true)
+        setActionEnabled(btnStop, false)
         updateUrls(false)
         Toast.makeText(this, "启动失败（详情见页面）", Toast.LENGTH_LONG).show()
     }
