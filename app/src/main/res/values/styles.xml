@@ -1,0 +1,65 @@
+<resources>
+    <!-- Text Appearances -->
+    <style name="TextAppearance.App.TitleLarge" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.App.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.App.HeadlineMedium" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.App.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.App.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <style name="TextAppearance.App.BodySmall" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">@color/text_tertiary</item>
+    </style>
+
+    <style name="TextAppearance.App.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <style name="TextAppearance.App.LabelMedium" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textColor">@color/text_tertiary</item>
+    </style>
+
+    <style name="TextAppearance.App.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:textColor">@color/text_tertiary</item>
+    </style>
+
+    <!-- Button Styles -->
+    <style name="Widget.App.Button.Primary" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/brand_accent</item>
+        <item name="android:textColor">@color/background_primary</item>
+    </style>
+
+    <style name="Widget.App.Button.Danger" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/status_error</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="Widget.App.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="backgroundTint">@color/surface_container_high</item>
+        <item name="android:textColor">@color/brand_accent</item>
+    </style>
+
+    <style name="Widget.App.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="strokeColor">@color/outline</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <!-- Chip Style -->
+    <style name="Widget.App.Chip.Status" parent="Widget.Material3.Chip.Assist">
+        <item name="chipBackgroundColor">@color/surface_container</item>
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+</resources>
