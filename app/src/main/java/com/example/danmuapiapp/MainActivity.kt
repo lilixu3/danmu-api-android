@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
     private lateinit var btnBattery: View
+    private lateinit var cardQuickSettings: View
 
     private lateinit var cardUrls: View
     private lateinit var layoutLanUrl: View
@@ -124,6 +125,7 @@ class MainActivity : AppCompatActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnBattery = findViewById(R.id.btnBattery)
+        cardQuickSettings = findViewById(R.id.cardQuickSettings)
 
         cardUrls = findViewById(R.id.cardUrls)
         layoutLanUrl = findViewById(R.id.layoutLanUrl)
@@ -357,7 +359,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateBatteryActionVisibility() {
-        btnBattery.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
+        // 电池“不受限制/忽略优化”已设置时，不再展示该入口（让界面更干净）
+        val done = isIgnoringBatteryOptimizations()
+        cardQuickSettings.visibility = if (done) View.GONE else View.VISIBLE
+        btnBattery.visibility = if (done) View.GONE else View.VISIBLE
     }
 
     private fun setUiStarting(message: String) {
@@ -365,7 +370,9 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("启动中", R.color.status_warning)
         tvStatusTitle.text = "正在启动"
         tvStatus.text = message
+        btnStart.text = "启动中..."
         btnStart.isEnabled = false
+        btnStart.alpha = 0.92f
         btnStop.isEnabled = true
         updateUrls(false)
     }
@@ -375,7 +382,10 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("运行中", R.color.status_success)
         tvStatusTitle.text = "服务运行中"
         tvStatus.text = message
+        // 服务运行中：按钮改为“已启用”并禁止点击，避免重复触发
+        btnStart.text = "已启用"
         btnStart.isEnabled = false
+        btnStart.alpha = 0.85f
         btnStop.isEnabled = true
         updateUrls(true)
     }
@@ -385,6 +395,8 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("未运行", R.color.text_tertiary)
         tvStatusTitle.text = "准备就绪"
         tvStatus.text = message
+        btnStart.text = "启动服务"
+        btnStart.alpha = 1f
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
@@ -395,6 +407,8 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("错误", R.color.status_error)
         tvStatusTitle.text = "启动失败"
         tvStatus.text = message
+        btnStart.text = "启动服务"
+        btnStart.alpha = 1f
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         updateUrls(false)
