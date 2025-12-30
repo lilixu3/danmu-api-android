@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark mode background: deep gradient with gentle neon glows -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="#0A0E1A"
+                android:centerColor="#0D1117"
+                android:endColor="#0F1419"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="600dp"
+                android:centerX="0.1"
+                android:centerY="0.1"
+                android:startColor="#1F6AE4FF"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="520dp"
+                android:centerX="0.9"
+                android:centerY="0.9"
+                android:startColor="#1F5AA9FF"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+</layer-list>
