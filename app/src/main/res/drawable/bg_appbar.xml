@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#1A1F2E" />
-</shape>
+<!--
+  AppBar 半透明“毛玻璃”效果背景（不依赖 RenderEffect，保证在 aapt2 资源链接阶段可用）
+  - 使用半透明 surface 色 + 细描边，模拟磨砂层次
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 主背景：半透明表面色 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#CC141824" />
+        </shape>
+    </item>
+
+    <!-- 底部分隔线 -->
+    <item android:gravity="bottom">
+        <shape android:shape="rectangle">
+            <size android:height="1dp" />
+            <solid android:color="#1A353D4F" />
+        </shape>
+    </item>
+
+</layer-list>
