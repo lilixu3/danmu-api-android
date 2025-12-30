@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#22FFFFFF">
+
+    <item>
+        <shape>
+            <!-- Frosted glass style -->
+            <solid android:color="#14FFFFFF" />
+            <corners android:radius="22dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#24FFFFFF" />
+        </shape>
+    </item>
+
+</ripple>
