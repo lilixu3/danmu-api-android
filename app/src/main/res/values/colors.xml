@@ -1,12 +1,33 @@
 <resources>
-    <color name="ic_launcher_background">#0B1220</color>
-    <color name="brand_accent">#22D3EE</color>
-    <color name="text_primary">#E5E7EB</color>
-    <color name="text_secondary">#9CA3AF</color>
-
-    <!-- 状态色（用于 Chip / 提示） -->
-    <color name="status_ok">#22D3EE</color>
-    <color name="status_warn">#FBBF24</color>
-    <color name="status_error">#FF4D4F</color>
-    <color name="status_neutral">#9CA3AF</color>
+    <!-- 主色调 -->
+    <color name="brand_primary">#1E88E5</color>
+    <color name="brand_accent">#00D9FF</color>
+    <color name="brand_secondary">#7C4DFF</color>
+    
+    <!-- 背景色 -->
+    <color name="background_primary">#0A0E1A</color>
+    <color name="background_secondary">#0F1419</color>
+    
+    <!-- 表面色 -->
+    <color name="surface_variant">#1A1F2E</color>
+    <color name="surface_container">#141824</color>
+    <color name="surface_container_high">#1C2130</color>
+    
+    <!-- 文本色 -->
+    <color name="text_primary">#F0F2F5</color>
+    <color name="text_secondary">#B0B8C5</color>
+    <color name="text_tertiary">#6B7280</color>
+    
+    <!-- 边框色 -->
+    <color name="outline_variant">#262D3D</color>
+    <color name="outline">#353D4F</color>
+    
+    <!-- 状态色 -->
+    <color name="status_success">#10B981</color>
+    <color name="status_warning">#F59E0B</color>
+    <color name="status_error">#EF4444</color>
+    <color name="status_info">#00D9FF</color>
+    
+    <!-- 图标启动器背景 -->
+    <color name="ic_launcher_background">#0A0E1A</color>
 </resources>
