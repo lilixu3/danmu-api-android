@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 基础深色背景 -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="#0A0E1A"
+                android:centerColor="#0D1117"
+                android:endColor="#0F1419"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 左上角光晕 -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="600dp"
+                android:centerX="0.1"
+                android:centerY="0.1"
+                android:startColor="#2200D9FF"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <!-- 右下角光晕 -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="500dp"
+                android:centerX="0.9"
+                android:centerY="0.9"
+                android:startColor="#221E88E5"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+</layer-list>
