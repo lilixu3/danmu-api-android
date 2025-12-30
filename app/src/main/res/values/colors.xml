@@ -1,33 +1,54 @@
 <resources>
-    <!-- 主色调 -->
-    <color name="brand_primary">#1E88E5</color>
-    <color name="brand_accent">#00D9FF</color>
-    <color name="brand_secondary">#7C4DFF</color>
-    
-    <!-- 背景色 -->
-    <color name="background_primary">#0A0E1A</color>
-    <color name="background_secondary">#0F1419</color>
-    
-    <!-- 表面色 -->
-    <color name="surface_variant">#1A1F2E</color>
-    <color name="surface_container">#141824</color>
-    <color name="surface_container_high">#1C2130</color>
-    
-    <!-- 文本色 -->
-    <color name="text_primary">#F0F2F5</color>
-    <color name="text_secondary">#B0B8C5</color>
-    <color name="text_tertiary">#6B7280</color>
-    
-    <!-- 边框色 -->
-    <color name="outline_variant">#262D3D</color>
-    <color name="outline">#353D4F</color>
-    
-    <!-- 状态色 -->
-    <color name="status_success">#10B981</color>
+    <!-- Light theme palette (default) -->
+
+    <!-- Brand -->
+    <color name="brand_primary">#2563EB</color>
+    <color name="brand_accent">#06B6D4</color>
+    <color name="brand_secondary">#7C3AED</color>
+
+    <!-- Background / Surface -->
+    <color name="background_primary">#F6F7FB</color>
+    <color name="background_secondary">#FFFFFF</color>
+
+    <color name="surface_variant">#FFFFFF</color>
+    <color name="surface_container">#FFFFFF</color>
+    <color name="surface_container_high">#EEF2FF</color>
+
+    <!-- Text -->
+    <color name="text_primary">#0B1220</color>
+    <color name="text_secondary">#334155</color>
+    <color name="text_tertiary">#64748B</color>
+
+    <!-- Outline -->
+    <color name="outline_variant">#E2E8F0</color>
+    <color name="outline">#CBD5E1</color>
+
+    <!-- Status -->
+    <color name="status_success">#16A34A</color>
     <color name="status_warning">#F59E0B</color>
-    <color name="status_error">#EF4444</color>
-    <color name="status_info">#00D9FF</color>
-    
-    <!-- 图标启动器背景 -->
-    <color name="ic_launcher_background">#0A0E1A</color>
+    <color name="status_error">#DC2626</color>
+    <color name="status_info">#06B6D4</color>
+
+    <!-- "On" colors (used by theme attrs) -->
+    <color name="on_brand_primary">#FFFFFF</color>
+    <color name="on_brand_accent">#00323B</color>
+    <color name="on_error">#FFFFFF</color>
+
+    <!-- UI overlay colors (used by drawables) -->
+    <color name="appbar_bg">#CCFFFFFF</color>
+    <color name="appbar_stroke">#14CBD5E1</color>
+    <color name="icon_container_bg">#1406B6D4</color>
+
+    <color name="info_banner_bg">#F1F5FF</color>
+    <color name="info_banner_stroke">#1AE2E8F0</color>
+
+    <color name="url_container_bg">#F8FAFF</color>
+    <color name="url_container_stroke">#1ACBD5E1</color>
+    <color name="url_container_ripple">#140B1220</color>
+
+    <color name="ripple_on_surface">#140B1220</color>
+    <color name="ripple_on_primary">#26FFFFFF</color>
+
+    <!-- Launcher background -->
+    <color name="ic_launcher_background">#F6F7FB</color>
 </resources>
