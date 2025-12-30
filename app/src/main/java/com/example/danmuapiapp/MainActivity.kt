@@ -1,6 +1,8 @@
 package com.example.danmuapiapp
 
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -9,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -16,6 +19,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,42 +33,42 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
-import android.content.res.ColorStateList
-import java.net.Inet4Address
 import java.net.HttpURLConnection
+import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        // Keep in sync with assets/nodejs-project/android-server.mjs defaults.
         private const val MAIN_PORT = 9321
-
         private const val PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
         private const val UPSTREAM_URL = "https://github.com/huangxd-/danmu_api"
     }
 
     private lateinit var toolbar: MaterialToolbar
-
+    private lateinit var statusIndicator: View
     private lateinit var chipStatus: Chip
+    private lateinit var tvStatusTitle: TextView
     private lateinit var tvStatus: TextView
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
-    private lateinit var btnBattery: MaterialButton
+    private lateinit var btnBattery: View
 
-    private lateinit var groupUrls: View
+    private lateinit var cardUrls: View
+    private lateinit var layoutLanUrl: View
+    private lateinit var layoutLocalUrl: View
     private lateinit var tvLanUrl: TextView
     private lateinit var tvLocalUrl: TextView
     private lateinit var btnOpenUrl: MaterialButton
     private lateinit var btnCopyUrl: MaterialButton
 
     private var preferredUrl: String? = null
+    private var statusAnimator: ValueAnimator? = null
 
     private val requestNotifPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ ->
-        // Start service anyway; on some Android versions the notification may be blocked without permission.
         startNodeServiceWithUiHint()
     }
 
@@ -87,7 +91,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Immersive status bar
+        // 沉浸式状态栏
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
@@ -95,38 +99,43 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
 
-        // Apply system bar insets to root padding (so UI won't be covered by status bar)
+        // 处理系统栏 insets
         val root = findViewById<View>(R.id.root)
-        val basePadL = root.paddingLeft
-        val basePadT = root.paddingTop
-        val basePadR = root.paddingRight
-        val basePadB = root.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(
-                basePadL + sys.left,
-                basePadT + sys.top,
-                basePadR + sys.right,
-                basePadB + sys.bottom
-            )
+            v.setPadding(0, sys.top, 0, sys.bottom)
             insets
         }
 
+        initViews()
+        setupListeners()
+        refreshUiFromServiceState()
+
+        // 检查更新（后台静默）
+        UpdateChecker.check(this)
+    }
+
+    private fun initViews() {
         toolbar = findViewById(R.id.toolbar)
+        statusIndicator = findViewById(R.id.statusIndicator)
         chipStatus = findViewById(R.id.chipStatus)
+        tvStatusTitle = findViewById(R.id.tvStatusTitle)
         tvStatus = findViewById(R.id.tvStatus)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         btnBattery = findViewById(R.id.btnBattery)
 
-        groupUrls = findViewById(R.id.groupUrls)
+        cardUrls = findViewById(R.id.cardUrls)
+        layoutLanUrl = findViewById(R.id.layoutLanUrl)
+        layoutLocalUrl = findViewById(R.id.layoutLocalUrl)
         tvLanUrl = findViewById(R.id.tvLanUrl)
         tvLocalUrl = findViewById(R.id.tvLocalUrl)
         btnOpenUrl = findViewById(R.id.btnOpenUrl)
         btnCopyUrl = findViewById(R.id.btnCopyUrl)
+    }
 
+    private fun setupListeners() {
         btnStart.setOnClickListener {
-            // Android 13+: request notification permission so foreground service notif can be shown.
             if (Build.VERSION.SDK_INT >= 33) {
                 if (ContextCompat.checkSelfPermission(
                         this,
@@ -141,7 +150,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStop.setOnClickListener {
-            stopAndExitApp()
+            showStopConfirmDialog()
         }
 
         btnBattery.setOnClickListener {
@@ -162,21 +171,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-
-        // URL interactions
-        tvLanUrl.setOnClickListener { openUrlSafely(tvLanUrl.text.toString()) }
-        tvLocalUrl.setOnClickListener { openUrlSafely(tvLocalUrl.text.toString()) }
-        tvLanUrl.setOnLongClickListener { copyUrl(tvLanUrl.text.toString()); true }
-        tvLocalUrl.setOnLongClickListener { copyUrl(tvLocalUrl.text.toString()); true }
+        // URL 点击事件
+        layoutLanUrl.setOnClickListener { openUrlSafely(tvLanUrl.text.toString()) }
+        layoutLocalUrl.setOnClickListener { openUrlSafely(tvLocalUrl.text.toString()) }
+        layoutLanUrl.setOnLongClickListener { copyUrl(tvLanUrl.text.toString()); true }
+        layoutLocalUrl.setOnLongClickListener { copyUrl(tvLocalUrl.text.toString()); true }
 
         btnOpenUrl.setOnClickListener { preferredUrl?.let { openUrlSafely(it) } }
         btnCopyUrl.setOnClickListener { preferredUrl?.let { copyUrl(it) } }
-
-        // Initial state
-        refreshUiFromServiceState()
-
-        // 检查 GitHub 发行版最新版本（不会阻塞 UI）
-        UpdateChecker.check(this)
     }
 
     override fun onStart() {
@@ -187,6 +189,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        statusAnimator?.cancel()
         try {
             unregisterReceiver(statusReceiver)
         } catch (_: Throwable) {
@@ -196,16 +199,16 @@ class MainActivity : AppCompatActivity() {
     private fun refreshUiFromServiceState() {
         updateBatteryActionVisibility()
         if (NodeService.isRunning()) {
-            setUiRunning("Node 正在运行（前台服务）")
+            setUiRunning("服务正在后台运行，可通过下方地址访问")
         } else {
-            setUiStopped("未运行。点击“启动”后，Node 会在后台跑起来。")
+            setUiStopped("点击启动按钮，开始运行弹幕 API 服务")
         }
     }
 
     private fun startNodeServiceWithUiHint() {
-        setUiStarting("启动中…请稍候（可在通知栏看到运行状态）")
+        setUiStarting("正在启动服务，请稍候...")
         startNodeService()
-        Toast.makeText(this, "已启动：后台服务运行中", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "服务启动中...", Toast.LENGTH_SHORT).show()
         maybePromptBatteryOptimization()
     }
 
@@ -218,38 +221,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 关闭按钮：
-     * 1) 尝试请求 Node 在本机 127.0.0.1 上优雅退出（/\_\_shutdown）
-     * 2) 停止前台服务
-     * 3) 自动退出 App（必要时兜底 killProcess，确保 Node 线程不会残留）
-     */
+    private fun showStopConfirmDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("停止服务")
+            .setMessage("确定要停止弹幕 API 服务吗？应用将会退出。")
+            .setPositiveButton("确定") { _, _ ->
+                stopAndExitApp()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     private fun stopAndExitApp() {
-        // 防止重复点击
-        setActionEnabled(btnStart, false)
-        setActionEnabled(btnStop, false)
-        tvStatus.text = "正在关闭…"
+        btnStart.isEnabled = false
+        btnStop.isEnabled = false
+        tvStatus.text = "正在关闭服务..."
 
         Thread {
-            // 先尝试让 Node 自己优雅退出
             try {
                 requestNodeShutdown()
             } catch (_: Throwable) {
             }
 
-            // 再停止 Service（如果 Node 已退出，会自动 stopSelf；这里是兜底）
             try {
                 stopService(Intent(this, NodeService::class.java))
             } catch (_: Throwable) {
             }
 
             runOnUiThread {
-                Toast.makeText(this, "已关闭服务，正在退出 App…", Toast.LENGTH_SHORT).show()
-                // 让任务从最近任务列表移除，更像“真正退出”
+                Toast.makeText(this, "服务已关闭，应用即将退出", Toast.LENGTH_SHORT).show()
                 finishAndRemoveTask()
             }
 
-            // 给一点时间让 Node 退出 / 资源释放；如果仍未退出，兜底杀进程
             try {
                 Thread.sleep(900)
             } catch (_: Throwable) {
@@ -268,7 +271,6 @@ class MainActivity : AppCompatActivity() {
         conn.doInput = true
         try {
             conn.connect()
-            // 读取一下响应，确保请求真正发出去
             runCatching { conn.inputStream.use { it.readBytes() } }
         } finally {
             conn.disconnect()
@@ -277,12 +279,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUrls(visible: Boolean) {
         if (!visible) {
-            groupUrls.visibility = View.GONE
+            cardUrls.visibility = View.GONE
             preferredUrl = null
             return
         }
 
-        groupUrls.visibility = View.VISIBLE
+        cardUrls.visibility = View.VISIBLE
 
         val lanIp = getLanIpv4()
         val lanUrl = if (lanIp != null) "http://$lanIp:$MAIN_PORT/" else null
@@ -290,12 +292,17 @@ class MainActivity : AppCompatActivity() {
 
         preferredUrl = lanUrl ?: localUrl
 
-        tvLanUrl.text = lanUrl ?: "未获取到局域网 IP（可检查是否已连接 Wi‑Fi/局域网）"
-        tvLocalUrl.text = localUrl
+        if (lanUrl != null) {
+            tvLanUrl.text = lanUrl
+            layoutLanUrl.isEnabled = true
+            layoutLanUrl.alpha = 1f
+        } else {
+            tvLanUrl.text = "未检测到局域网连接"
+            layoutLanUrl.isEnabled = false
+            layoutLanUrl.alpha = 0.5f
+        }
 
-        // Disable click when LAN URL not available
-        tvLanUrl.isEnabled = lanUrl != null
-        tvLanUrl.alpha = if (lanUrl != null) 1f else 0.55f
+        tvLocalUrl.text = localUrl
     }
 
     private fun openUrlSafely(url: String) {
@@ -304,7 +311,7 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
         } catch (t: Throwable) {
-            Toast.makeText(this, "无法打开浏览器：${t.message ?: t}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "无法打开浏览器", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -313,7 +320,7 @@ class MainActivity : AppCompatActivity() {
         if (!u.startsWith("http://") && !u.startsWith("https://")) return
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("url", u))
-        Toast.makeText(this, "已复制：$u", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "地址已复制到剪贴板", Toast.LENGTH_SHORT).show()
     }
 
     private fun getLanIpv4(): String? {
@@ -322,18 +329,16 @@ class MainActivity : AppCompatActivity() {
             for (ni in itf) {
                 if (!ni.isUp || ni.isLoopback) continue
                 val name = (ni.name ?: "").lowercase()
-                // Prefer common WLAN/ETH interfaces first
                 val prefer = name.startsWith("wlan") || name.startsWith("eth") || name.startsWith("en")
                 val addrs = ni.inetAddresses ?: continue
                 for (addr in addrs) {
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val ip = addr.hostAddress ?: continue
-                        if (ip.startsWith("169.254.")) continue // ignore link-local
+                        if (ip.startsWith("169.254.")) continue
                         if (prefer) return ip
                     }
                 }
             }
-            // Fallback: any non-loopback IPv4
             val itf2 = NetworkInterface.getNetworkInterfaces() ?: return null
             for (ni in itf2) {
                 if (!ni.isUp || ni.isLoopback) continue
@@ -351,73 +356,88 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
-
-
     private fun updateBatteryActionVisibility() {
-        // 已经是“不受限制/忽略电池优化”时，不再显示入口，界面更干净。
         btnBattery.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
     }
 
-    private fun setActionEnabled(btn: MaterialButton, enabled: Boolean) {
-        btn.isEnabled = enabled
-        // 自定义背景时，禁用态需要手动降透明度，避免“看起来还能点”。
-        btn.alpha = if (enabled) 1f else 0.45f
-    }
-
     private fun setUiStarting(message: String) {
-        updateStatusChip("启动中", R.color.status_warn)
+        updateStatusIndicator(R.color.status_warning, true)
+        updateStatusChip("启动中", R.color.status_warning)
+        tvStatusTitle.text = "正在启动"
         tvStatus.text = message
-        btnStart.text = "启动中…"
-        setActionEnabled(btnStart, false)
-        setActionEnabled(btnStop, true)
+        btnStart.isEnabled = false
+        btnStop.isEnabled = true
         updateUrls(false)
     }
 
     private fun setUiRunning(message: String) {
-        updateStatusChip("运行中", R.color.status_ok)
+        updateStatusIndicator(R.color.status_success, true)
+        updateStatusChip("运行中", R.color.status_success)
+        tvStatusTitle.text = "服务运行中"
         tvStatus.text = message
-        btnStart.text = "已启用"
-        setActionEnabled(btnStart, false)
-        setActionEnabled(btnStop, true)
+        btnStart.isEnabled = false
+        btnStop.isEnabled = true
         updateUrls(true)
     }
 
     private fun setUiStopped(message: String) {
-        updateStatusChip("未运行", R.color.status_neutral)
+        updateStatusIndicator(R.color.text_tertiary, false)
+        updateStatusChip("未运行", R.color.text_tertiary)
+        tvStatusTitle.text = "准备就绪"
         tvStatus.text = message
-        btnStart.text = "启动"
-        setActionEnabled(btnStart, true)
-        setActionEnabled(btnStop, false)
+        btnStart.isEnabled = true
+        btnStop.isEnabled = false
         updateUrls(false)
     }
 
     private fun setUiError(message: String) {
-        updateStatusChip("出错", R.color.status_error)
-        tvStatus.text = "启动失败：\n$message"
-        btnStart.text = "启动"
-        setActionEnabled(btnStart, true)
-        setActionEnabled(btnStop, false)
+        updateStatusIndicator(R.color.status_error, false)
+        updateStatusChip("错误", R.color.status_error)
+        tvStatusTitle.text = "启动失败"
+        tvStatus.text = message
+        btnStart.isEnabled = true
+        btnStop.isEnabled = false
         updateUrls(false)
-        Toast.makeText(this, "启动失败（详情见页面）", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "服务启动失败", Toast.LENGTH_LONG).show()
+    }
+
+    private fun updateStatusIndicator(colorRes: Int, animate: Boolean) {
+        val color = ContextCompat.getColor(this, colorRes)
+        statusIndicator.backgroundTintList = ColorStateList.valueOf(color)
+
+        statusAnimator?.cancel()
+        if (animate) {
+            statusAnimator = ValueAnimator.ofFloat(0.3f, 1f).apply {
+                duration = 1000
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+                addUpdateListener { animation ->
+                    statusIndicator.alpha = animation.animatedValue as Float
+                }
+                start()
+            }
+        } else {
+            statusIndicator.alpha = 1f
+        }
     }
 
     private fun updateStatusChip(text: String, colorRes: Int) {
         chipStatus.text = text
         val color = ContextCompat.getColor(this, colorRes)
-        // 背景使用低透明度，文字/图标用纯色，保持现代感且不刺眼
-        val bg = (color and 0x00FFFFFF) or 0x22000000
-        chipStatus.chipBackgroundColor = ColorStateList.valueOf(bg)
+        val bgColor = (color and 0x00FFFFFF) or 0x30000000
+        chipStatus.chipBackgroundColor = ColorStateList.valueOf(bgColor)
         chipStatus.setTextColor(color)
         chipStatus.chipIconTint = ColorStateList.valueOf(color)
     }
 
     private fun showProjectJump() {
         val items = arrayOf(
-            "打开项目主页（App）",
-            "打开上游项目（danmu_api）"
+            "查看应用项目主页",
+            "查看上游项目（danmu_api）"
         )
         AlertDialog.Builder(this)
-            .setTitle("项目跳转")
+            .setTitle("项目信息")
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> openUrlSafely(PROJECT_URL)
@@ -439,13 +459,13 @@ class MainActivity : AppCompatActivity() {
         if (isIgnoringBatteryOptimizations()) return
 
         AlertDialog.Builder(this)
-            .setTitle("后台常驻建议")
+            .setTitle("后台运行优化")
             .setMessage(
-                "为了减少被系统省电策略限制，建议把本 App 的电池用量设置为“不受限制/无限制”，并允许忽略电池优化。\n\n" +
-                        "点击“去设置”将打开系统页面（不同品牌入口可能略有差异）。"
+                "为确保服务稳定运行，建议将本应用添加到电池优化白名单，并设置为"不受限制"模式。\n\n" +
+                        "点击"前往设置"将打开系统电池优化页面。"
             )
-            .setNegativeButton("稍后") { d, _ -> d.dismiss() }
-            .setPositiveButton("去设置") { d, _ ->
+            .setNegativeButton("稍后提醒") { d, _ -> d.dismiss() }
+            .setPositiveButton("前往设置") { d, _ ->
                 d.dismiss()
                 openBatteryOptimization()
             }
@@ -455,7 +475,6 @@ class MainActivity : AppCompatActivity() {
     private fun openBatteryOptimization() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
-                // 直接请求加入白名单
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                 intent.data = Uri.parse("package:$packageName")
                 startActivity(intent)
@@ -464,7 +483,6 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Throwable) {
         }
 
-        // 兜底：打开电池优化设置或 App 信息页（用户手动设置为“不受限制”）
         try {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         } catch (_: Throwable) {
