@@ -1,7 +1,6 @@
 package com.example.danmuapiapp
 
 import android.Manifest
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
@@ -19,6 +18,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
+import android.content.res.Configuration
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
@@ -33,6 +33,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
+import com.google.android.material.materialswitch.MaterialSwitch
+import androidx.appcompat.app.AppCompatDelegate
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -44,6 +46,12 @@ class MainActivity : AppCompatActivity() {
         private const val MAIN_PORT = 9321
         private const val PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
         private const val UPSTREAM_URL = "https://github.com/huangxd-/danmu_api"
+
+        const val PREFS_UI = "ui_prefs"
+        const val KEY_DARK_MODE = "dark_mode"
+
+        @Volatile
+        private var pendingThemeFade = false
     }
 
     private lateinit var toolbar: MaterialToolbar
@@ -55,6 +63,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: MaterialButton
     private lateinit var btnBattery: View
     private lateinit var cardQuickSettings: View
+
+    private lateinit var rowTheme: View
+    private lateinit var switchTheme: MaterialSwitch
+    private lateinit var tvThemeHint: TextView
 
     private lateinit var cardUrls: View
     private lateinit var layoutLanUrl: View
@@ -92,11 +104,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 沉浸式状态栏
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+        // Smooth theme switching: fade-in on recreate to avoid an "abrupt" flash
+        if (pendingThemeFade) {
+            window.decorView.alpha = 0f
+        }
+
+        // Immersive system bars + correct icon color for light/dark
+        applySystemBars()
 
         setContentView(R.layout.activity_main)
 
@@ -110,10 +124,17 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         setupListeners()
+        setupToolbarActionViews()
+        setupThemeControls()
         refreshUiFromServiceState()
 
         // 检查更新（后台静默）
         UpdateChecker.check(this)
+
+        if (pendingThemeFade) {
+            pendingThemeFade = false
+            window.decorView.animate().alpha(1f).setDuration(180).start()
+        }
     }
 
     private fun initViews() {
@@ -126,6 +147,10 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btnStop)
         btnBattery = findViewById(R.id.btnBattery)
         cardQuickSettings = findViewById(R.id.cardQuickSettings)
+
+        rowTheme = findViewById(R.id.rowTheme)
+        switchTheme = findViewById(R.id.switchTheme)
+        tvThemeHint = findViewById(R.id.tvThemeHint)
 
         cardUrls = findViewById(R.id.cardUrls)
         layoutLanUrl = findViewById(R.id.layoutLanUrl)
@@ -159,6 +184,7 @@ class MainActivity : AppCompatActivity() {
             openBatteryOptimization()
         }
 
+        // Menu click fallback (e.g. overflow / non-action-view situations)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.action_check_update -> {
@@ -205,6 +231,66 @@ class MainActivity : AppCompatActivity() {
         } else {
             setUiStopped("点击启动按钮，开始运行弹幕 API 服务")
         }
+    }
+
+    private fun setupToolbarActionViews() {
+        // Make toolbar actions look like subtle, modern icon buttons.
+        runCatching {
+            (toolbar.menu.findItem(R.id.action_project)?.actionView as? MaterialButton)?.setOnClickListener {
+                showProjectJump()
+            }
+            (toolbar.menu.findItem(R.id.action_check_update)?.actionView as? MaterialButton)?.setOnClickListener {
+                UpdateChecker.check(this, userInitiated = true)
+            }
+        }
+    }
+
+    private fun setupThemeControls() {
+        val prefs = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
+        val storedDark = prefs.getBoolean(KEY_DARK_MODE, isNightMode())
+
+        // Avoid triggering listener when restoring
+        switchTheme.setOnCheckedChangeListener(null)
+        switchTheme.isChecked = storedDark
+        updateThemeHint(storedDark)
+
+        rowTheme.setOnClickListener {
+            switchTheme.toggle()
+        }
+
+        switchTheme.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_DARK_MODE, isChecked).apply()
+            updateThemeHint(isChecked)
+
+            val nowNight = isNightMode()
+            if (isChecked != nowNight) {
+                pendingThemeFade = true
+                AppCompatDelegate.setDefaultNightMode(
+                    if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+                )
+                recreate()
+            }
+        }
+    }
+
+    private fun updateThemeHint(dark: Boolean) {
+        tvThemeHint.text = if (dark) "深色模式" else "浅色模式"
+    }
+
+    private fun isNightMode(): Boolean {
+        val mask = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        return mask == Configuration.UI_MODE_NIGHT_YES
+    }
+
+    private fun applySystemBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+
+        val isLight = !isNightMode()
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.isAppearanceLightStatusBars = isLight
+        controller.isAppearanceLightNavigationBars = isLight
     }
 
     private fun startNodeServiceWithUiHint() {
@@ -361,8 +447,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateBatteryActionVisibility() {
         // 电池“不受限制/忽略优化”已设置时，不再展示该入口（让界面更干净）
         val done = isIgnoringBatteryOptimizations()
-        cardQuickSettings.visibility = if (done) View.GONE else View.VISIBLE
         btnBattery.visibility = if (done) View.GONE else View.VISIBLE
+
+        // Quick settings card stays, because it also hosts the appearance switch
+        cardQuickSettings.visibility = View.VISIBLE
     }
 
     private fun setUiStarting(message: String) {
@@ -439,7 +527,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatusChip(text: String, colorRes: Int) {
         chipStatus.text = text
         val color = ContextCompat.getColor(this, colorRes)
-        val bgColor = (color and 0x00FFFFFF) or 0x30000000
+        val alpha = if (isNightMode()) 0x30 else 0x1A
+        val bgColor = (color and 0x00FFFFFF) or (alpha shl 24)
         chipStatus.chipBackgroundColor = ColorStateList.valueOf(bgColor)
         chipStatus.setTextColor(color)
         chipStatus.chipIconTint = ColorStateList.valueOf(color)
