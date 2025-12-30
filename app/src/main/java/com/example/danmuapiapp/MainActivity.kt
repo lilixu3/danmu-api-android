@@ -461,8 +461,8 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("后台运行优化")
             .setMessage(
-                "为确保服务稳定运行，建议将本应用添加到电池优化白名单，并设置为"不受限制"模式。\n\n" +
-                        "点击"前往设置"将打开系统电池优化页面。"
+                "为确保服务稳定运行，建议将本应用添加到电池优化白名单，并设置为“ 不受限制 ”模式。\n\n" +
+                        "点击“前往设置”将打开系统电池优化页面。"
             )
             .setNegativeButton("稍后提醒") { d, _ -> d.dismiss() }
             .setPositiveButton("前往设置") { d, _ ->
