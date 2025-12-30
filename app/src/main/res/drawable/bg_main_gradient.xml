@@ -1,36 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Light mode background: soft paper-like gradient with subtle brand glow -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape>
             <gradient
                 android:angle="135"
-                android:startColor="#0A0E1A"
-                android:centerColor="#0D1117"
-                android:endColor="#0F1419"
+                android:startColor="#F9FAFF"
+                android:centerColor="#F6F7FB"
+                android:endColor="#FFFFFF"
                 android:type="linear" />
         </shape>
     </item>
 
+    <!-- Cyan glow (top-left) -->
     <item>
         <shape>
             <gradient
                 android:type="radial"
-                android:gradientRadius="600dp"
-                android:centerX="0.1"
-                android:centerY="0.1"
-                android:startColor="#2200D9FF"
+                android:gradientRadius="640dp"
+                android:centerX="0.12"
+                android:centerY="0.12"
+                android:startColor="#1A06B6D4"
                 android:endColor="#00000000" />
         </shape>
     </item>
 
+    <!-- Blue glow (bottom-right) -->
     <item>
         <shape>
             <gradient
                 android:type="radial"
-                android:gradientRadius="500dp"
-                android:centerX="0.9"
-                android:centerY="0.9"
-                android:startColor="#221E88E5"
+                android:gradientRadius="560dp"
+                android:centerX="0.92"
+                android:centerY="0.92"
+                android:startColor="#162563EB"
                 android:endColor="#00000000" />
         </shape>
     </item>
