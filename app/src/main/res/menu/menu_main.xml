@@ -3,17 +3,29 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_settings"
+        android:title="设置"
+        android:icon="@drawable/ic_settings_24"
+        app:actionLayout="@layout/action_settings"
+        app:showAsAction="always" />
+
+    <!--
+        Top bar: keep it clean (no overflow/3-dots).
+        Update/About entry points live in the Settings bottom sheet.
+        Keep these ids for backwards-compat / compile stability, but hide them from UI.
+    -->
+    <item
         android:id="@+id/action_project"
         android:title="项目"
         android:icon="@drawable/ic_link_24"
-        app:actionLayout="@layout/action_project"
-        app:showAsAction="always" />
+        android:visible="false"
+        app:showAsAction="never" />
 
     <item
         android:id="@+id/action_check_update"
         android:title="检查更新"
         android:icon="@drawable/ic_update_24"
-        app:actionLayout="@layout/action_check_update"
-        app:showAsAction="always" />
+        android:visible="false"
+        app:showAsAction="never" />
 
 </menu>

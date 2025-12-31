@@ -23,7 +23,6 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -34,7 +33,10 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
 import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.appcompat.app.AppCompatDelegate
+import android.widget.FrameLayout
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -187,6 +189,10 @@ class MainActivity : AppCompatActivity() {
         // Menu click fallback (e.g. overflow / non-action-view situations)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                R.id.action_settings -> {
+                    showSettingsSheet()
+                    true
+                }
                 R.id.action_check_update -> {
                     UpdateChecker.check(this, userInitiated = true)
                     true
@@ -236,13 +242,84 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbarActionViews() {
         // Make toolbar actions look like subtle, modern icon buttons.
         runCatching {
-            (toolbar.menu.findItem(R.id.action_project)?.actionView as? MaterialButton)?.setOnClickListener {
-                showProjectJump()
-            }
-            (toolbar.menu.findItem(R.id.action_check_update)?.actionView as? MaterialButton)?.setOnClickListener {
-                UpdateChecker.check(this, userInitiated = true)
+            (toolbar.menu.findItem(R.id.action_settings)?.actionView as? MaterialButton)?.setOnClickListener {
+                showSettingsSheet()
             }
         }
+    }
+
+    private fun showSettingsSheet() {
+        val dialog = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.sheet_settings, null)
+        dialog.setContentView(view)
+
+        dialog.setOnShowListener {
+            // Apply custom rounded glass background to the bottom sheet container.
+            val sheet = dialog.findViewById<FrameLayout>(com.google.android.material.R.id.design_bottom_sheet)
+            sheet?.setBackgroundResource(R.drawable.bg_bottom_sheet)
+        }
+
+        // Theme toggle
+        val prefs = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
+        val storedDark = prefs.getBoolean(KEY_DARK_MODE, isNightMode())
+
+        val rowThemeSheet = view.findViewById<View>(R.id.rowThemeSheet)
+        val switchThemeSheet = view.findViewById<MaterialSwitch>(R.id.switchThemeSheet)
+        val tvThemeHintSheet = view.findViewById<TextView>(R.id.tvThemeHintSheet)
+
+        switchThemeSheet.setOnCheckedChangeListener(null)
+        switchThemeSheet.isChecked = storedDark
+        tvThemeHintSheet.text = if (storedDark) "已开启" else "已关闭"
+
+        rowThemeSheet.setOnClickListener { switchThemeSheet.toggle() }
+        switchThemeSheet.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(KEY_DARK_MODE, isChecked).apply()
+            tvThemeHintSheet.text = if (isChecked) "已开启" else "已关闭"
+
+            // Keep main-page quick switch in sync (if visible)
+            runCatching {
+                switchTheme.setOnCheckedChangeListener(null)
+                switchTheme.isChecked = isChecked
+                updateThemeHint(isChecked)
+                switchTheme.setOnCheckedChangeListener { _, checked ->
+                    prefs.edit().putBoolean(KEY_DARK_MODE, checked).apply()
+                    updateThemeHint(checked)
+
+                    val nowNight = isNightMode()
+                    if (checked != nowNight) {
+                        pendingThemeFade = true
+                        AppCompatDelegate.setDefaultNightMode(
+                            if (checked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+                        )
+                        recreate()
+                    }
+                }
+            }
+
+            val nowNight = isNightMode()
+            if (isChecked != nowNight) {
+                pendingThemeFade = true
+                AppCompatDelegate.setDefaultNightMode(
+                    if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+                )
+                dialog.dismiss()
+                recreate()
+            }
+        }
+
+        // About
+        view.findViewById<View>(R.id.rowAbout).setOnClickListener {
+            dialog.dismiss()
+            showAboutDialog()
+        }
+
+        // Update
+        view.findViewById<View>(R.id.rowCheckUpdate).setOnClickListener {
+            UpdateChecker.check(this, userInitiated = true)
+            dialog.dismiss()
+        }
+
+        dialog.show()
     }
 
     private fun setupThemeControls() {
@@ -310,7 +387,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showStopConfirmDialog() {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("停止服务")
             .setMessage("确定要停止弹幕 API 服务吗？应用将会退出。")
             .setPositiveButton("确定") { _, _ ->
@@ -575,7 +652,7 @@ class MainActivity : AppCompatActivity() {
             "查看应用项目主页",
             "查看上游项目（danmu_api）"
         )
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("项目信息")
             .setItems(items) { _, which ->
                 when (which) {
@@ -584,6 +661,40 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showAboutDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_about, null)
+
+        view.findViewById<TextView>(R.id.tvAboutTitle).text = getString(R.string.app_name)
+        val pkgInfo = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
+        // 一些工程可能会关闭 BuildConfig 生成（例如在 gradle.properties 中设置相关开关），
+        // 因此这里不要依赖 BuildConfig 以免在 CI/不同构建环境下编译失败。
+        val versionName = pkgInfo?.versionName ?: "unknown"
+        val versionCode = if (pkgInfo == null) {
+            0L
+        } else {
+            if (Build.VERSION.SDK_INT >= 28) pkgInfo.longVersionCode else pkgInfo.versionCode.toLong()
+        }
+        view.findViewById<TextView>(R.id.tvAboutVersion).text = "v$versionName (${versionCode})"
+        view.findViewById<TextView>(R.id.tvAboutProjectUrl).text = PROJECT_URL
+        view.findViewById<TextView>(R.id.tvAboutUpstreamUrl).text = UPSTREAM_URL
+
+        val rowProject = view.findViewById<View>(R.id.rowAboutProject)
+        val rowUpstream = view.findViewById<View>(R.id.rowAboutUpstream)
+
+        rowProject.setOnClickListener { openUrlSafely(PROJECT_URL) }
+        rowProject.setOnLongClickListener { copyUrl(PROJECT_URL); true }
+        rowUpstream.setOnClickListener { openUrlSafely(UPSTREAM_URL) }
+        rowUpstream.setOnLongClickListener { copyUrl(UPSTREAM_URL); true }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("关于")
+            .setView(view)
+            .setPositiveButton("打开项目主页") { _, _ -> openUrlSafely(PROJECT_URL) }
+            .setNeutralButton("复制项目地址") { _, _ -> copyUrl(PROJECT_URL) }
+            .setNegativeButton("关闭", null)
             .show()
     }
 
@@ -597,7 +708,7 @@ class MainActivity : AppCompatActivity() {
     private fun maybePromptBatteryOptimization() {
         if (isIgnoringBatteryOptimizations()) return
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("后台运行优化")
             .setMessage(
                 "为确保服务稳定运行，建议将本应用添加到电池优化白名单，并设置为“ 不受限制 ”模式。\n\n" +
