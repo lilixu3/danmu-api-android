@@ -1,0 +1,97 @@
+name: Unzip danmu-api-android-main.zip into repo and push
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_url:
+        description: "可选：danmu-api-android-main.zip 的下载URL（留空则要求zip已在仓库根目录）"
+        required: false
+        default: ""
+      keep_github_dir:
+        description: "是否保留仓库现有 .github（避免把工作流自己删掉）true/false"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  unzip_and_push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="danmu-api-android-main.zip"
+
+          if [[ -n "${{ inputs.zip_url }}" ]]; then
+            echo "Downloading zip from URL..."
+            curl -L --fail "${{ inputs.zip_url }}" -o "$ZIP"
+          fi
+
+          if [[ ! -f "$ZIP" ]]; then
+            echo "::error::找不到 $ZIP。请先把它放到仓库根目录提交上来，或在 workflow_dispatch 里填写 zip_url。"
+            exit 1
+          fi
+
+          echo "Zip ready:"
+          ls -lh "$ZIP"
+
+      - name: Unzip and sync from top dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="danmu-api-android-main.zip"
+          TOPDIR="danmu-api-android-main"
+
+          rm -rf /tmp/unpack
+          mkdir -p /tmp/unpack
+          unzip -q "$ZIP" -d /tmp/unpack
+
+          SRC="/tmp/unpack/$TOPDIR"
+          if [[ ! -d "$SRC" ]]; then
+            echo "::error::解压后未找到顶层目录 $TOPDIR（实际内容如下）"
+            find /tmp/unpack -maxdepth 2 -mindepth 1 -print
+            exit 1
+          fi
+
+          echo "Sync from: $SRC -> repo root"
+          if [[ "${{ inputs.keep_github_dir }}" == "true" ]]; then
+            # 保留现有 .github（避免把 workflow 自己删掉/覆盖）
+            rsync -a --delete \
+              --exclude ".git" \
+              --exclude ".github" \
+              "$SRC"/ ./
+          else
+            # 完全镜像 zip 内容到仓库根目录（可能会覆盖/删除 .github）
+            rsync -a --delete \
+              --exclude ".git" \
+              "$SRC"/ ./
+          fi
+
+          # 可选：不想把zip留在仓库里就删掉（建议删）
+          rm -f "$ZIP"
+
+      - name: Commit & push changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          git commit -m "Import project from danmu-api-android-main.zip"
+          git push
