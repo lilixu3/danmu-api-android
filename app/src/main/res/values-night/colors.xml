@@ -42,7 +42,9 @@
     <!-- Glassmorphism (dark) -->
     <!-- Translucent surfaces to reveal the neon glows behind ("Gaussian blur" vibe) -->
     <color name="glass_card_bg">#7A0F1419</color>
-    <color name="glass_card_bg_strong">#99121725</color>
+    <!-- Strong glass background for dialogs/bottom-sheets in dark mode.
+         Increase opacity to avoid looking "too transparent" on black backgrounds. -->
+    <color name="glass_card_bg_strong">#CC121725</color>
     <color name="glass_border">#33FFFFFF</color>
     <color name="glass_highlight">#14FFFFFF</color>
     <color name="glass_highlight_soft">#0DFFFFFF</color>
