@@ -367,12 +367,40 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUrls(visible: Boolean) {
         if (!visible) {
-            cardUrls.visibility = View.GONE
             preferredUrl = null
+            if (cardUrls.visibility == View.VISIBLE) {
+                cardUrls.animate().cancel()
+                cardUrls.animate()
+                    .alpha(0f)
+                    .translationY(dp(12).toFloat())
+                    .setDuration(180)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .withEndAction {
+                        cardUrls.visibility = View.GONE
+                        cardUrls.alpha = 1f
+                        cardUrls.translationY = 0f
+                    }
+                    .start()
+            } else {
+                cardUrls.visibility = View.GONE
+                cardUrls.alpha = 1f
+                cardUrls.translationY = 0f
+            }
             return
         }
 
-        cardUrls.visibility = View.VISIBLE
+        if (cardUrls.visibility != View.VISIBLE) {
+            cardUrls.animate().cancel()
+            cardUrls.alpha = 0f
+            cardUrls.translationY = dp(12).toFloat()
+            cardUrls.visibility = View.VISIBLE
+            cardUrls.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(220)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
 
         val lanIp = getLanIpv4()
         val lanUrl = if (lanIp != null) "http://$lanIp:$MAIN_PORT/" else null
@@ -453,15 +481,29 @@ class MainActivity : AppCompatActivity() {
         cardQuickSettings.visibility = View.VISIBLE
     }
 
+    private fun dp(value: Int): Float = value * resources.displayMetrics.density
+
+    private fun setStartButtonState(text: String, enabled: Boolean, iconRes: Int) {
+        // Keep the "running => 已启用且不可点" small detail, while letting the new
+        // modern disabled color-states handle the look.
+        btnStart.text = text
+        btnStart.isEnabled = enabled
+        btnStart.alpha = 1f
+        btnStart.setIconResource(iconRes)
+    }
+
+    private fun setStopButtonEnabled(enabled: Boolean) {
+        btnStop.isEnabled = enabled
+        btnStop.alpha = 1f
+    }
+
     private fun setUiStarting(message: String) {
         updateStatusIndicator(R.color.status_warning, true)
         updateStatusChip("启动中", R.color.status_warning)
         tvStatusTitle.text = "正在启动"
         tvStatus.text = message
-        btnStart.text = "启动中..."
-        btnStart.isEnabled = false
-        btnStart.alpha = 0.92f
-        btnStop.isEnabled = true
+        setStartButtonState("启动中…", false, R.drawable.ic_hourglass_24)
+        setStopButtonEnabled(true)
         updateUrls(false)
     }
 
@@ -471,10 +513,8 @@ class MainActivity : AppCompatActivity() {
         tvStatusTitle.text = "服务运行中"
         tvStatus.text = message
         // 服务运行中：按钮改为“已启用”并禁止点击，避免重复触发
-        btnStart.text = "已启用"
-        btnStart.isEnabled = false
-        btnStart.alpha = 0.85f
-        btnStop.isEnabled = true
+        setStartButtonState("已启用", false, R.drawable.ic_check_24)
+        setStopButtonEnabled(true)
         updateUrls(true)
     }
 
@@ -483,10 +523,8 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("未运行", R.color.text_tertiary)
         tvStatusTitle.text = "准备就绪"
         tvStatus.text = message
-        btnStart.text = "启动服务"
-        btnStart.alpha = 1f
-        btnStart.isEnabled = true
-        btnStop.isEnabled = false
+        setStartButtonState("启动服务", true, R.drawable.ic_play_24)
+        setStopButtonEnabled(false)
         updateUrls(false)
     }
 
@@ -495,10 +533,8 @@ class MainActivity : AppCompatActivity() {
         updateStatusChip("错误", R.color.status_error)
         tvStatusTitle.text = "启动失败"
         tvStatus.text = message
-        btnStart.text = "启动服务"
-        btnStart.alpha = 1f
-        btnStart.isEnabled = true
-        btnStop.isEnabled = false
+        setStartButtonState("启动服务", true, R.drawable.ic_play_24)
+        setStopButtonEnabled(false)
         updateUrls(false)
         Toast.makeText(this, "服务启动失败", Toast.LENGTH_LONG).show()
     }

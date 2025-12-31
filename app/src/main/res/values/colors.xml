@@ -39,10 +39,23 @@
     <color name="appbar_stroke">#14CBD5E1</color>
     <color name="icon_container_bg">#1406B6D4</color>
 
-    <color name="info_banner_bg">#F1F5FF</color>
+    <!-- Glassmorphism (light) -->
+    <!-- Frosted surfaces should stay readable on top of the gradient background -->
+    <color name="glass_card_bg">#CCFFFFFF</color>
+    <color name="glass_card_bg_strong">#E6FFFFFF</color>
+    <color name="glass_border">#1A0B1220</color>
+    <color name="glass_highlight">#26FFFFFF</color>
+    <color name="glass_highlight_soft">#14FFFFFF</color>
+
+    <!-- Button disabled tokens (light) -->
+    <color name="btn_disabled_container">#1F0B1220</color>
+    <color name="btn_disabled_content">#610B1220</color>
+    <color name="btn_disabled_outline">#260B1220</color>
+
+    <color name="info_banner_bg">#B3FFFFFF</color>
     <color name="info_banner_stroke">#1AE2E8F0</color>
 
-    <color name="url_container_bg">#F8FAFF</color>
+    <color name="url_container_bg">#99FFFFFF</color>
     <color name="url_container_stroke">#1ACBD5E1</color>
     <color name="url_container_ripple">#140B1220</color>
 
@@ -51,4 +64,9 @@
 
     <!-- Launcher background -->
     <color name="ic_launcher_background">#F6F7FB</color>
+
+    <!-- Glass / blur surfaces -->
+    <color name="surface_glass">#99FFFFFF</color>
+    <color name="outline_glass">#1AE2E8F0</color>
+    <color name="shadow_light">#260B1220</color>
 </resources>
