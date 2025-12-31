@@ -1,40 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Light mode background: soft paper-like gradient with subtle brand glow -->
+<!--
+  Modern "glass / gaussian blur" style background:
+  - Soft linear base
+  - Two radial glow blobs to simulate blurred light sources
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Base gradient -->
     <item>
         <shape>
             <gradient
+                android:type="linear"
                 android:angle="135"
-                android:startColor="#F9FAFF"
-                android:centerColor="#F6F7FB"
-                android:endColor="#FFFFFF"
-                android:type="linear" />
+                android:startColor="#F8FAFC"
+                android:centerColor="#EEF2FF"
+                android:endColor="#E0F2FE" />
         </shape>
     </item>
 
-    <!-- Cyan glow (top-left) -->
-    <item>
+    <!-- Top-left glow -->
+    <item android:gravity="top|start">
         <shape>
+            <size android:width="560dp" android:height="560dp" />
             <gradient
                 android:type="radial"
-                android:gradientRadius="640dp"
-                android:centerX="0.12"
-                android:centerY="0.12"
-                android:startColor="#1A06B6D4"
-                android:endColor="#00000000" />
+                android:gradientRadius="280dp"
+                android:startColor="#2606B6D4"
+                android:centerColor="#1406B6D4"
+                android:endColor="@android:color/transparent" />
         </shape>
     </item>
 
-    <!-- Blue glow (bottom-right) -->
-    <item>
+    <!-- Bottom-right glow -->
+    <item android:gravity="bottom|end">
         <shape>
+            <size android:width="720dp" android:height="720dp" />
             <gradient
                 android:type="radial"
-                android:gradientRadius="560dp"
-                android:centerX="0.92"
-                android:centerY="0.92"
-                android:startColor="#162563EB"
-                android:endColor="#00000000" />
+                android:gradientRadius="360dp"
+                android:startColor="#202563EB"
+                android:centerColor="#102563EB"
+                android:endColor="@android:color/transparent" />
         </shape>
     </item>
 </layer-list>

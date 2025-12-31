@@ -39,10 +39,23 @@
     <color name="appbar_stroke">#14263148</color>
     <color name="icon_container_bg">#1A6AE4FF</color>
 
-    <color name="info_banner_bg">#101B2131</color>
+    <!-- Glassmorphism (dark) -->
+    <!-- Translucent surfaces to reveal the neon glows behind ("Gaussian blur" vibe) -->
+    <color name="glass_card_bg">#7A0F1419</color>
+    <color name="glass_card_bg_strong">#99121725</color>
+    <color name="glass_border">#33FFFFFF</color>
+    <color name="glass_highlight">#14FFFFFF</color>
+    <color name="glass_highlight_soft">#0DFFFFFF</color>
+
+    <!-- Button disabled tokens (dark) -->
+    <color name="btn_disabled_container">#24FFFFFF</color>
+    <color name="btn_disabled_content">#61FFFFFF</color>
+    <color name="btn_disabled_outline">#33FFFFFF</color>
+
+    <color name="info_banner_bg">#33121725</color>
     <color name="info_banner_stroke">#1A34415C</color>
 
-    <color name="url_container_bg">#0D1A2433</color>
+    <color name="url_container_bg">#33121725</color>
     <color name="url_container_stroke">#1A34415C</color>
     <color name="url_container_ripple">#1AFFFFFF</color>
 
@@ -51,4 +64,9 @@
 
     <!-- Launcher background -->
     <color name="ic_launcher_background">#0A0E1A</color>
+
+    <!-- Glass / blur surfaces -->
+    <color name="surface_glass">#33121725</color>
+    <color name="outline_glass">#1A34415C</color>
+    <color name="shadow_light">#33000000</color>
 </resources>
