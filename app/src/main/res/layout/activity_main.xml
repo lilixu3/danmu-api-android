@@ -27,6 +27,13 @@
             app:subtitle="本机局域网弹幕 API 服务"
             app:titleTextColor="?attr/colorOnSurface"
             app:subtitleTextColor="?attr/colorOnSurfaceVariant" />
+
+        <!-- subtle divider line to keep the transparent top bar readable on any background -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/glass_border"
+            android:alpha="0.55" />
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -54,15 +61,29 @@
                 android:layout_marginBottom="16dp"
                 app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/background_secondary"
+                app:cardBackgroundColor="@color/glass_card_bg_strong"
                 app:strokeWidth="1dp"
-                app:strokeColor="@color/outline_variant">
+                app:strokeColor="@color/glass_border">
 
-                <LinearLayout
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="24dp">
+                    android:foreground="@android:color/transparent">
+
+                    <!-- glass highlight layer (behind content) -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/overlay_glass_highlight_28"
+                        android:alpha="0.85"
+                        android:clickable="false"
+                        android:focusable="false" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="24dp">
 
                     <!-- 状态指示器区域 -->
                     <LinearLayout
@@ -151,7 +172,8 @@
                             app:iconGravity="textStart"
                             app:iconSize="20dp" />
                     </LinearLayout>
-                </LinearLayout>
+                    </LinearLayout>
+                </FrameLayout>
             </com.google.android.material.card.MaterialCardView>
 
             <!-- 访问地址卡片 -->
@@ -163,15 +185,28 @@
                 android:visibility="gone"
                 app:cardCornerRadius="24dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/background_secondary"
+                app:cardBackgroundColor="@color/glass_card_bg"
                 app:strokeWidth="1dp"
-                app:strokeColor="@color/outline_variant">
+                app:strokeColor="@color/glass_border">
 
-                <LinearLayout
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="20dp">
+                    android:foreground="@android:color/transparent">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/overlay_glass_highlight_24"
+                        android:alpha="0.75"
+                        android:clickable="false"
+                        android:focusable="false" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -287,7 +322,8 @@
                             app:icon="@drawable/ic_copy_24"
                             app:iconSize="18dp" />
                     </LinearLayout>
-                </LinearLayout>
+                    </LinearLayout>
+                </FrameLayout>
             </com.google.android.material.card.MaterialCardView>
 
             <!-- 快捷设置卡片 -->
@@ -298,15 +334,28 @@
                 android:layout_marginBottom="16dp"
                 app:cardCornerRadius="24dp"
                 app:cardElevation="0dp"
-                app:cardBackgroundColor="@color/background_secondary"
+                app:cardBackgroundColor="@color/glass_card_bg"
                 app:strokeWidth="1dp"
-                app:strokeColor="@color/outline_variant">
+                app:strokeColor="@color/glass_border">
 
-                <LinearLayout
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="20dp">
+                    android:foreground="@android:color/transparent">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/overlay_glass_highlight_24"
+                        android:alpha="0.75"
+                        android:clickable="false"
+                        android:focusable="false" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -442,7 +491,8 @@
                             android:src="@drawable/ic_chevron_right_24"
                             android:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
-                </LinearLayout>
+                    </LinearLayout>
+                </FrameLayout>
             </com.google.android.material.card.MaterialCardView>
 
             <!-- 底部提示信息 -->

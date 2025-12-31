@@ -39,32 +39,32 @@
     </style>
 
     <style name="Widget.App.Button.Primary" parent="Widget.App.Button.Base">
-        <item name="backgroundTint">?attr/colorPrimary</item>
-        <item name="android:textColor">?attr/colorOnPrimary</item>
-        <item name="iconTint">?attr/colorOnPrimary</item>
+        <item name="backgroundTint">@color/btn_primary_container</item>
+        <item name="android:textColor">@color/btn_primary_content</item>
+        <item name="iconTint">@color/btn_primary_content</item>
         <item name="rippleColor">@color/ripple_on_primary</item>
     </style>
 
     <style name="Widget.App.Button.Danger" parent="Widget.App.Button.Base">
-        <item name="backgroundTint">@color/status_error</item>
-        <item name="android:textColor">@color/on_error</item>
-        <item name="iconTint">@color/on_error</item>
+        <item name="backgroundTint">@color/btn_danger_container</item>
+        <item name="android:textColor">@color/btn_danger_content</item>
+        <item name="iconTint">@color/btn_danger_content</item>
         <item name="rippleColor">@color/ripple_on_primary</item>
     </style>
 
     <style name="Widget.App.Button.Tonal" parent="Widget.App.Button.Base">
-        <item name="backgroundTint">?attr/colorSurfaceVariant</item>
-        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
-        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="backgroundTint">@color/btn_tonal_container</item>
+        <item name="android:textColor">@color/btn_tonal_content</item>
+        <item name="iconTint">@color/btn_tonal_content</item>
         <item name="rippleColor">@color/ripple_on_surface</item>
     </style>
 
     <style name="Widget.App.Button.Outlined" parent="Widget.App.Button.Base">
         <item name="backgroundTint">@android:color/transparent</item>
-        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeColor">@color/btn_outlined_stroke</item>
         <item name="strokeWidth">1dp</item>
-        <item name="android:textColor">?attr/colorOnSurface</item>
-        <item name="iconTint">?attr/colorOnSurface</item>
+        <item name="android:textColor">@color/btn_outlined_content</item>
+        <item name="iconTint">@color/btn_outlined_content</item>
         <item name="rippleColor">@color/ripple_on_surface</item>
     </style>
 

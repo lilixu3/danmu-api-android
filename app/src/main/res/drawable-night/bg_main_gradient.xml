@@ -1,38 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Dark mode background: deep gradient with gentle neon glows -->
+<!--
+  Dark glass background with soft neon glows.
+  The translucency of cards + these blobs give a strong "gaussian blur" vibe.
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Base gradient -->
     <item>
         <shape>
             <gradient
+                android:type="linear"
                 android:angle="135"
-                android:startColor="#0A0E1A"
-                android:centerColor="#0D1117"
-                android:endColor="#0F1419"
-                android:type="linear" />
+                android:startColor="#0B1020"
+                android:centerColor="#0A1224"
+                android:endColor="#08101D" />
         </shape>
     </item>
 
-    <item>
+    <!-- Top-left cyan glow -->
+    <item android:gravity="top|start">
         <shape>
+            <size android:width="620dp" android:height="620dp" />
             <gradient
                 android:type="radial"
-                android:gradientRadius="600dp"
-                android:centerX="0.1"
-                android:centerY="0.1"
-                android:startColor="#1F6AE4FF"
-                android:endColor="#00000000" />
+                android:gradientRadius="310dp"
+                android:startColor="#246AE4FF"
+                android:centerColor="#126AE4FF"
+                android:endColor="@android:color/transparent" />
         </shape>
     </item>
 
-    <item>
+    <!-- Bottom-right indigo glow -->
+    <item android:gravity="bottom|end">
         <shape>
+            <size android:width="820dp" android:height="820dp" />
             <gradient
                 android:type="radial"
-                android:gradientRadius="520dp"
-                android:centerX="0.9"
-                android:centerY="0.9"
-                android:startColor="#1F5AA9FF"
-                android:endColor="#00000000" />
+                android:gradientRadius="410dp"
+                android:startColor="#1F3B82F6"
+                android:centerColor="#0F3B82F6"
+                android:endColor="@android:color/transparent" />
         </shape>
     </item>
 </layer-list>
