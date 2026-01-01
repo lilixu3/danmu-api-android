@@ -142,37 +142,11 @@ export default class HanjutvSource extends BaseSource {
       return [];
     }
 
-    // 检查别名匹配的函数
-    const checkAliasMatch = (anime, queryTitle) => {
-      // 首先检查主标题是否匹配
-      if (titleMatches(anime.name, queryTitle)) {
-        return { matched: true, displayName: anime.name };
-      }
-      
-      // 检查别名数组
-      if (anime.alias && Array.isArray(anime.alias) && anime.alias.length > 0) {
-        // 获取第一个别名
-        const firstAlias = anime.alias[0];
-        // 如果第一个别名和查询标题匹配，返回匹配并使用查询标题作为显示名称
-        if (titleMatches(firstAlias, queryTitle)) {
-          log("info", `[Hanjutv] Found alias match: "${firstAlias}" matches "${queryTitle}" for anime: ${anime.name}`);
-          return { matched: true, displayName: queryTitle };
-        }
-      }
-      
-      return { matched: false, displayName: anime.name };
-    };
-
     // 使用 map 和 async 时需要返回 Promise 数组，并等待所有 Promise 完成
     const processHanjutvAnimes = await Promise.all(sourceAnimes
+      .filter(s => titleMatches(s.name, queryTitle))
       .map(async (anime) => {
         try {
-          // 检查标题或别名是否匹配
-          const matchResult = checkAliasMatch(anime, queryTitle);
-          if (!matchResult.matched) {
-            return; // 不匹配则跳过
-          }
-
           const detail = await this.getDetail(anime.sid);
           const eps = await this.getEpisodes(anime.sid);
           let links = [];
@@ -186,11 +160,10 @@ export default class HanjutvSource extends BaseSource {
           }
 
           if (links.length > 0) {
-            // 使用匹配结果中的显示名称（如果是别名匹配，则使用查询标题）
             let transformedAnime = {
               animeId: anime.animeId,
               bangumiId: String(anime.animeId),
-              animeTitle: `${matchResult.displayName}(${new Date(anime.updateTime).getFullYear()})【${getCategory(detail.category)}】from hanjutv`,
+              animeTitle: `${anime.name}(${new Date(anime.updateTime).getFullYear()})【${getCategory(detail.category)}】from hanjutv`,
               type: getCategory(detail.category),
               typeDescription: getCategory(detail.category),
               imageUrl: anime.image.thumb,
