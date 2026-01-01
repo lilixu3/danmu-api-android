@@ -1,42 +1,80 @@
 <resources>
-    <!-- Light theme (default) -->
-    <color name="ic_launcher_background">#F0F4FF</color>
+    <!--
+      Light theme (default)
+      目标：去掉“傻白”，整体更有层次感（柔和的冷暖渐变背景 + 微雾感表面 + 统一的 Material3 配色）。
+    -->
+
+    <!-- App icon background -->
+    <color name="ic_launcher_background">#EEF2FF</color>
+
+    <!-- Background (used by bg_main.xml) -->
+    <color name="bg_start">#F3F6FF</color>
+    <color name="bg_end">#FAF5FF</color>
+    <color name="glow_primary">#244F46E5</color>   <!-- ~14% indigo -->
+    <color name="glow_secondary">#1A0EA5E9</color> <!-- ~10% cyan  -->
+    <color name="glow_tertiary">#1AA855F7</color>  <!-- ~10% purple -->
 
     <!-- Brand / accent -->
-    <color name="brand_accent">#5B5FEF</color>
+    <color name="brand_accent">#4F46E5</color>
     <color name="on_accent">#FFFFFF</color>
 
     <!-- Text -->
-    <color name="text_primary">#0F172A</color>
-    <color name="text_secondary">#64748B</color>
+    <color name="text_primary">#0B1220</color>
+    <color name="text_secondary">#526079</color>
 
-    <!-- Surfaces / outlines -->
-    <color name="surface_card">#FFFFFF</color>
-    <color name="surface_card_weak">#FAFBFF</color>
-    <color name="surface_pill">#F8FAFC</color>
-    <color name="surface_status">#FFFFFF</color>
-
-    <!-- Sheets / dialogs -->
-    <color name="surface_sheet">#FFFFFF</color>
-    <color name="sheet_handle">#CBD5E1</color>
+    <!-- Surfaces / outlines (slightly tinted, not pure white) -->
+    <color name="surface_card">#FCFDFF</color>
+    <color name="surface_card_weak">#F6F7FF</color>
+    <color name="surface_pill">#EFF2FF</color>
+    <color name="surface_status">#FCFDFF</color>
+    <color name="surface_sheet">#FDFDFF</color>
+    <color name="sheet_handle">#C7D0E4</color>
 
     <!-- Accent helpers -->
-    <color name="accent_soft">#EEF2FF</color>
-    <color name="accent_stroke">#C7D2FE</color>
+    <color name="accent_soft">#E8EAFF</color>
+    <color name="accent_stroke">#D2D7FF</color>
 
     <!-- Danger helpers -->
     <color name="danger">@color/danger_text</color>
     <color name="danger_text">#DC2626</color>
     <color name="danger_stroke">#FECACA</color>
 
-    <color name="stroke_subtle">#E2E8F0</color>
-    <color name="stroke_button">#CBD5E1</color>
+    <color name="stroke_subtle">#E2E7F5</color>
+    <color name="stroke_button">#D4DAEC</color>
 
-    <color name="icon_tint">#475569</color>
+    <color name="icon_tint">#3B4A65</color>
 
     <!-- Status colors -->
     <color name="status_ok">#10B981</color>
     <color name="status_warn">#F59E0B</color>
     <color name="status_error">#EF4444</color>
     <color name="status_neutral">#94A3B8</color>
+
+    <!-- Material3 mapping (让 Switch/Chip/Dialog 等组件也跟随统一配色) -->
+    <color name="m3_primary">@color/brand_accent</color>
+    <color name="m3_on_primary">@color/on_accent</color>
+    <color name="m3_primary_container">#E5E7FF</color>
+    <color name="m3_on_primary_container">#1A1B5A</color>
+
+    <color name="m3_secondary">#0891B2</color>
+    <color name="m3_on_secondary">#FFFFFF</color>
+    <color name="m3_secondary_container">#D9F2FF</color>
+    <color name="m3_on_secondary_container">#003547</color>
+
+    <color name="m3_tertiary">#A855F7</color>
+    <color name="m3_on_tertiary">#FFFFFF</color>
+    <color name="m3_tertiary_container">#F3E8FF</color>
+    <color name="m3_on_tertiary_container">#3B0764</color>
+
+    <color name="m3_error">#DC2626</color>
+    <color name="m3_on_error">#FFFFFF</color>
+
+    <color name="m3_background">@color/bg_start</color>
+    <color name="m3_on_background">@color/text_primary</color>
+    <color name="m3_surface">@color/surface_card</color>
+    <color name="m3_on_surface">@color/text_primary</color>
+    <color name="m3_surface_variant">#E9EEF9</color>
+    <color name="m3_on_surface_variant">#42526A</color>
+    <color name="m3_outline">@color/stroke_button</color>
+    <color name="m3_outline_variant">#D3DBEB</color>
 </resources>
