@@ -28,12 +28,10 @@ export default class BaseHandler {
 
 
   delLocalEnv(key) {
-    const hasKey = (obj, k) => obj && Object.prototype.hasOwnProperty.call(obj, k);
-
     // 删除
-    if (typeof globals.env !== 'undefined' && hasKey(globals.env, key)) {
+    if (typeof globals.env !== 'undefined' && globals.env[key]) {
       delete globals.env[key];
-    } else if (typeof process !== 'undefined' && process.env && hasKey(process.env, key)) {
+    } else if (typeof process !== 'undefined' && process.env?.[key]) {
       delete process.env[key];
     }
 
@@ -43,7 +41,6 @@ export default class BaseHandler {
     log("info", `[server] ✓ Environment variable deleted successfully: ${key}`);
     return true;
   }
-
 
   // 获取所有环境变量
   getAllEnv() {

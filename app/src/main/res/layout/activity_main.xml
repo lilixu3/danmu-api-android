@@ -274,7 +274,8 @@
                             android:text="http://192.168.x.x:9321/"
                             android:textSize="13sp"
                             android:textColor="@color/text_primary"
-                            android:singleLine="true"
+                            android:singleLine="false"
+                            android:maxLines="3"
                             android:ellipsize="end" />
 
                         <TextView
@@ -295,7 +296,8 @@
                             android:text="http://127.0.0.1:9321/"
                             android:textSize="13sp"
                             android:textColor="@color/text_primary"
-                            android:singleLine="true"
+                            android:singleLine="false"
+                            android:maxLines="3"
                             android:ellipsize="end" />
 
                         <LinearLayout
@@ -351,7 +353,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="提示：请不要在国内平台宣传本项目"
+                android:text="提示: 上方地址已填写token，可以直接复制粘贴到播放器使用"
                 android:textSize="11sp"
                 android:textColor="@color/text_secondary"
                 android:alpha="0.85" />

@@ -15,7 +15,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.InputType
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -36,6 +38,9 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import android.content.res.ColorStateList
 import androidx.core.graphics.ColorUtils
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import java.net.Inet4Address
 import java.net.HttpURLConnection
 import java.net.NetworkInterface
@@ -46,6 +51,9 @@ class MainActivity : AppCompatActivity() {
     companion object {
         // Keep in sync with assets/nodejs-project/android-server.mjs defaults.
         private const val MAIN_PORT = 9321
+
+        // danmu_api upstream default token.
+        private const val DEFAULT_TOKEN = "87654321"
 
         private const val PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
         private const val UPSTREAM_URL = "https://github.com/huangxd-/danmu_api"
@@ -293,9 +301,18 @@ class MainActivity : AppCompatActivity() {
         groupUrls.visibility = View.VISIBLE
         tvUrlsHint.visibility = View.GONE
 
+        val token = readApiTokenForDisplay()
+
+        fun buildEndpoint(host: String): String {
+            val base = "http://$host:$MAIN_PORT"
+            // Always show full endpoint with TOKEN (even if it equals the upstream default),
+            // so it matches the web UI and is easier to copy/paste.
+            return if (!token.isNullOrBlank()) "$base/$token" else base
+        }
+
         val lanIp = getLanIpv4()
-        val lanUrl = if (lanIp != null) "http://$lanIp:$MAIN_PORT/" else null
-        val localUrl = "http://127.0.0.1:$MAIN_PORT/"
+        val lanUrl = if (lanIp != null) buildEndpoint(lanIp) else null
+        val localUrl = buildEndpoint("127.0.0.1")
 
         preferredUrl = lanUrl ?: localUrl
 
@@ -305,6 +322,272 @@ class MainActivity : AppCompatActivity() {
         // Disable click when LAN URL not available
         tvLanUrl.isEnabled = lanUrl != null
         tvLanUrl.alpha = if (lanUrl != null) 1f else 0.55f
+    }
+
+    /**
+     * 读取运行时配置里的 TOKEN（用于拼接可直接粘贴到弹幕客户端的 API 地址）。
+     *
+     * - 优先读取 filesDir/nodejs-project/config/.env（网页端修改会落盘到这里）
+     * - 兜底读取 config/config.yaml
+     *
+     * 注意：这里返回的是 API token（TOKEN），不是 ADMIN_TOKEN。
+     */
+    private fun readApiTokenForDisplay(): String? {
+        // 1) .env
+        runCatching {
+            val envFile = java.io.File(filesDir, "nodejs-project/config/.env")
+            if (envFile.exists()) {
+                val lines = envFile.readLines(Charsets.UTF_8)
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) continue
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) continue
+                    val key = line.substring(0, idx).trim()
+                    if (key != "TOKEN") continue
+                    var value = line.substring(idx + 1).trim()
+                    // strip quotes if any
+                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+                        if (value.length >= 2) value = value.substring(1, value.length - 1)
+                    }
+                    return value
+                }
+            }
+        }
+
+        // 2) config.yaml (very small parser; enough for TOKEN: "..." or TOKEN: ...)
+        runCatching {
+            val yamlFile = java.io.File(filesDir, "nodejs-project/config/config.yaml")
+            if (yamlFile.exists()) {
+                val lines = yamlFile.readLines(Charsets.UTF_8)
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) continue
+                    if (!line.startsWith("TOKEN")) continue
+                    val idx = line.indexOf(':')
+                    if (idx <= 0) continue
+                    val key = line.substring(0, idx).trim()
+                    if (key != "TOKEN") continue
+                    var value = line.substring(idx + 1).trim()
+                    // remove surrounding quotes
+                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+                        if (value.length >= 2) value = value.substring(1, value.length - 1)
+                    }
+                    return value
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Read value from runtime config (filesDir/nodejs-project/config/.env first, then config.yaml).
+     * This is used for displaying and editing settings inside the App.
+     */
+    private fun readConfigValue(keyName: String): String? {
+        // Ensure the node project has been extracted so runtime config files exist.
+        runCatching { AssetCopier.ensureNodeProjectExtracted(this) }
+
+        // 1) .env
+        runCatching {
+            val envFile = java.io.File(filesDir, "nodejs-project/config/.env")
+            if (envFile.exists()) {
+                val lines = envFile.readLines(Charsets.UTF_8)
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) continue
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) continue
+                    val key = line.substring(0, idx).trim()
+                    if (key != keyName) continue
+                    var value = line.substring(idx + 1).trim()
+                    // strip quotes if any
+                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+                        if (value.length >= 2) value = value.substring(1, value.length - 1)
+                    }
+                    return value
+                }
+            }
+        }
+
+        // 2) config.yaml (very small parser; enough for KEY: "..." or KEY: ...)
+        runCatching {
+            val yamlFile = java.io.File(filesDir, "nodejs-project/config/config.yaml")
+            if (yamlFile.exists()) {
+                val lines = yamlFile.readLines(Charsets.UTF_8)
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) continue
+                    if (!line.startsWith(keyName)) continue
+                    val idx = line.indexOf(':')
+                    if (idx <= 0) continue
+                    val key = line.substring(0, idx).trim()
+                    if (key != keyName) continue
+                    var value = line.substring(idx + 1).trim()
+                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+                        if (value.length >= 2) value = value.substring(1, value.length - 1)
+                    }
+                    return value
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun setConfigValue(keyName: String, valueRaw: String): Boolean {
+        return runCatching {
+            AssetCopier.ensureNodeProjectExtracted(this)
+
+            val configDir = java.io.File(filesDir, "nodejs-project/config")
+            if (!configDir.exists()) configDir.mkdirs()
+
+            val envFile = java.io.File(configDir, ".env")
+            val yamlFile = java.io.File(configDir, "config.yaml")
+
+            val value = valueRaw.trim()
+
+            fun formatEnvValue(v: String): String {
+                if (v.isEmpty()) return ""
+                // Quote only if needed to keep .env parse stable
+                val needsQuote = v.any { it.isWhitespace() || it == '#' || it == '"' || it == '\'' }
+                return if (needsQuote) "\"" + v.replace("\"", "\\\"") + "\"" else v
+            }
+
+            fun formatYamlValue(v: String): String {
+                val t = v.trim()
+                if (t.isEmpty()) return "\"\""
+                if (t.equals("true", ignoreCase = true)) return "true"
+                if (t.equals("false", ignoreCase = true)) return "false"
+                // keep pure numbers unquoted (match web端逻辑：Number(value))
+                val isPureNumber = t.matches(Regex("-?\\d+(\\.\\d+)?"))
+                if (isPureNumber) return t
+                val escaped = t.replace("\\", "\\\\").replace("\"", "\\\"")
+                return "\"$escaped\""
+            }
+
+            var updated = false
+
+            // ============ 更新 .env（与网页端一致：若存在则更新；不存在则创建） ============
+            runCatching {
+                val outValue = formatEnvValue(value)
+                val lines = if (envFile.exists()) envFile.readLines(Charsets.UTF_8).toMutableList() else mutableListOf()
+                var replaced = false
+                for (i in lines.indices) {
+                    val raw = lines[i]
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) continue
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) continue
+                    val key = line.substring(0, idx).trim()
+                    if (key != keyName) continue
+                    lines[i] = "$keyName=$outValue"
+                    replaced = true
+                    break
+                }
+                if (!replaced) {
+                    if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
+                    lines.add("$keyName=$outValue")
+                }
+                envFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
+                updated = true
+            }
+
+            // ============ 更新 config.yaml（网页端“修改环境变量”也会落盘到这里；同时该文件更易被用户直接查看） ============
+            runCatching {
+                val outValue = formatYamlValue(value)
+                val lines = if (yamlFile.exists()) yamlFile.readLines(Charsets.UTF_8).toMutableList() else mutableListOf()
+
+                var keyFound = false
+                for (i in lines.indices) {
+                    val trimmed = lines[i].trim()
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+                    val idx = trimmed.indexOf(':')
+                    if (idx <= 0) continue
+                    val key = trimmed.substring(0, idx).trim()
+                    if (key != keyName) continue
+                    lines[i] = "$keyName: $outValue"
+                    keyFound = true
+                    break
+                }
+
+                if (!keyFound) {
+                    if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
+                    lines.add("$keyName: $outValue")
+                }
+
+                yamlFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
+                updated = true
+            }
+
+            updated
+        }.getOrElse { false }
+    }
+
+    private fun showAdminTokenDialog(onUpdated: (() -> Unit)? = null) {
+        val current = readConfigValue("ADMIN_TOKEN") ?: ""
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (resources.displayMetrics.density * 18).toInt()
+            setPadding(pad, (resources.displayMetrics.density * 6).toInt(), pad, 0)
+        }
+
+        val oldTil = TextInputLayout(this).apply {
+            hint = "旧管理员密码"
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+        }
+        val oldEt = TextInputEditText(oldTil.context).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        oldTil.addView(oldEt)
+        container.addView(oldTil)
+
+        val newTil = TextInputLayout(this).apply {
+            hint = "新管理员密码"
+            endIconMode = TextInputLayout.END_ICON_PASSWORD_TOGGLE
+        }
+        val newEt = TextInputEditText(newTil.context).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        newTil.addView(newEt)
+        container.addView(newTil)
+
+        val dlg = MaterialAlertDialogBuilder(this)
+            .setTitle("修改管理员密码")
+            .setMessage("此密码对应环境变量 ADMIN_TOKEN。\n\n未设置过旧密码无需填写，直接输入新密码即可")
+            .setView(container)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .show()
+
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            oldTil.error = null
+            newTil.error = null
+
+            val oldVal = oldEt.text?.toString()?.trim() ?: ""
+            val newVal = newEt.text?.toString()?.trim() ?: ""
+
+            if (oldVal != current) {
+                oldTil.error = "旧密码不正确"
+                return@setOnClickListener
+            }
+            if (newVal.isBlank()) {
+                newTil.error = "新密码不能为空"
+                return@setOnClickListener
+            }
+
+            val ok = setConfigValue("ADMIN_TOKEN", newVal)
+            if (!ok) {
+                Toast.makeText(this, "保存失败：无法写入配置文件", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            Toast.makeText(this, "已更新管理员密码", Toast.LENGTH_SHORT).show()
+            dlg.dismiss()
+            onUpdated?.invoke()
+        }
     }
 
     private fun openUrlSafely(url: String) {
@@ -461,6 +744,8 @@ class MainActivity : AppCompatActivity() {
         val ivBatteryArrow = v.findViewById<ImageView>(R.id.ivBatteryArrow)
 
         val rowUpdate = v.findViewById<View>(R.id.rowUpdate)
+        val rowAdminToken = v.findViewById<View>(R.id.rowAdminToken)
+        val tvAdminTokenSub = v.findViewById<TextView>(R.id.tvAdminTokenSub)
         val rowAbout = v.findViewById<View>(R.id.rowAbout)
 
         val dialog = BottomSheetDialog(this, R.style.ThemeOverlay_DanmuApiApp_BottomSheet)
@@ -533,6 +818,22 @@ class MainActivity : AppCompatActivity() {
         rowUpdate.setOnClickListener {
             dialog.dismiss()
             UpdateChecker.check(this, userInitiated = true)
+        }
+
+        // Admin token (ADMIN_TOKEN)
+        fun refreshAdminTokenSub() {
+            val current = readConfigValue("ADMIN_TOKEN")
+            tvAdminTokenSub.text = if (current.isNullOrBlank()) {
+                "未设置（系统管理不可用）"
+            } else {
+                "已设置（需旧密码才能修改）"
+            }
+        }
+        refreshAdminTokenSub()
+
+        rowAdminToken.setOnClickListener {
+            // Keep sheet open; show dialog on top.
+            showAdminTokenDialog(onUpdated = { refreshAdminTokenSub() })
         }
 
         rowAbout.setOnClickListener {
