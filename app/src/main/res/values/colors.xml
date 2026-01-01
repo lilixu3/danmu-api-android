@@ -1,42 +1,43 @@
 <resources>
     <!-- Light theme (default) -->
-    <color name="ic_launcher_background">#F6F7FF</color>
+    <color name="ic_launcher_background">#F0F4FF</color>
 
-    <!-- Brand / accent -->
-    <color name="brand_accent">#4F46E5</color>
+    <!-- Brand / accent - 更柔和的渐变色系 -->
+    <color name="brand_accent">#6366F1</color>
     <color name="on_accent">#FFFFFF</color>
 
-    <!-- Text -->
-    <color name="text_primary">#0B1020</color>
-    <color name="text_secondary">#54627A</color>
+    <!-- Text - 提升对比度和层次感 -->
+    <color name="text_primary">#1E293B</color>
+    <color name="text_secondary">#64748B</color>
 
-    <!-- Surfaces / outlines -->
-    <color name="surface_card">#F7FFFFFF</color>
-    <color name="surface_card_weak">#EEFFFFFF</color>
-    <color name="surface_pill">#F4FFFFFF</color>
-    <color name="surface_status">#FFFFFFFF</color>
+    <!-- Surfaces - 毛玻璃效果，更通透 -->
+    <color name="surface_card">#F5FFFFFF</color>
+    <color name="surface_card_weak">#EAFFFFFF</color>
+    <color name="surface_pill">#F0F8FF</color>
+    <color name="surface_status">#FDFFFFFF</color>
 
     <!-- Sheets / dialogs -->
-    <color name="surface_sheet">#FFFCFDFF</color>
-    <color name="sheet_handle">#160B1020</color>
+    <color name="surface_sheet">#FEFFFFFF</color>
+    <color name="sheet_handle">#20334155</color>
 
-    <!-- Accent helpers -->
-    <color name="accent_soft">#1A4F46E5</color>
-    <color name="accent_stroke">#224F46E5</color>
+    <!-- Accent helpers - 柔和的高光 -->
+    <color name="accent_soft">#F0F4FF</color>
+    <color name="accent_stroke">#E0E7FF</color>
 
-        <!-- Danger helpers -->
+    <!-- Danger helpers -->
     <color name="danger">@color/danger_text</color>
-    <color name="danger_text">#DC2626</color>
-    <color name="danger_stroke">#33DC2626</color>
+    <color name="danger_text">#EF4444</color>
+    <color name="danger_stroke">#FEE2E2</color>
 
-    <color name="stroke_subtle">#160B1020</color>
-    <color name="stroke_button">#240B1020</color>
+    <!-- Strokes - 更细腻的边框 -->
+    <color name="stroke_subtle">#E2E8F0</color>
+    <color name="stroke_button">#CBD5E1</color>
 
-    <color name="icon_tint">#334155</color>
+    <color name="icon_tint">#475569</color>
 
-    <!-- Status colors -->
+    <!-- Status colors - 更柔和的状态色 -->
     <color name="status_ok">#10B981</color>
     <color name="status_warn">#F59E0B</color>
-    <color name="status_error">#EF4444</color>
+    <color name="status_error">#F43F5E</color>
     <color name="status_neutral">#94A3B8</color>
 </resources>
