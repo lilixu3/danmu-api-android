@@ -1,17 +1,6 @@
 import { globals } from '../configs/globals.js';
 import { log } from './log-util.js'
 
-/**
- * Node.js polyfills (Android / older Node runtimes)
- * - Some Node builds may not provide atob/btoa.
- * - We only polyfill when Buffer exists (Node).
- */
-if (typeof globalThis.btoa === 'undefined' && typeof Buffer !== 'undefined') {
-  globalThis.btoa = (str) => Buffer.from(str, 'binary').toString('base64');
-}
-if (typeof globalThis.atob === 'undefined' && typeof Buffer !== 'undefined') {
-  globalThis.atob = (b64) => Buffer.from(b64, 'base64').toString('binary');
-}
 // =====================
 // 请求工具方法
 // =====================
@@ -75,38 +64,23 @@ export async function httpGet(url, options = {}) {
         // 获取 ArrayBuffer
         const arrayBuffer = await response.arrayBuffer();
 
-        // 在部分 Node.js / Android 运行时，DecompressionStream 可能不存在；这里做兼容处理
-        if (typeof DecompressionStream === 'undefined' && globals?.deployPlatform === 'node') {
-          const { inflateRawSync, inflateSync } = await import('zlib');
-          const buf = Buffer.from(arrayBuffer);
-          let out;
-          try {
-            // 绝大多数情况下是 deflateRaw
-            out = inflateRawSync(buf);
-          } catch (e) {
-            // 兜底：尝试标准 inflate
-            out = inflateSync(buf);
-          }
-          data = out.toString('utf-8');
-        } else {
-          // 使用 DecompressionStream 进行解压
-          // "deflate" 对应 zlib 的 inflate
-          const decompressionStream = new DecompressionStream("deflate");
-          const decompressedStream = new Response(
-            new Blob([arrayBuffer]).stream().pipeThrough(decompressionStream)
-          );
+        // 使用 DecompressionStream 进行解压
+        // "deflate" 对应 zlib 的 inflate
+        const decompressionStream = new DecompressionStream("deflate");
+        const decompressedStream = new Response(
+          new Blob([arrayBuffer]).stream().pipeThrough(decompressionStream)
+        );
 
-          // 读取解压后的文本
-          let decodedData;
-          try {
-            decodedData = await decompressedStream.text();
-          } catch (e) {
-            log("error", "[请求模拟] 解压缩失败", e);
-            throw e;
-          }
-
-          data = decodedData; // 更新解压后的数据
+        // 读取解压后的文本
+        let decodedData;
+        try {
+          decodedData = await decompressedStream.text();
+        } catch (e) {
+          log("error", "[请求模拟] 解压缩失败", e);
+          throw e;
         }
+
+        data = decodedData; // 更新解压后的数据
       } else {
         data = await response.text();
       }

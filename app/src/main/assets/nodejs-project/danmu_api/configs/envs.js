@@ -10,8 +10,8 @@ export class Envs {
   static accessedEnvVars = new Map();
 
   static VOD_ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'imgo', 'youku', 'qq']; // vod允许的播放平台
-  static ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'imgo', 'youku', 'qq', 'renren', 'hanjutv', 'bahamut', 'dandan', "sohu", "letv", 'custom']; // 全部源允许的播放平台
-  static ALLOWED_SOURCES = ['360', 'vod', 'tmdb', 'douban', 'tencent', 'youku', 'iqiyi', 'imgo', 'bilibili', 'renren', 'hanjutv', 'bahamut', 'dandan', "sohu", "letv", 'custom']; // 允许的源
+  static ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'imgo', 'youku', 'qq', 'renren', 'hanjutv', 'bahamut', 'dandan', 'custom']; // 全部源允许的播放平台
+  static ALLOWED_SOURCES = ['360', 'vod', 'tmdb', 'douban', 'tencent', 'youku', 'iqiyi', 'imgo', 'bilibili', 'renren', 'hanjutv', 'bahamut', 'dandan', 'custom']; // 允许的源
 
   /**
    * 获取环境变量
@@ -22,15 +22,10 @@ export class Envs {
    */
   static get(key, defaultValue, type = 'string', encrypt = false) {
     let value;
-
-    // IMPORTANT:
-    // Use existence checks instead of truthy checks, so values like 0 / false / '' are treated as "set".
-    const hasKey = (obj, k) => obj && Object.prototype.hasOwnProperty.call(obj, k);
-
-    if (typeof this.env !== 'undefined' && hasKey(this.env, key)) {
+    if (typeof this.env !== 'undefined' && this.env[key]) {
       value = this.env[key];
       this.originalEnvVars.set(key, value);
-    } else if (typeof process !== 'undefined' && process.env && hasKey(process.env, key)) {
+    } else if (typeof process !== 'undefined' && process.env?.[key]) {
       value = process.env[key];
       this.originalEnvVars.set(key, value);
     } else {
@@ -174,28 +169,14 @@ export class Envs {
   static getOriginalEnvVars() {
     return this.originalEnvVars;
   }
-
+  
   /** 解析弹幕转换颜色
    * @returns {string} 弹幕转换颜色
    */
   static resolveConvertColor() {
     // CONVERT_COLOR_TO_WHITE 变量向前兼容处理
-    // 直接从原始环境变量读取，不记录到 accessedEnvVars
-    let convertColorToWhite = false;
-    if (typeof this.env !== 'undefined' && this.env['CONVERT_COLOR_TO_WHITE']) {
-      convertColorToWhite = this.env['CONVERT_COLOR_TO_WHITE'] === true || 
-                            this.env['CONVERT_COLOR_TO_WHITE'] === 'true' || 
-                            this.env['CONVERT_COLOR_TO_WHITE'] === 1 || 
-                            this.env['CONVERT_COLOR_TO_WHITE'] === '1';
-    } else if (typeof process !== 'undefined' && process.env?.['CONVERT_COLOR_TO_WHITE']) {
-      const val = process.env['CONVERT_COLOR_TO_WHITE'];
-      convertColorToWhite = val === 'true' || val === '1';
-    }
-    
-    // 如果设置了旧的 CONVERT_COLOR_TO_WHITE，则转换为新的 CONVERT_COLOR 值
-    // true -> 'white', false -> 'default'
-    const defaultColor = convertColorToWhite ? 'white' : 'default';
-    return this.get('CONVERT_COLOR', defaultColor, 'string');
+    let convertColorToWhite = this.get('CONVERT_COLOR_TO_WHITE', false, 'boolean');
+    return this.get('CONVERT_COLOR', convertColorToWhite ? 'white': 'default', 'string');
   }
 
   /**
@@ -214,7 +195,7 @@ export class Envs {
    */
   static load(env = {}) {
     this.env = env;
-
+    
     // 环境变量分类和描述映射
     const envVarConfig = {
       // API配置
@@ -231,7 +212,7 @@ export class Envs {
       'VOD_REQUEST_TIMEOUT': { category: 'source', type: 'number', description: 'VOD请求超时时间，默认10000', min: 5000, max: 30000 },
       'BILIBILI_COOKIE': { category: 'source', type: 'text', description: 'B站Cookie' },
       'YOUKU_CONCURRENCY': { category: 'source', type: 'number', description: '优酷并发配置，默认8', min: 1, max: 16 },
-
+      
       // 匹配配置
       'PLATFORM_ORDER': { category: 'match', type: 'multi-select', options: this.ALLOWED_PLATFORMS, description: '平台排序配置' },
       'EPISODE_TITLE_FILTER': { category: 'match', type: 'text', description: '剧集标题过滤规则' },
@@ -245,7 +226,7 @@ export class Envs {
       'DANMU_LIMIT': { category: 'danmu', type: 'number', description: '弹幕数量限制，单位为k，即千：默认 0，表示不限制弹幕数', min: 0, max: 100 },
       'DANMU_SIMPLIFIED': { category: 'danmu', type: 'boolean', description: '弹幕繁体转简体开关' },
       'CONVERT_TOP_BOTTOM_TO_SCROLL': { category: 'danmu', type: 'boolean', description: '顶部/底部弹幕转换为浮动弹幕' },
-      'CONVERT_COLOR': { category: 'danmu', type: 'color-list', description: '自定义随机转换颜色池（支持手动配置/排序/删除，支持真随机添加，为空则不转换）' },
+      'CONVERT_COLOR': { category: 'danmu', type: 'select', options: ['default', 'white', 'color'], description: '弹幕转换颜色配置' },
       'DANMU_OUTPUT_FORMAT': { category: 'danmu', type: 'select', options: ['json', 'xml'], description: '弹幕输出格式，默认json' },
       'DANMU_PUSH_URL': { category: 'danmu', type: 'text', description: '弹幕推送地址，示例 http://127.0.0.1:9978/action?do=refresh&type=danmaku&path= ' },
 
@@ -266,7 +247,7 @@ export class Envs {
       'DEPLOY_PLATFROM_TOKEN': { category: 'system', type: 'text', description: '部署平台访问令牌' },
       'NODE_TLS_REJECT_UNAUTHORIZED': { category: 'system', type: 'number', description: '在建立 HTTPS 连接时是否验证服务器的 SSL/TLS 证书，0表示忽略，默认为1', min: 0, max: 1 },
     };
-
+    
     return {
       vodAllowedPlatforms: this.VOD_ALLOWED_PLATFORMS,
       allowedPlatforms: this.ALLOWED_PLATFORMS,
