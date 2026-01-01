@@ -1,49 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    
-    <!-- 毛玻璃底板 -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#FEFFFFFF" />
-            <corners
-                android:topLeftRadius="32dp"
-                android:topRightRadius="32dp"
-                android:bottomLeftRadius="0dp"
-                android:bottomRightRadius="0dp" />
-        </shape>
-    </item>
-    
-    <!-- 顶部边框 -->
-    <item>
-        <shape android:shape="rectangle">
-            <stroke
-                android:width="0.5dp"
-                android:color="#E2E8F0" />
-            <corners
-                android:topLeftRadius="32dp"
-                android:topRightRadius="32dp"
-                android:bottomLeftRadius="0dp"
-                android:bottomRightRadius="0dp" />
-            <solid android:color="@android:color/transparent"/>
-        </shape>
-    </item>
-    
-    <!-- 顶部高光 -->
-    <item
-        android:top="1dp"
-        android:left="1dp"
-        android:right="1dp">
-        <shape android:shape="rectangle">
-            <stroke
-                android:width="0.5dp"
-                android:color="#50FFFFFF" />
-            <corners
-                android:topLeftRadius="31dp"
-                android:topRightRadius="31dp"
-                android:bottomLeftRadius="0dp"
-                android:bottomRightRadius="0dp" />
-            <solid android:color="@android:color/transparent"/>
-        </shape>
-    </item>
-    
-</layer-list>
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/surface_sheet" />
+    <corners
+        android:topLeftRadius="28dp"
+        android:topRightRadius="28dp"
+        android:bottomLeftRadius="0dp"
+        android:bottomRightRadius="0dp" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/stroke_subtle" />
+</shape>

@@ -2,42 +2,41 @@
     <!-- Light theme (default) -->
     <color name="ic_launcher_background">#F0F4FF</color>
 
-    <!-- Brand / accent - 更柔和的渐变色系 -->
-    <color name="brand_accent">#6366F1</color>
+    <!-- Brand / accent -->
+    <color name="brand_accent">#5B5FEF</color>
     <color name="on_accent">#FFFFFF</color>
 
-    <!-- Text - 提升对比度和层次感 -->
-    <color name="text_primary">#1E293B</color>
+    <!-- Text -->
+    <color name="text_primary">#0F172A</color>
     <color name="text_secondary">#64748B</color>
 
-    <!-- Surfaces - 毛玻璃效果，更通透 -->
-    <color name="surface_card">#F5FFFFFF</color>
-    <color name="surface_card_weak">#EAFFFFFF</color>
-    <color name="surface_pill">#F0F8FF</color>
-    <color name="surface_status">#FDFFFFFF</color>
+    <!-- Surfaces / outlines -->
+    <color name="surface_card">#FFFFFF</color>
+    <color name="surface_card_weak">#FAFBFF</color>
+    <color name="surface_pill">#F8FAFC</color>
+    <color name="surface_status">#FFFFFF</color>
 
     <!-- Sheets / dialogs -->
-    <color name="surface_sheet">#FEFFFFFF</color>
-    <color name="sheet_handle">#20334155</color>
+    <color name="surface_sheet">#FFFFFF</color>
+    <color name="sheet_handle">#CBD5E1</color>
 
-    <!-- Accent helpers - 柔和的高光 -->
-    <color name="accent_soft">#F0F4FF</color>
-    <color name="accent_stroke">#E0E7FF</color>
+    <!-- Accent helpers -->
+    <color name="accent_soft">#EEF2FF</color>
+    <color name="accent_stroke">#C7D2FE</color>
 
     <!-- Danger helpers -->
     <color name="danger">@color/danger_text</color>
-    <color name="danger_text">#EF4444</color>
-    <color name="danger_stroke">#FEE2E2</color>
+    <color name="danger_text">#DC2626</color>
+    <color name="danger_stroke">#FECACA</color>
 
-    <!-- Strokes - 更细腻的边框 -->
     <color name="stroke_subtle">#E2E8F0</color>
     <color name="stroke_button">#CBD5E1</color>
 
     <color name="icon_tint">#475569</color>
 
-    <!-- Status colors - 更柔和的状态色 -->
+    <!-- Status colors -->
     <color name="status_ok">#10B981</color>
     <color name="status_warn">#F59E0B</color>
-    <color name="status_error">#F43F5E</color>
+    <color name="status_error">#EF4444</color>
     <color name="status_neutral">#94A3B8</color>
 </resources>
