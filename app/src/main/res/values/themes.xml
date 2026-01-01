@@ -1,27 +1,44 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Light theme overrides (DayNight handled via values-night) -->
+    <!-- Immersive status bar: content will draw under system bars, handled in MainActivity with insets. -->
     <style name="Theme.DanmuApiApp" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Brand -->
-        <item name="colorPrimary">@color/brand_primary</item>
-        <item name="colorOnPrimary">@color/on_brand_primary</item>
-        <item name="colorSecondary">@color/brand_accent</item>
-        <item name="colorOnSecondary">@color/on_brand_accent</item>
-
-        <!-- Surfaces -->
-        <item name="colorSurface">@color/background_secondary</item>
+        <!-- Basic Material3 color mapping (will adapt via day/night colors.xml) -->
+        <item name="colorPrimary">@color/brand_accent</item>
+        <item name="colorOnPrimary">@color/on_accent</item>
         <item name="colorOnSurface">@color/text_primary</item>
-        <item name="colorSurfaceVariant">@color/surface_container_high</item>
-        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
-        <item name="colorOutline">@color/outline</item>
-        <item name="colorOutlineVariant">@color/outline_variant</item>
 
-        <!-- Background -->
-        <item name="android:colorBackground">@color/background_primary</item>
-
-        <!-- Transparent system bars (we set icon appearance in code too) -->
         <item name="android:statusBarColor" tools:targetApi="l">@android:color/transparent</item>
         <item name="android:navigationBarColor" tools:targetApi="l">@android:color/transparent</item>
+        <!-- Light theme should use dark status/navigation icons -->
         <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="o">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+
+        <!-- Dialog / sheet styling -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.DanmuApiApp.MaterialAlertDialog</item>
+    </style>
+
+    <!-- Rounded Material alert dialog (About / battery prompt etc.) -->
+    <style name="ThemeOverlay.DanmuApiApp.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.DanmuApiApp.Dialog</item>
+    </style>
+
+    <style name="ShapeAppearance.DanmuApiApp.Dialog" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">24dp</item>
+    </style>
+
+    <!-- Bottom sheet for Settings -->
+    <style name="ThemeOverlay.DanmuApiApp.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.DanmuApiApp.BottomSheet</item>
+    </style>
+
+    <style name="Widget.DanmuApiApp.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.DanmuApiApp.BottomSheet</item>
+        <item name="backgroundTint">@color/surface_sheet</item>
+    </style>
+
+    <style name="ShapeAppearance.DanmuApiApp.BottomSheet" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSizeTopLeft">28dp</item>
+        <item name="cornerSizeTopRight">28dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
     </style>
 </resources>

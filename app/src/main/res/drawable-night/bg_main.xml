@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Dark: deep gradient + subtle glows -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="#0B1020"
+                android:endColor="#0F172A" />
+        </shape>
+    </item>
+
+    <!-- Top-left violet glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="560dp"
+                android:centerX="0.15"
+                android:centerY="0.05"
+                android:startColor="#338B5CF6"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <!-- Bottom-right cyan glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="640dp"
+                android:centerX="0.92"
+                android:centerY="0.98"
+                android:startColor="#2238BDF8"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+</layer-list>

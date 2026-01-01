@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@color/glass_card_bg_strong" />
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/surface_sheet" />
     <corners
         android:topLeftRadius="28dp"
         android:topRightRadius="28dp"
@@ -8,5 +8,5 @@
         android:bottomRightRadius="0dp" />
     <stroke
         android:width="1dp"
-        android:color="@color/glass_border" />
+        android:color="@color/stroke_subtle" />
 </shape>
