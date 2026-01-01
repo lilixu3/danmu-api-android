@@ -1,74 +1,42 @@
 <resources>
-    <!-- Dark theme palette -->
+    <!-- Dark theme overrides -->
+    <color name="ic_launcher_background">#0B1020</color>
 
-    <!-- Brand -->
-    <color name="brand_primary">#5AA9FF</color>
-    <color name="brand_accent">#6AE4FF</color>
-    <color name="brand_secondary">#B49BFF</color>
-
-    <!-- Background / Surface -->
-    <color name="background_primary">#0A0E1A</color>
-    <color name="background_secondary">#0F1419</color>
-
-    <color name="surface_variant">#161C2A</color>
-    <color name="surface_container">#121725</color>
-    <color name="surface_container_high">#1B2131</color>
+    <!-- Brand / accent -->
+    <color name="brand_accent">#8B5CF6</color>
+    <color name="on_accent">#FFFFFF</color>
 
     <!-- Text -->
-    <color name="text_primary">#F3F4F6</color>
-    <color name="text_secondary">#C7CEDA</color>
-    <color name="text_tertiary">#8B95A7</color>
+    <color name="text_primary">#E7E9F3</color>
+    <color name="text_secondary">#A8B0C2</color>
 
-    <!-- Outline -->
-    <color name="outline_variant">#263148</color>
-    <color name="outline">#34415C</color>
+    <!-- Surfaces / outlines -->
+    <color name="surface_card">#1AFFFFFF</color>
+    <color name="surface_card_weak">#14FFFFFF</color>
+    <color name="surface_pill">#14FFFFFF</color>
+    <color name="surface_status">#101114</color>
 
-    <!-- Status -->
-    <color name="status_success">#22C55E</color>
-    <color name="status_warning">#F59E0B</color>
-    <color name="status_error">#EF4444</color>
-    <color name="status_info">#6AE4FF</color>
+    <!-- Sheets / dialogs -->
+    <color name="surface_sheet">#121826</color>
+    <color name="sheet_handle">#22FFFFFF</color>
 
-    <!-- "On" colors (used by theme attrs) -->
-    <color name="on_brand_primary">#08101F</color>
-    <color name="on_brand_accent">#001A20</color>
-    <color name="on_error">#FFFFFF</color>
+    <!-- Accent helpers -->
+    <color name="accent_soft">#1A8B5CF6</color>
+    <color name="accent_stroke">#2A8B5CF6</color>
 
-    <!-- UI overlay colors (used by drawables) -->
-    <color name="appbar_bg">#990A0E1A</color>
-    <color name="appbar_stroke">#14263148</color>
-    <color name="icon_container_bg">#1A6AE4FF</color>
+        <!-- Danger helpers -->
+    <color name="danger">@color/danger_text</color>
+    <color name="danger_text">#FF6B6B</color>
+    <color name="danger_stroke">#33FF6B6B</color>
 
-    <!-- Glassmorphism (dark) -->
-    <!-- Translucent surfaces to reveal the neon glows behind ("Gaussian blur" vibe) -->
-    <color name="glass_card_bg">#7A0F1419</color>
-    <!-- Strong glass background for dialogs/bottom-sheets in dark mode.
-         Increase opacity to avoid looking "too transparent" on black backgrounds. -->
-    <color name="glass_card_bg_strong">#CC121725</color>
-    <color name="glass_border">#33FFFFFF</color>
-    <color name="glass_highlight">#14FFFFFF</color>
-    <color name="glass_highlight_soft">#0DFFFFFF</color>
+    <color name="stroke_subtle">#22FFFFFF</color>
+    <color name="stroke_button">#33FFFFFF</color>
 
-    <!-- Button disabled tokens (dark) -->
-    <color name="btn_disabled_container">#24FFFFFF</color>
-    <color name="btn_disabled_content">#61FFFFFF</color>
-    <color name="btn_disabled_outline">#33FFFFFF</color>
+    <color name="icon_tint">#E7E9F3</color>
 
-    <color name="info_banner_bg">#33121725</color>
-    <color name="info_banner_stroke">#1A34415C</color>
-
-    <color name="url_container_bg">#33121725</color>
-    <color name="url_container_stroke">#1A34415C</color>
-    <color name="url_container_ripple">#1AFFFFFF</color>
-
-    <color name="ripple_on_surface">#1AFFFFFF</color>
-    <color name="ripple_on_primary">#20000000</color>
-
-    <!-- Launcher background -->
-    <color name="ic_launcher_background">#0A0E1A</color>
-
-    <!-- Glass / blur surfaces -->
-    <color name="surface_glass">#33121725</color>
-    <color name="outline_glass">#1A34415C</color>
-    <color name="shadow_light">#33000000</color>
+    <!-- Status colors -->
+    <color name="status_ok">#34D399</color>
+    <color name="status_warn">#FBBF24</color>
+    <color name="status_error">#FB7185</color>
+    <color name="status_neutral">#A8B0C2</color>
 </resources>

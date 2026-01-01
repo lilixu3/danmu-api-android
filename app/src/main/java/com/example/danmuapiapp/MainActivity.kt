@@ -1,7 +1,6 @@
 package com.example.danmuapiapp
 
 import android.Manifest
-import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -10,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -18,12 +16,12 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
-import android.content.res.Configuration
-import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -32,58 +30,47 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
-import com.google.android.material.materialswitch.MaterialSwitch
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import androidx.appcompat.app.AppCompatDelegate
-import android.widget.FrameLayout
-import java.net.HttpURLConnection
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import android.content.res.ColorStateList
+import androidx.core.graphics.ColorUtils
 import java.net.Inet4Address
+import java.net.HttpURLConnection
 import java.net.NetworkInterface
 import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
+        // Keep in sync with assets/nodejs-project/android-server.mjs defaults.
         private const val MAIN_PORT = 9321
+
         private const val PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
         private const val UPSTREAM_URL = "https://github.com/huangxd-/danmu_api"
-
-        const val PREFS_UI = "ui_prefs"
-        const val KEY_DARK_MODE = "dark_mode"
-
-        @Volatile
-        private var pendingThemeFade = false
     }
 
     private lateinit var toolbar: MaterialToolbar
-    private lateinit var statusIndicator: View
+
     private lateinit var chipStatus: Chip
-    private lateinit var tvStatusTitle: TextView
     private lateinit var tvStatus: TextView
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
-    private lateinit var btnBattery: View
-    private lateinit var cardQuickSettings: View
 
-    private lateinit var rowTheme: View
-    private lateinit var switchTheme: MaterialSwitch
-    private lateinit var tvThemeHint: TextView
-
-    private lateinit var cardUrls: View
-    private lateinit var layoutLanUrl: View
-    private lateinit var layoutLocalUrl: View
+    private lateinit var groupUrls: View
+    private lateinit var tvUrlsHint: TextView
     private lateinit var tvLanUrl: TextView
     private lateinit var tvLocalUrl: TextView
     private lateinit var btnOpenUrl: MaterialButton
     private lateinit var btnCopyUrl: MaterialButton
 
     private var preferredUrl: String? = null
-    private var statusAnimator: ValueAnimator? = null
 
     private val requestNotifPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ ->
+        // Start service anyway; on some Android versions the notification may be blocked without permission.
         startNodeServiceWithUiHint()
     }
 
@@ -104,67 +91,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply persisted theme before view inflation (default is light/white theme).
+        UiPrefs.applyTheme(this)
+
         super.onCreate(savedInstanceState)
 
-        // Smooth theme switching: fade-in on recreate to avoid an "abrupt" flash
-        if (pendingThemeFade) {
-            window.decorView.alpha = 0f
-        }
-
-        // Immersive system bars + correct icon color for light/dark
-        applySystemBars()
+        // Immersive status bar
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        updateSystemBarsAppearance()
 
         setContentView(R.layout.activity_main)
 
-        // 处理系统栏 insets
+        // Apply system bar insets to root padding (so UI won't be covered by status bar)
         val root = findViewById<View>(R.id.root)
+        val basePadL = root.paddingLeft
+        val basePadT = root.paddingTop
+        val basePadR = root.paddingRight
+        val basePadB = root.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, sys.top, 0, sys.bottom)
+            v.setPadding(
+                basePadL + sys.left,
+                basePadT + sys.top,
+                basePadR + sys.right,
+                basePadB + sys.bottom
+            )
             insets
         }
 
-        initViews()
-        setupListeners()
-        setupToolbarActionViews()
-        setupThemeControls()
-        refreshUiFromServiceState()
-
-        // 检查更新（后台静默）
-        UpdateChecker.check(this)
-
-        if (pendingThemeFade) {
-            pendingThemeFade = false
-            window.decorView.animate().alpha(1f).setDuration(180).start()
-        }
-    }
-
-    private fun initViews() {
         toolbar = findViewById(R.id.toolbar)
-        statusIndicator = findViewById(R.id.statusIndicator)
         chipStatus = findViewById(R.id.chipStatus)
-        tvStatusTitle = findViewById(R.id.tvStatusTitle)
         tvStatus = findViewById(R.id.tvStatus)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
-        btnBattery = findViewById(R.id.btnBattery)
-        cardQuickSettings = findViewById(R.id.cardQuickSettings)
 
-        rowTheme = findViewById(R.id.rowTheme)
-        switchTheme = findViewById(R.id.switchTheme)
-        tvThemeHint = findViewById(R.id.tvThemeHint)
-
-        cardUrls = findViewById(R.id.cardUrls)
-        layoutLanUrl = findViewById(R.id.layoutLanUrl)
-        layoutLocalUrl = findViewById(R.id.layoutLocalUrl)
+        groupUrls = findViewById(R.id.groupUrls)
+        tvUrlsHint = findViewById(R.id.tvUrlsHint)
         tvLanUrl = findViewById(R.id.tvLanUrl)
         tvLocalUrl = findViewById(R.id.tvLocalUrl)
         btnOpenUrl = findViewById(R.id.btnOpenUrl)
         btnCopyUrl = findViewById(R.id.btnCopyUrl)
-    }
 
-    private fun setupListeners() {
         btnStart.setOnClickListener {
+            // Android 13+: request notification permission so foreground service notif can be shown.
             if (Build.VERSION.SDK_INT >= 33) {
                 if (ContextCompat.checkSelfPermission(
                         this,
@@ -179,40 +150,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStop.setOnClickListener {
-            showStopConfirmDialog()
+            stopAndExitApp()
         }
 
-        btnBattery.setOnClickListener {
-            openBatteryOptimization()
-        }
-
-        // Menu click fallback (e.g. overflow / non-action-view situations)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.action_settings -> {
-                    showSettingsSheet()
-                    true
-                }
-                R.id.action_check_update -> {
-                    UpdateChecker.check(this, userInitiated = true)
-                    true
-                }
-                R.id.action_project -> {
-                    showProjectJump()
-                    true
-                }
+                R.id.action_settings -> { showSettingsDialog(); true }
                 else -> false
             }
         }
 
-        // URL 点击事件
-        layoutLanUrl.setOnClickListener { openUrlSafely(tvLanUrl.text.toString()) }
-        layoutLocalUrl.setOnClickListener { openUrlSafely(tvLocalUrl.text.toString()) }
-        layoutLanUrl.setOnLongClickListener { copyUrl(tvLanUrl.text.toString()); true }
-        layoutLocalUrl.setOnLongClickListener { copyUrl(tvLocalUrl.text.toString()); true }
+
+        // URL interactions
+        tvLanUrl.setOnClickListener { openUrlSafely(tvLanUrl.text.toString()) }
+        tvLocalUrl.setOnClickListener { openUrlSafely(tvLocalUrl.text.toString()) }
+        tvLanUrl.setOnLongClickListener { copyUrl(tvLanUrl.text.toString()); true }
+        tvLocalUrl.setOnLongClickListener { copyUrl(tvLocalUrl.text.toString()); true }
 
         btnOpenUrl.setOnClickListener { preferredUrl?.let { openUrlSafely(it) } }
         btnCopyUrl.setOnClickListener { preferredUrl?.let { copyUrl(it) } }
+
+        // Initial state
+        refreshUiFromServiceState()
+
+        // 检查 GitHub 发行版最新版本（不会阻塞 UI）
+        UpdateChecker.check(this)
     }
 
     override fun onStart() {
@@ -223,7 +185,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        statusAnimator?.cancel()
         try {
             unregisterReceiver(statusReceiver)
         } catch (_: Throwable) {
@@ -231,149 +192,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshUiFromServiceState() {
-        updateBatteryActionVisibility()
         if (NodeService.isRunning()) {
-            setUiRunning("服务正在后台运行，可通过下方地址访问")
+            setUiRunning("Node 正在运行（前台服务）")
         } else {
-            setUiStopped("点击启动按钮，开始运行弹幕 API 服务")
+            setUiStopped("未运行。点击“启动服务”后，Node 会在后台跑起来。")
         }
     }
 
-    private fun setupToolbarActionViews() {
-        // Make toolbar actions look like subtle, modern icon buttons.
-        runCatching {
-            (toolbar.menu.findItem(R.id.action_settings)?.actionView as? MaterialButton)?.setOnClickListener {
-                showSettingsSheet()
-            }
+    private fun updateSystemBarsAppearance() {
+        val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !night
+            // Some devices also tint nav icons; keep consistent.
+            isAppearanceLightNavigationBars = !night
         }
-    }
-
-    private fun showSettingsSheet() {
-        val dialog = BottomSheetDialog(this)
-        val view = layoutInflater.inflate(R.layout.sheet_settings, null)
-        dialog.setContentView(view)
-
-        dialog.setOnShowListener {
-            // Apply custom rounded glass background to the bottom sheet container.
-            val sheet = dialog.findViewById<FrameLayout>(com.google.android.material.R.id.design_bottom_sheet)
-            sheet?.setBackgroundResource(R.drawable.bg_bottom_sheet)
-        }
-
-        // Theme toggle
-        val prefs = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
-        val storedDark = prefs.getBoolean(KEY_DARK_MODE, isNightMode())
-
-        val rowThemeSheet = view.findViewById<View>(R.id.rowThemeSheet)
-        val switchThemeSheet = view.findViewById<MaterialSwitch>(R.id.switchThemeSheet)
-        val tvThemeHintSheet = view.findViewById<TextView>(R.id.tvThemeHintSheet)
-
-        switchThemeSheet.setOnCheckedChangeListener(null)
-        switchThemeSheet.isChecked = storedDark
-        tvThemeHintSheet.text = if (storedDark) "已开启" else "已关闭"
-
-        rowThemeSheet.setOnClickListener { switchThemeSheet.toggle() }
-        switchThemeSheet.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_DARK_MODE, isChecked).apply()
-            tvThemeHintSheet.text = if (isChecked) "已开启" else "已关闭"
-
-            // Keep main-page quick switch in sync (if visible)
-            runCatching {
-                switchTheme.setOnCheckedChangeListener(null)
-                switchTheme.isChecked = isChecked
-                updateThemeHint(isChecked)
-                switchTheme.setOnCheckedChangeListener { _, checked ->
-                    prefs.edit().putBoolean(KEY_DARK_MODE, checked).apply()
-                    updateThemeHint(checked)
-
-                    val nowNight = isNightMode()
-                    if (checked != nowNight) {
-                        pendingThemeFade = true
-                        AppCompatDelegate.setDefaultNightMode(
-                            if (checked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
-                        )
-                        recreate()
-                    }
-                }
-            }
-
-            val nowNight = isNightMode()
-            if (isChecked != nowNight) {
-                pendingThemeFade = true
-                AppCompatDelegate.setDefaultNightMode(
-                    if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
-                )
-                dialog.dismiss()
-                recreate()
-            }
-        }
-
-        // About
-        view.findViewById<View>(R.id.rowAbout).setOnClickListener {
-            dialog.dismiss()
-            showAboutDialog()
-        }
-
-        // Update
-        view.findViewById<View>(R.id.rowCheckUpdate).setOnClickListener {
-            UpdateChecker.check(this, userInitiated = true)
-            dialog.dismiss()
-        }
-
-        dialog.show()
-    }
-
-    private fun setupThemeControls() {
-        val prefs = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
-        val storedDark = prefs.getBoolean(KEY_DARK_MODE, isNightMode())
-
-        // Avoid triggering listener when restoring
-        switchTheme.setOnCheckedChangeListener(null)
-        switchTheme.isChecked = storedDark
-        updateThemeHint(storedDark)
-
-        rowTheme.setOnClickListener {
-            switchTheme.toggle()
-        }
-
-        switchTheme.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(KEY_DARK_MODE, isChecked).apply()
-            updateThemeHint(isChecked)
-
-            val nowNight = isNightMode()
-            if (isChecked != nowNight) {
-                pendingThemeFade = true
-                AppCompatDelegate.setDefaultNightMode(
-                    if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
-                )
-                recreate()
-            }
-        }
-    }
-
-    private fun updateThemeHint(dark: Boolean) {
-        tvThemeHint.text = if (dark) "深色模式" else "浅色模式"
-    }
-
-    private fun isNightMode(): Boolean {
-        val mask = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        return mask == Configuration.UI_MODE_NIGHT_YES
-    }
-
-    private fun applySystemBars() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-
-        val isLight = !isNightMode()
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.isAppearanceLightStatusBars = isLight
-        controller.isAppearanceLightNavigationBars = isLight
     }
 
     private fun startNodeServiceWithUiHint() {
-        setUiStarting("正在启动服务，请稍候...")
+        setUiStarting("启动中…请稍候（可在通知栏看到运行状态）")
         startNodeService()
-        Toast.makeText(this, "服务启动中...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已启动：后台服务运行中", Toast.LENGTH_SHORT).show()
         maybePromptBatteryOptimization()
     }
 
@@ -386,38 +225,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showStopConfirmDialog() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("停止服务")
-            .setMessage("确定要停止弹幕 API 服务吗？应用将会退出。")
-            .setPositiveButton("确定") { _, _ ->
-                stopAndExitApp()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
+    /**
+     * 关闭按钮：
+     * 1) 尝试请求 Node 在本机 127.0.0.1 上优雅退出（/\_\_shutdown）
+     * 2) 停止前台服务
+     * 3) 自动退出 App（必要时兜底 killProcess，确保 Node 线程不会残留）
+     */
     private fun stopAndExitApp() {
+        // 防止重复点击
         btnStart.isEnabled = false
         btnStop.isEnabled = false
-        tvStatus.text = "正在关闭服务..."
+        tvStatus.text = "正在关闭…"
 
         Thread {
+            // 先尝试让 Node 自己优雅退出
             try {
                 requestNodeShutdown()
             } catch (_: Throwable) {
             }
 
+            // 再停止 Service（如果 Node 已退出，会自动 stopSelf；这里是兜底）
             try {
                 stopService(Intent(this, NodeService::class.java))
             } catch (_: Throwable) {
             }
 
             runOnUiThread {
-                Toast.makeText(this, "服务已关闭，应用即将退出", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "已关闭服务，正在退出 App…", Toast.LENGTH_SHORT).show()
+                // 让任务从最近任务列表移除，更像“真正退出”
                 finishAndRemoveTask()
             }
 
+            // 给一点时间让 Node 退出 / 资源释放；如果仍未退出，兜底杀进程
             try {
                 Thread.sleep(900)
             } catch (_: Throwable) {
@@ -436,6 +275,7 @@ class MainActivity : AppCompatActivity() {
         conn.doInput = true
         try {
             conn.connect()
+            // 读取一下响应，确保请求真正发出去
             runCatching { conn.inputStream.use { it.readBytes() } }
         } finally {
             conn.disconnect()
@@ -444,40 +284,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUrls(visible: Boolean) {
         if (!visible) {
+            groupUrls.visibility = View.GONE
+            tvUrlsHint.visibility = View.VISIBLE
             preferredUrl = null
-            if (cardUrls.visibility == View.VISIBLE) {
-                cardUrls.animate().cancel()
-                cardUrls.animate()
-                    .alpha(0f)
-                    .translationY(dp(12).toFloat())
-                    .setDuration(180)
-                    .setInterpolator(AccelerateDecelerateInterpolator())
-                    .withEndAction {
-                        cardUrls.visibility = View.GONE
-                        cardUrls.alpha = 1f
-                        cardUrls.translationY = 0f
-                    }
-                    .start()
-            } else {
-                cardUrls.visibility = View.GONE
-                cardUrls.alpha = 1f
-                cardUrls.translationY = 0f
-            }
             return
         }
 
-        if (cardUrls.visibility != View.VISIBLE) {
-            cardUrls.animate().cancel()
-            cardUrls.alpha = 0f
-            cardUrls.translationY = dp(12).toFloat()
-            cardUrls.visibility = View.VISIBLE
-            cardUrls.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(220)
-                .setInterpolator(AccelerateDecelerateInterpolator())
-                .start()
-        }
+        groupUrls.visibility = View.VISIBLE
+        tvUrlsHint.visibility = View.GONE
 
         val lanIp = getLanIpv4()
         val lanUrl = if (lanIp != null) "http://$lanIp:$MAIN_PORT/" else null
@@ -485,17 +299,12 @@ class MainActivity : AppCompatActivity() {
 
         preferredUrl = lanUrl ?: localUrl
 
-        if (lanUrl != null) {
-            tvLanUrl.text = lanUrl
-            layoutLanUrl.isEnabled = true
-            layoutLanUrl.alpha = 1f
-        } else {
-            tvLanUrl.text = "未检测到局域网连接"
-            layoutLanUrl.isEnabled = false
-            layoutLanUrl.alpha = 0.5f
-        }
-
+        tvLanUrl.text = lanUrl ?: "未获取到局域网 IP（可检查是否已连接 Wi‑Fi/局域网）"
         tvLocalUrl.text = localUrl
+
+        // Disable click when LAN URL not available
+        tvLanUrl.isEnabled = lanUrl != null
+        tvLanUrl.alpha = if (lanUrl != null) 1f else 0.55f
     }
 
     private fun openUrlSafely(url: String) {
@@ -504,7 +313,7 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
         } catch (t: Throwable) {
-            Toast.makeText(this, "无法打开浏览器", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "无法打开浏览器：${t.message ?: t}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -513,7 +322,7 @@ class MainActivity : AppCompatActivity() {
         if (!u.startsWith("http://") && !u.startsWith("https://")) return
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("url", u))
-        Toast.makeText(this, "地址已复制到剪贴板", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已复制：$u", Toast.LENGTH_SHORT).show()
     }
 
     private fun getLanIpv4(): String? {
@@ -522,16 +331,18 @@ class MainActivity : AppCompatActivity() {
             for (ni in itf) {
                 if (!ni.isUp || ni.isLoopback) continue
                 val name = (ni.name ?: "").lowercase()
+                // Prefer common WLAN/ETH interfaces first
                 val prefer = name.startsWith("wlan") || name.startsWith("eth") || name.startsWith("en")
                 val addrs = ni.inetAddresses ?: continue
                 for (addr in addrs) {
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val ip = addr.hostAddress ?: continue
-                        if (ip.startsWith("169.254.")) continue
+                        if (ip.startsWith("169.254.")) continue // ignore link-local
                         if (prefer) return ip
                     }
                 }
             }
+            // Fallback: any non-loopback IPv4
             val itf2 = NetworkInterface.getNetworkInterfaces() ?: return null
             for (ni in itf2) {
                 if (!ni.isUp || ni.isLoopback) continue
@@ -549,111 +360,64 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
-    private fun updateBatteryActionVisibility() {
-        // 电池“不受限制/忽略优化”已设置时，不再展示该入口（让界面更干净）
-        val done = isIgnoringBatteryOptimizations()
-        btnBattery.visibility = if (done) View.GONE else View.VISIBLE
-
-        // Quick settings card stays, because it also hosts the appearance switch
-        cardQuickSettings.visibility = View.VISIBLE
-    }
-
-    private fun dp(value: Int): Float = value * resources.displayMetrics.density
-
-    private fun setStartButtonState(text: String, enabled: Boolean, iconRes: Int) {
-        // Keep the "running => 已启用且不可点" small detail, while letting the new
-        // modern disabled color-states handle the look.
-        btnStart.text = text
-        btnStart.isEnabled = enabled
-        btnStart.alpha = 1f
-        btnStart.setIconResource(iconRes)
-    }
-
-    private fun setStopButtonEnabled(enabled: Boolean) {
-        btnStop.isEnabled = enabled
-        btnStop.alpha = 1f
-    }
-
     private fun setUiStarting(message: String) {
-        updateStatusIndicator(R.color.status_warning, true)
-        updateStatusChip("启动中", R.color.status_warning)
-        tvStatusTitle.text = "正在启动"
+        updateStatusChip("启动中", R.color.status_warn)
         tvStatus.text = message
-        setStartButtonState("启动中…", false, R.drawable.ic_hourglass_24)
-        setStopButtonEnabled(true)
+        btnStart.text = "启动中…"
+        btnStart.setIconResource(R.drawable.ic_play_24)
+        btnStart.isEnabled = false
+        btnStop.isEnabled = true
         updateUrls(false)
     }
 
     private fun setUiRunning(message: String) {
-        updateStatusIndicator(R.color.status_success, true)
-        updateStatusChip("运行中", R.color.status_success)
-        tvStatusTitle.text = "服务运行中"
+        updateStatusChip("运行中", R.color.status_ok)
         tvStatus.text = message
-        // 服务运行中：按钮改为“已启用”并禁止点击，避免重复触发
-        setStartButtonState("已启用", false, R.drawable.ic_check_24)
-        setStopButtonEnabled(true)
+        btnStart.text = "已启动"
+        btnStart.setIconResource(R.drawable.ic_check_24)
+        btnStart.isEnabled = false
+        btnStop.isEnabled = true
         updateUrls(true)
     }
 
     private fun setUiStopped(message: String) {
-        updateStatusIndicator(R.color.text_tertiary, false)
-        updateStatusChip("未运行", R.color.text_tertiary)
-        tvStatusTitle.text = "准备就绪"
+        updateStatusChip("未运行", R.color.status_neutral)
         tvStatus.text = message
-        setStartButtonState("启动服务", true, R.drawable.ic_play_24)
-        setStopButtonEnabled(false)
+        btnStart.text = "启动服务"
+        btnStart.setIconResource(R.drawable.ic_play_24)
+        btnStart.isEnabled = true
+        btnStop.isEnabled = false
         updateUrls(false)
     }
 
     private fun setUiError(message: String) {
-        updateStatusIndicator(R.color.status_error, false)
-        updateStatusChip("错误", R.color.status_error)
-        tvStatusTitle.text = "启动失败"
-        tvStatus.text = message
-        setStartButtonState("启动服务", true, R.drawable.ic_play_24)
-        setStopButtonEnabled(false)
+        updateStatusChip("出错", R.color.status_error)
+        tvStatus.text = "启动失败：\n$message"
+        btnStart.text = "重新启动"
+        btnStart.setIconResource(R.drawable.ic_play_24)
+        btnStart.isEnabled = true
+        btnStop.isEnabled = false
         updateUrls(false)
-        Toast.makeText(this, "服务启动失败", Toast.LENGTH_LONG).show()
-    }
-
-    private fun updateStatusIndicator(colorRes: Int, animate: Boolean) {
-        val color = ContextCompat.getColor(this, colorRes)
-        statusIndicator.backgroundTintList = ColorStateList.valueOf(color)
-
-        statusAnimator?.cancel()
-        if (animate) {
-            statusAnimator = ValueAnimator.ofFloat(0.3f, 1f).apply {
-                duration = 1000
-                repeatCount = ValueAnimator.INFINITE
-                repeatMode = ValueAnimator.REVERSE
-                interpolator = AccelerateDecelerateInterpolator()
-                addUpdateListener { animation ->
-                    statusIndicator.alpha = animation.animatedValue as Float
-                }
-                start()
-            }
-        } else {
-            statusIndicator.alpha = 1f
-        }
+        Toast.makeText(this, "启动失败（详情见页面）", Toast.LENGTH_LONG).show()
     }
 
     private fun updateStatusChip(text: String, colorRes: Int) {
         chipStatus.text = text
         val color = ContextCompat.getColor(this, colorRes)
-        val alpha = if (isNightMode()) 0x30 else 0x1A
-        val bgColor = (color and 0x00FFFFFF) or (alpha shl 24)
-        chipStatus.chipBackgroundColor = ColorStateList.valueOf(bgColor)
+        // 背景使用低透明度：浅色/深色主题都更舒适
+        val bg = ColorUtils.setAlphaComponent(color, 40)
+        chipStatus.chipBackgroundColor = ColorStateList.valueOf(bg)
         chipStatus.setTextColor(color)
         chipStatus.chipIconTint = ColorStateList.valueOf(color)
     }
 
     private fun showProjectJump() {
         val items = arrayOf(
-            "查看应用项目主页",
-            "查看上游项目（danmu_api）"
+            "打开项目主页（App）",
+            "打开上游项目（danmu_api）"
         )
         MaterialAlertDialogBuilder(this)
-            .setTitle("项目信息")
+            .setTitle("项目跳转")
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> openUrlSafely(PROJECT_URL)
@@ -665,37 +429,118 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAboutDialog() {
-        val view = layoutInflater.inflate(R.layout.dialog_about, null)
-
-        view.findViewById<TextView>(R.id.tvAboutTitle).text = getString(R.string.app_name)
-        val pkgInfo = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
-        // 一些工程可能会关闭 BuildConfig 生成（例如在 gradle.properties 中设置相关开关），
-        // 因此这里不要依赖 BuildConfig 以免在 CI/不同构建环境下编译失败。
-        val versionName = pkgInfo?.versionName ?: "unknown"
-        val versionCode = if (pkgInfo == null) {
-            0L
-        } else {
-            if (Build.VERSION.SDK_INT >= 28) pkgInfo.longVersionCode else pkgInfo.versionCode.toLong()
-        }
-        view.findViewById<TextView>(R.id.tvAboutVersion).text = "v$versionName (${versionCode})"
-        view.findViewById<TextView>(R.id.tvAboutProjectUrl).text = PROJECT_URL
-        view.findViewById<TextView>(R.id.tvAboutUpstreamUrl).text = UPSTREAM_URL
-
-        val rowProject = view.findViewById<View>(R.id.rowAboutProject)
-        val rowUpstream = view.findViewById<View>(R.id.rowAboutUpstream)
-
-        rowProject.setOnClickListener { openUrlSafely(PROJECT_URL) }
-        rowProject.setOnLongClickListener { copyUrl(PROJECT_URL); true }
-        rowUpstream.setOnClickListener { openUrlSafely(UPSTREAM_URL) }
-        rowUpstream.setOnLongClickListener { copyUrl(UPSTREAM_URL); true }
+        val msg = (
+            "简单用法：\n" +
+                "1) 点击“启动服务”后，服务会以前台方式在后台运行。\n" +
+                "2) 在同一局域网设备上，用浏览器打开页面显示的“局域网地址”。\n" +
+                "3) 若经常被杀后台，请在“设置 → 电池优化”里将电池用量设置为“不受限制/无限制”。\n\n" +
+                "项目地址：\n$PROJECT_URL"
+        )
 
         MaterialAlertDialogBuilder(this)
             .setTitle("关于")
-            .setView(view)
-            .setPositiveButton("打开项目主页") { _, _ -> openUrlSafely(PROJECT_URL) }
-            .setNeutralButton("复制项目地址") { _, _ -> copyUrl(PROJECT_URL) }
-            .setNegativeButton("关闭", null)
+            .setMessage(msg)
+            .setPositiveButton("打开项目") { _, _ -> openUrlSafely(PROJECT_URL) }
+            .setNeutralButton("复制地址") { _, _ -> copyUrl(PROJECT_URL) }
+            .setNegativeButton("更多…") { _, _ -> showProjectJump() }
             .show()
+    }
+
+    private fun showSettingsDialog() {
+        val v = layoutInflater.inflate(R.layout.sheet_settings, null)
+
+        val sheetRoot = v.findViewById<View>(R.id.sheetRoot)
+        val btnClose = v.findViewById<View>(R.id.btnClose)
+
+        val rowTheme = v.findViewById<View>(R.id.rowTheme)
+        val tvThemeSub = v.findViewById<TextView>(R.id.tvThemeSub)
+        val sw = v.findViewById<MaterialSwitch>(R.id.switchTheme)
+
+        val rowBattery = v.findViewById<View>(R.id.rowBattery)
+        val tvBatterySub = v.findViewById<TextView>(R.id.tvBatterySub)
+        val ivBatteryArrow = v.findViewById<ImageView>(R.id.ivBatteryArrow)
+
+        val rowUpdate = v.findViewById<View>(R.id.rowUpdate)
+        val rowAbout = v.findViewById<View>(R.id.rowAbout)
+
+        val dialog = BottomSheetDialog(this, R.style.ThemeOverlay_DanmuApiApp_BottomSheet)
+        dialog.setContentView(v)
+        dialog.window?.setDimAmount(0.35f)
+
+        // Avoid being covered by gesture navigation bar
+        val basePadL = sheetRoot.paddingLeft
+        val basePadT = sheetRoot.paddingTop
+        val basePadR = sheetRoot.paddingRight
+        val basePadB = sheetRoot.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(sheetRoot) { view, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            view.setPadding(basePadL, basePadT, basePadR, basePadB + nav.bottom)
+            insets
+        }
+
+        dialog.setOnShowListener {
+            val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+            bottomSheet?.setBackgroundResource(R.drawable.bg_sheet)
+            bottomSheet?.let {
+                val behavior = BottomSheetBehavior.from(it)
+                // iOS-like bottom panel: attached to bottom, not draggable.
+                behavior.isFitToContents = true
+                behavior.skipCollapsed = true
+                behavior.state = BottomSheetBehavior.STATE_EXPANDED
+                behavior.isDraggable = false
+            }
+        }
+
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        // Theme toggle
+        val dark = UiPrefs.isDarkTheme(this)
+        sw.isChecked = dark
+        tvThemeSub.text = if (dark) "当前：黑色主题" else "当前：白色主题"
+
+        rowTheme.setOnClickListener { sw.isChecked = !sw.isChecked }
+        sw.setOnCheckedChangeListener { _, isChecked ->
+            UiPrefs.setDarkTheme(this, isChecked)
+            dialog.dismiss()
+            // Ensure immediate visual update
+            recreate()
+        }
+
+        // Battery optimization
+        fun refreshBatteryRow() {
+            val done = isIgnoringBatteryOptimizations()
+            if (done) {
+                tvBatterySub.text = "已设置（无限制）"
+                rowBattery.isEnabled = false
+                rowBattery.alpha = 0.55f
+                ivBatteryArrow.visibility = View.GONE
+            } else {
+                tvBatterySub.text = "建议设置为“不受限制/无限制”，更稳定"
+                rowBattery.isEnabled = true
+                rowBattery.alpha = 1f
+                ivBatteryArrow.visibility = View.VISIBLE
+            }
+        }
+        refreshBatteryRow()
+
+        rowBattery.setOnClickListener {
+            if (!isIgnoringBatteryOptimizations()) {
+                dialog.dismiss()
+                openBatteryOptimization()
+            }
+        }
+
+        rowUpdate.setOnClickListener {
+            dialog.dismiss()
+            UpdateChecker.check(this, userInitiated = true)
+        }
+
+        rowAbout.setOnClickListener {
+            dialog.dismiss()
+            showAboutDialog()
+        }
+
+        dialog.show()
     }
 
     @SuppressLint("ObsoleteSdkInt")
@@ -709,13 +554,13 @@ class MainActivity : AppCompatActivity() {
         if (isIgnoringBatteryOptimizations()) return
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("后台运行优化")
+            .setTitle("后台常驻建议")
             .setMessage(
-                "为确保服务稳定运行，建议将本应用添加到电池优化白名单，并设置为“ 不受限制 ”模式。\n\n" +
-                        "点击“前往设置”将打开系统电池优化页面。"
+                "为了减少被系统省电策略限制，建议把本 App 的电池用量设置为“不受限制/无限制”，并允许忽略电池优化。\n\n" +
+                        "点击“去设置”将打开系统页面（不同品牌入口可能略有差异）。"
             )
-            .setNegativeButton("稍后提醒") { d, _ -> d.dismiss() }
-            .setPositiveButton("前往设置") { d, _ ->
+            .setNegativeButton("稍后") { d, _ -> d.dismiss() }
+            .setPositiveButton("去设置") { d, _ ->
                 d.dismiss()
                 openBatteryOptimization()
             }
@@ -725,6 +570,7 @@ class MainActivity : AppCompatActivity() {
     private fun openBatteryOptimization() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
+                // 直接请求加入白名单
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                 intent.data = Uri.parse("package:$packageName")
                 startActivity(intent)
@@ -733,6 +579,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Throwable) {
         }
 
+        // 兜底：打开电池优化设置或 App 信息页（用户手动设置为“不受限制”）
         try {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         } catch (_: Throwable) {
