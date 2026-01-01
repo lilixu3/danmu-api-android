@@ -2,6 +2,13 @@
     <!-- Dark theme overrides -->
     <color name="ic_launcher_background">#0B1020</color>
 
+    <!-- Background (used by bg_main.xml) -->
+    <color name="bg_start">#0B1020</color>
+    <color name="bg_end">#0F172A</color>
+    <color name="glow_primary">#338B5CF6</color>
+    <color name="glow_secondary">#2238BDF8</color>
+    <color name="glow_tertiary">#2238BDF8</color>
+
     <!-- Brand / accent -->
     <color name="brand_accent">#8B5CF6</color>
     <color name="on_accent">#FFFFFF</color>
@@ -11,9 +18,9 @@
     <color name="text_secondary">#A8B0C2</color>
 
     <!-- Surfaces / outlines -->
-    <color name="surface_card">#1AFFFFFF</color>
-    <color name="surface_card_weak">#14FFFFFF</color>
-    <color name="surface_pill">#14FFFFFF</color>
+    <color name="surface_card">#151F35</color>
+    <color name="surface_card_weak">#121A2E</color>
+    <color name="surface_pill">#111A2D</color>
     <color name="surface_status">#101114</color>
 
     <!-- Sheets / dialogs -->
@@ -39,4 +46,32 @@
     <color name="status_warn">#FBBF24</color>
     <color name="status_error">#FB7185</color>
     <color name="status_neutral">#A8B0C2</color>
+
+    <!-- Material3 mapping (dark) -->
+    <color name="m3_primary">@color/brand_accent</color>
+    <color name="m3_on_primary">@color/on_accent</color>
+    <color name="m3_primary_container">#2A1B4D</color>
+    <color name="m3_on_primary_container">#EDE9FE</color>
+
+    <color name="m3_secondary">#38BDF8</color>
+    <color name="m3_on_secondary">#001A24</color>
+    <color name="m3_secondary_container">#0B2A3A</color>
+    <color name="m3_on_secondary_container">#BFEAFF</color>
+
+    <color name="m3_tertiary">#A855F7</color>
+    <color name="m3_on_tertiary">#120019</color>
+    <color name="m3_tertiary_container">#2A0E3A</color>
+    <color name="m3_on_tertiary_container">#F3E8FF</color>
+
+    <color name="m3_error">@color/danger_text</color>
+    <color name="m3_on_error">#1B0002</color>
+
+    <color name="m3_background">@color/bg_start</color>
+    <color name="m3_on_background">@color/text_primary</color>
+    <color name="m3_surface">#0F172A</color>
+    <color name="m3_on_surface">@color/text_primary</color>
+    <color name="m3_surface_variant">#1F2A44</color>
+    <color name="m3_on_surface_variant">#A8B0C2</color>
+    <color name="m3_outline">#33FFFFFF</color>
+    <color name="m3_outline_variant">#22FFFFFF</color>
 </resources>

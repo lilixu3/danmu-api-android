@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Light: clean gradient base -->
+    <!-- Light: soft pearly gradient base -->
     <item>
         <shape>
             <gradient
                 android:angle="135"
-                android:startColor="#FFFFFF"
-                android:endColor="#F8FAFC" />
+                android:startColor="@color/bg_start"
+                android:endColor="@color/bg_end" />
         </shape>
     </item>
 
-    <!-- Top-left soft indigo glow -->
+    <!-- Top-left indigo glow -->
     <item>
         <shape>
             <gradient
@@ -19,12 +19,12 @@
                 android:gradientRadius="650dp"
                 android:centerX="0.08"
                 android:centerY="0.05"
-                android:startColor="#1A5B5FEF"
+                android:startColor="@color/glow_primary"
                 android:endColor="#00000000" />
         </shape>
     </item>
 
-    <!-- Bottom-right soft violet glow -->
+    <!-- Bottom-right violet glow -->
     <item>
         <shape>
             <gradient
@@ -32,12 +32,12 @@
                 android:gradientRadius="700dp"
                 android:centerX="0.95"
                 android:centerY="0.98"
-                android:startColor="#14A78BFA"
+                android:startColor="@color/glow_tertiary"
                 android:endColor="#00000000" />
         </shape>
     </item>
 
-    <!-- Subtle center accent -->
+    <!-- Subtle center cyan accent -->
     <item>
         <shape>
             <gradient
@@ -45,7 +45,7 @@
                 android:gradientRadius="500dp"
                 android:centerX="0.5"
                 android:centerY="0.4"
-                android:startColor="#08818CF8"
+                android:startColor="@color/glow_secondary"
                 android:endColor="#00000000" />
         </shape>
     </item>

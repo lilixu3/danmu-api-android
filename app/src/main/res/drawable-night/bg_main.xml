@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Dark: deep gradient + subtle glows -->
+    <!-- Dark: deep gradient + subtle glows (use shared color tokens) -->
     <item>
         <shape>
             <gradient
                 android:angle="135"
-                android:startColor="#0B1020"
-                android:endColor="#0F172A" />
+                android:startColor="@color/bg_start"
+                android:endColor="@color/bg_end" />
         </shape>
     </item>
 
@@ -19,7 +19,7 @@
                 android:gradientRadius="560dp"
                 android:centerX="0.15"
                 android:centerY="0.05"
-                android:startColor="#338B5CF6"
+                android:startColor="@color/glow_primary"
                 android:endColor="#00000000" />
         </shape>
     </item>
@@ -32,7 +32,7 @@
                 android:gradientRadius="640dp"
                 android:centerX="0.92"
                 android:centerY="0.98"
-                android:startColor="#2238BDF8"
+                android:startColor="@color/glow_secondary"
                 android:endColor="#00000000" />
         </shape>
     </item>
