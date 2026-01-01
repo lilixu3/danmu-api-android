@@ -1,63 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Base: 柔和的天空蓝渐变 -->
+    <!-- Light: clean gradient base -->
     <item>
         <shape>
             <gradient
                 android:angle="135"
-                android:startColor="#F8FAFF"
-                android:centerColor="#F0F4FF"
-                android:endColor="#E8EFFF"
-                android:type="linear" />
+                android:startColor="#FFFFFF"
+                android:endColor="#F8FAFC" />
         </shape>
     </item>
 
-    <!-- Top-left: 紫色光晕 (更柔和) -->
+    <!-- Top-left soft indigo glow -->
     <item>
         <shape>
             <gradient
                 android:type="radial"
-                android:gradientRadius="65%"
-                android:centerX="0.15"
-                android:centerY="0.08"
-                android:startColor="#28818CF8"
-                android:centerColor="#12818CF8"
+                android:gradientRadius="650dp"
+                android:centerX="0.08"
+                android:centerY="0.05"
+                android:startColor="#1A5B5FEF"
                 android:endColor="#00000000" />
         </shape>
     </item>
 
-    <!-- Middle: 青色点缀 -->
+    <!-- Bottom-right soft violet glow -->
     <item>
         <shape>
             <gradient
                 android:type="radial"
-                android:gradientRadius="50%"
-                android:centerX="0.7"
-                android:centerY="0.35"
-                android:startColor="#1806B6D4"
+                android:gradientRadius="700dp"
+                android:centerX="0.95"
+                android:centerY="0.98"
+                android:startColor="#14A78BFA"
                 android:endColor="#00000000" />
         </shape>
     </item>
 
-    <!-- Bottom-right: 粉紫色光晕 -->
+    <!-- Subtle center accent -->
     <item>
         <shape>
             <gradient
                 android:type="radial"
-                android:gradientRadius="70%"
-                android:centerX="0.88"
-                android:centerY="0.92"
-                android:startColor="#22A78BFA"
-                android:centerColor="#10A78BFA"
+                android:gradientRadius="500dp"
+                android:centerX="0.5"
+                android:centerY="0.4"
+                android:startColor="#08818CF8"
                 android:endColor="#00000000" />
-        </shape>
-    </item>
-
-    <!-- Subtle noise texture overlay (optional, 增加质感) -->
-    <item>
-        <shape>
-            <solid android:color="#02FFFFFF" />
         </shape>
     </item>
 
