@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">弹幕API</string>
+    <string name="qs_tile_label">弹幕API</string>
 </resources>

@@ -29,6 +29,18 @@
             android:name=".NodeService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Quick Settings tile (Android 7.0+): start/stop the Node foreground service -->
+        <service
+            android:name=".NodeTileService"
+            android:label="@string/qs_tile_label"
+            android:icon="@drawable/ic_qs_node"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
