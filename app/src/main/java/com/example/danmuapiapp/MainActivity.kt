@@ -49,9 +49,6 @@ import java.net.URL
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        // Keep in sync with assets/nodejs-project/android-server.mjs defaults.
-        private const val MAIN_PORT = 9321
-
         // danmu_api upstream default token.
         private const val DEFAULT_TOKEN = "87654321"
 
@@ -274,7 +271,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestNodeShutdown() {
-        val url = URL("http://127.0.0.1:$MAIN_PORT/__shutdown")
+        val port = RuntimeConfig.getMainPort(this)
+        val url = URL("http://127.0.0.1:$port/__shutdown")
         val conn = (url.openConnection() as HttpURLConnection)
         conn.requestMethod = "GET"
         conn.instanceFollowRedirects = false
@@ -303,8 +301,10 @@ class MainActivity : AppCompatActivity() {
 
         val token = readApiTokenForDisplay()
 
+        val port = RuntimeConfig.getMainPort(this)
+
         fun buildEndpoint(host: String): String {
-            val base = "http://$host:$MAIN_PORT"
+            val base = "http://$host:$port"
             // Always show full endpoint with TOKEN (even if it equals the upstream default),
             // so it matches the web UI and is easier to copy/paste.
             return if (!token.isNullOrBlank()) "$base/$token" else base
