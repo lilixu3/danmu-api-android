@@ -9,7 +9,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import java.net.HttpURLConnection
 import java.io.File
+import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 class NodeService : Service() {
@@ -17,6 +19,12 @@ class NodeService : Service() {
     companion object {
         private const val CHANNEL_ID = "danmuapi_node"
         private const val NOTIF_ID = 3001
+
+        /** Start foreground Node service (default when action is null). */
+        const val ACTION_START = "com.example.danmuapiapp.action.START_NODE"
+
+        /** Request the embedded Node server to shutdown, then stop foreground service. */
+        const val ACTION_STOP = "com.example.danmuapiapp.action.STOP_NODE"
 
         const val ACTION_NODE_STATUS = "com.example.danmuapiapp.NODE_STATUS"
         const val EXTRA_STATUS = "status"
@@ -33,6 +41,8 @@ class NodeService : Service() {
         fun isRunning(): Boolean = started.get()
     }
 
+    private val stopRequested = AtomicBoolean(false)
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -41,6 +51,13 @@ class NodeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Handle stop requests first.
+        if (intent?.action == ACTION_STOP) {
+            val wasRunning = started.get()
+            handleStopRequest(startId)
+            return if (wasRunning) START_STICKY else START_NOT_STICKY
+        }
+
         if (started.get()) {
             startForeground(NOTIF_ID, buildNotification("Node 已在运行"))
             broadcastStatus(STATUS_ALREADY_RUNNING, "Node 已在运行（查看通知栏状态）")
@@ -49,6 +66,9 @@ class NodeService : Service() {
 
         startForeground(NOTIF_ID, buildNotification("Node 启动中…"))
         broadcastStatus(STATUS_STARTING, "启动中…（可在通知栏查看状态）")
+
+        // New start cancels any previous stop request.
+        stopRequested.set(false)
 
         if (started.compareAndSet(false, true)) {
             Thread {
@@ -59,6 +79,21 @@ class NodeService : Service() {
                         throw IllegalStateException(
                             "入口文件不存在: ${entryFile.absolutePath}（请确认 assets/nodejs-project/main.js 已打包）"
                         )
+                    }
+
+                    // If user requested stop while we were extracting/copying, cancel before starting Node.
+                    if (stopRequested.get()) {
+                        started.set(false)
+                        updateNotification("启动已取消")
+                        broadcastStatus(STATUS_STOPPED, "启动已取消")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stopForeground(true)
+                        }
+                        stopSelf()
+                        return@Thread
                     }
 
                     // 更新一次通知 + 广播，让主页有“已启动”的反馈
@@ -100,6 +135,76 @@ class NodeService : Service() {
         }
 
         return START_STICKY
+    }
+
+    private fun handleStopRequest(startId: Int) {
+        if (!started.get()) {
+            // Not running: reflect stopped state for UI/tile, then stop immediately.
+            broadcastStatus(STATUS_STOPPED, "未运行")
+            stopSelf(startId)
+            return
+        }
+
+        stopRequested.set(true)
+        updateNotification("Node 正在停止…")
+
+        // Request a graceful shutdown via loopback HTTP.
+        Thread {
+            try {
+                requestNodeShutdownWithRetries()
+            } catch (_: Throwable) {
+            }
+
+            // Give Node a moment to exit on its own.
+            val deadline = System.currentTimeMillis() + 2500
+            while (started.get() && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(100)
+                } catch (_: Throwable) {
+                }
+            }
+
+            // If still running, fall back to killing the process (same strategy as "关闭并退出").
+            if (started.get()) {
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }.start()
+    }
+
+    private fun requestNodeShutdownWithRetries() {
+        val port = RuntimeConfig.getMainPort(this)
+        var lastErr: Throwable? = null
+        repeat(6) { attempt ->
+            try {
+                val url = URL("http://127.0.0.1:$port/__shutdown")
+                val conn = (url.openConnection() as HttpURLConnection)
+                conn.requestMethod = "GET"
+                conn.instanceFollowRedirects = false
+                conn.connectTimeout = 700
+                conn.readTimeout = 700
+                conn.doInput = true
+                try {
+                    conn.connect()
+                    runCatching { conn.inputStream.use { it.readBytes() } }
+                } finally {
+                    conn.disconnect()
+                }
+                return
+            } catch (t: Throwable) {
+                lastErr = t
+                // Backoff: 0ms, 150ms, 250ms, 400ms...
+                val sleepMs = when (attempt) {
+                    0 -> 0L
+                    1 -> 150L
+                    2 -> 250L
+                    else -> 400L
+                }
+                if (sleepMs > 0) {
+                    try { Thread.sleep(sleepMs) } catch (_: Throwable) {}
+                }
+            }
+        }
+        if (lastErr != null) throw lastErr as Throwable
     }
 
     override fun onDestroy() {
