@@ -206,12 +206,20 @@ class MainActivity : AppCompatActivity() {
         val keepAliveOn = NodeKeepAlive.isKeepAliveEnabled(this)
         if (!keepAliveOn) return
 
-        val a11yEnabled = NodeKeepAlive.isAccessibilityServiceEnabled(this)
-        if (a11yEnabled) return
+        // Some ROMs / Android versions may update Accessibility settings a bit later
+        // when returning from the system Settings UI. Do a quick double-check before
+        // auto-closing the toggle to avoid false negatives.
+        if (NodeKeepAlive.isAccessibilityServiceEnabled(this)) return
 
-        // 用户未开启系统无障碍服务 -> 关闭 App 内开关
-        NodeKeepAlive.setKeepAliveEnabled(this, false)
-        Toast.makeText(this, "未开启系统无障碍服务，已自动关闭保活开关", Toast.LENGTH_SHORT).show()
+        window.decorView.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            if (!NodeKeepAlive.isKeepAliveEnabled(this)) return@postDelayed
+            if (NodeKeepAlive.isAccessibilityServiceEnabled(this)) return@postDelayed
+
+            // 用户未开启系统无障碍服务 -> 关闭 App 内开关
+            NodeKeepAlive.setKeepAliveEnabled(this, false)
+            Toast.makeText(this, "未开启系统无障碍服务，已自动关闭保活开关", Toast.LENGTH_SHORT).show()
+        }, 500L)
     }
 
     /**
