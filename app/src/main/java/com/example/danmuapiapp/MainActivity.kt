@@ -190,8 +190,28 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         // Ensure preference is applied when returning to foreground.
         applyExcludeFromRecents(UiPrefs.isHideFromRecents(this))
+        // Keep "无障碍保活"开关与系统无障碍实际状态一致：
+        // 用户跳转到系统无障碍页面但未真正开启服务就返回时，自动关闭 App 内开关。
+        syncA11yKeepAliveToggleWithSystem()
         registerStatusReceiver()
         refreshUiFromServiceState()
+    }
+
+    /**
+     * 如果 App 内已经打开“无障碍保活”，但系统无障碍里并未真正启用对应服务，
+     * 那么说明用户没有完成开启流程（或已在系统里关闭）。此时应自动关闭 App 内开关，
+     * 避免 UI 状态与实际能力不一致。
+     */
+    private fun syncA11yKeepAliveToggleWithSystem() {
+        val keepAliveOn = NodeKeepAlive.isKeepAliveEnabled(this)
+        if (!keepAliveOn) return
+
+        val a11yEnabled = NodeKeepAlive.isAccessibilityServiceEnabled(this)
+        if (a11yEnabled) return
+
+        // 用户未开启系统无障碍服务 -> 关闭 App 内开关
+        NodeKeepAlive.setKeepAliveEnabled(this, false)
+        Toast.makeText(this, "未开启系统无障碍服务，已自动关闭保活开关", Toast.LENGTH_SHORT).show()
     }
 
     /**
