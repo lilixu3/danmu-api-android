@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 
 /**
  * Keep-alive related preferences + helpers.
@@ -128,7 +130,38 @@ object NodeKeepAlive {
      * Whether our accessibility keep-alive service is enabled in system Accessibility settings.
      */
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
-        val cn = ComponentName(context, KeepAliveAccessibilityService::class.java)
+        // Primary: query AccessibilityManager for enabled services.
+        // NOTE: Some OEM / Android versions report AccessibilityServiceInfo.id in different
+        // formats (full class name vs "/.ShortName"). So we compare in a normalized way.
+        runCatching {
+            val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+            val expectedPkg = context.packageName
+            val expectedCls = KeepAliveAccessibilityService::class.java.name
+            val expectedIdFull = "$expectedPkg/$expectedCls"
+            val expectedIdShort = "$expectedPkg/.${KeepAliveAccessibilityService::class.java.simpleName}"
+
+            val list = am?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            if (list != null) {
+                for (info in list) {
+                    // Best-effort: compare by resolveInfo.serviceInfo (most reliable).
+                    val si = info.resolveInfo?.serviceInfo
+                    if (si != null) {
+                        val cls = normalizeClassName(si.name, si.packageName ?: expectedPkg)
+                        if (si.packageName.equals(expectedPkg, ignoreCase = true) && cls == expectedCls) {
+                            return true
+                        }
+                    }
+
+                    // Fallback: compare id strings (handle both full & short formats).
+                    val id = info.id
+                    if (id.equals(expectedIdFull, ignoreCase = true) || id.equals(expectedIdShort, ignoreCase = true)) {
+                        return true
+                    }
+                }
+            }
+        }
+
+        // Fallback: read Settings.Secure (colon-separated component list).
         val enabled = Settings.Secure.getInt(
             context.contentResolver,
             Settings.Secure.ACCESSIBILITY_ENABLED,
@@ -141,9 +174,28 @@ object NodeKeepAlive {
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
 
-        val flat = cn.flattenToString()
-        // Enabled list is colon-separated.
-        return enabledServices.split(':').any { it.equals(flat, ignoreCase = true) }
+        val expected = ComponentName(context, KeepAliveAccessibilityService::class.java)
+        return enabledServices
+            .split(':')
+            .asSequence()
+            .mapNotNull { parseEnabledA11yComponent(it) }
+            .any { it.packageName == expected.packageName && it.className == expected.className }
+    }
+
+    private fun parseEnabledA11yComponent(raw: String): ComponentName? {
+        val s = raw.trim()
+        val slash = s.indexOf('/')
+        if (slash <= 0 || slash >= s.length - 1) return null
+
+        val pkg = s.substring(0, slash)
+        val clsRaw = s.substring(slash + 1)
+        val cls = normalizeClassName(clsRaw, pkg)
+        return runCatching { ComponentName(pkg, cls) }.getOrNull()
+    }
+
+    private fun normalizeClassName(rawClassName: String, pkg: String): String {
+        val cls = rawClassName.trim()
+        return if (cls.startsWith(".")) pkg + cls else cls
     }
 
     /**
