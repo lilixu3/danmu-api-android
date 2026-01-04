@@ -26,6 +26,9 @@ class NodeService : Service() {
         /** Request the embedded Node server to shutdown, then stop foreground service. */
         const val ACTION_STOP = "com.example.danmuapiapp.action.STOP_NODE"
 
+        /** Refresh restart policy after settings changes (no side effects). */
+        const val ACTION_REFRESH_POLICY = "com.example.danmuapiapp.action.REFRESH_POLICY"
+
         const val ACTION_NODE_STATUS = "com.example.danmuapiapp.NODE_STATUS"
         const val EXTRA_STATUS = "status"
         const val EXTRA_MESSAGE = "message"
@@ -51,17 +54,46 @@ class NodeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Handle stop requests first.
-        if (intent?.action == ACTION_STOP) {
-            val wasRunning = started.get()
+        val action = intent?.action
+
+        // 0) Settings changed: refresh restart policy without modifying desiredRunning.
+        if (action == ACTION_REFRESH_POLICY) {
+            if (started.get()) {
+                // Keep notif up to date; do not broadcast status to avoid UI noise.
+                startForeground(NOTIF_ID, buildNotification("Node 正在运行（前台服务）"))
+            } else {
+                // Nothing to refresh.
+                stopSelf(startId)
+            }
+            return restartPolicy()
+        }
+
+        // 1) Explicit STOP: user intent to stop -> never auto-restart.
+        if (action == ACTION_STOP) {
+            NodeKeepAlive.setDesiredRunning(this, false)
             handleStopRequest(startId)
-            return if (wasRunning) START_STICKY else START_NOT_STICKY
+            return START_NOT_STICKY
+        }
+
+        // 2) Explicit START: user intent to start -> allow keep-alive (if enabled).
+        if (action == ACTION_START) {
+            NodeKeepAlive.setDesiredRunning(this, true)
+        } else {
+            // 3) action==null: can be either an explicit start (MainActivity uses no action)
+            //    or a system re-delivery when the process was killed (START_STICKY => null intent).
+            //    We MUST NOT override user's "desiredRunning" here.
+            if (!NodeKeepAlive.isDesiredRunning(this)) {
+                // User has stopped / exited -> do not resurrect.
+                broadcastStatus(STATUS_STOPPED, "已停止")
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
         }
 
         if (started.get()) {
             startForeground(NOTIF_ID, buildNotification("Node 已在运行"))
             broadcastStatus(STATUS_ALREADY_RUNNING, "Node 已在运行（查看通知栏状态）")
-            return START_STICKY
+            return restartPolicy()
         }
 
         startForeground(NOTIF_ID, buildNotification("Node 启动中…"))
@@ -99,6 +131,7 @@ class NodeService : Service() {
                     // 更新一次通知 + 广播，让主页有“已启动”的反馈
                     updateNotification("Node 正在运行（前台服务）")
                     broadcastStatus(STATUS_RUNNING, "Node 正在运行（前台服务）")
+                    NodeKeepAlive.onNodeRunning(this)
 
                     val entry = entryFile.absolutePath
                     @Suppress("UNUSED_VARIABLE")
@@ -134,7 +167,24 @@ class NodeService : Service() {
             }.start()
         }
 
-        return START_STICKY
+        return restartPolicy()
+    }
+
+    /**
+     * Only use START_STICKY when "无障碍保活" is enabled AND our accessibility service is enabled.
+     * Otherwise, unexpected process kills should NOT resurrect the foreground service.
+     */
+    private fun restartPolicy(): Int {
+        return if (
+            NodeKeepAlive.isKeepAliveEnabled(this) &&
+            NodeKeepAlive.isAccessibilityServiceEnabled(this) &&
+            NodeKeepAlive.hasPostNotificationsPermission(this) &&
+            NodeKeepAlive.isDesiredRunning(this)
+        ) {
+            START_STICKY
+        } else {
+            START_NOT_STICKY
+        }
     }
 
     private fun handleStopRequest(startId: Int) {

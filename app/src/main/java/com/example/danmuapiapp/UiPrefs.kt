@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatDelegate
 object UiPrefs {
     private const val PREFS_NAME = "danmu_ui_prefs"
     private const val KEY_DARK_THEME = "dark_theme"
+    private const val KEY_HIDE_FROM_RECENTS = "hide_from_recents"
 
     fun isDarkTheme(context: Context): Boolean {
         val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -29,5 +30,17 @@ object UiPrefs {
             .putBoolean(KEY_DARK_THEME, dark)
             .apply()
         applyTheme(context)
+    }
+
+    fun isHideFromRecents(context: Context): Boolean {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return sp.getBoolean(KEY_HIDE_FROM_RECENTS, false)
+    }
+
+    fun setHideFromRecents(context: Context, hide: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_HIDE_FROM_RECENTS, hide)
+            .apply()
     }
 }
