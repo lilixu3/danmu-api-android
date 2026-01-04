@@ -1,3 +1,5 @@
+# DanmuApiApp（Android）
+
 DanmuApiApp 是一个 Android “壳”应用：通过 **nodejs-mobile** 在普通未 Root 的手机上运行 Node.js，并在局域网内提供弹幕 API 服务（前台服务常驻，便于家庭内网/NAS/电视盒子等设备调用）。
 
 > 本 App 内置的弹幕服务逻辑**基于** `huangxd-/danmu_api`：
@@ -28,7 +30,16 @@ DanmuApiApp 是一个 Android “壳”应用：通过 **nodejs-mobile** 在普�
 说明：
 
 - `TOKEN`：客户端/API 调用需要用的普通访问令牌。
-- `ADMIN_TOKEN`：系统管理/管理功能令牌（可以在APP中自行修改，需要输入旧密钥）。
+- `ADMIN_TOKEN`：系统管理/管理功能令牌（用于更高权限的管理接口/页面）。
+
+---
+
+## 目录结构说明（开发/二次开发）
+
+- Android App 入口：`app/src/main/java/.../MainActivity.kt`
+- Node.js Mobile 入口（打包进 assets）：`app/src/main/assets/nodejs-project/main.js`
+- Android 启动脚本（ESM）：`app/src/main/assets/nodejs-project/android-server.mjs`
+- 内置弹幕服务（来源 `huangxd-/danmu_api`）：`app/src/main/assets/nodejs-project/danmu_api/`
 
 ---
 

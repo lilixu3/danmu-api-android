@@ -2,6 +2,7 @@ package com.example.danmuapiapp
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -109,6 +110,9 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
 
+        // Apply "hide from recents" preference for current task.
+        applyExcludeFromRecents(UiPrefs.isHideFromRecents(this))
+
         // Apply system bar insets to root padding (so UI won't be covered by status bar)
         val root = findViewById<View>(R.id.root)
         val basePadL = root.paddingLeft
@@ -184,8 +188,36 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Ensure preference is applied when returning to foreground.
+        applyExcludeFromRecents(UiPrefs.isHideFromRecents(this))
         registerStatusReceiver()
         refreshUiFromServiceState()
+    }
+
+    /**
+     * Hide/show this App's task card in the system "Recents" (swipe-up task switcher).
+     *
+     * Note: this only affects our own task, and takes effect immediately on most launchers.
+     */
+    private fun applyExcludeFromRecents(exclude: Boolean) {
+        if (Build.VERSION.SDK_INT < 21) return
+        val am = (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager) ?: return
+        val currentId = taskId
+
+        var applied = false
+        for (t in am.appTasks) {
+            val info = runCatching { t.taskInfo }.getOrNull() ?: continue
+            if (info.id == currentId) {
+                runCatching { t.setExcludeFromRecents(exclude) }
+                applied = true
+                break
+            }
+        }
+
+        // Fallback: some ROMs may not match taskId reliably.
+        if (!applied) {
+            am.appTasks.firstOrNull()?.let { runCatching { it.setExcludeFromRecents(exclude) } }
+        }
     }
 
     override fun onStop() {
@@ -222,6 +254,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startNodeService() {
+        // Mark as "desired running" so keep-alive can restart if it crashes.
+        NodeKeepAlive.setDesiredRunning(this, true)
         val intent = Intent(this, NodeService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -237,6 +271,8 @@ class MainActivity : AppCompatActivity() {
      * 3) 自动退出 App（必要时兜底 killProcess，确保 Node 线程不会残留）
      */
     private fun stopAndExitApp() {
+        // 手动停止：不要自动重启
+        NodeKeepAlive.setDesiredRunning(this, false)
         // 防止重复点击
         btnStart.isEnabled = false
         btnStop.isEnabled = false
@@ -249,9 +285,9 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Throwable) {
             }
 
-            // 再停止 Service（如果 Node 已退出，会自动 stopSelf；这里是兜底）
+            // 再向前台服务发送 STOP（会确保 desiredRunning=false，并避免“杀进程后被系统拉起”）
             try {
-                stopService(Intent(this, NodeService::class.java))
+                startService(Intent(this, NodeService::class.java).setAction(NodeService.ACTION_STOP))
             } catch (_: Throwable) {
             }
 
@@ -262,11 +298,16 @@ class MainActivity : AppCompatActivity() {
             }
 
             // 给一点时间让 Node 退出 / 资源释放；如果仍未退出，兜底杀进程
-            try {
-                Thread.sleep(900)
-            } catch (_: Throwable) {
+            val deadline = System.currentTimeMillis() + 2000
+            while (NodeService.isRunning() && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(120)
+                } catch (_: Throwable) {
+                }
             }
-            android.os.Process.killProcess(android.os.Process.myPid())
+            if (NodeService.isRunning()) {
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
         }.start()
     }
 
@@ -743,6 +784,14 @@ class MainActivity : AppCompatActivity() {
         val tvBatterySub = v.findViewById<TextView>(R.id.tvBatterySub)
         val ivBatteryArrow = v.findViewById<ImageView>(R.id.ivBatteryArrow)
 
+        val rowHideRecents = v.findViewById<View>(R.id.rowHideRecents)
+        val tvHideRecentsSub = v.findViewById<TextView>(R.id.tvHideRecentsSub)
+        val swHideRecents = v.findViewById<MaterialSwitch>(R.id.switchHideRecents)
+
+        val rowA11yKeepAlive = v.findViewById<View>(R.id.rowA11yKeepAlive)
+        val tvA11yKeepAliveSub = v.findViewById<TextView>(R.id.tvA11yKeepAliveSub)
+        val swA11yKeepAlive = v.findViewById<MaterialSwitch>(R.id.switchA11yKeepAlive)
+
         val rowUpdate = v.findViewById<View>(R.id.rowUpdate)
         val rowAdminToken = v.findViewById<View>(R.id.rowAdminToken)
         val tvAdminTokenSub = v.findViewById<TextView>(R.id.tvAdminTokenSub)
@@ -807,6 +856,112 @@ class MainActivity : AppCompatActivity() {
             }
         }
         refreshBatteryRow()
+
+        // Hide from recents (task switcher card)
+        var ignoreHideRecentsChange = false
+        fun refreshHideRecentsRow() {
+            val hide = UiPrefs.isHideFromRecents(this)
+            ignoreHideRecentsChange = true
+            swHideRecents.isChecked = hide
+            ignoreHideRecentsChange = false
+            tvHideRecentsSub.text = if (hide) {
+                "已隐藏（上滑最近任务中不显示）"
+            } else {
+                "显示在上滑任务栏/最近任务中"
+            }
+        }
+        refreshHideRecentsRow()
+
+        rowHideRecents.setOnClickListener { swHideRecents.toggle() }
+
+        swHideRecents.setOnCheckedChangeListener { _, isChecked ->
+            if (ignoreHideRecentsChange) return@setOnCheckedChangeListener
+
+            if (isChecked) {
+                // Only enable after explicit confirmation.
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("隐藏最近任务卡片")
+                    .setMessage(
+                        "开启后，上滑任务栏/最近任务中将看不到本 App 的任务卡片。\n\n" +
+                            "请先在最近任务界面，将本 App 任务卡片“上锁/锁定”（不同系统叫法可能不同）。\n\n" +
+                            "完成上锁后，再点击下方“确认隐藏”。"
+                    )
+                    .setNegativeButton("取消") { d, _ ->
+                        d.dismiss()
+                        ignoreHideRecentsChange = true
+                        swHideRecents.isChecked = false
+                        ignoreHideRecentsChange = false
+                    }
+                    .setPositiveButton("确认隐藏") { d, _ ->
+                        d.dismiss()
+                        UiPrefs.setHideFromRecents(this, true)
+                        applyExcludeFromRecents(true)
+                        refreshHideRecentsRow()
+                        Toast.makeText(this, "已隐藏：最近任务中不再显示", Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            } else {
+                UiPrefs.setHideFromRecents(this, false)
+                applyExcludeFromRecents(false)
+                refreshHideRecentsRow()
+                Toast.makeText(this, "已恢复显示：最近任务可见", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Accessibility keep-alive
+        fun refreshA11yKeepAliveRow() {
+            val keepAliveOn = NodeKeepAlive.isKeepAliveEnabled(this)
+            val a11yEnabled = NodeKeepAlive.isAccessibilityServiceEnabled(this)
+            val notifOk = NodeKeepAlive.hasPostNotificationsPermission(this)
+
+            swA11yKeepAlive.isChecked = keepAliveOn
+
+            tvA11yKeepAliveSub.text = when {
+                !keepAliveOn -> "关闭（不自动重启）"
+                !notifOk -> "已开启：需要通知权限才能自动重启"
+                a11yEnabled -> "已开启：异常退出会自动拉起服务"
+                else -> "已开启：请在系统无障碍中启用“保活服务”"
+            }
+        }
+
+        refreshA11yKeepAliveRow()
+
+        rowA11yKeepAlive.setOnClickListener {
+            // Open system accessibility settings; user must enable the service manually.
+            dialog.dismiss()
+            openAccessibilitySettings()
+        }
+
+        swA11yKeepAlive.setOnCheckedChangeListener { _, isChecked ->
+            NodeKeepAlive.setKeepAliveEnabled(this, isChecked)
+            // Sync: when user turns OFF keep-alive in App settings, also turn OFF the
+            // system Accessibility service (it can only disable itself).
+            if (!isChecked) {
+                NodeKeepAlive.requestDisableAccessibilityService(this)
+            }
+
+            // If Node foreground service is currently running, refresh its restart policy
+            // so "关闭保活" takes effect immediately (avoid START_STICKY lingering).
+            if (NodeService.isRunning()) {
+                runCatching {
+                    startService(
+                        Intent(this, NodeService::class.java)
+                            .setAction(NodeService.ACTION_REFRESH_POLICY)
+                    )
+                }
+            }
+            refreshA11yKeepAliveRow()
+            if (isChecked && !NodeKeepAlive.isAccessibilityServiceEnabled(this)) {
+                // Guide user to enable accessibility service.
+                dialog.dismiss()
+                Toast.makeText(
+                    this,
+                    "请在系统无障碍中启用“弹幕API 保活服务”后生效",
+                    Toast.LENGTH_LONG
+                ).show()
+                openAccessibilitySettings()
+            }
+        }
 
         rowBattery.setOnClickListener {
             if (!isIgnoringBatteryOptimizations()) {
@@ -883,6 +1038,28 @@ class MainActivity : AppCompatActivity() {
         // 兜底：打开电池优化设置或 App 信息页（用户手动设置为“不受限制”）
         try {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        } catch (_: Throwable) {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        }
+    }
+
+    /**
+     * Open system Accessibility settings so user can enable the keep-alive AccessibilityService.
+     * Accessibility services must be enabled manually by the user.
+     */
+    private fun openAccessibilitySettings() {
+        // Primary: open Accessibility settings directly
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        } catch (_: Throwable) {
+        }
+
+        // Fallbacks: Settings app / App details
+        try {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
         } catch (_: Throwable) {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
             intent.data = Uri.parse("package:$packageName")

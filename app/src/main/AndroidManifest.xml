@@ -41,6 +41,21 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Accessibility keep-alive (user must enable in system Accessibility settings) -->
+        <service
+            android:name=".KeepAliveAccessibilityService"
+            android:label="@string/a11y_keepalive_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/a11y_keep_alive_config" />
+        </service>
+
     </application>
 
 </manifest>

@@ -77,6 +77,8 @@ class NodeTileService : TileService() {
         if (busy) return
 
         if (NodeService.isRunning()) {
+            // Manual stop from tile -> should not auto-restart.
+            NodeKeepAlive.setDesiredRunning(this, false)
             busy = true
             updateTile(state = Tile.STATE_UNAVAILABLE, subtitle = "停止中…")
             // Deliver STOP to the running foreground service.
@@ -89,6 +91,8 @@ class NodeTileService : TileService() {
                 refreshTileState()
             }
         } else {
+            // User requests start -> mark as desired running.
+            NodeKeepAlive.setDesiredRunning(this, true)
             busy = true
             updateTile(state = Tile.STATE_UNAVAILABLE, subtitle = "启动中…")
             val it = Intent(this, NodeService::class.java).setAction(NodeService.ACTION_START)
