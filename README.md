@@ -1,4 +1,4 @@
-DanmuApiApp 是一个 Android “壳”应用：通过 **nodejs-mobile** 在普通未 Root 的手机上运行 Node.js，并在局域网内提供弹幕 API 服务（前台服务常驻，便于家庭内网/NAS/电视盒子等设备调用）。
+DanmuApiApp 是一个 Android “壳”应用：通过 **nodejs-mobile** 在手机上运行 Node.js，并在局域网内提供弹幕 API 服务（前台服务常驻，便于家庭内网/NAS/电视盒子等设备调用）。
 
 > 本 App 内置的弹幕服务逻辑**基于** `huangxd-/danmu_api`：
 > https://github.com/huangxd-/danmu_api
