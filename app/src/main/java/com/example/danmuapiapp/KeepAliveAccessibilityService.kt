@@ -148,6 +148,12 @@ class KeepAliveAccessibilityService : AccessibilityService() {
             return 5 * 60_000L // 5 minutes
         }
 
+        // Android 13+ missing notification permission blocks auto-start.
+        // Avoid tight retry loops in this case.
+        if (!NodeKeepAlive.hasPostNotificationsPermission(this) && !NodeService.isRunning()) {
+            return 15 * 60_000L
+        }
+
         // When Node is running: check infrequently.
         if (NodeService.isRunning()) {
             val interactive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
@@ -178,7 +184,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         if (!NodeKeepAlive.hasPostNotificationsPermission(this)) {
             if (Build.VERSION.SDK_INT >= 33) {
                 val now = System.currentTimeMillis()
-                if (now - lastPermToastMs > 30_000L) {
+                if (now - lastPermToastMs > 10 * 60_000L) {
                     lastPermToastMs = now
                     Toast.makeText(
                         this,
