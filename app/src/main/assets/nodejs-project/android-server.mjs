@@ -14,6 +14,52 @@ const __dirname = path.dirname(__filename);
 // Persistent home (config/logs are stored outside the module folder)
 const HOME = process.env.DANMU_API_HOME || __dirname;
 const CONFIG_DIR = path.join(HOME, 'config');
+
+const ENV_FILE = path.join(CONFIG_DIR, '.env');
+const YAML_FILE = path.join(CONFIG_DIR, 'config.yaml');
+
+// Config reload debounce + passive reload (no polling):
+// - Prefer fs.watch (event-driven) when available.
+// - If fs.watch is unavailable, DO NOT fall back to fs.watchFile polling (battery drain on mobile).
+//   Instead, we check file mtimes only when requests arrive (throttled).
+let _configReloadTimer = null;
+let _lastConfigStatCheckMs = 0;
+let _lastEnvMtimeMs = 0;
+let _lastYamlMtimeMs = 0;
+
+function _readMtimeMs(file) {
+  try {
+    return fs.statSync(file).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function _recordConfigMtimes() {
+  _lastEnvMtimeMs = _readMtimeMs(ENV_FILE);
+  _lastYamlMtimeMs = _readMtimeMs(YAML_FILE);
+}
+
+function scheduleConfigReload() {
+  if (_configReloadTimer) clearTimeout(_configReloadTimer);
+  _configReloadTimer = setTimeout(() => {
+    log('Config changed, reloading ...');
+    loadConfigOnce();
+  }, 500);
+}
+
+function maybeReloadConfigOnTraffic() {
+  const now = Date.now();
+  if (now - _lastConfigStatCheckMs < 2000) return;
+  _lastConfigStatCheckMs = now;
+
+  const envM = _readMtimeMs(ENV_FILE);
+  const yamlM = _readMtimeMs(YAML_FILE);
+  if (envM > _lastEnvMtimeMs || yamlM > _lastYamlMtimeMs) {
+    scheduleConfigReload();
+  }
+}
+
 const LOG_DIR = path.join(HOME, 'logs');
 
 const HOST = process.env.DANMU_API_HOST || '0.0.0.0';
@@ -83,8 +129,8 @@ function applyEnv(kv, { override = true } = {}) {
 function loadConfigOnce() {
   ensureDirs();
 
-  const envFile = path.join(CONFIG_DIR, '.env');
-  const yamlFile = path.join(CONFIG_DIR, 'config.yaml');
+  const envFile = ENV_FILE;
+  const yamlFile = YAML_FILE;
 
   // 1) YAML first (lower priority)
   if (fs.existsSync(yamlFile)) {
@@ -114,31 +160,27 @@ function loadConfigOnce() {
   } else {
     log('.env not found, skipping:', envFile);
   }
+  _recordConfigMtimes();
 }
 
 function watchConfigs() {
-  const envFile = path.join(CONFIG_DIR, '.env');
-  const yamlFile = path.join(CONFIG_DIR, 'config.yaml');
+  // Watch the config directory if possible (covers file create/rename).
+  try {
+    if (fs.existsSync(CONFIG_DIR)) {
+      fs.watch(CONFIG_DIR, { persistent: false }, () => scheduleConfigReload());
+    }
+  } catch (e) {
+    log('fs.watch(CONFIG_DIR) unavailable:', e?.message || e);
+  }
 
-  let timer = null;
-  const scheduleReload = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      log('Config changed, reloading ...');
-      loadConfigOnce();
-    }, 500);
-  };
-
-  // fs.watch might not be available for some FS; try/catch
-  for (const f of [envFile, yamlFile]) {
+  // Also watch individual files (some platforms are more reliable this way).
+  for (const f of [ENV_FILE, YAML_FILE]) {
     try {
       if (!fs.existsSync(f)) continue;
-      fs.watch(f, { persistent: false }, () => scheduleReload());
-    } catch {
-      // fallback
-      try {
-        fs.watchFile(f, { interval: 2000, persistent: false }, () => scheduleReload());
-      } catch {}
+      fs.watch(f, { persistent: false }, () => scheduleConfigReload());
+    } catch (e) {
+      // No polling fallback here to avoid battery drain on mobile.
+      log('fs.watch unavailable for', f, '- will reload on traffic');
     }
   }
 }
@@ -191,6 +233,8 @@ function createMainServer() {
     try {
       const host = req.headers.host || `127.0.0.1:${PORT}`;
       const fullUrl = new URL(req.url || '/', `http://${host}`);
+
+      maybeReloadConfigOnTraffic();
 
       // Android app uses this endpoint to request a graceful shutdown.
       if (fullUrl.pathname === '/__shutdown') {
@@ -248,6 +292,8 @@ function createProxyServer() {
 
     try {
       const urlObj = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+
+      maybeReloadConfigOnTraffic();
 
       if (urlObj.pathname !== '/proxy') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
