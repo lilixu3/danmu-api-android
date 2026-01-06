@@ -1,9 +1,0 @@
-<resources>
-    <!-- Toolbar title: aligns with menu icon and matches app typography -->
-    <style name="TextAppearance.DanmuApiApp.ToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
-        <item name="android:textSize">22sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/text_primary</item>
-        <item name="android:letterSpacing">0.02</item>
-    </style>
-</resources>
