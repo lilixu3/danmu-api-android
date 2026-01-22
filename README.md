@@ -79,5 +79,5 @@ App 右上角菜单提供：
 
 ## 致谢
 
-- danmu_api：`huangxd-/danmu_api`、`lilixu3/danmu_api`
+- danmu_api：`huangxd-/danmu_api`
 - Node.js on Android：`nodejs-mobile`
