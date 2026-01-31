@@ -1,4 +1,4 @@
-DanmuApiApp 是一个 Android “壳”应用：在**普通未 Root 手机**上通过 **nodejs-mobile** 运行 Node.js，启动本地 HTTP 服务，把手机变成一个局域网可访问的 **danmu_api** 服务端（前台服务常驻）。
+弹幕 API 是一个 Android “壳”应用：在**普通未 Root 手机**上通过 **nodejs-mobile** 运行 Node.js，启动本地 HTTP 服务，把手机变成一个局域网可访问的 **danmu_api** 服务端（前台服务常驻）。
 
 本项目支持：
 
