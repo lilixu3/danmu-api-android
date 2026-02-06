@@ -57,6 +57,7 @@ DanmuApiApp 是一个 Android “壳”应用：在手机/平板上通过 **node
 ## 配置与目录
 
 - 运行时目录（默认）：`/data/user/0/com.example.danmuapiapp/files/`
+- 可自定义运行目录（安卓11+需要授予所有文件访问权限）
 - 配置文件：`config/.env`
 - 多配置档案：`config/profiles/*.env`
 - 核心目录：
