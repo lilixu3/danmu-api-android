@@ -1,0 +1,84 @@
+<resources>
+    <!--
+      Light theme (default)
+      目标：去掉“傻白”，整体更有层次感（柔和的冷暖渐变背景 + 微雾感表面 + 统一的 Material3 配色）。
+    -->
+
+    <!-- App icon background -->
+
+    <!-- Background (used by bg_main.xml) -->
+    <color name="bg_start">#E3F2FD</color>
+    <color name="bg_end">#E0F7FA</color>
+    <color name="glow_primary">#1A0288D1</color>   <!-- ~10% blue -->
+    <color name="glow_secondary">#1A00ACC1</color> <!-- ~10% cyan  -->
+    <color name="glow_tertiary">#1A00BCD4</color>  <!-- ~10% light cyan -->
+
+    <!-- Brand / accent -->
+    <color name="brand_accent">#00BCD4</color>
+    <color name="on_accent">#FFFFFF</color>
+
+    <!-- Text -->
+    <color name="text_primary">#0B1220</color>
+    <color name="text_secondary">#526079</color>
+
+    <!--
+      Surfaces / outlines (light):
+      Blue-cyan theme surfaces with fresh gradient feel.
+    -->
+    <color name="surface_card">#FFFFFF</color>
+    <color name="surface_card_weak">#F5F9FF</color>
+    <color name="surface_sheet">#FFFFFF</color>
+
+    <!-- Accent helpers -->
+    <color name="accent_soft">#E1F5FE</color>
+    <color name="accent_stroke">#B3E5FC</color>
+
+    <!-- Danger helpers -->
+    <color name="danger_text">#DC2626</color>
+
+    <color name="stroke_subtle">#D9E0F0</color>
+    <color name="stroke_button">#CCD5EA</color>
+
+    <color name="icon_tint">#3B4A65</color>
+
+    <!-- Status colors -->
+    <color name="status_ok">#10B981</color>
+    <color name="status_warn">#F59E0B</color>
+    <color name="status_error">#EF4444</color>
+    <!-- Backward-compat alias (older code may still reference this name) -->
+    <color name="status_neutral">#94A3B8</color>
+
+    <!-- Material3 mapping (让 Switch/Chip/Dialog 等组件也跟随统一配色) -->
+    <color name="m3_primary">@color/brand_accent</color>
+    <color name="m3_on_primary">@color/on_accent</color>
+    <color name="m3_primary_container">#E0F7FA</color>
+    <color name="m3_on_primary_container">#001A24</color>
+
+    <color name="m3_secondary">#0097A7</color>
+    <color name="m3_on_secondary">#FFFFFF</color>
+
+    <color name="m3_tertiary">#00BCD4</color>
+    <color name="m3_on_tertiary">#FFFFFF</color>
+    <color name="m3_tertiary_container">#B2EBF2</color>
+    <color name="m3_on_tertiary_container">#001A24</color>
+
+    <color name="m3_error">#DC2626</color>
+    <color name="m3_on_error">#FFFFFF</color>
+
+    <color name="m3_background">@color/bg_start</color>
+    <color name="m3_on_background">@color/text_primary</color>
+    <color name="m3_surface">@color/surface_card</color>
+    <color name="m3_on_surface">@color/text_primary</color>
+    <color name="m3_surface_variant">#E9EEF9</color>
+    <color name="m3_on_surface_variant">#42526A</color>
+    <color name="m3_outline">@color/stroke_button</color>
+    <color name="m3_outline_variant">#D3DBEB</color>
+    <!-- API Card 渐变色 (Light) -->
+    <color name="api_card_gradient_start">#F5F9FF</color>
+    <color name="api_card_gradient_end">#E1F5FE</color>
+
+    <!-- API Icon Container 渐变色 (Light) -->
+    
+    <!-- Divider 渐变色 (Light) -->
+    <color name="divider_gradient_center">#D9E0F0</color>
+</resources>

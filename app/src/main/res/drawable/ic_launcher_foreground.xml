@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 主图标组 - 缩小并居中，确保在安全区域内 -->
+    <group
+        android:scaleX="2.6"
+        android:scaleY="2.6"
+        android:translateX="22"
+        android:translateY="22">
+
+        <!-- 外层圆环 - 代表连接和网络 -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.95"
+            android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z"
+            android:strokeWidth="1.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.3"/>
+
+        <!-- 内部弹幕流动效果 - 三条横线代表弹幕 -->
+        <group
+            android:translateX="0"
+            android:translateY="0">
+            <!-- 第一条弹幕 -->
+            <path
+                android:fillColor="#60A5FA"
+                android:pathData="M6,8h8c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H6c-0.55,0 -1,-0.45 -1,-1v0C5,8.45 5.45,8 6,8z" />
+
+            <!-- 第二条弹幕 -->
+            <path
+                android:fillColor="#34D399"
+                android:pathData="M8,11.5h10c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H8c-0.55,0 -1,-0.45 -1,-1v0C7,11.95 7.45,11.5 8,11.5z" />
+
+            <!-- 第三条弹幕 -->
+            <path
+                android:fillColor="#F472B6"
+                android:pathData="M5,15h7c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H5c-0.55,0 -1,-0.45 -1,-1v0C4,15.45 4.45,15 5,15z" />
+        </group>
+
+        <!-- API 符号 - 右下角小图标 -->
+        <group
+            android:scaleX="0.35"
+            android:scaleY="0.35"
+            android:translateX="17"
+            android:translateY="17">
+            <path
+                android:fillColor="#FBBF24"
+                android:pathData="M12,2L4,5v6.09c0,5.05 3.41,9.76 8,10.91 4.59,-1.15 8,-5.86 8,-10.91V5L12,2zM18,11.09c0,4 -2.55,7.7 -6,8.83 -3.45,-1.13 -6,-4.82 -6,-8.83V6.31l6,-2.12 6,2.12v4.78z" />
+            <path
+                android:fillColor="#FBBF24"
+                android:pathData="M10.5,13l-2.5,-2.5 1.41,-1.41L10.5,10.17l3.59,-3.58L15.5,8l-5,5z" />
+        </group>
+
+    </group>
+</vector>

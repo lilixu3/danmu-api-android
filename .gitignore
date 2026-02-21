@@ -1,0 +1,28 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+/app/src/main/assets/nodejs-project/node_modules
+/dist
+*.jks
+
+# 公开仓库排除（私有/流程类文件）
+/.github/
+/RELEASE.md
+/重开项目提示词.md
+/OPEN_SOURCE_CHECKLIST.md
+/node_modules.zip
+
+# JNI 预编译库（体积大，需自行准备）
+/app/libnode/
+/app/jni-current/
+
+# 构建工具链（非源码）
+/tools/

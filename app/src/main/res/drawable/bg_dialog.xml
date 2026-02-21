@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dialog surface (Settings-like):
+  - Use the same surface token as Settings bottom sheet
+  - No outer stroke (dialogs are floating; the 1dp border can look like an "ugly line")
+  - Corner radius aligned with BottomSheet top radius for visual consistency
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="?attr/colorSurface" />
+    <corners android:radius="28dp" />
+</shape>

@@ -1,0 +1,9 @@
+{
+  "name": "danmuapiapp-node",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "dependencies": {
+    "https-proxy-agent": "7.0.6"
+  }
+}

@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">弹幕API</string>
+    <string name="qs_tile_label">弹幕API</string>
+    <string name="a11y_keepalive_label">弹幕API 保活服务</string>
+    <string name="a11y_keepalive_desc">用于保持"弹幕API"后台服务更稳定：当 Node 前台服务异常退出时自动拉起。不会读取屏幕内容。</string>
+    <string name="notification_channel_name">弹幕API服务</string>
+    <string name="notification_channel_desc">用于显示弹幕API服务运行状态</string>
+
+    <!-- 主题相关 -->
+    <string name="theme_title">主题风格</string>
+    <string name="theme_subtitle">选择你喜欢的配色方案</string>
+    <string name="theme_ocean_blue">海洋蓝</string>
+    <string name="theme_forest_green">森林绿</string>
+    <string name="theme_sunset_orange">日落橙</string>
+    <string name="theme_purple_dream">紫色梦幻</string>
+    <string name="theme_rose_pink">玫瑰粉</string>
+    <string name="theme_night_sky">夜空蓝</string>
+    <string name="theme_autumn_brown">秋日棕</string>
+    <string name="theme_cherry_red">樱桃红</string>
+    <string name="theme_mint_green">薄荷绿</string>
+    <string name="theme_coral_orange">珊瑚橙</string>
+    <string name="theme_midnight_black">午夜黑</string>
+    <string name="theme_sakura_pink">樱花粉</string>
+    <string name="theme_aurora_purple">极光紫</string>
+    <string name="theme_restart_hint">主题已切换</string>
+</resources>
