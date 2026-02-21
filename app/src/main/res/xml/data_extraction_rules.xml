@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+
+    <cloud-backup>
+        <!-- Keep backups small and avoid syncing sensitive runtime data. -->
+        <exclude domain="file" path="nodejs-project/config" />
+        <exclude domain="file" path="nodejs-project/logs" />
+        <exclude domain="file" path="nodejs-project/.cache" />
+        <exclude domain="file" path="nodejs-project/danmu_api_stable" />
+        <exclude domain="file" path="nodejs-project/danmu_api_dev" />
+        <exclude domain="file" path="nodejs-project/danmu_api_custom" />
+        <exclude domain="file" path="nodejs-project/node_modules" />
+    </cloud-backup>
+
+    <device-transfer>
+        <!-- Same exclusions for device-to-device transfer. -->
+        <exclude domain="file" path="nodejs-project/config" />
+        <exclude domain="file" path="nodejs-project/logs" />
+        <exclude domain="file" path="nodejs-project/.cache" />
+        <exclude domain="file" path="nodejs-project/danmu_api_stable" />
+        <exclude domain="file" path="nodejs-project/danmu_api_dev" />
+        <exclude domain="file" path="nodejs-project/danmu_api_custom" />
+        <exclude domain="file" path="nodejs-project/node_modules" />
+    </device-transfer>
+
+</data-extraction-rules>

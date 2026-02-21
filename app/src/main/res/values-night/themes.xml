@@ -1,0 +1,101 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.DanmuApiApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Material3 配色（深浅色在 colors.xml 中） -->
+        <item name="colorPrimary">@color/m3_primary</item>
+        <item name="colorOnPrimary">@color/m3_on_primary</item>
+        <item name="colorPrimaryContainer">@color/m3_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/m3_on_primary_container</item>
+
+        <item name="colorSecondary">@color/m3_secondary</item>
+        <item name="colorOnSecondary">@color/m3_on_secondary</item>
+
+        <!--
+            IMPORTANT (主题联动修复 - 夜间模式):
+            在夜间模式下，TonalButton / 小图标按钮容器 / 底栏选中指示等
+            会依赖 colorSecondaryContainer。
+
+            如果这里写死为 m3_secondary_container（默认蓝灰/青蓝），
+            那么即使用户在应用内切换到「森林绿/日落橙/樱桃红」等主题，
+            这些控件仍会保持蓝灰色。
+
+            这里把 SecondaryContainer 映射到当前主题的 PrimaryContainer，
+            让夜间模式也能完整跟随 ThemePrefs 的主题切换。
+        -->
+        <item name="colorSecondaryContainer">?attr/colorPrimaryContainer</item>
+        <item name="colorOnSecondaryContainer">?attr/colorOnPrimaryContainer</item>
+
+        <item name="colorTertiary">@color/m3_tertiary</item>
+        <item name="colorOnTertiary">@color/m3_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/m3_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/m3_on_tertiary_container</item>
+
+        <item name="colorError">@color/m3_error</item>
+        <item name="colorOnError">@color/m3_on_error</item>
+
+        <item name="colorOnBackground">@color/m3_on_background</item>
+        <item name="colorSurface">@color/m3_surface</item>
+        <item name="colorOnSurface">@color/m3_on_surface</item>
+        <item name="colorSurfaceVariant">@color/m3_surface_variant</item>
+        <item name="colorSurface_weak">@color/surface_card_weak</item>
+        <item name="colorOnSurfaceVariant">@color/m3_on_surface_variant</item>
+
+        <!--
+            Material3 surface 容器色（用于多数 M3 组件与弹窗）
+            同上：避免在夜间模式下写死为固定「蓝灰」surface。
+            让「关于」三张卡片、更多选项弹窗卡片等也随主题切换。
+        -->
+        <item name="colorSurfaceContainerLowest">?attr/colorSurface</item>
+        <item name="colorSurfaceContainerLow">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainer">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainerHigh">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainerHighest">?attr/colorSurface</item>
+        <item name="colorOutline">@color/m3_outline</item>
+        <item name="colorOutlineVariant">@color/m3_outline_variant</item>
+
+        <item name="android:colorBackground">@color/m3_background</item>
+        <item name="android:windowBackground">@color/m3_background</item>
+
+        <!--
+          注意：避免在此处设置仅 AppCompat 才有的属性（例如 `colorBackground`），
+          某些工具链在纯 Material3 父主题下可能缺少该属性，导致 aapt2 链接失败。
+          平台背景已通过 android:colorBackground/windowBackground 覆盖。
+        -->
+        <item name="colorBackgroundFloating">@color/surface_sheet</item>
+
+        <!-- 弹出菜单样式（右上角更多） -->
+        <item name="actionBarPopupTheme">@style/ThemeOverlay.DanmuApiApp.PopupMenu</item>
+        <item name="popupMenuStyle">@style/Widget.DanmuApiApp.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.DanmuApiApp.PopupMenu</item>
+
+        <!-- 输入框样式（设置页/表单） -->
+        <item name="textInputStyle">@style/Widget.DanmuApiApp.TextInputLayout</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">false</item>
+
+        <!-- 对话框样式保持一致 -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.DanmuApiApp.MaterialAlertDialog</item>
+    
+        <!-- 自定义令牌默认值（夜间模式兜底） -->
+        <item name="danmuBgStart">@color/bg_start</item>
+        <item name="danmuBgEnd">@color/bg_end</item>
+        <item name="danmuGlowPrimary">@color/glow_primary</item>
+        <item name="danmuGlowSecondary">@color/glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/accent_soft</item>
+        <item name="danmuAccentStroke">@color/accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/api_card_gradient_end</item>
+</style>
+
+    <!-- 启动页专用主题：夜间模式下也保持一致背景，避免闪白 -->
+    <style name="Theme.DanmuApiApp.Startup" parent="Theme.DanmuApiApp.NightSky">
+        <!-- 启动阶段还没来得及读取用户主题偏好，先用默认主题色保证不会“白屏闪一下” -->
+        <item name="android:windowBackground">@drawable/bg_main</item>
+        <item name="android:colorBackground">?attr/danmuBgStart</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

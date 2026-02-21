@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+
+    <!--
+      Keep backups small and avoid syncing sensitive runtime data.
+      These folders can be re-created by AssetCopier / updater on next launch.
+    -->
+
+    <!-- Runtime config may include TOKEN / cookies, so exclude it by default. -->
+    <exclude domain="file" path="nodejs-project/config" />
+
+    <!-- Logs can contain request headers / cookies / tokens. -->
+    <exclude domain="file" path="nodejs-project/logs" />
+
+    <!-- Cache / temp files. -->
+    <exclude domain="file" path="nodejs-project/.cache" />
+
+    <!-- Downloaded danmu_api variants: can be re-downloaded. -->
+    <exclude domain="file" path="nodejs-project/danmu_api_stable" />
+    <exclude domain="file" path="nodejs-project/danmu_api_dev" />
+    <exclude domain="file" path="nodejs-project/danmu_api_custom" />
+
+    <!-- Extracted node_modules: can be re-extracted from assets. -->
+    <exclude domain="file" path="nodejs-project/node_modules" />
+
+</full-backup-content>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 现代渐变背景 - 从深蓝到青色 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="135"
+                android:startColor="#1E3A8A"
+                android:centerColor="#3B82F6"
+                android:endColor="#06B6D4"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 装饰性光晕 - 增加科技感和深度 -->
+    <item android:gravity="center">
+        <shape android:shape="oval">
+            <size android:width="80dp" android:height="80dp" />
+            <solid android:color="#3060A5FA" />
+        </shape>
+    </item>
+
+    <!-- 小装饰圆点 -->
+    <item android:gravity="top|left" android:top="20dp" android:left="20dp">
+        <shape android:shape="oval">
+            <size android:width="6dp" android:height="6dp" />
+            <solid android:color="#30FFFFFF" />
+        </shape>
+    </item>
+
+    <item android:gravity="top|right" android:top="20dp" android:right="20dp">
+        <shape android:shape="oval">
+            <size android:width="4dp" android:height="4dp" />
+            <solid android:color="#30FFFFFF" />
+        </shape>
+    </item>
+
+    <item android:gravity="bottom|left" android:bottom="20dp" android:left="20dp">
+        <shape android:shape="oval">
+            <size android:width="4dp" android:height="4dp" />
+            <solid android:color="#30FFFFFF" />
+        </shape>
+    </item>
+
+    <item android:gravity="bottom|right" android:bottom="20dp" android:right="20dp">
+        <shape android:shape="oval">
+            <size android:width="6dp" android:height="6dp" />
+            <solid android:color="#30FFFFFF" />
+        </shape>
+    </item>
+
+</layer-list>

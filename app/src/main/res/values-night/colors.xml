@@ -1,0 +1,65 @@
+<resources>
+    <!-- 暗色主题：独立霓虹夜景风 -->
+
+    <color name="bg_start">#090E19</color>
+    <color name="bg_end">#151E33</color>
+    <color name="glow_primary">#337DCFFF</color>
+    <color name="glow_secondary">#2A73DACA</color>
+    <color name="glow_tertiary">#33C4B5FD</color>
+
+    <color name="brand_accent">#7DCFFF</color>
+    <color name="on_accent">#031A28</color>
+
+    <color name="text_primary">#E6EAFA</color>
+    <color name="text_secondary">#9CA8CA</color>
+
+    <color name="surface_card">#10192B</color>
+    <color name="surface_card_weak">#0D1424</color>
+    <color name="surface_sheet">#10192B</color>
+
+    <color name="accent_soft">#20355A</color>
+    <color name="accent_stroke">#3A7DCFFF</color>
+
+    <color name="danger_text">#FF8BA7</color>
+
+    <color name="stroke_subtle">#2A9CA8CA</color>
+    <color name="stroke_button">#3F7A88B6</color>
+
+    <color name="icon_tint">#DCE3FB</color>
+
+    <color name="status_ok">#73DACA</color>
+    <color name="status_warn">#F6C177</color>
+    <color name="status_error">#FF8BA7</color>
+    <color name="status_neutral">#9CA8CA</color>
+
+    <!-- Material3 映射 -->
+    <color name="m3_primary">@color/brand_accent</color>
+    <color name="m3_on_primary">@color/on_accent</color>
+    <color name="m3_primary_container">#12324A</color>
+    <color name="m3_on_primary_container">#BEE8FF</color>
+
+    <color name="m3_secondary">#C4B5FD</color>
+    <color name="m3_on_secondary">#2B1D46</color>
+
+    <color name="m3_tertiary">#73DACA</color>
+    <color name="m3_on_tertiary">#042620</color>
+    <color name="m3_tertiary_container">#123F38</color>
+    <color name="m3_on_tertiary_container">#B7F4EA</color>
+
+    <color name="m3_error">@color/danger_text</color>
+    <color name="m3_on_error">#3A0618</color>
+
+    <color name="m3_background">@color/bg_start</color>
+    <color name="m3_on_background">@color/text_primary</color>
+    <color name="m3_surface">#0E1422</color>
+    <color name="m3_on_surface">@color/text_primary</color>
+    <color name="m3_surface_variant">#202A42</color>
+    <color name="m3_on_surface_variant">#9CA8CA</color>
+    <color name="m3_outline">#4F5E86</color>
+    <color name="m3_outline_variant">#313D60</color>
+
+    <color name="api_card_gradient_start">#13203A</color>
+    <color name="api_card_gradient_end">#1C2F54</color>
+
+    <color name="divider_gradient_center">#2A4F5E86</color>
+</resources>

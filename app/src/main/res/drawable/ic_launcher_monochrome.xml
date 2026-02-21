@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 单色版本 - 用于 Android 13+ 的主题图标 -->
+    <group
+        android:scaleX="2.8"
+        android:scaleY="2.8"
+        android:translateX="21"
+        android:translateY="21">
+
+        <!-- 外层圆环 -->
+        <path
+            android:fillColor="#000000"
+            android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z" />
+
+        <!-- 弹幕线条 -->
+        <path
+            android:fillColor="#000000"
+            android:pathData="M6,8h8c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H6c-0.55,0 -1,-0.45 -1,-1v0C5,8.45 5.45,8 6,8z" />
+
+        <path
+            android:fillColor="#000000"
+            android:pathData="M8,11.5h10c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H8c-0.55,0 -1,-0.45 -1,-1v0C7,11.95 7.45,11.5 8,11.5z" />
+
+        <path
+            android:fillColor="#000000"
+            android:pathData="M5,15h7c0.55,0 1,0.45 1,1v0c0,0.55 -0.45,1 -1,1H5c-0.55,0 -1,-0.45 -1,-1v0C4,15.45 4.45,15 5,15z" />
+
+    </group>
+</vector>

@@ -1,0 +1,956 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- 沉浸式状态栏：内容绘制到系统栏下方，由 MainActivity 处理 Insets -->
+    <style name="Theme.DanmuApiApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Material3 配色（深浅色在 colors.xml 中） -->
+        <item name="colorPrimary">@color/m3_primary</item>
+        <item name="colorOnPrimary">@color/m3_on_primary</item>
+        <item name="colorPrimaryContainer">@color/m3_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/m3_on_primary_container</item>
+
+        <item name="colorSecondary">@color/m3_secondary</item>
+        <item name="colorOnSecondary">@color/m3_on_secondary</item>
+        <!--
+            IMPORTANT (主题联动修复):
+            App 的「主题色」会随 ThemePrefs 在多套配色间切换，但 Material3 的一些
+            *容器色*（例如 TonalButton / NavigationBar ActiveIndicator / 小图标按钮底色）
+            默认依赖 colorSecondaryContainer / colorOnSecondaryContainer。
+            之前仅在基础主题里写死了 m3_* 颜色，导致这些控件在切换主题时仍保持“蓝灰色”。
+
+            这里把 SecondaryContainer 映射到 PrimaryContainer（以及对应的 on 色），
+            让 TonalButton、底栏选中指示、复制/下载小按钮背景等都会随主题变化。
+        -->
+        <item name="colorSecondaryContainer">?attr/colorPrimaryContainer</item>
+        <item name="colorOnSecondaryContainer">?attr/colorOnPrimaryContainer</item>
+
+        <item name="colorTertiary">@color/m3_tertiary</item>
+        <item name="colorOnTertiary">@color/m3_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/m3_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/m3_on_tertiary_container</item>
+
+        <item name="colorError">@color/m3_error</item>
+        <item name="colorOnError">@color/m3_on_error</item>
+
+        <item name="colorOnBackground">@color/m3_on_background</item>
+        <item name="colorSurface">@color/m3_surface</item>
+        <item name="colorOnSurface">@color/m3_on_surface</item>
+        <item name="colorSurfaceVariant">@color/m3_surface_variant</item>
+        <item name="colorSurface_weak">@color/surface_card_weak</item>
+        <item name="colorOnSurfaceVariant">@color/m3_on_surface_variant</item>
+
+        <!--
+            Material3 surface 容器色（用于多数 M3 组件与弹窗）
+            同上：避免写死基础蓝灰色，让「关于」三张卡片、更多选项弹窗卡片等随主题切换。
+        -->
+        <item name="colorSurfaceContainerLowest">?attr/colorSurface</item>
+        <item name="colorSurfaceContainerLow">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainer">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainerHigh">?attr/colorSurfaceVariant</item>
+        <item name="colorSurfaceContainerHighest">?attr/colorSurface</item>
+        <item name="colorOutline">@color/m3_outline</item>
+        <item name="colorOutlineVariant">@color/m3_outline_variant</item>
+
+        <!-- 平台背景跟随同一套颜色，避免弹窗/菜单闪白 -->
+        <item name="android:colorBackground">@color/m3_background</item>
+        <item name="android:windowBackground">@color/m3_background</item>
+
+        <!--
+          弹出菜单/更多菜单背景依赖 `colorBackgroundFloating`。
+          部分机型在暗色模式下仍可能保持纯白，不显式覆盖会导致文字不可读。
+        -->
+        <!--
+          注意：避免在此处设置仅 AppCompat 才有的属性（例如 `colorBackground`），
+          某些工具链在纯 Material3 父主题下可能缺少该属性，导致 aapt2 链接失败。
+          平台背景已通过 android:colorBackground/windowBackground 覆盖。
+        -->
+        <item name="colorBackgroundFloating">@color/surface_sheet</item>
+
+        <!-- 弹出菜单样式（右上角更多） -->
+        <item name="actionBarPopupTheme">@style/ThemeOverlay.DanmuApiApp.PopupMenu</item>
+        <item name="popupMenuStyle">@style/Widget.DanmuApiApp.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.DanmuApiApp.PopupMenu</item>
+
+        <!-- 输入框样式（设置页/表单） -->
+        <item name="textInputStyle">@style/Widget.DanmuApiApp.TextInputLayout</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- 浅色主题使用深色系统栏图标 -->
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+
+        <!-- 弹窗/底部表单样式 -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.DanmuApiApp.MaterialAlertDialog</item>
+
+        <!-- 自定义令牌默认值（兜底） -->
+        <item name="danmuBgStart">@color/bg_start</item>
+        <item name="danmuBgEnd">@color/bg_end</item>
+        <item name="danmuGlowPrimary">@color/glow_primary</item>
+        <item name="danmuGlowSecondary">@color/glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/accent_soft</item>
+        <item name="danmuAccentStroke">@color/accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/api_card_gradient_end</item>
+
+        <!-- 底部导航配色（兜底） -->
+        <item name="bottomNavBg">@color/theme_night_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_night_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_night_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_night_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_night_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_night_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_night_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_night_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_night_input_field_stroke</item>
+    </style>
+
+    <!-- 启动页专用主题：避免系统默认白底闪烁 -->
+    <style name="Theme.DanmuApiApp.Startup" parent="Theme.DanmuApiApp.NightSky">
+        <!-- 启动阶段还没来得及读取用户主题偏好，先用默认主题色保证不会“白屏闪一下” -->
+        <item name="android:windowBackground">@drawable/bg_main</item>
+        <item name="android:colorBackground">?attr/danmuBgStart</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- 圆角对话框（关于/电池提示等） -->
+    <style name="ThemeOverlay.DanmuApiApp.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.DanmuApiApp.Dialog</item>
+        <!-- 对话框表面颜色与设置表单一致 -->
+        <item name="colorSurface">@color/surface_sheet</item>
+
+        <!-- 统一窗口背景，避免部分 ROM 出现双层边线 -->
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
+        <!-- 统一遮罩强度 -->
+        <item name="android:backgroundDimAmount">0.35</item>
+    </style>
+
+    <style name="ShapeAppearance.DanmuApiApp.Dialog" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">28dp</item>
+    </style>
+
+    <!-- 设置底部表单 -->
+    <style name="ThemeOverlay.DanmuApiApp.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.DanmuApiApp.BottomSheet</item>
+        <!-- 防止部分 ROM 白角/闪白 -->
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <!-- 工具栏更多菜单（右上角三点） -->
+    <style name="ThemeOverlay.DanmuApiApp.PopupMenu" parent="ThemeOverlay.AppCompat.DayNight">
+        <item name="android:popupBackground">@drawable/bg_popup_menu</item>
+        <item name="colorBackgroundFloating">@color/surface_sheet</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+    </style>
+
+    <style name="Widget.DanmuApiApp.PopupMenu" parent="Widget.AppCompat.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_popup_menu</item>
+    </style>
+
+    <!-- TextInputLayout 默认样式（避免暗色模式白底） -->
+    <style name="Widget.DanmuApiApp.TextInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxBackgroundColor">?attr/inputFieldBg</item>
+        <item name="boxStrokeColor">?attr/inputFieldStroke</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="boxStrokeWidthFocused">2dp</item>
+        <item name="hintTextColor">@color/text_secondary</item>
+        <item name="helperTextTextColor">@color/text_secondary</item>
+        <item name="errorTextColor">@color/danger_text</item>
+        <item name="endIconTint">@color/icon_tint</item>
+        <item name="startIconTint">@color/icon_tint</item>
+    </style>
+
+    <!-- 强调版 TextInputLayout：用于关键入口（URL/关键字/快速推送） -->
+    <style name="Widget.DanmuApiApp.TextInputLayout.Highlight" parent="Widget.DanmuApiApp.TextInputLayout">
+        <item name="boxBackgroundColor">?attr/inputFieldBg</item>
+        <item name="boxStrokeColor">?attr/inputFieldStroke</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="boxStrokeWidthFocused">2dp</item>
+    </style>
+
+    <style name="Widget.DanmuApiApp.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.DanmuApiApp.BottomSheet</item>
+        <item name="backgroundTint">@color/surface_sheet</item>
+        <!--
+          部分 ROM 可能忽略 backgroundTint，这里提供显式背景兜底，避免闪白。
+        -->
+        <item name="android:background">@drawable/bg_sheet</item>
+    </style>
+
+    <style name="ShapeAppearance.DanmuApiApp.BottomSheet" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSizeTopLeft">28dp</item>
+        <item name="cornerSizeTopRight">28dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+
+    <!-- ========================================
+         13 套主题样式定义
+         ======================================== -->
+
+    <!-- 主题 1：海洋蓝（默认） -->
+        <style name="Theme.DanmuApiApp.OceanBlue" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_ocean_primary</item>
+        <item name="colorOnPrimary">@color/theme_ocean_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_ocean_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_ocean_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_ocean_secondary</item>
+        <item name="colorOnSecondary">@color/theme_ocean_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_ocean_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_ocean_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_ocean_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_ocean_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_ocean_bg_start</item>
+        <item name="android:windowBackground">@color/theme_ocean_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_ocean_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_ocean_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_ocean_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_ocean_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_ocean_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_ocean_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_ocean_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_ocean_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_ocean_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_ocean_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_ocean_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_ocean_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_ocean_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_ocean_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_ocean_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_ocean_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_ocean_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_ocean_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_ocean_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_ocean_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 2：森林绿 -->
+        <style name="Theme.DanmuApiApp.ForestGreen" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_forest_primary</item>
+        <item name="colorOnPrimary">@color/theme_forest_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_forest_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_forest_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_forest_secondary</item>
+        <item name="colorOnSecondary">@color/theme_forest_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_forest_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_forest_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_forest_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_forest_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_forest_bg_start</item>
+        <item name="android:windowBackground">@color/theme_forest_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_forest_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_forest_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_forest_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_forest_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_forest_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_forest_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_forest_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_forest_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_forest_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_forest_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_forest_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_forest_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_forest_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_forest_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_forest_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_forest_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_forest_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_forest_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_forest_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_forest_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 3：日落橙 -->
+        <style name="Theme.DanmuApiApp.SunsetOrange" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_sunset_primary</item>
+        <item name="colorOnPrimary">@color/theme_sunset_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_sunset_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_sunset_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_sunset_secondary</item>
+        <item name="colorOnSecondary">@color/theme_sunset_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_sunset_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_sunset_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_sunset_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_sunset_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_sunset_bg_start</item>
+        <item name="android:windowBackground">@color/theme_sunset_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_sunset_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_sunset_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_sunset_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_sunset_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_sunset_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_sunset_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_sunset_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_sunset_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_sunset_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_sunset_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_sunset_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_sunset_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_sunset_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_sunset_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_sunset_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_sunset_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_sunset_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_sunset_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_sunset_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_sunset_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 4：紫色梦幻 -->
+        <style name="Theme.DanmuApiApp.PurpleDream" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_purple_primary</item>
+        <item name="colorOnPrimary">@color/theme_purple_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_purple_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_purple_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_purple_secondary</item>
+        <item name="colorOnSecondary">@color/theme_purple_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_purple_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_purple_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_purple_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_purple_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_purple_bg_start</item>
+        <item name="android:windowBackground">@color/theme_purple_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_purple_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_purple_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_purple_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_purple_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_purple_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_purple_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_purple_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_purple_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_purple_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_purple_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_purple_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_purple_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_purple_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_purple_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_purple_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_purple_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_purple_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_purple_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_purple_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_purple_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 5：玫瑰粉 -->
+        <style name="Theme.DanmuApiApp.RosePink" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_rose_primary</item>
+        <item name="colorOnPrimary">@color/theme_rose_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_rose_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_rose_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_rose_secondary</item>
+        <item name="colorOnSecondary">@color/theme_rose_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_rose_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_rose_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_rose_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_rose_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_rose_bg_start</item>
+        <item name="android:windowBackground">@color/theme_rose_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_rose_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_rose_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_rose_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_rose_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_rose_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_rose_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_rose_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_rose_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_rose_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_rose_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_rose_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_rose_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_rose_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_rose_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_rose_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_rose_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_rose_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_rose_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_rose_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_rose_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 6：夜空蓝 -->
+        <style name="Theme.DanmuApiApp.NightSky" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_night_primary</item>
+        <item name="colorOnPrimary">@color/theme_night_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_night_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_night_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_night_secondary</item>
+        <item name="colorOnSecondary">@color/theme_night_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_night_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_night_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_night_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_night_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_night_bg_start</item>
+        <item name="android:windowBackground">@color/theme_night_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_night_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_night_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_night_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_night_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_night_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_night_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_night_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_night_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_night_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_night_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_night_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_night_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_night_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_night_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_night_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_night_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_night_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_night_input_field_stroke</item>
+    </style>
+
+    <!-- 主题 7：秋日棕 -->
+        <style name="Theme.DanmuApiApp.AutumnBrown" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_autumn_primary</item>
+        <item name="colorOnPrimary">@color/theme_autumn_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_autumn_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_autumn_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_autumn_secondary</item>
+        <item name="colorOnSecondary">@color/theme_autumn_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_autumn_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_autumn_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_autumn_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_autumn_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_autumn_bg_start</item>
+        <item name="android:windowBackground">@color/theme_autumn_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_autumn_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_autumn_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_autumn_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_autumn_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_autumn_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_autumn_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_autumn_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_autumn_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_autumn_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_autumn_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_autumn_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_autumn_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_autumn_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_autumn_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_autumn_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_autumn_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_autumn_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_autumn_input_field_stroke</item>
+    </style>
+
+    <!-- 主题 8：樱桃红 -->
+        <style name="Theme.DanmuApiApp.CherryRed" parent="Theme.DanmuApiApp">
+        <!-- 核心配色 -->
+        <item name="colorPrimary">@color/theme_cherry_primary</item>
+        <item name="colorOnPrimary">@color/theme_cherry_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_cherry_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_cherry_on_primary_container</item>
+
+        <item name="colorSecondary">@color/theme_cherry_secondary</item>
+        <item name="colorOnSecondary">@color/theme_cherry_on_secondary</item>
+
+        <item name="colorTertiary">@color/theme_cherry_accent</item>
+
+        <!-- 背景/表面 -->
+        <item name="colorSurface">@color/theme_cherry_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_cherry_surface_variant</item>
+
+        <item name="colorSurface_weak">@color/theme_cherry_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+
+        <item name="android:colorBackground">@color/theme_cherry_bg_start</item>
+        <item name="android:windowBackground">@color/theme_cherry_bg_start</item>
+
+        <!-- 描边 -->
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+
+        <!-- 自定义令牌（用于 drawable 和特殊卡片） -->
+        <item name="danmuBgStart">@color/theme_cherry_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_cherry_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_cherry_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_cherry_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_cherry_glow_tertiary</item>
+
+        <item name="danmuAccentSoft">@color/theme_cherry_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_cherry_accent_stroke</item>
+
+        <item name="danmuApiCardGradientStart">@color/theme_cherry_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_cherry_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_cherry_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_cherry_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_cherry_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_cherry_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_cherry_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_cherry_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_cherry_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_cherry_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_cherry_input_field_stroke</item>
+    </style>
+
+    <!-- ========================================
+         新增主题样式定义
+         ======================================== -->
+
+    <!-- 主题 9：薄荷绿 -->
+    <style name="Theme.DanmuApiApp.MintGreen" parent="Theme.DanmuApiApp">
+        <item name="colorPrimary">@color/theme_mint_primary</item>
+        <item name="colorOnPrimary">@color/theme_mint_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_mint_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_mint_on_primary_container</item>
+        <item name="colorSecondary">@color/theme_mint_secondary</item>
+        <item name="colorOnSecondary">@color/theme_mint_on_secondary</item>
+        <item name="colorTertiary">@color/theme_mint_accent</item>
+        <item name="colorSurface">@color/theme_mint_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_mint_surface_variant</item>
+        <item name="colorSurface_weak">@color/theme_mint_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="android:colorBackground">@color/theme_mint_bg_start</item>
+        <item name="android:windowBackground">@color/theme_mint_bg_start</item>
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+        <item name="danmuBgStart">@color/theme_mint_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_mint_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_mint_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_mint_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_mint_glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/theme_mint_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_mint_accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/theme_mint_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_mint_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_mint_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_mint_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_mint_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_mint_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_mint_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_mint_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_mint_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_mint_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_mint_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_mint_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_mint_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 10：珊瑚橙 -->
+    <style name="Theme.DanmuApiApp.CoralOrange" parent="Theme.DanmuApiApp">
+        <item name="colorPrimary">@color/theme_coral_primary</item>
+        <item name="colorOnPrimary">@color/theme_coral_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_coral_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_coral_on_primary_container</item>
+        <item name="colorSecondary">@color/theme_coral_secondary</item>
+        <item name="colorOnSecondary">@color/theme_coral_on_secondary</item>
+        <item name="colorTertiary">@color/theme_coral_accent</item>
+        <item name="colorSurface">@color/theme_coral_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_coral_surface_variant</item>
+        <item name="colorSurface_weak">@color/theme_coral_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="android:colorBackground">@color/theme_coral_bg_start</item>
+        <item name="android:windowBackground">@color/theme_coral_bg_start</item>
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+        <item name="danmuBgStart">@color/theme_coral_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_coral_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_coral_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_coral_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_coral_glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/theme_coral_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_coral_accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/theme_coral_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_coral_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_coral_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_coral_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_coral_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_coral_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_coral_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_coral_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_coral_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_coral_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_coral_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_coral_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_coral_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 11：午夜黑 -->
+    <style name="Theme.DanmuApiApp.MidnightBlack" parent="Theme.DanmuApiApp">
+        <item name="colorPrimary">@color/theme_midnight_primary</item>
+        <item name="colorOnPrimary">@color/theme_midnight_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_midnight_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_midnight_on_primary_container</item>
+        <item name="colorSecondary">@color/theme_midnight_secondary</item>
+        <item name="colorOnSecondary">@color/theme_midnight_on_secondary</item>
+        <item name="colorTertiary">@color/theme_midnight_accent</item>
+        <item name="colorSurface">@color/theme_midnight_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_midnight_surface_variant</item>
+        <item name="colorSurface_weak">@color/theme_midnight_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="android:colorBackground">@color/theme_midnight_bg_start</item>
+        <item name="android:windowBackground">@color/theme_midnight_bg_start</item>
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+        <item name="danmuBgStart">@color/theme_midnight_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_midnight_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_midnight_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_midnight_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_midnight_glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/theme_midnight_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_midnight_accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/theme_midnight_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_midnight_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_midnight_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_midnight_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_midnight_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_midnight_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_midnight_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_midnight_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_midnight_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_midnight_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_midnight_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_midnight_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_midnight_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 12：樱花粉 -->
+    <style name="Theme.DanmuApiApp.SakuraPink" parent="Theme.DanmuApiApp">
+        <item name="colorPrimary">@color/theme_sakura_primary</item>
+        <item name="colorOnPrimary">@color/theme_sakura_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_sakura_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_sakura_on_primary_container</item>
+        <item name="colorSecondary">@color/theme_sakura_secondary</item>
+        <item name="colorOnSecondary">@color/theme_sakura_on_secondary</item>
+        <item name="colorTertiary">@color/theme_sakura_accent</item>
+        <item name="colorSurface">@color/theme_sakura_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_sakura_surface_variant</item>
+        <item name="colorSurface_weak">@color/theme_sakura_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="android:colorBackground">@color/theme_sakura_bg_start</item>
+        <item name="android:windowBackground">@color/theme_sakura_bg_start</item>
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+        <item name="danmuBgStart">@color/theme_sakura_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_sakura_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_sakura_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_sakura_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_sakura_glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/theme_sakura_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_sakura_accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/theme_sakura_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_sakura_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_sakura_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_sakura_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_sakura_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_sakura_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_sakura_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_sakura_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_sakura_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_sakura_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_sakura_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_sakura_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_sakura_settings_card_stroke</item>
+    </style>
+
+    <!-- 主题 13：极光紫 -->
+    <style name="Theme.DanmuApiApp.AuroraPurple" parent="Theme.DanmuApiApp">
+        <item name="colorPrimary">@color/theme_aurora_primary</item>
+        <item name="colorOnPrimary">@color/theme_aurora_on_primary</item>
+        <item name="colorPrimaryContainer">@color/theme_aurora_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/theme_aurora_on_primary_container</item>
+        <item name="colorSecondary">@color/theme_aurora_secondary</item>
+        <item name="colorOnSecondary">@color/theme_aurora_on_secondary</item>
+        <item name="colorTertiary">@color/theme_aurora_accent</item>
+        <item name="colorSurface">@color/theme_aurora_surface</item>
+        <item name="colorSurfaceVariant">@color/theme_aurora_surface_variant</item>
+        <item name="colorSurface_weak">@color/theme_aurora_surface_variant</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="android:colorBackground">@color/theme_aurora_bg_start</item>
+        <item name="android:windowBackground">@color/theme_aurora_bg_start</item>
+        <item name="colorOutline">@color/stroke_button</item>
+        <item name="colorOutlineVariant">@color/stroke_subtle</item>
+        <item name="danmuBgStart">@color/theme_aurora_bg_start</item>
+        <item name="danmuBgEnd">@color/theme_aurora_bg_end</item>
+        <item name="danmuGlowPrimary">@color/theme_aurora_glow_primary</item>
+        <item name="danmuGlowSecondary">@color/theme_aurora_glow_secondary</item>
+        <item name="danmuGlowTertiary">@color/theme_aurora_glow_tertiary</item>
+        <item name="danmuAccentSoft">@color/theme_aurora_primary_container</item>
+        <item name="danmuAccentStroke">@color/theme_aurora_accent_stroke</item>
+        <item name="danmuApiCardGradientStart">@color/theme_aurora_api_card_gradient_start</item>
+        <item name="danmuApiCardGradientEnd">@color/theme_aurora_api_card_gradient_end</item>
+
+        <!-- 底部导航配色 -->
+        <item name="bottomNavBg">@color/theme_aurora_bottom_nav_bg</item>
+        <item name="bottomNavSelected">@color/theme_aurora_bottom_nav_selected</item>
+        <item name="bottomNavUnselected">@color/theme_aurora_bottom_nav_unselected</item>
+
+        <!-- 参数卡片配色 -->
+        <item name="paramCardBg">@color/theme_aurora_param_card_bg</item>
+        <item name="paramCardStroke">@color/theme_aurora_param_card_stroke</item>
+
+        <!-- 本地地址卡片配色 -->
+        <item name="localAddressCardBg">@color/theme_aurora_local_address_card_bg</item>
+        <item name="localAddressCardStroke">@color/theme_aurora_local_address_card_stroke</item>
+
+        <!-- 输入框配色 -->
+        <item name="inputFieldBg">@color/theme_aurora_input_field_bg</item>
+        <item name="inputFieldStroke">@color/theme_aurora_input_field_stroke</item>
+
+        <!-- 设置卡片配色 -->
+        <item name="settingsCardBg">@color/theme_aurora_settings_card_bg</item>
+        <item name="settingsCardStroke">@color/theme_aurora_settings_card_stroke</item>
+    </style>
+</resources>

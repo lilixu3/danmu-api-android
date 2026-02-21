@@ -1,0 +1,39 @@
+<resources>
+    <!-- Custom theme tokens to make *all* UI colors switch with ThemePrefs -->
+    <!-- A slightly tinted surface used by list cards. (referenced as ?attr/colorSurface_weak) -->
+    <attr name="colorSurface_weak" format="color"/>
+
+    <attr name="danmuBgStart" format="color"/>
+    <attr name="danmuBgEnd" format="color"/>
+
+    <attr name="danmuGlowPrimary" format="color"/>
+    <attr name="danmuGlowSecondary" format="color"/>
+    <attr name="danmuGlowTertiary" format="color"/>
+
+    <attr name="danmuAccentSoft" format="color"/>
+    <attr name="danmuAccentStroke" format="color"/>
+
+    <attr name="danmuApiCardGradientStart" format="color"/>
+    <attr name="danmuApiCardGradientEnd" format="color"/>
+
+    <!-- Bottom navigation bar colors (theme-specific) -->
+    <attr name="bottomNavBg" format="color"/>
+    <attr name="bottomNavSelected" format="color"/>
+    <attr name="bottomNavUnselected" format="color"/>
+
+    <!-- Parameter cards colors (4 small cards in home page) -->
+    <attr name="paramCardBg" format="color"/>
+    <attr name="paramCardStroke" format="color"/>
+
+    <!-- Local address card colors -->
+    <attr name="localAddressCardBg" format="color"/>
+    <attr name="localAddressCardStroke" format="color"/>
+
+    <!-- Input field colors -->
+    <attr name="inputFieldBg" format="color"/>
+    <attr name="inputFieldStroke" format="color"/>
+
+    <!-- Settings card colors (for settings items) -->
+    <attr name="settingsCardBg" format="color"/>
+    <attr name="settingsCardStroke" format="color"/>
+</resources>

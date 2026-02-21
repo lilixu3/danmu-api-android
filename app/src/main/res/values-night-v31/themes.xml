@@ -1,0 +1,12 @@
+<resources>
+    <!-- 夜间模式下的 Android 12+ 启动页属性 -->
+    <style name="Theme.DanmuApiApp.Startup" parent="Theme.DanmuApiApp.NightSky">
+        <item name="android:windowBackground">@drawable/bg_main</item>
+        <item name="android:colorBackground">?attr/danmuBgStart</item>
+        <item name="android:windowSplashScreenBackground">?attr/danmuBgStart</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

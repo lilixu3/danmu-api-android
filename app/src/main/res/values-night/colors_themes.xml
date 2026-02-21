@@ -1,0 +1,454 @@
+<resources>
+    <!-- Dark variants for all theme palettes (used when system is in Night mode) -->
+
+    <!-- Theme: ocean (night) - 深邃海洋 -->
+    <color name="theme_ocean_bg_start">#0A1F24</color>
+    <color name="theme_ocean_bg_end">#0E2A32</color>
+    <color name="theme_ocean_primary">#26C6DA</color>
+    <color name="theme_ocean_primary_container">#004D5A</color>
+    <color name="theme_ocean_secondary">#00ACC1</color>
+    <color name="theme_ocean_accent">#4DD0E1</color>
+    <color name="theme_ocean_surface">#132328</color>
+    <color name="theme_ocean_surface_variant">#1A3339</color>
+    <color name="theme_ocean_on_primary">#001F24</color>
+    <color name="theme_ocean_on_primary_container">#E0F7FA</color>
+    <color name="theme_ocean_on_secondary">#001F24</color>
+    <color name="theme_ocean_glow_primary">#1A26C6DA</color>
+    <color name="theme_ocean_glow_secondary">#1A00ACC1</color>
+    <color name="theme_ocean_glow_tertiary">#1A4DD0E1</color>
+    <color name="theme_ocean_accent_stroke">#2A4DD0E1</color>
+    <color name="theme_ocean_api_card_gradient_start">#1A3339</color>
+    <color name="theme_ocean_api_card_gradient_end">#004D5A</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_ocean_bottom_nav_bg">#1A2F35</color>
+    <color name="theme_ocean_bottom_nav_selected">#26C6DA</color>
+    <color name="theme_ocean_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_ocean_param_card_bg">#1A3339</color>
+    <color name="theme_ocean_param_card_stroke">#5026C6DA</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_ocean_local_address_card_bg">#132328</color>
+    <color name="theme_ocean_local_address_card_stroke">#4026C6DA</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_ocean_input_field_bg">#0E2A32</color>
+    <color name="theme_ocean_input_field_stroke">#6026C6DA</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_ocean_settings_card_bg">#1A3339</color>
+    <color name="theme_ocean_settings_card_stroke">#004D5A</color>
+
+    <!-- Theme: forest (night) - 深林夜色 -->
+    <color name="theme_forest_bg_start">#0A1F14</color>
+    <color name="theme_forest_bg_end">#0E2A1C</color>
+    <color name="theme_forest_primary">#81C784</color>
+    <color name="theme_forest_primary_container">#1E4D2B</color>
+    <color name="theme_forest_secondary">#66BB6A</color>
+    <color name="theme_forest_accent">#A5D6A7</color>
+    <color name="theme_forest_surface">#122318</color>
+    <color name="theme_forest_surface_variant">#1A3324</color>
+    <color name="theme_forest_on_primary">#001F0A</color>
+    <color name="theme_forest_on_primary_container">#C8E6C9</color>
+    <color name="theme_forest_on_secondary">#001F0A</color>
+    <color name="theme_forest_glow_primary">#1A81C784</color>
+    <color name="theme_forest_glow_secondary">#1A66BB6A</color>
+    <color name="theme_forest_glow_tertiary">#1AA5D6A7</color>
+    <color name="theme_forest_accent_stroke">#2AA5D6A7</color>
+    <color name="theme_forest_api_card_gradient_start">#1A3324</color>
+    <color name="theme_forest_api_card_gradient_end">#1E4D2B</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_forest_bottom_nav_bg">#1A2F24</color>
+    <color name="theme_forest_bottom_nav_selected">#81C784</color>
+    <color name="theme_forest_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_forest_param_card_bg">#1A3324</color>
+    <color name="theme_forest_param_card_stroke">#5081C784</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_forest_local_address_card_bg">#122318</color>
+    <color name="theme_forest_local_address_card_stroke">#4081C784</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_forest_input_field_bg">#0E2A1C</color>
+    <color name="theme_forest_input_field_stroke">#6081C784</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_forest_settings_card_bg">#1A3324</color>
+    <color name="theme_forest_settings_card_stroke">#1E4D2B</color>
+
+    <!-- Theme: sunset (night) - 暮色余晖 -->
+    <color name="theme_sunset_bg_start">#241A0A</color>
+    <color name="theme_sunset_bg_end">#32240E</color>
+    <color name="theme_sunset_primary">#FFB74D</color>
+    <color name="theme_sunset_primary_container">#4D3300</color>
+    <color name="theme_sunset_secondary">#FFA726</color>
+    <color name="theme_sunset_accent">#FFCC80</color>
+    <color name="theme_sunset_surface">#1F1812</color>
+    <color name="theme_sunset_surface_variant">#2A221A</color>
+    <color name="theme_sunset_on_primary">#1F1000</color>
+    <color name="theme_sunset_on_primary_container">#FFE0B2</color>
+    <color name="theme_sunset_on_secondary">#1F1000</color>
+    <color name="theme_sunset_glow_primary">#1AFFB74D</color>
+    <color name="theme_sunset_glow_secondary">#1AFFA726</color>
+    <color name="theme_sunset_glow_tertiary">#1AFFCC80</color>
+    <color name="theme_sunset_accent_stroke">#2AFFCC80</color>
+    <color name="theme_sunset_api_card_gradient_start">#2A221A</color>
+    <color name="theme_sunset_api_card_gradient_end">#4D3300</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_sunset_bottom_nav_bg">#2A2218</color>
+    <color name="theme_sunset_bottom_nav_selected">#FFB74D</color>
+    <color name="theme_sunset_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_sunset_param_card_bg">#2A221A</color>
+    <color name="theme_sunset_param_card_stroke">#50FFB74D</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_sunset_local_address_card_bg">#1F1812</color>
+    <color name="theme_sunset_local_address_card_stroke">#40FFB74D</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_sunset_input_field_bg">#32240E</color>
+    <color name="theme_sunset_input_field_stroke">#60FFB74D</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_sunset_settings_card_bg">#2A221A</color>
+    <color name="theme_sunset_settings_card_stroke">#4D3300</color>
+
+    <!-- Theme: purple (night) - 紫夜迷梦 -->
+    <color name="theme_purple_bg_start">#1F1224</color>
+    <color name="theme_purple_bg_end">#2A1832</color>
+    <color name="theme_purple_primary">#CE93D8</color>
+    <color name="theme_purple_primary_container">#3D1F4D</color>
+    <color name="theme_purple_secondary">#BA68C8</color>
+    <color name="theme_purple_accent">#E1BEE7</color>
+    <color name="theme_purple_surface">#1F1628</color>
+    <color name="theme_purple_surface_variant">#2A1F38</color>
+    <color name="theme_purple_on_primary">#1F0A24</color>
+    <color name="theme_purple_on_primary_container">#E1BEE7</color>
+    <color name="theme_purple_on_secondary">#1F0A24</color>
+    <color name="theme_purple_glow_primary">#1ACE93D8</color>
+    <color name="theme_purple_glow_secondary">#1ABA68C8</color>
+    <color name="theme_purple_glow_tertiary">#1AE1BEE7</color>
+    <color name="theme_purple_accent_stroke">#2AE1BEE7</color>
+    <color name="theme_purple_api_card_gradient_start">#2A1F38</color>
+    <color name="theme_purple_api_card_gradient_end">#3D1F4D</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_purple_bottom_nav_bg">#2A1F35</color>
+    <color name="theme_purple_bottom_nav_selected">#CE93D8</color>
+    <color name="theme_purple_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_purple_param_card_bg">#2A1F38</color>
+    <color name="theme_purple_param_card_stroke">#50CE93D8</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_purple_local_address_card_bg">#1F1628</color>
+    <color name="theme_purple_local_address_card_stroke">#40CE93D8</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_purple_input_field_bg">#2A1832</color>
+    <color name="theme_purple_input_field_stroke">#60CE93D8</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_purple_settings_card_bg">#2A1F38</color>
+    <color name="theme_purple_settings_card_stroke">#3D1F4D</color>
+
+    <!-- Theme: rose (night) - 玫瑰夜语 -->
+    <color name="theme_rose_bg_start">#240A16</color>
+    <color name="theme_rose_bg_end">#320E20</color>
+    <color name="theme_rose_primary">#F48FB1</color>
+    <color name="theme_rose_primary_container">#4D1A2E</color>
+    <color name="theme_rose_secondary">#EC407A</color>
+    <color name="theme_rose_accent">#F8BBD0</color>
+    <color name="theme_rose_surface">#1F1018</color>
+    <color name="theme_rose_surface_variant">#2A1822</color>
+    <color name="theme_rose_on_primary">#240013</color>
+    <color name="theme_rose_on_primary_container">#F8BBD0</color>
+    <color name="theme_rose_on_secondary">#240013</color>
+    <color name="theme_rose_glow_primary">#1AF48FB1</color>
+    <color name="theme_rose_glow_secondary">#1AEC407A</color>
+    <color name="theme_rose_glow_tertiary">#1AF8BBD0</color>
+    <color name="theme_rose_accent_stroke">#2AF8BBD0</color>
+    <color name="theme_rose_api_card_gradient_start">#2A1822</color>
+    <color name="theme_rose_api_card_gradient_end">#4D1A2E</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_rose_bottom_nav_bg">#2A1820</color>
+    <color name="theme_rose_bottom_nav_selected">#F48FB1</color>
+    <color name="theme_rose_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_rose_param_card_bg">#2A1822</color>
+    <color name="theme_rose_param_card_stroke">#50F48FB1</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_rose_local_address_card_bg">#1F1018</color>
+    <color name="theme_rose_local_address_card_stroke">#40F48FB1</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_rose_input_field_bg">#320E20</color>
+    <color name="theme_rose_input_field_stroke">#60F48FB1</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_rose_settings_card_bg">#2A1822</color>
+    <color name="theme_rose_settings_card_stroke">#4D1A2E</color>
+
+    <!-- Theme: night (night) - 霓虹夜景 -->
+    <color name="theme_night_bg_start">#090E19</color>
+    <color name="theme_night_bg_end">#151E33</color>
+    <color name="theme_night_primary">#7DCFFF</color>
+    <color name="theme_night_primary_container">#12324A</color>
+    <color name="theme_night_secondary">#C4B5FD</color>
+    <color name="theme_night_accent">#73DACA</color>
+    <color name="theme_night_surface">#10192B</color>
+    <color name="theme_night_surface_variant">#17243B</color>
+    <color name="theme_night_on_primary">#031A28</color>
+    <color name="theme_night_on_primary_container">#BEE8FF</color>
+    <color name="theme_night_on_secondary">#2B1D46</color>
+    <color name="theme_night_glow_primary">#337DCFFF</color>
+    <color name="theme_night_glow_secondary">#2A73DACA</color>
+    <color name="theme_night_glow_tertiary">#33C4B5FD</color>
+    <color name="theme_night_accent_stroke">#3A7DCFFF</color>
+    <color name="theme_night_api_card_gradient_start">#13203A</color>
+    <color name="theme_night_api_card_gradient_end">#1C2F54</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_night_bottom_nav_bg">#121C31</color>
+    <color name="theme_night_bottom_nav_selected">#7DCFFF</color>
+    <color name="theme_night_bottom_nav_unselected">#7F8DB2</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_night_param_card_bg">#17243B</color>
+    <color name="theme_night_param_card_stroke">#507DCFFF</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_night_local_address_card_bg">#10192B</color>
+    <color name="theme_night_local_address_card_stroke">#407DCFFF</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_night_input_field_bg">#151E33</color>
+    <color name="theme_night_input_field_stroke">#607DCFFF</color>
+    <!-- 设置项卡片颜色 -->
+
+    <!-- Theme: autumn (night) - 秋夜温馨 -->
+    <color name="theme_autumn_bg_start">#1F1612</color>
+    <color name="theme_autumn_bg_end">#2A1E18</color>
+    <color name="theme_autumn_primary">#BCAAA4</color>
+    <color name="theme_autumn_primary_container">#3D2E24</color>
+    <color name="theme_autumn_secondary">#A1887F</color>
+    <color name="theme_autumn_accent">#D7CCC8</color>
+    <color name="theme_autumn_surface">#1F1814</color>
+    <color name="theme_autumn_surface_variant">#2A221C</color>
+    <color name="theme_autumn_on_primary">#1F1612</color>
+    <color name="theme_autumn_on_primary_container">#D7CCC8</color>
+    <color name="theme_autumn_on_secondary">#1F1612</color>
+    <color name="theme_autumn_glow_primary">#1ABCAAA4</color>
+    <color name="theme_autumn_glow_secondary">#1AA1887F</color>
+    <color name="theme_autumn_glow_tertiary">#1AD7CCC8</color>
+    <color name="theme_autumn_accent_stroke">#2AD7CCC8</color>
+    <color name="theme_autumn_api_card_gradient_start">#2A221C</color>
+    <color name="theme_autumn_api_card_gradient_end">#3D2E24</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_autumn_bottom_nav_bg">#2A221C</color>
+    <color name="theme_autumn_bottom_nav_selected">#BCAAA4</color>
+    <color name="theme_autumn_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_autumn_param_card_bg">#2A221C</color>
+    <color name="theme_autumn_param_card_stroke">#50BCAAA4</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_autumn_local_address_card_bg">#1F1814</color>
+    <color name="theme_autumn_local_address_card_stroke">#40BCAAA4</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_autumn_input_field_bg">#2A1E18</color>
+    <color name="theme_autumn_input_field_stroke">#60BCAAA4</color>
+    <!-- 设置项卡片颜色 -->
+
+    <!-- Theme: cherry (night) - 樱桃夜色 -->
+    <color name="theme_cherry_bg_start">#240A0C</color>
+    <color name="theme_cherry_bg_end">#320E12</color>
+    <color name="theme_cherry_primary">#FF8A80</color>
+    <color name="theme_cherry_primary_container">#4D1418</color>
+    <color name="theme_cherry_secondary">#EF5350</color>
+    <color name="theme_cherry_accent">#FFCDD2</color>
+    <color name="theme_cherry_surface">#1F1012</color>
+    <color name="theme_cherry_surface_variant">#2A1618</color>
+    <color name="theme_cherry_on_primary">#240003</color>
+    <color name="theme_cherry_on_primary_container">#FFCDD2</color>
+    <color name="theme_cherry_on_secondary">#240003</color>
+    <color name="theme_cherry_glow_primary">#1AFF8A80</color>
+    <color name="theme_cherry_glow_secondary">#1AEF5350</color>
+    <color name="theme_cherry_glow_tertiary">#1AFFCDD2</color>
+    <color name="theme_cherry_accent_stroke">#2AFFCDD2</color>
+    <color name="theme_cherry_api_card_gradient_start">#2A1618</color>
+    <color name="theme_cherry_api_card_gradient_end">#4D1418</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_cherry_bottom_nav_bg">#2A1618</color>
+    <color name="theme_cherry_bottom_nav_selected">#FF8A80</color>
+    <color name="theme_cherry_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_cherry_param_card_bg">#2A1618</color>
+    <color name="theme_cherry_param_card_stroke">#50FF8A80</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_cherry_local_address_card_bg">#1F1012</color>
+    <color name="theme_cherry_local_address_card_stroke">#40FF8A80</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_cherry_input_field_bg">#320E12</color>
+    <color name="theme_cherry_input_field_stroke">#60FF8A80</color>
+    <!-- 设置项卡片颜色 -->
+
+    <!-- ===== 新主题夜间模式 ===== -->
+
+    <!-- Theme: mint (night) - 薄荷夜凉 -->
+    <color name="theme_mint_bg_start">#0A1F1E</color>
+    <color name="theme_mint_bg_end">#0E2A28</color>
+    <color name="theme_mint_primary">#4DB6AC</color>
+    <color name="theme_mint_primary_container">#1E4D47</color>
+    <color name="theme_mint_secondary">#26A69A</color>
+    <color name="theme_mint_accent">#80CBC4</color>
+    <color name="theme_mint_surface">#122320</color>
+    <color name="theme_mint_surface_variant">#1A332E</color>
+    <color name="theme_mint_on_primary">#001F1C</color>
+    <color name="theme_mint_on_primary_container">#B2DFDB</color>
+    <color name="theme_mint_on_secondary">#001F1C</color>
+    <color name="theme_mint_glow_primary">#1A4DB6AC</color>
+    <color name="theme_mint_glow_secondary">#1A26A69A</color>
+    <color name="theme_mint_glow_tertiary">#1A80CBC4</color>
+    <color name="theme_mint_accent_stroke">#2A80CBC4</color>
+    <color name="theme_mint_api_card_gradient_start">#1A332E</color>
+    <color name="theme_mint_api_card_gradient_end">#1E4D47</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_mint_bottom_nav_bg">#1A2F2C</color>
+    <color name="theme_mint_bottom_nav_selected">#4DB6AC</color>
+    <color name="theme_mint_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_mint_param_card_bg">#1A332E</color>
+    <color name="theme_mint_param_card_stroke">#504DB6AC</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_mint_local_address_card_bg">#122320</color>
+    <color name="theme_mint_local_address_card_stroke">#404DB6AC</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_mint_input_field_bg">#0E2A28</color>
+    <color name="theme_mint_input_field_stroke">#604DB6AC</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_mint_settings_card_bg">#1A332E</color>
+    <color name="theme_mint_settings_card_stroke">#1E4D47</color>
+
+    <!-- Theme: coral (night) - 珊瑚夜韵 -->
+    <color name="theme_coral_bg_start">#241410</color>
+    <color name="theme_coral_bg_end">#321C14</color>
+    <color name="theme_coral_primary">#FF8A65</color>
+    <color name="theme_coral_primary_container">#4D2418</color>
+    <color name="theme_coral_secondary">#FF7043</color>
+    <color name="theme_coral_accent">#FFAB91</color>
+    <color name="theme_coral_surface">#1F1612</color>
+    <color name="theme_coral_surface_variant">#2A1E18</color>
+    <color name="theme_coral_on_primary">#1F0A00</color>
+    <color name="theme_coral_on_primary_container">#FFCCBC</color>
+    <color name="theme_coral_on_secondary">#1F0A00</color>
+    <color name="theme_coral_glow_primary">#1AFF8A65</color>
+    <color name="theme_coral_glow_secondary">#1AFF7043</color>
+    <color name="theme_coral_glow_tertiary">#1AFFAB91</color>
+    <color name="theme_coral_accent_stroke">#2AFFAB91</color>
+    <color name="theme_coral_api_card_gradient_start">#2A1E18</color>
+    <color name="theme_coral_api_card_gradient_end">#4D2418</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_coral_bottom_nav_bg">#2A1E18</color>
+    <color name="theme_coral_bottom_nav_selected">#FF8A65</color>
+    <color name="theme_coral_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_coral_param_card_bg">#2A1E18</color>
+    <color name="theme_coral_param_card_stroke">#50FF8A65</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_coral_local_address_card_bg">#1F1612</color>
+    <color name="theme_coral_local_address_card_stroke">#40FF8A65</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_coral_input_field_bg">#321C14</color>
+    <color name="theme_coral_input_field_stroke">#60FF8A65</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_coral_settings_card_bg">#2A1E18</color>
+    <color name="theme_coral_settings_card_stroke">#4D2418</color>
+
+    <!-- Theme: midnight (night) - 午夜深邃 (保持暗色) -->
+    <color name="theme_midnight_bg_start">#1A2228</color>
+    <color name="theme_midnight_bg_end">#263238</color>
+    <color name="theme_midnight_primary">#80CBC4</color>
+    <color name="theme_midnight_primary_container">#37474F</color>
+    <color name="theme_midnight_secondary">#4DD0E1</color>
+    <color name="theme_midnight_accent">#80DEEA</color>
+    <color name="theme_midnight_surface">#263238</color>
+    <color name="theme_midnight_surface_variant">#37474F</color>
+    <color name="theme_midnight_on_primary">#001F1C</color>
+    <color name="theme_midnight_on_primary_container">#B2DFDB</color>
+    <color name="theme_midnight_on_secondary">#001F24</color>
+    <color name="theme_midnight_glow_primary">#1A80CBC4</color>
+    <color name="theme_midnight_glow_secondary">#1A4DD0E1</color>
+    <color name="theme_midnight_glow_tertiary">#1A80DEEA</color>
+    <color name="theme_midnight_accent_stroke">#2A80DEEA</color>
+    <color name="theme_midnight_api_card_gradient_start">#37474F</color>
+    <color name="theme_midnight_api_card_gradient_end">#263238</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_midnight_bottom_nav_bg">#2A3842</color>
+    <color name="theme_midnight_bottom_nav_selected">#80CBC4</color>
+    <color name="theme_midnight_bottom_nav_unselected">#90A4AE</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_midnight_param_card_bg">#37474F</color>
+    <color name="theme_midnight_param_card_stroke">#5080CBC4</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_midnight_local_address_card_bg">#263238</color>
+    <color name="theme_midnight_local_address_card_stroke">#4080CBC4</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_midnight_input_field_bg">#1A2228</color>
+    <color name="theme_midnight_input_field_stroke">#6080CBC4</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_midnight_settings_card_bg">#37474F</color>
+    <color name="theme_midnight_settings_card_stroke">#455A64</color>
+
+    <!-- Theme: sakura (night) - 樱花夜梦 -->
+    <color name="theme_sakura_bg_start">#241218</color>
+    <color name="theme_sakura_bg_end">#321820</color>
+    <color name="theme_sakura_primary">#F8BBD0</color>
+    <color name="theme_sakura_primary_container">#4D1F2E</color>
+    <color name="theme_sakura_secondary">#F48FB1</color>
+    <color name="theme_sakura_accent">#FCE4EC</color>
+    <color name="theme_sakura_surface">#1F141A</color>
+    <color name="theme_sakura_surface_variant">#2A1C24</color>
+    <color name="theme_sakura_on_primary">#240013</color>
+    <color name="theme_sakura_on_primary_container">#FFE4E9</color>
+    <color name="theme_sakura_on_secondary">#240013</color>
+    <color name="theme_sakura_glow_primary">#1AF8BBD0</color>
+    <color name="theme_sakura_glow_secondary">#1AF48FB1</color>
+    <color name="theme_sakura_glow_tertiary">#1AFCE4EC</color>
+    <color name="theme_sakura_accent_stroke">#2AFCE4EC</color>
+    <color name="theme_sakura_api_card_gradient_start">#2A1C24</color>
+    <color name="theme_sakura_api_card_gradient_end">#4D1F2E</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_sakura_bottom_nav_bg">#2A1C24</color>
+    <color name="theme_sakura_bottom_nav_selected">#F8BBD0</color>
+    <color name="theme_sakura_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_sakura_param_card_bg">#2A1C24</color>
+    <color name="theme_sakura_param_card_stroke">#50F8BBD0</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_sakura_local_address_card_bg">#1F141A</color>
+    <color name="theme_sakura_local_address_card_stroke">#40F8BBD0</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_sakura_input_field_bg">#321820</color>
+    <color name="theme_sakura_input_field_stroke">#60F8BBD0</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_sakura_settings_card_bg">#2A1C24</color>
+    <color name="theme_sakura_settings_card_stroke">#4D1F2E</color>
+
+    <!-- Theme: aurora (night) - 极光璀璨 -->
+    <color name="theme_aurora_bg_start">#1A1224</color>
+    <color name="theme_aurora_bg_end">#241832</color>
+    <color name="theme_aurora_primary">#9575CD</color>
+    <color name="theme_aurora_primary_container">#3D2A5A</color>
+    <color name="theme_aurora_secondary">#7E57C2</color>
+    <color name="theme_aurora_accent">#B39DDB</color>
+    <color name="theme_aurora_surface">#1F1628</color>
+    <color name="theme_aurora_surface_variant">#2A1F38</color>
+    <color name="theme_aurora_on_primary">#1F0A24</color>
+    <color name="theme_aurora_on_primary_container">#D1C4E9</color>
+    <color name="theme_aurora_on_secondary">#1F0A24</color>
+    <color name="theme_aurora_glow_primary">#1A9575CD</color>
+    <color name="theme_aurora_glow_secondary">#1A7E57C2</color>
+    <color name="theme_aurora_glow_tertiary">#1AB39DDB</color>
+    <color name="theme_aurora_accent_stroke">#2AB39DDB</color>
+    <color name="theme_aurora_api_card_gradient_start">#2A1F38</color>
+    <color name="theme_aurora_api_card_gradient_end">#3D2A5A</color>
+    <!-- 底栏专用颜色 (night) -->
+    <color name="theme_aurora_bottom_nav_bg">#2A1F35</color>
+    <color name="theme_aurora_bottom_nav_selected">#9575CD</color>
+    <color name="theme_aurora_bottom_nav_unselected">#78909C</color>
+    <!-- 参数卡片颜色（4个小卡片）- 深色背景 + 主题色边框 -->
+    <color name="theme_aurora_param_card_bg">#2A1F38</color>
+    <color name="theme_aurora_param_card_stroke">#509575CD</color>
+    <!-- 本机地址卡片颜色 - 更深的背景 -->
+    <color name="theme_aurora_local_address_card_bg">#1F1628</color>
+    <color name="theme_aurora_local_address_card_stroke">#409575CD</color>
+    <!-- 输入框颜色 - 深色背景 + 主题色边框 -->
+    <color name="theme_aurora_input_field_bg">#241832</color>
+    <color name="theme_aurora_input_field_stroke">#609575CD</color>
+    <!-- 设置项卡片颜色 -->
+    <color name="theme_aurora_settings_card_bg">#2A1F38</color>
+    <color name="theme_aurora_settings_card_stroke">#3D2A5A</color>
+</resources>

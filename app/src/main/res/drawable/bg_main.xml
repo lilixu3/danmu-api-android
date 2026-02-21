@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Light: soft pearly gradient base -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="?attr/danmuBgStart"
+                android:endColor="?attr/danmuBgEnd" />
+        </shape>
+    </item>
+
+    <!-- Top-left indigo glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="650dp"
+                android:centerX="0.08"
+                android:centerY="0.05"
+                android:startColor="?attr/danmuGlowPrimary"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <!-- Bottom-right violet glow -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="700dp"
+                android:centerX="0.95"
+                android:centerY="0.98"
+                android:startColor="?attr/danmuGlowTertiary"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+    <!-- Subtle center cyan accent -->
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:gradientRadius="500dp"
+                android:centerX="0.5"
+                android:centerY="0.4"
+                android:startColor="?attr/danmuGlowSecondary"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+
+</layer-list>
