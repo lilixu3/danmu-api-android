@@ -47,6 +47,7 @@ class NodeService : Service() {
         private const val STOP_SHUTDOWN_ATTEMPTS = 6
         private const val STOP_WAIT_TIMEOUT_MS = 2600L
         private const val START_READY_TIMEOUT_MS = 20_000L
+        private const val START_READY_RECHECK_INTERVAL_MS = 2000L
 
         fun start(context: Context) {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
@@ -76,6 +77,7 @@ class NodeService : Service() {
     private var nodeThread: Thread? = null
     private var isRunning = false
     private var isStopping = false
+    private var runningPublishedGeneration = -1L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -87,8 +89,13 @@ class NodeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
-                startNode()
+                val shouldStart = synchronized(stateLock) {
+                    !(isRunning || nodeThread?.isAlive == true || isStopping)
+                }
+                if (shouldStart) {
+                    startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
+                    startNode()
+                }
                 return START_STICKY
             }
             ACTION_STOP -> {
@@ -107,6 +114,7 @@ class NodeService : Service() {
             isRunning = true
             isStopping = false
             generation = runtimeGeneration.incrementAndGet()
+            runningPublishedGeneration = -1L
         }
 
         scope.launch {
@@ -151,24 +159,27 @@ class NodeService : Service() {
                 }
                 runtimeThread.start()
 
-                // 仅在端口真正就绪后上报 running，避免 UI 误判“已运行后又掉线”。
+                // 启动慢机型上端口可能晚于首轮超时才就绪，因此超时后继续低频复检。
                 scope.launch {
                     val ready = waitForRuntimeReady(
                         ports = resolveCandidatePorts(),
                         generation = generation,
                         timeoutMs = START_READY_TIMEOUT_MS
                     )
-                    if (!ready || runtimeGeneration.get() != generation) {
+                    if (ready) {
+                        publishRunningIfNeeded(generation)
                         return@launch
                     }
-                    val canPublish = synchronized(stateLock) {
-                        runtimeGeneration.get() == generation &&
-                            isRunning &&
-                            nodeThread?.isAlive == true
-                    }
-                    if (canPublish) {
-                        broadcastStatus(STATUS_RUNNING)
-                        updateNotification("服务运行中")
+
+                    while (isActive && runtimeGeneration.get() == generation) {
+                        if (!isNodeThreadAlive()) return@launch
+                        val ports = resolveCandidatePorts()
+                        val nowReady = ports.any { it in 1..65535 && isPortOpen(it) }
+                        if (nowReady) {
+                            publishRunningIfNeeded(generation)
+                            return@launch
+                        }
+                        delay(START_READY_RECHECK_INTERVAL_MS)
                     }
                 }
             } catch (t: Throwable) {
@@ -178,6 +189,7 @@ class NodeService : Service() {
                     synchronized(stateLock) {
                         isRunning = false
                         isStopping = false
+                        runningPublishedGeneration = -1L
                         if (nodeThread?.isAlive != true) {
                             nodeThread = null
                         }
@@ -295,12 +307,31 @@ class NodeService : Service() {
         }
     }
 
+    private fun publishRunningIfNeeded(generation: Long) {
+        val shouldPublish = synchronized(stateLock) {
+            val sameGeneration = runtimeGeneration.get() == generation
+            if (!sameGeneration) return@synchronized false
+            val canPublish = isRunning &&
+                !isStopping &&
+                nodeThread?.isAlive == true &&
+                runningPublishedGeneration != generation
+            if (canPublish) {
+                runningPublishedGeneration = generation
+            }
+            canPublish
+        }
+        if (!shouldPublish) return
+        broadcastStatus(STATUS_RUNNING)
+        updateNotification("服务运行中")
+    }
+
     private fun finalizeStop(generation: Long) {
         if (runtimeGeneration.get() != generation) return
         synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
             isRunning = false
             isStopping = false
+            runningPublishedGeneration = -1L
             if (nodeThread?.isAlive != true) {
                 nodeThread = null
             }
@@ -425,6 +456,7 @@ class NodeService : Service() {
             nodeThread = null
             isRunning = false
             isStopping = false
+            runningPublishedGeneration = -1L
         }
         super.onDestroy()
     }
