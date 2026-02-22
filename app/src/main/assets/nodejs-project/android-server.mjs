@@ -516,13 +516,12 @@ const METRICS = {
   lastClientIp: '',
 };
 
-const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist', 'whitelist']);
+const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist']);
 const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control']);
 const _ACCESS_TRACK_MAX_DEVICES = 240;
 
 let _accessControl = {
   mode: 'off',
-  whitelist: new Set(),
   blacklist: new Set(),
   updatedAtMs: 0,
 };
@@ -1172,7 +1171,7 @@ function _normalizeAccessMode(raw, fallback = 'off') {
   const mode = String(raw || '').trim().toLowerCase();
   if (!mode) return fallback;
   if (mode === 'blacklist' || mode === 'black' || mode === 'block' || mode === 'deny') return 'blacklist';
-  if (mode === 'whitelist' || mode === 'white' || mode === 'allow') return 'whitelist';
+  if (mode === 'whitelist' || mode === 'white' || mode === 'allow') return 'off';
   if (mode === 'off' || mode === 'none' || mode === 'disable' || mode === 'disabled') return 'off';
   return fallback;
 }
@@ -1181,7 +1180,6 @@ function _snapshotAccessControl() {
   const updatedAtMs = Number(_accessControl.updatedAtMs || Date.now()) || Date.now();
   return {
     mode: _accessControl.mode || 'off',
-    whitelist: Array.from(_accessControl.whitelist || []).sort(),
     blacklist: Array.from(_accessControl.blacklist || []).sort(),
     updatedAtMs,
     updatedAt: new Date(updatedAtMs).toISOString(),
@@ -1197,7 +1195,7 @@ function _sanitizeAccessControl(raw, fallback = null, strictMode = false) {
     const parsed = _normalizeAccessMode(data.mode, '');
     if (!parsed) {
       if (strictMode) {
-        throw new Error('mode 仅支持 off / blacklist / whitelist');
+        throw new Error('mode 仅支持 off / blacklist');
       }
     } else {
       mode = parsed;
@@ -1207,21 +1205,17 @@ function _sanitizeAccessControl(raw, fallback = null, strictMode = false) {
     mode = 'off';
   }
 
-  const whitelist = Object.prototype.hasOwnProperty.call(data, 'whitelist')
-    ? _normalizeIpList(data.whitelist)
-    : _normalizeIpList(base.whitelist);
   const blacklist = Object.prototype.hasOwnProperty.call(data, 'blacklist')
     ? _normalizeIpList(data.blacklist)
     : _normalizeIpList(base.blacklist);
 
   const updatedAtMs = Number(data.updatedAtMs || base.updatedAtMs || Date.now()) || Date.now();
-  return { mode, whitelist, blacklist, updatedAtMs };
+  return { mode, blacklist, updatedAtMs };
 }
 
 function _applyAccessControl(next) {
   _accessControl = {
     mode: _normalizeAccessMode(next?.mode, 'off'),
-    whitelist: new Set(_normalizeIpList(next?.whitelist)),
     blacklist: new Set(_normalizeIpList(next?.blacklist)),
     updatedAtMs: Number(next?.updatedAtMs || Date.now()) || Date.now(),
   };
@@ -1233,7 +1227,6 @@ function _persistAccessControl() {
     const current = _snapshotAccessControl();
     const next = {
       mode: current.mode,
-      whitelist: current.whitelist,
       blacklist: current.blacklist,
       updatedAtMs: Date.now(),
     };
@@ -1255,7 +1248,7 @@ function _loadAccessControlFromDisk() {
     if (!fs.existsSync(ACCESS_CONTROL_FILE)) {
       _lastAccessControlMtimeMs = 0;
       if (!_ACCESS_CONTROL_MODES.has(_accessControl.mode)) {
-        _applyAccessControl({ mode: 'off', whitelist: [], blacklist: [], updatedAtMs: Date.now() });
+        _applyAccessControl({ mode: 'off', blacklist: [], updatedAtMs: Date.now() });
       }
       return;
     }
@@ -1263,7 +1256,6 @@ function _loadAccessControlFromDisk() {
     const parsed = raw.trim() ? JSON.parse(raw) : {};
     const next = _sanitizeAccessControl(parsed, {
       mode: 'off',
-      whitelist: [],
       blacklist: [],
       updatedAtMs: Date.now(),
     });
@@ -1298,13 +1290,6 @@ function _evaluateClientAccess(clientIp, pathname) {
       return { allowed: false, reason: 'blacklist_hit', clientIp: normalizedIp };
     }
     return { allowed: true, reason: 'blacklist_pass', clientIp: normalizedIp };
-  }
-
-  if (mode === 'whitelist') {
-    if (normalizedIp && _accessControl.whitelist.has(normalizedIp)) {
-      return { allowed: true, reason: 'whitelist_hit', clientIp: normalizedIp };
-    }
-    return { allowed: false, reason: 'whitelist_miss', clientIp: normalizedIp };
   }
 
   return { allowed: true, reason: 'unknown_mode', clientIp: normalizedIp };
@@ -1367,18 +1352,13 @@ function _recordDeviceAccess({ clientIp, method, pathname, allowed, reason, user
 
 function _buildAccessDevicesPayload() {
   const mode = _accessControl.mode || 'off';
-  const whitelist = _accessControl.whitelist || new Set();
   const blacklist = _accessControl.blacklist || new Set();
 
   const list = [];
   for (const item of _accessDevices.values()) {
     const ip = item.ip;
-    const inWhitelist = whitelist.has(ip);
     const inBlacklist = blacklist.has(ip);
-    const effectiveBlocked = !_isLoopbackIp(ip) && (
-      (mode === 'blacklist' && inBlacklist) ||
-      (mode === 'whitelist' && !inWhitelist)
-    );
+    const effectiveBlocked = !_isLoopbackIp(ip) && mode === 'blacklist' && inBlacklist;
     list.push({
       ip,
       firstSeenAtMs: item.firstSeenAtMs,
@@ -1392,7 +1372,7 @@ function _buildAccessDevicesPayload() {
       lastPath: item.lastPath,
       lastReason: item.lastReason,
       lastUserAgent: item.lastUserAgent,
-      inWhitelist,
+      inWhitelist: false,
       inBlacklist,
       effectiveBlocked,
     });
@@ -1407,7 +1387,7 @@ function _buildAccessControlPayload() {
     success: true,
     config: {
       mode: snapshot.mode,
-      whitelist: snapshot.whitelist,
+      whitelist: [],
       blacklist: snapshot.blacklist,
       updatedAtMs: snapshot.updatedAtMs,
       updatedAt: snapshot.updatedAt,
@@ -1415,7 +1395,7 @@ function _buildAccessControlPayload() {
     },
     stats: {
       trackedDevices: _accessDevices.size,
-      whitelistCount: snapshot.whitelist.length,
+      whitelistCount: 0,
       blacklistCount: snapshot.blacklist.length,
       totalAllowedRequests: _accessAllowCount,
       totalBlockedRequests: _accessBlockCount,
@@ -1473,7 +1453,6 @@ async function _handleAccessControlEndpoint(req, res, urlObj, clientIp) {
     const current = _snapshotAccessControl();
     const next = _sanitizeAccessControl(body, current, true);
     if (body && body.clearRules === true) {
-      next.whitelist = [];
       next.blacklist = [];
     }
     next.updatedAtMs = Date.now();
@@ -1670,7 +1649,7 @@ function createMainServer() {
           logLevel: String(process.env.LOG_LEVEL || 'info'),
           accessControl: {
             mode: _accessControl.mode || 'off',
-            whitelistCount: _accessControl.whitelist.size,
+            whitelistCount: 0,
             blacklistCount: _accessControl.blacklist.size,
             blockedRequests: _accessBlockCount,
           },
