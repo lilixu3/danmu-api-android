@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -14,10 +15,12 @@ import javax.inject.Inject
 
 @HiltViewModel
 class RequestRecordsViewModel @Inject constructor(
-    private val repository: RequestRecordRepository
+    private val repository: RequestRecordRepository,
+    private val adminSessionRepository: AdminSessionRepository
 ) : ViewModel() {
 
     val records = repository.records
+    val adminSessionState = adminSessionRepository.sessionState
     var isRefreshing by mutableStateOf(false)
         private set
 

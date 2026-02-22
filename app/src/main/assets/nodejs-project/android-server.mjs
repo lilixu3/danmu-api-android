@@ -1,6 +1,7 @@
 import http from 'http';
 import https from 'https';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 import { URL, fileURLToPath } from 'url';
 // Resolve current module dir (ESM-safe)
@@ -436,6 +437,7 @@ const HOME = process.env.DANMU_API_HOME || __dirname;
 const CONFIG_DIR = path.join(HOME, 'config');
 
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
+const ACCESS_CONTROL_FILE = path.join(CONFIG_DIR, 'access-control.json');
 
 // Config reload debounce + passive reload (no polling):
 // - Prefer fs.watch (event-driven) when available.
@@ -444,6 +446,7 @@ const ENV_FILE = path.join(CONFIG_DIR, '.env');
 let _configReloadTimer = null;
 let _lastConfigStatCheckMs = 0;
 let _lastEnvMtimeMs = 0;
+let _lastAccessControlMtimeMs = 0;
 
 function _readMtimeMs(file) {
   try {
@@ -455,6 +458,7 @@ function _readMtimeMs(file) {
 
 function _recordConfigMtimes() {
   _lastEnvMtimeMs = _readMtimeMs(ENV_FILE);
+  _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
 }
 
 function scheduleConfigReload() {
@@ -463,6 +467,7 @@ function scheduleConfigReload() {
   _configReloadTimer = setTimeout(async () => {
     log('Config changed, reloading ...');
     loadConfigOnce();
+    _loadAccessControlFromDisk();
     // Refresh log level if user changed LOG_LEVEL in .env
     _refreshLogLevel();
     // Refresh file logging config if user changed App log settings in .env
@@ -485,7 +490,8 @@ function maybeReloadConfigOnTraffic() {
   _lastConfigStatCheckMs = now;
 
   const envM = _readMtimeMs(ENV_FILE);
-  if (envM > _lastEnvMtimeMs) {
+  const aclM = _readMtimeMs(ACCESS_CONTROL_FILE);
+  if (envM > _lastEnvMtimeMs || aclM > _lastAccessControlMtimeMs) {
     scheduleConfigReload();
   }
 }
@@ -509,6 +515,20 @@ const METRICS = {
   lastRequestPath: '',
   lastClientIp: '',
 };
+
+const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist', 'whitelist']);
+const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control']);
+const _ACCESS_TRACK_MAX_DEVICES = 240;
+
+let _accessControl = {
+  mode: 'off',
+  whitelist: new Set(),
+  blacklist: new Set(),
+  updatedAtMs: 0,
+};
+let _accessAllowCount = 0;
+let _accessBlockCount = 0;
+const _accessDevices = new Map();
 
 // File logging (best-effort):
 // - Optionally writes console logs to LOG_FILE with rotation.
@@ -901,6 +921,7 @@ function loadConfigOnce() {
   } else {
     log('.env not found, skipping:', envFile);
   }
+  _loadAccessControlFromDisk();
   _recordConfigMtimes();
 }
 
@@ -915,7 +936,7 @@ function watchConfigs() {
   }
 
   // Also watch individual files (some platforms are more reliable this way).
-  for (const f of [ENV_FILE]) {
+  for (const f of [ENV_FILE, ACCESS_CONTROL_FILE]) {
     try {
       if (!fs.existsSync(f)) continue;
       fs.watch(f, { persistent: false }, () => scheduleConfigReload());
@@ -1100,16 +1121,388 @@ function _setupCoreWatchersForVariant(variantKey) {
   }
 }
 
+function _normalizeClientIp(rawIp) {
+  let value = String(rawIp || '').trim().toLowerCase();
+  if (!value) return '';
+  if (value.includes(',')) value = value.split(',')[0].trim();
+
+  if (value.startsWith('[')) {
+    const closeIdx = value.indexOf(']');
+    if (closeIdx > 0) {
+      value = value.substring(1, closeIdx);
+    }
+  }
+
+  const zoneIdx = value.indexOf('%');
+  if (zoneIdx > 0) {
+    value = value.substring(0, zoneIdx);
+  }
+
+  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) {
+    value = value.split(':')[0];
+  }
+
+  if (value.startsWith('::ffff:')) {
+    const mapped = value.substring(7);
+    if (net.isIP(mapped) === 4) return mapped;
+  }
+
+  if (net.isIP(value) > 0) return value;
+  return '';
+}
+
+function _normalizeIpList(rawList) {
+  const source = Array.isArray(rawList)
+    ? rawList
+    : typeof rawList === 'string'
+      ? rawList.split(/[\s,;]+/)
+      : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of source) {
+    const ip = _normalizeClientIp(item);
+    if (!ip || seen.has(ip)) continue;
+    seen.add(ip);
+    out.push(ip);
+  }
+  return out;
+}
+
+function _normalizeAccessMode(raw, fallback = 'off') {
+  const mode = String(raw || '').trim().toLowerCase();
+  if (!mode) return fallback;
+  if (mode === 'blacklist' || mode === 'black' || mode === 'block' || mode === 'deny') return 'blacklist';
+  if (mode === 'whitelist' || mode === 'white' || mode === 'allow') return 'whitelist';
+  if (mode === 'off' || mode === 'none' || mode === 'disable' || mode === 'disabled') return 'off';
+  return fallback;
+}
+
+function _snapshotAccessControl() {
+  const updatedAtMs = Number(_accessControl.updatedAtMs || Date.now()) || Date.now();
+  return {
+    mode: _accessControl.mode || 'off',
+    whitelist: Array.from(_accessControl.whitelist || []).sort(),
+    blacklist: Array.from(_accessControl.blacklist || []).sort(),
+    updatedAtMs,
+    updatedAt: new Date(updatedAtMs).toISOString(),
+  };
+}
+
+function _sanitizeAccessControl(raw, fallback = null, strictMode = false) {
+  const base = fallback || _snapshotAccessControl();
+  const data = raw && typeof raw === 'object' ? raw : {};
+
+  let mode = base.mode;
+  if (Object.prototype.hasOwnProperty.call(data, 'mode')) {
+    const parsed = _normalizeAccessMode(data.mode, '');
+    if (!parsed) {
+      if (strictMode) {
+        throw new Error('mode 仅支持 off / blacklist / whitelist');
+      }
+    } else {
+      mode = parsed;
+    }
+  }
+  if (!_ACCESS_CONTROL_MODES.has(mode)) {
+    mode = 'off';
+  }
+
+  const whitelist = Object.prototype.hasOwnProperty.call(data, 'whitelist')
+    ? _normalizeIpList(data.whitelist)
+    : _normalizeIpList(base.whitelist);
+  const blacklist = Object.prototype.hasOwnProperty.call(data, 'blacklist')
+    ? _normalizeIpList(data.blacklist)
+    : _normalizeIpList(base.blacklist);
+
+  const updatedAtMs = Number(data.updatedAtMs || base.updatedAtMs || Date.now()) || Date.now();
+  return { mode, whitelist, blacklist, updatedAtMs };
+}
+
+function _applyAccessControl(next) {
+  _accessControl = {
+    mode: _normalizeAccessMode(next?.mode, 'off'),
+    whitelist: new Set(_normalizeIpList(next?.whitelist)),
+    blacklist: new Set(_normalizeIpList(next?.blacklist)),
+    updatedAtMs: Number(next?.updatedAtMs || Date.now()) || Date.now(),
+  };
+}
+
+function _persistAccessControl() {
+  try {
+    ensureDirs();
+    const current = _snapshotAccessControl();
+    const next = {
+      mode: current.mode,
+      whitelist: current.whitelist,
+      blacklist: current.blacklist,
+      updatedAtMs: Date.now(),
+    };
+    _applyAccessControl(next);
+
+    const tmpFile = `${ACCESS_CONTROL_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+    fs.renameSync(tmpFile, ACCESS_CONTROL_FILE);
+    _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
+    return true;
+  } catch (e) {
+    log('Failed to persist access-control config:', e?.message || e);
+    return false;
+  }
+}
+
+function _loadAccessControlFromDisk() {
+  try {
+    if (!fs.existsSync(ACCESS_CONTROL_FILE)) {
+      _lastAccessControlMtimeMs = 0;
+      if (!_ACCESS_CONTROL_MODES.has(_accessControl.mode)) {
+        _applyAccessControl({ mode: 'off', whitelist: [], blacklist: [], updatedAtMs: Date.now() });
+      }
+      return;
+    }
+    const raw = fs.readFileSync(ACCESS_CONTROL_FILE, 'utf-8');
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    const next = _sanitizeAccessControl(parsed, {
+      mode: 'off',
+      whitelist: [],
+      blacklist: [],
+      updatedAtMs: Date.now(),
+    });
+    _applyAccessControl(next);
+    _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
+  } catch (e) {
+    log('Failed to load access-control config:', e?.message || e);
+  }
+}
+
+function _isInternalAccessPath(pathname) {
+  const stripped = _stripTokenPrefix(String(pathname || '/'));
+  return _ACCESS_INTERNAL_PATHS.has(stripped);
+}
+
+function _evaluateClientAccess(clientIp, pathname) {
+  const normalizedIp = _normalizeClientIp(clientIp);
+  const mode = _accessControl.mode || 'off';
+
+  if (_isInternalAccessPath(pathname)) {
+    return { allowed: true, reason: 'internal', clientIp: normalizedIp };
+  }
+  if (_isLoopbackIp(normalizedIp)) {
+    return { allowed: true, reason: 'loopback', clientIp: normalizedIp };
+  }
+  if (mode === 'off') {
+    return { allowed: true, reason: 'mode_off', clientIp: normalizedIp };
+  }
+
+  if (mode === 'blacklist') {
+    if (normalizedIp && _accessControl.blacklist.has(normalizedIp)) {
+      return { allowed: false, reason: 'blacklist_hit', clientIp: normalizedIp };
+    }
+    return { allowed: true, reason: 'blacklist_pass', clientIp: normalizedIp };
+  }
+
+  if (mode === 'whitelist') {
+    if (normalizedIp && _accessControl.whitelist.has(normalizedIp)) {
+      return { allowed: true, reason: 'whitelist_hit', clientIp: normalizedIp };
+    }
+    return { allowed: false, reason: 'whitelist_miss', clientIp: normalizedIp };
+  }
+
+  return { allowed: true, reason: 'unknown_mode', clientIp: normalizedIp };
+}
+
+function _evictOldestAccessDevice() {
+  let oldestKey = '';
+  let oldestSeen = Number.MAX_SAFE_INTEGER;
+  for (const [ip, item] of _accessDevices.entries()) {
+    const ts = Number(item.lastSeenAtMs || 0);
+    if (ts < oldestSeen) {
+      oldestSeen = ts;
+      oldestKey = ip;
+    }
+  }
+  if (oldestKey) {
+    _accessDevices.delete(oldestKey);
+  }
+}
+
+function _recordDeviceAccess({ clientIp, method, pathname, allowed, reason, userAgent }) {
+  const ip = _normalizeClientIp(clientIp);
+  if (!ip || _isLoopbackIp(ip)) return;
+
+  const now = Date.now();
+  let item = _accessDevices.get(ip);
+  if (!item) {
+    if (_accessDevices.size >= _ACCESS_TRACK_MAX_DEVICES) {
+      _evictOldestAccessDevice();
+    }
+    item = {
+      ip,
+      firstSeenAtMs: now,
+      lastSeenAtMs: now,
+      totalRequests: 0,
+      allowedRequests: 0,
+      blockedRequests: 0,
+      lastMethod: 'GET',
+      lastPath: '/',
+      lastReason: '',
+      lastUserAgent: '',
+    };
+    _accessDevices.set(ip, item);
+  }
+
+  item.lastSeenAtMs = now;
+  item.totalRequests += 1;
+  if (allowed) item.allowedRequests += 1;
+  else item.blockedRequests += 1;
+  item.lastMethod = String(method || 'GET').toUpperCase();
+  item.lastPath = String(pathname || '/');
+  item.lastReason = String(reason || '');
+  if (userAgent) {
+    item.lastUserAgent = String(userAgent).slice(0, 220);
+  }
+
+  if (allowed) _accessAllowCount += 1;
+  else _accessBlockCount += 1;
+}
+
+function _buildAccessDevicesPayload() {
+  const mode = _accessControl.mode || 'off';
+  const whitelist = _accessControl.whitelist || new Set();
+  const blacklist = _accessControl.blacklist || new Set();
+
+  const list = [];
+  for (const item of _accessDevices.values()) {
+    const ip = item.ip;
+    const inWhitelist = whitelist.has(ip);
+    const inBlacklist = blacklist.has(ip);
+    const effectiveBlocked = !_isLoopbackIp(ip) && (
+      (mode === 'blacklist' && inBlacklist) ||
+      (mode === 'whitelist' && !inWhitelist)
+    );
+    list.push({
+      ip,
+      firstSeenAtMs: item.firstSeenAtMs,
+      firstSeenAt: new Date(item.firstSeenAtMs).toISOString(),
+      lastSeenAtMs: item.lastSeenAtMs,
+      lastSeenAt: new Date(item.lastSeenAtMs).toISOString(),
+      totalRequests: item.totalRequests,
+      allowedRequests: item.allowedRequests,
+      blockedRequests: item.blockedRequests,
+      lastMethod: item.lastMethod,
+      lastPath: item.lastPath,
+      lastReason: item.lastReason,
+      lastUserAgent: item.lastUserAgent,
+      inWhitelist,
+      inBlacklist,
+      effectiveBlocked,
+    });
+  }
+  list.sort((a, b) => b.lastSeenAtMs - a.lastSeenAtMs);
+  return list;
+}
+
+function _buildAccessControlPayload() {
+  const snapshot = _snapshotAccessControl();
+  return {
+    success: true,
+    config: {
+      mode: snapshot.mode,
+      whitelist: snapshot.whitelist,
+      blacklist: snapshot.blacklist,
+      updatedAtMs: snapshot.updatedAtMs,
+      updatedAt: snapshot.updatedAt,
+      file: ACCESS_CONTROL_FILE,
+    },
+    stats: {
+      trackedDevices: _accessDevices.size,
+      whitelistCount: snapshot.whitelist.length,
+      blacklistCount: snapshot.blacklist.length,
+      totalAllowedRequests: _accessAllowCount,
+      totalBlockedRequests: _accessBlockCount,
+    },
+    devices: _buildAccessDevicesPayload(),
+  };
+}
+
+function _sendJson(res, statusCode, payload) {
+  res.statusCode = statusCode;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
+}
+
+async function _readJsonBody(req) {
+  const buf = await readRequestBody(req);
+  if (!buf || !buf.length) return {};
+  try {
+    return JSON.parse(buf.toString('utf-8'));
+  } catch {
+    throw new Error('请求体必须是 JSON');
+  }
+}
+
+async function _handleAccessControlEndpoint(req, res, urlObj, clientIp) {
+  if (!_isAdminAuthorized(req, urlObj, clientIp)) {
+    _sendJson(res, 403, {
+      success: false,
+      errorCode: 403,
+      errorMessage: 'Forbidden',
+    });
+    return true;
+  }
+
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET') {
+    _sendJson(res, 200, _buildAccessControlPayload());
+    return true;
+  }
+  if (!['POST', 'PUT', 'PATCH'].includes(method)) {
+    _sendJson(res, 405, {
+      success: false,
+      errorCode: 405,
+      errorMessage: 'Method Not Allowed',
+    });
+    return true;
+  }
+
+  try {
+    const body = await _readJsonBody(req);
+    if (body && body.clearDevices === true) {
+      _accessDevices.clear();
+    }
+
+    const current = _snapshotAccessControl();
+    const next = _sanitizeAccessControl(body, current, true);
+    if (body && body.clearRules === true) {
+      next.whitelist = [];
+      next.blacklist = [];
+    }
+    next.updatedAtMs = Date.now();
+    _applyAccessControl(next);
+
+    if (!_persistAccessControl()) {
+      throw new Error('保存访问控制配置失败');
+    }
+    _sendJson(res, 200, _buildAccessControlPayload());
+  } catch (e) {
+    _sendJson(res, 400, {
+      success: false,
+      errorCode: 400,
+      errorMessage: e?.message || '参数错误',
+    });
+  }
+  return true;
+}
+
 function getClientIp(req) {
   const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff) return xff.split(',')[0].trim();
+  if (typeof xff === 'string' && xff) return _normalizeClientIp(xff);
   const xrip = req.headers['x-real-ip'];
-  if (typeof xrip === 'string' && xrip) return xrip.trim();
-  return req.socket?.remoteAddress || '';
+  if (typeof xrip === 'string' && xrip) return _normalizeClientIp(xrip);
+  return _normalizeClientIp(req.socket?.remoteAddress || '');
 }
 
 function _isLoopbackIp(ip) {
-  const raw = String(ip || '').trim().toLowerCase();
+  const raw = _normalizeClientIp(ip);
   if (!raw) return false;
   if (raw === '::1' || raw === '0:0:0:0:0:0:0:1') return true;
   if (raw.startsWith('127.')) return true;
@@ -1238,7 +1631,10 @@ function createMainServer() {
     try {
       const host = req.headers.host || `127.0.0.1:${PORT}`;
       const fullUrl = new URL(req.url || '/', `http://${host}`);
+      const rawPathname = fullUrl.pathname || '/';
+      const strippedPathname = _stripTokenPrefix(rawPathname);
       const clientIp = getClientIp(req);
+      const method = (req.method || 'GET').toUpperCase();
 
       // Update simple metrics (for diagnostics UI)
       try {
@@ -1252,7 +1648,7 @@ function createMainServer() {
       _maybeReloadCoreOnTraffic();
 
       // Health endpoint (used by the Android app for status/diagnostics)
-      if (fullUrl.pathname === '/__health') {
+      if (strippedPathname === '/__health') {
         const variantKey = _getVariant();
         const info = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
         const payload = {
@@ -1272,6 +1668,12 @@ function createMainServer() {
           envFileMtimeMs: _lastEnvMtimeMs,
           logFile: LOG_FILE,
           logLevel: String(process.env.LOG_LEVEL || 'info'),
+          accessControl: {
+            mode: _accessControl.mode || 'off',
+            whitelistCount: _accessControl.whitelist.size,
+            blacklistCount: _accessControl.blacklist.size,
+            blockedRequests: _accessBlockCount,
+          },
         };
         res.statusCode = 200;
         res.setHeader('content-type', 'application/json; charset=utf-8');
@@ -1280,7 +1682,7 @@ function createMainServer() {
       }
 
       // Android app uses this endpoint to request a graceful shutdown.
-      if (fullUrl.pathname === '/__shutdown') {
+      if (strippedPathname === '/__shutdown') {
         if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
           res.statusCode = 403;
           res.setHeader('content-type', 'text/plain; charset=utf-8');
@@ -1297,6 +1699,43 @@ function createMainServer() {
         return;
       }
 
+      if (strippedPathname === '/__access-control') {
+        await _handleAccessControlEndpoint(req, res, fullUrl, clientIp);
+        return;
+      }
+
+      const accessResult = _evaluateClientAccess(clientIp, rawPathname);
+      const userAgent = String(req.headers['user-agent'] || '').trim();
+      if (!accessResult.allowed) {
+        _recordDeviceAccess({
+          clientIp: accessResult.clientIp,
+          method,
+          pathname: strippedPathname,
+          allowed: false,
+          reason: accessResult.reason,
+          userAgent,
+        });
+        _sendJson(res, 403, {
+          success: false,
+          errorCode: 403,
+          errorMessage: '设备访问受限',
+          mode: _accessControl.mode || 'off',
+          clientIp: accessResult.clientIp,
+          reason: accessResult.reason,
+        });
+        return;
+      }
+      if (!_isInternalAccessPath(fullUrl.pathname || '/')) {
+        _recordDeviceAccess({
+          clientIp: accessResult.clientIp || clientIp,
+          method,
+          pathname: strippedPathname,
+          allowed: true,
+          reason: accessResult.reason,
+          userAgent,
+        });
+      }
+
       // Build headers (Node gives lower-cased keys)
       const headers = {};
       for (const [k, v] of Object.entries(req.headers)) {
@@ -1304,7 +1743,6 @@ function createMainServer() {
         headers[k] = v;
       }
 
-      const method = (req.method || 'GET').toUpperCase();
       let body;
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
         const buf = await readRequestBody(req);
@@ -1321,7 +1759,6 @@ function createMainServer() {
       //  - offsetMs (milliseconds)
       //  - fontSize (int)
       // ------------------------------------------------------------
-      const strippedPath = _stripTokenPrefix(fullUrl.pathname || '');
       const offsetMsRaw = fullUrl.searchParams.get('offsetMs') || fullUrl.searchParams.get('offset_ms');
       const offsetRaw = fullUrl.searchParams.get('offset') || fullUrl.searchParams.get('danmu_offset');
       const fontRaw = fullUrl.searchParams.get('fontSize') || fullUrl.searchParams.get('font_size') || fullUrl.searchParams.get('fontsize');
@@ -1341,7 +1778,7 @@ function createMainServer() {
         if (Number.isFinite(fs) && fs > 0) fontSize = fs;
       }
 
-      const wantsOverride = strippedPath.startsWith('/api/v2/comment/') &&
+      const wantsOverride = strippedPathname.startsWith('/api/v2/comment/') &&
         (Math.abs(offsetSec) > 1e-6 || fontSize !== null);
 
       if (wantsOverride) {
@@ -1409,16 +1846,49 @@ function createProxyServer() {
 
     try {
       const urlObj = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+      const proxyPath = _stripTokenPrefix(urlObj.pathname || '/');
       const clientIp = getClientIp(req);
+      const method = (req.method || 'GET').toUpperCase();
+      const userAgent = String(req.headers['user-agent'] || '').trim();
 
       maybeReloadConfigOnTraffic();
       _maybeReloadCoreOnTraffic();
 
-      if (urlObj.pathname !== '/proxy') {
+      if (proxyPath !== '/proxy') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not found');
         return;
       }
+
+      const accessResult = _evaluateClientAccess(clientIp, proxyPath);
+      if (!accessResult.allowed) {
+        _recordDeviceAccess({
+          clientIp: accessResult.clientIp,
+          method,
+          pathname: proxyPath,
+          allowed: false,
+          reason: accessResult.reason,
+          userAgent,
+        });
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          success: false,
+          errorCode: 403,
+          errorMessage: '设备访问受限',
+          mode: _accessControl.mode || 'off',
+          clientIp: accessResult.clientIp,
+          reason: accessResult.reason,
+        }));
+        return;
+      }
+      _recordDeviceAccess({
+        clientIp: accessResult.clientIp || clientIp,
+        method,
+        pathname: proxyPath,
+        allowed: true,
+        reason: accessResult.reason,
+        userAgent,
+      });
 
       if (!_isAdminAuthorized(req, urlObj, clientIp)) {
         res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1480,7 +1950,7 @@ function createProxyServer() {
 
       // Read body if needed
       let bodyBuf = null;
-      if ((req.method || 'GET').toUpperCase() !== 'GET') {
+      if (method !== 'GET') {
         bodyBuf = await readRequestBody(req);
       }
 

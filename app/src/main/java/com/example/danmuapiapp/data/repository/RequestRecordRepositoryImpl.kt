@@ -3,13 +3,12 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.domain.model.RequestRecord
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -26,78 +25,65 @@ import javax.inject.Singleton
 @Singleton
 class RequestRecordRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val adminSessionRepository: AdminSessionRepository
 ) : RequestRecordRepository {
 
     companion object {
-        private const val PREFS_NAME = "request_records"
-        private const val KEY_JSON = "records_json"
         private const val MAX_RECORDS = 200
         private const val RUNTIME_PREFS_NAME = "runtime"
         private const val DEFAULT_PORT = 9321
     }
 
-    private val localPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-    private val json = Json { ignoreUnknownKeys = true }
-    private val localRecords = loadLocalRecords().toMutableList()
-    private var remoteRecords: List<RequestRecord> = emptyList()
-    private var hasRemoteSnapshot = false
-
-    private val _records = MutableStateFlow(localRecords.toList())
+    private val _records = MutableStateFlow<List<RequestRecord>>(emptyList())
     override val records: StateFlow<List<RequestRecord>> = _records.asStateFlow()
 
     override suspend fun refreshFromService() {
         val fetched = fetchRemoteRecords() ?: return
-        remoteRecords = fetched
-        hasRemoteSnapshot = true
-        publishRecords()
+        _records.value = fetched
+            .sortedByDescending { it.timestamp }
+            .distinctBy { it.id }
+            .take(MAX_RECORDS)
     }
 
     override fun addRecord(record: RequestRecord) {
-        val merged = (listOf(record) + localRecords)
-            .sortedByDescending { it.timestamp }
-            .distinctBy { it.id }
-            .take(MAX_RECORDS)
-        localRecords.clear()
-        localRecords.addAll(merged)
-        saveLocalRecords(merged)
-        publishRecords()
+        // 仅保留远端记录源，避免本地记录与远端记录重复。
     }
 
     override fun clearRecords() {
-        localRecords.clear()
-        remoteRecords = emptyList()
-        hasRemoteSnapshot = false
         _records.value = emptyList()
-        localPrefs.edit().remove(KEY_JSON).apply()
-    }
-
-    private fun publishRecords() {
-        val source = if (hasRemoteSnapshot) remoteRecords else localRecords
-        _records.value = source
-            .sortedByDescending { it.timestamp }
-            .distinctBy { it.id }
-            .take(MAX_RECORDS)
     }
 
     private fun fetchRemoteRecords(): List<RequestRecord>? {
         val port = runtimePrefs.getInt("port", DEFAULT_PORT)
         val token = TokenDefaults.resolveTokenFromPrefs(runtimePrefs, context)
-        val tokenPath = if (token.isBlank()) "" else "/$token"
-        val url = "http://127.0.0.1:$port$tokenPath/api/reqrecords"
+        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
 
-        return runCatching {
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .build()
-            httpClient.newCall(request).execute().use { response ->
-                if (response.code !in 200..299) return null
-                val body = response.body.string()
-                parseRemoteRecords(body)
-            }
-        }.getOrNull()
+        val isAdminMode = adminSessionRepository.sessionState.value.isAdminMode
+        val tokenPaths = when {
+            isAdminMode && adminToken.isNotBlank() -> listOf("/$adminToken")
+            token.isNotBlank() -> listOf("/$token")
+            else -> listOf("")
+        }
+
+        tokenPaths.forEach { tokenPath ->
+            val url = "http://127.0.0.1:$port$tokenPath/api/reqrecords"
+            val records = runCatching {
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.code !in 200..299) return@use null
+                    val body = response.body.string()
+                    parseRemoteRecords(body)
+                }
+            }.getOrNull()
+            if (records != null) return records
+        }
+
+        return null
     }
 
     private fun parseRemoteRecords(raw: String): List<RequestRecord> {
@@ -203,21 +189,4 @@ class RequestRecordRepositoryImpl @Inject constructor(
         return if (text.equals("null", true) || text.equals("undefined", true)) "" else text
     }
 
-    private fun loadLocalRecords(): List<RequestRecord> {
-        val raw = localPrefs.getString(KEY_JSON, "") ?: ""
-        if (raw.isBlank()) return emptyList()
-
-        return runCatching {
-            json.decodeFromString(ListSerializer(RequestRecord.serializer()), raw)
-                .sortedByDescending { it.timestamp }
-                .take(MAX_RECORDS)
-        }.getOrElse { emptyList() }
-    }
-
-    private fun saveLocalRecords(records: List<RequestRecord>) {
-        val body = runCatching {
-            json.encodeToString(ListSerializer(RequestRecord.serializer()), records)
-        }.getOrElse { "[]" }
-        localPrefs.edit().putString(KEY_JSON, body).apply()
-    }
 }

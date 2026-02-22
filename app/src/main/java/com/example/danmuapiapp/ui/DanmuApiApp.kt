@@ -20,12 +20,14 @@ import com.example.danmuapiapp.ui.screen.apitest.ApiTestScreen
 import com.example.danmuapiapp.ui.screen.config.ConfigScreen
 import com.example.danmuapiapp.ui.screen.console.ConsoleScreen
 import com.example.danmuapiapp.ui.screen.core.CoreScreen
+import com.example.danmuapiapp.ui.screen.deviceaccess.DeviceAccessScreen
 import com.example.danmuapiapp.ui.screen.home.HomeScreen
 import com.example.danmuapiapp.ui.screen.push.PushDanmuScreen
 import com.example.danmuapiapp.ui.screen.records.RequestRecordsScreen
 import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
+import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
 import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
@@ -123,7 +125,9 @@ fun DanmuApiApp() {
                     onOpenPushDanmu = { navController.navigate(ToolRoute.PushDanmu) },
                     onOpenRequestRecords = { navController.navigate(ToolRoute.RequestRecords) },
                     onOpenConsole = { navController.navigate(ToolRoute.Console) },
-                    onOpenConfig = { navController.navigate(ToolRoute.Config) }
+                    onOpenConfig = { navController.navigate(ToolRoute.Config) },
+                    onOpenDeviceAccess = { navController.navigate(ToolRoute.DeviceAccess) },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
                 )
             }
             composable(Screen.Settings.route) {
@@ -134,7 +138,8 @@ fun DanmuApiApp() {
                     onOpenServiceConfig = { navController.navigate(SettingsRoute.ServiceConfig) },
                     onOpenNetwork = { navController.navigate(SettingsRoute.Network) },
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
-                    onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) }
+                    onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
                 )
             }
 
@@ -159,6 +164,9 @@ fun DanmuApiApp() {
             composable(SettingsRoute.BackupRestore) {
                 BackupRestoreScreen(onBack = { navController.popBackStack() })
             }
+            composable(SettingsRoute.AdminMode) {
+                AdminModeScreen(onBack = { navController.popBackStack() })
+            }
 
             composable(ToolRoute.Console) {
                 ConsoleScreen()
@@ -173,7 +181,16 @@ fun DanmuApiApp() {
                 RequestRecordsScreen(onBack = { navController.popBackStack() })
             }
             composable(ToolRoute.Config) {
-                ConfigScreen(onBack = { navController.popBackStack() })
+                ConfigScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
+                )
+            }
+            composable(ToolRoute.DeviceAccess) {
+                DeviceAccessScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
+                )
             }
         }
     }

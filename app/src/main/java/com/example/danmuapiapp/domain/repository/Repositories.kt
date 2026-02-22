@@ -66,3 +66,21 @@ interface RequestRecordRepository {
     fun addRecord(record: RequestRecord)
     fun clearRecords()
 }
+
+interface AccessControlRepository {
+    suspend fun fetchSnapshot(): Result<DeviceAccessSnapshot>
+    suspend fun saveConfig(
+        config: DeviceAccessConfig,
+        clearDevices: Boolean = false,
+        clearRules: Boolean = false
+    ): Result<DeviceAccessSnapshot>
+}
+
+interface AdminSessionRepository {
+    val sessionState: StateFlow<AdminSessionState>
+    fun refresh()
+    suspend fun login(inputToken: String): Result<Unit>
+    suspend fun logout()
+    suspend fun setAdminTokenAndLogin(token: String): Result<Unit>
+    fun currentAdminTokenOrNull(): String
+}
