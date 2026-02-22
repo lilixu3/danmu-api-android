@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -35,6 +36,7 @@ fun RequestRecordsScreen(
     viewModel: RequestRecordsViewModel = hiltViewModel()
 ) {
     val records by viewModel.records.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboard.current
     var filterSuccess by remember { mutableStateOf<Boolean?>(null) }
     var expandedId by remember { mutableStateOf<Long?>(null) }
@@ -107,6 +109,37 @@ fun RequestRecordsScreen(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(Icons.Rounded.ClearAll, "清空", Modifier.size(18.dp))
+                }
+            }
+        }
+
+        if (!adminState.isAdminMode) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Rounded.AdminPanelSettings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "当前为普通模式，客户端真实 IP 可能被隐藏。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

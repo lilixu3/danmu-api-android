@@ -36,9 +36,12 @@ fun ToolsScreen(
     onOpenRequestRecords: () -> Unit,
     onOpenConsole: () -> Unit,
     onOpenConfig: () -> Unit,
+    onOpenDeviceAccess: () -> Unit,
+    onOpenAdminMode: () -> Unit,
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val recentLogs = logs.takeLast(22).reversed()
     val errorCount = logs.count { it.level == LogLevel.Error }
@@ -48,6 +51,7 @@ fun ToolsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 viewModel.refreshLogs()
+                viewModel.refreshAdminState()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -62,7 +66,17 @@ fun ToolsScreen(
             .padding(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("工具", style = MaterialTheme.typography.headlineLarge)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("工具", style = MaterialTheme.typography.headlineLarge)
+            AdminModeStatusChip(
+                enabled = adminState.isAdminMode,
+                onClick = onOpenAdminMode
+            )
+        }
         Text(
             "接口调试、弹幕推送与请求追踪",
             style = MaterialTheme.typography.bodyMedium,
@@ -108,6 +122,47 @@ fun ToolsScreen(
             icon = { Icon(Icons.Rounded.History, null) },
             onClick = onOpenRequestRecords
         )
+
+        ToolEntryCard(
+            title = "设备控制",
+            subtitle = "黑白名单管理与访问设备统计",
+            icon = { Icon(Icons.Rounded.Shield, null) },
+            onClick = onOpenDeviceAccess
+        )
+    }
+}
+
+@Composable
+private fun AdminModeStatusChip(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = if (enabled) Icons.Rounded.VerifiedUser else Icons.Rounded.AdminPanelSettings,
+                contentDescription = if (enabled) "已开启管理员模式" else "未开启管理员模式",
+                tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = if (enabled) "已开启管理员模式" else "未开启管理员模式",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

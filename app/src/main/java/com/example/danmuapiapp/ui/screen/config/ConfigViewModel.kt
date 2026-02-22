@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.danmuapiapp.data.util.TokenDefaults
 import androidx.lifecycle.ViewModel
 import com.example.danmuapiapp.domain.model.EnvVarDef
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,6 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ConfigViewModel @Inject constructor(
     private val envConfigRepo: EnvConfigRepository,
+    private val adminSessionRepository: AdminSessionRepository,
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient
 ) : ViewModel() {
@@ -36,6 +38,10 @@ class ConfigViewModel @Inject constructor(
     val catalog = envConfigRepo.catalog
     val isCatalogLoading = envConfigRepo.isCatalogLoading
     val rawContent = envConfigRepo.rawContent
+    val adminSessionState = adminSessionRepository.sessionState
+
+    private val _operationMessage = MutableStateFlow<String?>(null)
+    val operationMessage: StateFlow<String?> = _operationMessage.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -53,15 +59,21 @@ class ConfigViewModel @Inject constructor(
     fun closeEditor() { _editingVar.value = null }
 
     fun setValue(key: String, value: String) {
+        if (!ensureAdminMode()) return
         envConfigRepo.setValue(key, value)
+        _operationMessage.value = "已保存 $key"
     }
 
     fun deleteKey(key: String) {
+        if (!ensureAdminMode()) return
         envConfigRepo.deleteKey(key)
+        _operationMessage.value = "已删除 $key"
     }
 
     fun saveRawContent(content: String) {
+        if (!ensureAdminMode()) return
         envConfigRepo.saveRawContent(content)
+        _operationMessage.value = "源码已保存"
     }
 
     fun getEnvFilePath(): String = envConfigRepo.getEnvFilePath()
@@ -206,6 +218,16 @@ class ConfigViewModel @Inject constructor(
 
     private fun extractMessage(root: JSONObject, fallback: String): String {
         return root.optString("message").trim().ifBlank { fallback }
+    }
+
+    fun dismissMessage() {
+        _operationMessage.value = null
+    }
+
+    private fun ensureAdminMode(): Boolean {
+        if (adminSessionRepository.sessionState.value.isAdminMode) return true
+        _operationMessage.value = "当前为只读模式，请先到 设置 > 管理员权限 开启管理员模式"
+        return false
     }
 }
 

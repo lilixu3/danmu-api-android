@@ -224,7 +224,29 @@ object RootRuntimeController {
     }
 
     fun restart(context: Context, port: Int): OpResult {
-        stop(context, port)
+        val beforePid = readPid(context)
+        val stopResult = stop(context, port)
+        if (!stopResult.ok) {
+            return OpResult(
+                false,
+                "重启失败",
+                "停止阶段失败：${stopResult.detail.ifBlank { stopResult.message }}"
+            )
+        }
+
+        // 兜底确认：端口仍被占用时说明旧进程未完全退出，避免误判“已重启”。
+        if (isRunningFast(port)) {
+            val pid = beforePid ?: readPid(context)
+            if (pid != null && RootShell.hasRoot(1500L)) {
+                RootShell.exec("kill -KILL $pid 2>/dev/null || true", timeoutMs = 3500L)
+                waitForPidExit(pid, timeoutMs = 1800L)
+                waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 1800L)
+            }
+        }
+
+        if (isRunningFast(port)) {
+            return OpResult(false, "重启失败", "旧进程仍在运行，未执行新启动")
+        }
         return start(context, port, quickMode = false)
     }
 

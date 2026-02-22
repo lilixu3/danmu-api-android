@@ -61,6 +61,7 @@ private const val KEY_TITLE_PLATFORM_OFFSET_TABLE = "TITLE_PLATFORM_OFFSET_TABLE
 @Composable
 fun ConfigScreen(
     onBack: () -> Unit,
+    onOpenAdminMode: () -> Unit,
     viewModel: ConfigViewModel = hiltViewModel()
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -71,6 +72,7 @@ fun ConfigScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val editingVar by viewModel.editingVar.collectAsStateWithLifecycle()
     val isRawMode by viewModel.isRawMode.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.reload()
@@ -118,7 +120,7 @@ fun ConfigScreen(
         "other" to "其他"
     )
 
-    if (editingVar != null) {
+    if (editingVar != null && adminState.isAdminMode) {
         EnvVarEditDialog(
             def = editingVar!!,
             currentValue = envVars[editingVar!!.key] ?: "",
@@ -189,11 +191,52 @@ fun ConfigScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        if (!adminState.isAdminMode) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.AdminPanelSettings,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "当前为只读模式",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "请先开启管理员模式后再编辑敏感配置。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = onOpenAdminMode) {
+                        Text("去开启")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+
         if (isRawMode) {
             RawEditMode(
                 rawContent = rawContent,
                 onSave = { viewModel.saveRawContent(it) },
                 envFilePath = viewModel.getEnvFilePath(),
+                editable = adminState.isAdminMode,
                 modifier = Modifier.weight(1f)
             )
         } else {
@@ -204,6 +247,7 @@ fun ConfigScreen(
                 searchQuery = searchQuery,
                 onSearchChange = { viewModel.setSearch(it) },
                 onEditVar = { viewModel.openEditor(it) },
+                editable = adminState.isAdminMode,
                 isCatalogLoading = isCatalogLoading,
                 catalogEmpty = catalog.isEmpty(),
                 modifier = Modifier.weight(1f)
@@ -220,6 +264,7 @@ private fun VisualEditMode(
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onEditVar: (EnvVarDef) -> Unit,
+    editable: Boolean,
     isCatalogLoading: Boolean,
     catalogEmpty: Boolean,
     modifier: Modifier = Modifier
@@ -312,6 +357,7 @@ private fun VisualEditMode(
                 EnvVarCard(
                     def = def,
                     currentValue = envVars[def.key],
+                    enabled = editable,
                     onClick = { onEditVar(def) }
                 )
             }
@@ -324,6 +370,7 @@ private fun RawEditMode(
     rawContent: String,
     onSave: (String) -> Unit,
     envFilePath: String,
+    editable: Boolean,
     modifier: Modifier = Modifier
 ) {
     var text by remember(rawContent) { mutableStateOf(rawContent) }
@@ -344,6 +391,7 @@ private fun RawEditMode(
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
+            readOnly = !editable,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
@@ -355,7 +403,7 @@ private fun RawEditMode(
 
         FilledTonalButton(
             onClick = { onSave(text) },
-            enabled = hasChanges,
+            enabled = hasChanges && editable,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp)
         ) {
@@ -372,12 +420,13 @@ private fun RawEditMode(
 private fun EnvVarCard(
     def: EnvVarDef,
     currentValue: String?,
+    enabled: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp,

@@ -58,6 +58,17 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val HOT_RELOAD_DEBOUNCE_MS = 800L
         private const val HOT_RELOAD_MIN_INTERVAL_MS = 2500L
         private const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
+        private val NORMAL_RESTART_CRITICAL_FILES = setOf(
+            "main.js",
+            "android-server.mjs",
+            "worker-proxy.mjs"
+        )
+        private val NORMAL_RESTART_SKIP_PREFIXES = listOf(
+            "config/",
+            "danmu_api_stable/",
+            "danmu_api_dev/",
+            "danmu_api_custom/"
+        )
     }
 
     private val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
@@ -955,10 +966,38 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val watcher = WorkDirHotReloadWatcher(projectDir) { changedPath ->
-            scheduleHotReload("检测到工作目录变更：$changedPath")
+            val normalized = normalizeHotReloadPath(changedPath)
+            if (!shouldRestartOnNormalPathChange(normalized)) {
+                return@WorkDirHotReloadWatcher
+            }
+            scheduleHotReload("检测到工作目录关键变更：$normalized")
         }
         watcher.start()
         hotReloadWatcher = watcher
+    }
+
+    private fun normalizeHotReloadPath(path: String): String {
+        return path.trim()
+            .replace('\\', '/')
+            .trimStart('/')
+    }
+
+    private fun shouldRestartOnNormalPathChange(path: String): Boolean {
+        if (path.isBlank()) return false
+        val normalized = path.lowercase()
+
+        if (normalized in NORMAL_RESTART_CRITICAL_FILES) {
+            return true
+        }
+        if (NORMAL_RESTART_SKIP_PREFIXES.any { prefix ->
+                normalized == prefix.removeSuffix("/") || normalized.startsWith(prefix)
+            }) {
+            // 核心目录与 config 变更由 Node 进程内热重载处理，避免整服务重启。
+            return false
+        }
+
+        // 其余工作目录变更默认不触发服务重启，避免普通模式频繁抖动。
+        return false
     }
 
     private fun stopNormalWorkDirWatcher() {

@@ -35,9 +35,11 @@ fun SettingsHubScreen(
     onOpenNetwork: () -> Unit,
     onOpenBackupRestore: () -> Unit,
     onOpenGithubToken: () -> Unit,
+    onOpenAdminMode: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val adminSessionState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -45,6 +47,7 @@ fun SettingsHubScreen(
     val hasInAppDownload = viewModel.appUpdateDownloadUrls.isNotEmpty() &&
         !viewModel.appUpdateLatestVersion.isNullOrBlank()
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
+    val adminSummary = remember(adminSessionState) { viewModel.adminModeSummary() }
     val updateSubtitle = when {
         viewModel.isCheckingAppUpdate -> "正在检查新版本..."
         viewModel.isDownloadingAppUpdate -> "正在下载：${viewModel.appUpdateDownloadDetail}"
@@ -125,6 +128,15 @@ fun SettingsHubScreen(
                     subtitle = ".env 导入导出 · WebDAV 同步",
                     icon = Icons.Rounded.CloudSync,
                     onClick = onOpenBackupRestore
+                )
+            }
+
+            SettingsGroup(title = "安全与权限") {
+                SettingsItem(
+                    title = "管理员权限",
+                    subtitle = adminSummary,
+                    icon = Icons.Rounded.AdminPanelSettings,
+                    onClick = onOpenAdminMode
                 )
             }
 

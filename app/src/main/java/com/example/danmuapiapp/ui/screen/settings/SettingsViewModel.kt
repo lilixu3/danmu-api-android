@@ -28,6 +28,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.WebDavConfig
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.Lazy
@@ -48,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val runtimeRepo: RuntimeRepository,
     private val coreRepo: CoreRepository,
     private val settingsRepo: SettingsRepository,
+    private val adminSessionRepository: AdminSessionRepository,
     private val envConfigRepoLazy: Lazy<EnvConfigRepository>,
     private val githubProxyService: GithubProxyService,
     private val webDavService: WebDavService,
@@ -67,6 +69,7 @@ class SettingsViewModel @Inject constructor(
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
     val fileLogEnabled = settingsRepo.fileLogEnabled
+    val adminSessionState = adminSessionRepository.sessionState
     val proxyOptions = githubProxyService.proxyOptions()
 
     var normalBootAutoStartEnabled by mutableStateOf(
@@ -147,6 +150,15 @@ class SettingsViewModel @Inject constructor(
         private set
 
     private var proxyTestJob: Job? = null
+
+    fun adminModeSummary(): String {
+        val state = adminSessionState.value
+        return when {
+            state.isAdminMode -> "已开启 · ${state.tokenHint}"
+            state.hasAdminTokenConfigured -> "未开启 · 点击输入 ADMIN_TOKEN"
+            else -> "未配置 ADMIN_TOKEN"
+        }
+    }
 
     fun saveServiceConfig(port: Int, token: String) {
         val normalizedToken = token.trim()

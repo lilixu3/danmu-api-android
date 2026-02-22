@@ -24,6 +24,7 @@ object ToolRoute {
     const val PushDanmu = "tool_push_danmu"
     const val RequestRecords = "tool_request_records"
     const val Config = "tool_config"
+    const val DeviceAccess = "tool_device_access"
 }
 
 object SettingsRoute {
@@ -34,4 +35,5 @@ object SettingsRoute {
     const val Network = "settings_network"
     const val GithubToken = "settings_github_token"
     const val BackupRestore = "settings_backup_restore"
+    const val AdminMode = "settings_admin_mode"
 }

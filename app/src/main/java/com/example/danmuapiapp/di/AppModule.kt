@@ -27,7 +27,13 @@ abstract class RepositoryModule {
     abstract fun bindRequestRecordRepository(impl: RequestRecordRepositoryImpl): RequestRecordRepository
 
     @Binds @Singleton
+    abstract fun bindAccessControlRepository(impl: AccessControlRepositoryImpl): AccessControlRepository
+
+    @Binds @Singleton
     abstract fun bindEnvConfigRepository(impl: EnvConfigRepositoryImpl): EnvConfigRepository
+
+    @Binds @Singleton
+    abstract fun bindAdminSessionRepository(impl: AdminSessionRepositoryImpl): AdminSessionRepository
 }
 
 @Module
