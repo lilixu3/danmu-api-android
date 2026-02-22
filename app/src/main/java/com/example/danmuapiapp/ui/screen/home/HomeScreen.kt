@@ -1934,6 +1934,11 @@ private fun NoCoreDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("当前选择的 ${currentVariant.label} 尚未安装，请选择要下载的版本：")
+                Text(
+                    "下载完成后会自动切换到所选核心并启动服务。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 ApiVariant.entries.filter { it.repo.isNotBlank() }.forEach { variant ->
                     OutlinedCard(
                         onClick = { onInstall(variant) },

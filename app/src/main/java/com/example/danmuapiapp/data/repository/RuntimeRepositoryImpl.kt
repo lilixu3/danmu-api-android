@@ -551,6 +551,24 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, "普通模式启动前准备失败: $reason")
                     return
                 }
+                val projectDir = prepared.getOrNull() ?: return
+                val selectedCoreDir = File(projectDir, "danmu_api_${state.variant.key}")
+                val selectedCoreReady = runCatching {
+                    NodeProjectManager.hasValidCore(selectedCoreDir)
+                }.getOrDefault(false)
+                if (!selectedCoreReady) {
+                    val fallback = ApiVariant.entries.firstOrNull { variant ->
+                        NodeProjectManager.hasValidCore(File(projectDir, "danmu_api_${variant.key}"))
+                    }
+                    val reason = if (fallback != null && fallback != state.variant) {
+                        "当前核心 ${state.variant.label} 未安装，可先切换到 ${fallback.label} 或下载后再启动"
+                    } else {
+                        "当前核心 ${state.variant.label} 未安装，请先下载核心后再启动"
+                    }
+                    markError(reason)
+                    addLog(LogLevel.Error, reason)
+                    return
+                }
                 NodeService.start(context)
                 scope.launch {
                     delay(NORMAL_START_TIMEOUT_PRIMARY_MS)
