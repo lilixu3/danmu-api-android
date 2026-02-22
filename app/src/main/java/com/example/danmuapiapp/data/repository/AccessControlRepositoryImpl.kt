@@ -6,22 +6,36 @@ import com.example.danmuapiapp.domain.model.DeviceAccessConfig
 import com.example.danmuapiapp.domain.model.DeviceAccessDevice
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
+import com.example.danmuapiapp.domain.model.DeviceAccessSource
 import com.example.danmuapiapp.domain.repository.AccessControlRepository
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.net.ConnectException
+import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URLDecoder
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,7 +70,6 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     private data class RuntimeAddress(
         val port: Int,
-        val token: String,
         val tokenPath: String,
         val adminToken: String,
         val adminTokenPath: String
@@ -68,16 +81,23 @@ class AccessControlRepositoryImpl @Inject constructor(
         val body: String
     )
 
-    override suspend fun fetchSnapshot(): Result<DeviceAccessSnapshot> {
+    @Volatile
+    private var lastLanScanAtMs: Long = 0L
+
+    override suspend fun fetchSnapshot(includeLanNeighbors: Boolean): Result<DeviceAccessSnapshot> {
         return runCatching {
             withContext(Dispatchers.IO) {
                 val runtime = resolveRuntimeAddress()
-                val control = fetchControlSnapshot(runtime)
-                val history = runCatching {
-                    fetchHistoryDevices(runtime)
-                }.getOrDefault(emptyMap())
-                val lanNeighbors = runCatching { readLanNeighborIps() }.getOrDefault(emptySet())
-                mergeHistory(control, history, lanNeighbors)
+                loadSnapshot(runtime, includeLanNeighbors, markLanScan = false)
+            }
+        }
+    }
+
+    override suspend fun scanLanDevices(): Result<DeviceAccessSnapshot> {
+        return runCatching {
+            withContext(Dispatchers.IO) {
+                val runtime = resolveRuntimeAddress()
+                loadSnapshot(runtime, includeLanNeighbors = true, markLanScan = true)
             }
         }
     }
@@ -85,17 +105,16 @@ class AccessControlRepositoryImpl @Inject constructor(
     override suspend fun saveConfig(
         config: DeviceAccessConfig,
         clearDevices: Boolean,
-        clearRules: Boolean
+        clearBlacklist: Boolean
     ): Result<DeviceAccessSnapshot> {
         return runCatching {
             withContext(Dispatchers.IO) {
                 val runtime = resolveRuntimeAddress()
                 val payload = JSONObject().apply {
                     put("mode", config.mode.key)
-                    put("whitelist", JSONArray(config.whitelist))
                     put("blacklist", JSONArray(config.blacklist))
                     if (clearDevices) put("clearDevices", true)
-                    if (clearRules) put("clearRules", true)
+                    if (clearBlacklist) put("clearRules", true)
                 }
                 val root = executeControlJson(
                     runtime = runtime,
@@ -106,10 +125,48 @@ class AccessControlRepositoryImpl @Inject constructor(
                 val history = runCatching {
                     fetchHistoryDevices(runtime)
                 }.getOrDefault(emptyMap())
-                val lanNeighbors = runCatching { readLanNeighborIps() }.getOrDefault(emptySet())
-                mergeHistory(control, history, lanNeighbors)
+                mergeDevices(
+                    snapshot = control,
+                    historyMap = history,
+                    lanNeighbors = emptySet(),
+                    lanScanAtMs = lastLanScanAtMs
+                )
             }
         }
+    }
+
+    private suspend fun loadSnapshot(
+        runtime: RuntimeAddress,
+        includeLanNeighbors: Boolean,
+        markLanScan: Boolean
+    ): DeviceAccessSnapshot {
+        val control = fetchControlSnapshot(runtime)
+        val history = runCatching {
+            fetchHistoryDevices(runtime)
+        }.getOrDefault(emptyMap())
+        val activeProbedIps = if (markLanScan) {
+            runCatching { probeLanDevices() }.getOrDefault(emptySet())
+        } else {
+            emptySet()
+        }
+        val lanNeighbors = if (includeLanNeighbors) {
+            runCatching { readLanNeighborIps() + activeProbedIps }.getOrDefault(activeProbedIps)
+        } else {
+            emptySet()
+        }
+        val scanAtMs = if (includeLanNeighbors || markLanScan) {
+            val now = System.currentTimeMillis()
+            lastLanScanAtMs = now
+            now
+        } else {
+            lastLanScanAtMs
+        }
+        return mergeDevices(
+            snapshot = control,
+            historyMap = history,
+            lanNeighbors = lanNeighbors,
+            lanScanAtMs = scanAtMs
+        )
     }
 
     private fun resolveRuntimeAddress(): RuntimeAddress {
@@ -121,7 +178,6 @@ class AccessControlRepositoryImpl @Inject constructor(
         val adminTokenPath = if (adminToken.isBlank()) "" else "/$adminToken"
         return RuntimeAddress(
             port = port,
-            token = token,
             tokenPath = tokenPath,
             adminToken = adminToken,
             adminTokenPath = adminTokenPath
@@ -291,11 +347,9 @@ class AccessControlRepositoryImpl @Inject constructor(
 
         val configObj = root.optJSONObject("config") ?: JSONObject()
         val mode = DeviceAccessMode.fromKey(configObj.optString("mode", "off"))
-        val whitelist = parseIpArray(configObj.optJSONArray("whitelist"))
         val blacklist = parseIpArray(configObj.optJSONArray("blacklist"))
         val config = DeviceAccessConfig(
             mode = mode,
-            whitelist = whitelist,
             blacklist = blacklist,
             updatedAtMs = configObj.optLong("updatedAtMs", 0L).coerceAtLeast(0L)
         )
@@ -304,7 +358,6 @@ class AccessControlRepositoryImpl @Inject constructor(
         val statsObj = root.optJSONObject("stats")
 
         val trackedDevices = statsObj?.optInt("trackedDevices", devices.size) ?: devices.size
-        val whitelistCount = statsObj?.optInt("whitelistCount", whitelist.size) ?: whitelist.size
         val blacklistCount = statsObj?.optInt("blacklistCount", blacklist.size) ?: blacklist.size
         val totalAllowedRequests = statsObj?.optLong("totalAllowedRequests", 0L) ?: 0L
         val totalBlockedRequests = statsObj?.optLong("totalBlockedRequests", 0L) ?: 0L
@@ -313,10 +366,10 @@ class AccessControlRepositoryImpl @Inject constructor(
             config = config,
             devices = devices,
             trackedDevices = trackedDevices.coerceAtLeast(devices.size),
-            whitelistCount = whitelistCount.coerceAtLeast(config.whitelist.size),
             blacklistCount = blacklistCount.coerceAtLeast(config.blacklist.size),
             totalAllowedRequests = totalAllowedRequests.coerceAtLeast(0L),
-            totalBlockedRequests = totalBlockedRequests.coerceAtLeast(0L)
+            totalBlockedRequests = totalBlockedRequests.coerceAtLeast(0L),
+            lastLanScanAtMs = lastLanScanAtMs
         )
     }
 
@@ -329,11 +382,10 @@ class AccessControlRepositoryImpl @Inject constructor(
             val ip = normalizeIp(obj.optString("ip", ""))
             if (ip.isBlank()) continue
 
-            val inWhitelist = obj.optBoolean("inWhitelist", config.whitelist.contains(ip))
             val inBlacklist = obj.optBoolean("inBlacklist", config.blacklist.contains(ip))
             val effectiveBlocked = obj.optBoolean(
                 "effectiveBlocked",
-                calculateEffectiveBlocked(config, ip, inWhitelist, inBlacklist)
+                calculateEffectiveBlocked(config, ip, inBlacklist)
             )
 
             out += DeviceAccessDevice(
@@ -347,9 +399,9 @@ class AccessControlRepositoryImpl @Inject constructor(
                 lastPath = decodeUtf8(obj.optString("lastPath", "")),
                 lastReason = obj.optString("lastReason", "").trim(),
                 lastUserAgent = obj.optString("lastUserAgent", "").trim(),
-                inWhitelist = inWhitelist,
                 inBlacklist = inBlacklist,
-                effectiveBlocked = effectiveBlocked
+                effectiveBlocked = effectiveBlocked,
+                source = DeviceAccessSource.AccessRecord
             )
         }
         return out.sortedWith(
@@ -358,29 +410,29 @@ class AccessControlRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun mergeHistory(
+    private fun mergeDevices(
         snapshot: DeviceAccessSnapshot,
         historyMap: Map<String, HistoryDevice>,
-        lanNeighbors: Set<String>
+        lanNeighbors: Set<String>,
+        lanScanAtMs: Long
     ): DeviceAccessSnapshot {
         val config = snapshot.config
         val merged = linkedMapOf<String, DeviceAccessDevice>()
         snapshot.devices.forEach { device ->
             val history = historyMap[device.ip]
             if (history == null) {
+                val inBlacklist = config.blacklist.contains(device.ip)
                 merged[device.ip] = device.copy(
-                    inWhitelist = config.whitelist.contains(device.ip),
-                    inBlacklist = config.blacklist.contains(device.ip),
+                    inBlacklist = inBlacklist,
                     effectiveBlocked = calculateEffectiveBlocked(
                         config = config,
                         ip = device.ip,
-                        inWhitelist = config.whitelist.contains(device.ip),
-                        inBlacklist = config.blacklist.contains(device.ip)
-                    )
+                        inBlacklist = inBlacklist
+                    ),
+                    source = DeviceAccessSource.AccessRecord
                 )
                 return@forEach
             }
-            val inWhitelist = config.whitelist.contains(device.ip)
             val inBlacklist = config.blacklist.contains(device.ip)
             val historySeen = history.lastSeenAtMs.coerceAtLeast(0L)
             merged[device.ip] = device.copy(
@@ -400,20 +452,18 @@ class AccessControlRepositoryImpl @Inject constructor(
                 } else {
                     history.lastPath.ifBlank { device.lastPath }
                 },
-                inWhitelist = inWhitelist,
                 inBlacklist = inBlacklist,
                 effectiveBlocked = calculateEffectiveBlocked(
                     config = config,
                     ip = device.ip,
-                    inWhitelist = inWhitelist,
                     inBlacklist = inBlacklist
-                )
+                ),
+                source = DeviceAccessSource.AccessRecord
             )
         }
 
         historyMap.forEach { (ip, history) ->
             if (merged.containsKey(ip)) return@forEach
-            val inWhitelist = config.whitelist.contains(ip)
             val inBlacklist = config.blacklist.contains(ip)
             val seenAt = history.lastSeenAtMs.coerceAtLeast(0L)
             merged[ip] = DeviceAccessDevice(
@@ -425,36 +475,13 @@ class AccessControlRepositoryImpl @Inject constructor(
                 blockedRequests = 0,
                 lastMethod = history.lastMethod.ifBlank { "GET" },
                 lastPath = history.lastPath,
-                inWhitelist = inWhitelist,
                 inBlacklist = inBlacklist,
                 effectiveBlocked = calculateEffectiveBlocked(
                     config = config,
                     ip = ip,
-                    inWhitelist = inWhitelist,
                     inBlacklist = inBlacklist
-                )
-            )
-        }
-
-        config.whitelist.forEach { ip ->
-            if (merged.containsKey(ip)) return@forEach
-            merged[ip] = DeviceAccessDevice(
-                ip = ip,
-                firstSeenAtMs = 0L,
-                lastSeenAtMs = 0L,
-                totalRequests = 0,
-                allowedRequests = 0,
-                blockedRequests = 0,
-                lastMethod = "GET",
-                lastPath = "白名单规则",
-                inWhitelist = true,
-                inBlacklist = false,
-                effectiveBlocked = calculateEffectiveBlocked(
-                    config = config,
-                    ip = ip,
-                    inWhitelist = true,
-                    inBlacklist = false
-                )
+                ),
+                source = DeviceAccessSource.AccessRecord
             )
         }
 
@@ -469,20 +496,18 @@ class AccessControlRepositoryImpl @Inject constructor(
                 blockedRequests = 0,
                 lastMethod = "GET",
                 lastPath = "黑名单规则",
-                inWhitelist = false,
                 inBlacklist = true,
                 effectiveBlocked = calculateEffectiveBlocked(
                     config = config,
                     ip = ip,
-                    inWhitelist = false,
                     inBlacklist = true
-                )
+                ),
+                source = DeviceAccessSource.BlacklistRule
             )
         }
 
         lanNeighbors.forEach { ip ->
             if (merged.containsKey(ip)) return@forEach
-            val inWhitelist = config.whitelist.contains(ip)
             val inBlacklist = config.blacklist.contains(ip)
             merged[ip] = DeviceAccessDevice(
                 ip = ip,
@@ -492,32 +517,123 @@ class AccessControlRepositoryImpl @Inject constructor(
                 allowedRequests = 0,
                 blockedRequests = 0,
                 lastMethod = "GET",
-                lastPath = "局域网邻居设备",
-                inWhitelist = inWhitelist,
+                lastPath = "局域网检测",
                 inBlacklist = inBlacklist,
                 effectiveBlocked = calculateEffectiveBlocked(
                     config = config,
                     ip = ip,
-                    inWhitelist = inWhitelist,
                     inBlacklist = inBlacklist
-                )
+                ),
+                source = DeviceAccessSource.LanScan
             )
         }
 
         val mergedDevices = merged.values.sortedWith(
-            compareByDescending<DeviceAccessDevice> { it.lastSeenAtMs }
+            compareByDescending<DeviceAccessDevice> { it.inBlacklist }
+                .thenByDescending { sourcePriority(it.source) }
+                .thenByDescending { it.totalRequests }
+                .thenByDescending { it.lastSeenAtMs }
                 .thenBy { it.ip }
         )
+        val trackedFromList = mergedDevices.count {
+            it.source == DeviceAccessSource.AccessRecord
+        }
+        val lanScannedCount = mergedDevices.count { it.source == DeviceAccessSource.LanScan }
         return snapshot.copy(
             devices = mergedDevices,
-            trackedDevices = maxOf(snapshot.trackedDevices, mergedDevices.size),
-            whitelistCount = maxOf(snapshot.whitelistCount, config.whitelist.size),
-            blacklistCount = maxOf(snapshot.blacklistCount, config.blacklist.size)
+            trackedDevices = maxOf(snapshot.trackedDevices, trackedFromList),
+            blacklistCount = maxOf(snapshot.blacklistCount, config.blacklist.size),
+            lanScannedCount = lanScannedCount,
+            lastLanScanAtMs = lanScanAtMs
         )
     }
 
+    private fun sourcePriority(source: DeviceAccessSource): Int {
+        return when (source) {
+            DeviceAccessSource.AccessRecord -> 3
+            DeviceAccessSource.LanScan -> 2
+            DeviceAccessSource.BlacklistRule -> 1
+        }
+    }
+
+    private suspend fun probeLanDevices(): Set<String> = coroutineScope {
+        val targets = collectLanProbeTargets()
+        if (targets.isEmpty()) return@coroutineScope emptySet()
+
+        val limiter = Semaphore(36)
+        targets.map { ip ->
+            async(Dispatchers.IO) {
+                limiter.withPermit {
+                    if (probeSingleIp(ip)) ip else null
+                }
+            }
+        }.awaitAll()
+            .filterNotNull()
+            .toSet()
+    }
+
+    private fun collectLanProbeTargets(): Set<String> {
+        val out = linkedSetOf<String>()
+        val networkInterfaces = runCatching {
+            Collections.list(NetworkInterface.getNetworkInterfaces())
+        }.getOrElse { return emptySet() }
+
+        networkInterfaces.forEach { netIf ->
+            val validInterface = runCatching {
+                netIf.isUp && !netIf.isLoopback
+            }.getOrDefault(false)
+            if (!validInterface) return@forEach
+
+            val ifaceAddrs = runCatching { netIf.interfaceAddresses }.getOrDefault(emptyList())
+            ifaceAddrs.forEach { ifaceAddr ->
+                val ipv4 = ifaceAddr.address as? Inet4Address ?: return@forEach
+                if (ipv4.isLoopbackAddress || !ipv4.isSiteLocalAddress) return@forEach
+                val hostIp = normalizeIp(ipv4.hostAddress ?: "")
+                if (hostIp.isBlank()) return@forEach
+                val prefix = hostIp.substringBeforeLast('.', "")
+                if (prefix.isBlank()) return@forEach
+                val selfLast = hostIp.substringAfterLast('.').toIntOrNull() ?: -1
+                for (last in 1..254) {
+                    if (last == selfLast) continue
+                    out += "$prefix.$last"
+                }
+            }
+        }
+        return out
+    }
+
+    private fun probeSingleIp(ip: String): Boolean {
+        if (ip.isBlank() || isLoopback(ip)) return false
+        val socketResult = runCatching {
+            Socket().use { socket ->
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(ip, 80), 120)
+                true
+            }
+        }.getOrElse { error ->
+            when (error) {
+                is ConnectException -> true
+                is SocketTimeoutException -> false
+                else -> false
+            }
+        }
+        if (socketResult) return true
+
+        return runCatching {
+            val address = java.net.InetAddress.getByName(ip)
+            address.isReachable(120)
+        }.getOrDefault(false)
+    }
+
     private fun readLanNeighborIps(): Set<String> {
-        val arpFile = java.io.File("/proc/net/arp")
+        val out = linkedSetOf<String>()
+        out += readLanNeighborIpsFromArpFile()
+        out += readLanNeighborIpsFromIpNeigh()
+        return out
+    }
+
+    private fun readLanNeighborIpsFromArpFile(): Set<String> {
+        val arpFile = File("/proc/net/arp")
         if (!arpFile.exists() || !arpFile.isFile) return emptySet()
         val out = linkedSetOf<String>()
         val lines = runCatching { arpFile.readLines(Charsets.UTF_8) }.getOrElse { return emptySet() }
@@ -532,6 +648,47 @@ class AccessControlRepositoryImpl @Inject constructor(
             }
         }
         return out
+    }
+
+    private fun readLanNeighborIpsFromIpNeigh(): Set<String> {
+        val lines = readIpNeighLines()
+        if (lines.isEmpty()) return emptySet()
+
+        val out = linkedSetOf<String>()
+        lines.forEach { raw ->
+            val line = raw.trim()
+            if (line.isBlank()) return@forEach
+            val parts = line.split(Regex("\\s+"))
+            if (parts.isEmpty()) return@forEach
+            val tokensUpper = parts.map { it.uppercase() }
+            if (tokensUpper.any { it == "FAILED" || it == "INCOMPLETE" || it == "UNREACHABLE" }) {
+                return@forEach
+            }
+            val ip = normalizeIp(parts[0])
+            if (ip.isNotBlank() && !isLoopback(ip)) {
+                out += ip
+            }
+        }
+        return out
+    }
+
+    private fun readIpNeighLines(): List<String> {
+        val commands = listOf(
+            listOf("ip", "neigh", "show"),
+            listOf("/system/bin/ip", "neigh", "show")
+        )
+        commands.forEach { command ->
+            val lines = runCatching {
+                val process = ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start()
+                val output = process.inputStream.bufferedReader().use { it.readLines() }
+                val code = process.waitFor()
+                if (code == 0) output else emptyList()
+            }.getOrDefault(emptyList())
+            if (lines.isNotEmpty()) return lines
+        }
+        return emptyList()
     }
 
     private fun parseIpArray(arr: JSONArray?): List<String> {
@@ -574,15 +731,10 @@ class AccessControlRepositoryImpl @Inject constructor(
     private fun calculateEffectiveBlocked(
         config: DeviceAccessConfig,
         ip: String,
-        inWhitelist: Boolean,
         inBlacklist: Boolean
     ): Boolean {
         if (isLoopback(ip)) return false
-        return when (config.mode) {
-            DeviceAccessMode.Off -> false
-            DeviceAccessMode.Blacklist -> inBlacklist
-            DeviceAccessMode.Whitelist -> !inWhitelist
-        }
+        return config.mode == DeviceAccessMode.Blacklist && inBlacklist
     }
 
     private fun isLoopback(ip: String): Boolean {

@@ -125,7 +125,7 @@ fun ToolsScreen(
 
         ToolEntryCard(
             title = "设备控制",
-            subtitle = "黑白名单管理与访问设备统计",
+            subtitle = "黑名单管理、访问排行与局域网检测",
             icon = { Icon(Icons.Rounded.Shield, null) },
             onClick = onOpenDeviceAccess
         )

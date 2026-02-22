@@ -5,7 +5,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.danmuapiapp.domain.model.DeviceAccessConfig
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.repository.AccessControlRepository
@@ -18,11 +17,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
-
-enum class DeviceRuleList {
-    Whitelist,
-    Blacklist
-}
 
 @HiltViewModel
 class DeviceAccessViewModel @Inject constructor(
@@ -47,6 +41,8 @@ class DeviceAccessViewModel @Inject constructor(
         private set
     var isSaving by mutableStateOf(false)
         private set
+    var showLanNeighbors by mutableStateOf(false)
+        private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
     var operationMessage by mutableStateOf<String?>(null)
@@ -62,101 +58,103 @@ class DeviceAccessViewModel @Inject constructor(
             isRefreshing = true
             try {
                 val result = withContext(Dispatchers.IO) {
-                    repository.fetchSnapshot()
+                    repository.fetchSnapshot(includeLanNeighbors = showLanNeighbors)
                 }
-                result.onSuccess { _snapshot.value = it }
-                    .onFailure { errorMessage = it.message ?: "刷新失败" }
+                result.onSuccess {
+                    _snapshot.value = it
+                }.onFailure {
+                    errorMessage = it.message ?: "刷新失败"
+                }
             } finally {
                 isRefreshing = false
             }
         }
     }
 
-    fun applyMode(mode: DeviceAccessMode) {
+    fun scanLanDevices() {
+        if (isRefreshing) return
+        showLanNeighbors = true
+        viewModelScope.launch {
+            isRefreshing = true
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    repository.scanLanDevices()
+                }
+                result.onSuccess {
+                    _snapshot.value = it
+                    operationMessage = if (it.lanScannedCount > 0) {
+                        "检测到 ${it.lanScannedCount} 台局域网设备"
+                    } else {
+                        "未检测到可识别的局域网设备"
+                    }
+                }.onFailure {
+                    errorMessage = it.message ?: "检测失败"
+                }
+            } finally {
+                isRefreshing = false
+            }
+        }
+    }
+
+    fun hideLanDevices() {
+        if (!showLanNeighbors) return
+        showLanNeighbors = false
+        refresh()
+    }
+
+    fun setBlacklistEnabled(enabled: Boolean) {
         if (!ensureAdminMode()) return
         val current = _snapshot.value.config
-        if (current.mode == mode) return
+        val nextMode = if (enabled) DeviceAccessMode.Blacklist else DeviceAccessMode.Off
+        if (current.mode == nextMode) return
         saveConfig(
-            next = current.copy(mode = mode),
-            successMessage = "访问模式已切换为 ${mode.label}"
+            nextMode = nextMode,
+            blacklist = current.blacklist,
+            successMessage = if (enabled) "已开启黑名单防护" else "已关闭黑名单防护"
         )
     }
 
-    fun toggleRule(ipRaw: String, list: DeviceRuleList) {
+    fun toggleBlock(ipRaw: String) {
         if (!ensureAdminMode()) return
         val ip = normalizeIp(ipRaw)
         if (ip.isBlank()) return
         val current = _snapshot.value.config
-
-        val whitelist = current.whitelist.toMutableSet()
         val blacklist = current.blacklist.toMutableSet()
-        when (list) {
-            DeviceRuleList.Whitelist -> {
-                if (whitelist.contains(ip)) whitelist.remove(ip)
-                else {
-                    whitelist.add(ip)
-                    blacklist.remove(ip)
-                }
-            }
-
-            DeviceRuleList.Blacklist -> {
-                if (blacklist.contains(ip)) blacklist.remove(ip)
-                else {
-                    blacklist.add(ip)
-                    whitelist.remove(ip)
-                }
-            }
+        val added = if (blacklist.contains(ip)) {
+            blacklist.remove(ip)
+            false
+        } else {
+            blacklist.add(ip)
+            true
         }
-
-        val next = current.copy(
-            whitelist = whitelist.toList().sorted(),
-            blacklist = blacklist.toList().sorted()
+        saveConfig(
+            nextMode = current.mode,
+            blacklist = blacklist.toList().sorted(),
+            successMessage = if (added) "已拉黑设备 $ip" else "已解除拉黑 $ip"
         )
-        saveConfig(next = next, successMessage = "规则已更新")
     }
 
-    fun addManualIp(raw: String, list: DeviceRuleList) {
+    fun clearBlacklist() {
         if (!ensureAdminMode()) return
-        val ip = normalizeIp(raw)
-        if (ip.isBlank()) {
-            errorMessage = "请输入有效的 IPv4/IPv6 地址"
+        val current = _snapshot.value.config
+        if (current.blacklist.isEmpty()) {
+            operationMessage = "黑名单已为空"
             return
         }
-        val current = _snapshot.value.config
-        val whitelist = current.whitelist.toMutableSet()
-        val blacklist = current.blacklist.toMutableSet()
-        when (list) {
-            DeviceRuleList.Whitelist -> {
-                whitelist.add(ip)
-                blacklist.remove(ip)
-            }
-
-            DeviceRuleList.Blacklist -> {
-                blacklist.add(ip)
-                whitelist.remove(ip)
-            }
-        }
-        val next = current.copy(
-            whitelist = whitelist.toList().sorted(),
-            blacklist = blacklist.toList().sorted()
-        )
-        saveConfig(next = next, successMessage = "已添加设备 $ip")
-    }
-
-    fun clearRules() {
-        if (!ensureAdminMode()) return
-        val current = _snapshot.value.config
         saveConfig(
-            next = current.copy(whitelist = emptyList(), blacklist = emptyList()),
-            clearRules = true,
-            successMessage = "已清空黑白名单"
+            nextMode = current.mode,
+            blacklist = emptyList(),
+            clearBlacklist = true,
+            successMessage = "已清空黑名单"
         )
     }
 
     fun clearDeviceStats() {
         if (!ensureAdminMode()) return
+        val current = _snapshot.value.config
         saveConfig(
-            next = _snapshot.value.config,
+            nextMode = current.mode,
+            blacklist = current.blacklist,
             clearDevices = true,
             successMessage = "已清空设备访问统计"
         )
@@ -171,20 +169,22 @@ class DeviceAccessViewModel @Inject constructor(
     }
 
     private fun saveConfig(
-        next: DeviceAccessConfig,
+        nextMode: DeviceAccessMode,
+        blacklist: List<String>,
         clearDevices: Boolean = false,
-        clearRules: Boolean = false,
+        clearBlacklist: Boolean = false,
         successMessage: String
     ) {
         if (isSaving) return
         viewModelScope.launch {
             isSaving = true
             try {
+                val currentConfig = _snapshot.value.config
                 val result = withContext(Dispatchers.IO) {
                     repository.saveConfig(
-                        config = next,
+                        config = currentConfig.copy(mode = nextMode, blacklist = blacklist),
                         clearDevices = clearDevices,
-                        clearRules = clearRules
+                        clearBlacklist = clearBlacklist
                     )
                 }
                 result.onSuccess {

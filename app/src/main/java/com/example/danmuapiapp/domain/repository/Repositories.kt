@@ -68,11 +68,12 @@ interface RequestRecordRepository {
 }
 
 interface AccessControlRepository {
-    suspend fun fetchSnapshot(): Result<DeviceAccessSnapshot>
+    suspend fun fetchSnapshot(includeLanNeighbors: Boolean = false): Result<DeviceAccessSnapshot>
+    suspend fun scanLanDevices(): Result<DeviceAccessSnapshot>
     suspend fun saveConfig(
         config: DeviceAccessConfig,
         clearDevices: Boolean = false,
-        clearRules: Boolean = false
+        clearBlacklist: Boolean = false
     ): Result<DeviceAccessSnapshot>
 }
 
