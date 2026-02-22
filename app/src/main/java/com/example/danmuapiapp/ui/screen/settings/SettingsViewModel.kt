@@ -705,24 +705,52 @@ class SettingsViewModel @Inject constructor(
                 RuntimePaths.applyCustomBaseDir(context, targetPath)
             }
             if (result.ok) {
+                val previousVariant = runtimeState.value.variant
+                var resolvedVariant: ApiVariant? = null
                 withContext(Dispatchers.IO) {
                     runCatching {
                         val projectDir = NodeProjectManager.ensureProjectExtracted(
                             context,
                             RuntimePaths.normalProjectDir(context)
                         )
-                        syncRuntimeVariantFromEnv(projectDir)
+                        resolvedVariant = syncRuntimeVariantFromEnv(projectDir)
+                        NodeProjectManager.writeRuntimeEnv(context, projectDir)
                     }
                 }
                 coreRepo.refreshCoreInfo()
                 envConfigRepo.reload()
                 refreshWorkDirInfo()
-                if (runtimeState.value.status == ServiceStatus.Running) {
+                val selectedVariant = resolvedVariant
+                val variantMessage = when {
+                    selectedVariant == null -> "当前目录未检测到可用核心，请先下载核心"
+                    selectedVariant != previousVariant -> "已自动切换核心为 ${selectedVariant.label}"
+                    else -> null
+                }
+                if (runtimeState.value.status == ServiceStatus.Running && selectedVariant != null) {
+                    if (selectedVariant != previousVariant) {
+                        runtimeRepo.addLog(LogLevel.Info, "已根据新目录自动切换核心到 ${selectedVariant.label}")
+                    }
                     runtimeRepo.addLog(LogLevel.Info, "工作目录已变更，正在重启服务应用新目录")
                     runtimeRepo.restartService()
-                    operationMessage = "${result.message}，服务正在重启，请稍候"
+                    operationMessage = buildString {
+                        append(result.message)
+                        if (!variantMessage.isNullOrBlank()) {
+                            append("，")
+                            append(variantMessage)
+                        }
+                        append("，服务正在重启，请稍候")
+                    }
                 } else {
-                    operationMessage = result.message
+                    if (runtimeState.value.status == ServiceStatus.Running && selectedVariant == null) {
+                        runtimeRepo.addLog(LogLevel.Warn, "工作目录已切换，但新目录没有可用核心，已跳过自动重启")
+                    }
+                    operationMessage = buildString {
+                        append(result.message)
+                        if (!variantMessage.isNullOrBlank()) {
+                            append("，")
+                            append(variantMessage)
+                        }
+                    }
                 }
             } else {
                 operationMessage = result.message
@@ -731,17 +759,32 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun syncRuntimeVariantFromEnv(projectDir: java.io.File) {
+    private fun syncRuntimeVariantFromEnv(projectDir: java.io.File): ApiVariant? {
+        val installedVariants = ApiVariant.entries.filter { variant ->
+            NodeProjectManager.hasValidCore(java.io.File(projectDir, "danmu_api_${variant.key}"))
+        }
+        if (installedVariants.isEmpty()) return null
+
         val envFile = java.io.File(projectDir, "config/.env")
-        if (!envFile.exists() || !envFile.isFile) return
+        val preferredVariant = if (envFile.exists() && envFile.isFile) {
+            val text = runCatching { envFile.readText(Charsets.UTF_8) }.getOrDefault("")
+            val env = parseEnvMap(text)
+            val rawVariant = env["DANMU_API_VARIANT"]?.trim()?.lowercase().orEmpty()
+            ApiVariant.entries.firstOrNull { it.key == rawVariant }
+        } else {
+            null
+        }
 
-        val text = runCatching { envFile.readText(Charsets.UTF_8) }.getOrElse { return }
-        val env = parseEnvMap(text)
-        val rawVariant = env["DANMU_API_VARIANT"]?.trim()?.lowercase().orEmpty()
-        if (rawVariant.isBlank()) return
+        val currentVariant = runtimeState.value.variant
+        val resolvedVariant = when {
+            preferredVariant != null && installedVariants.contains(preferredVariant) -> preferredVariant
+            installedVariants.contains(currentVariant) -> currentVariant
+            installedVariants.contains(ApiVariant.Stable) -> ApiVariant.Stable
+            else -> installedVariants.first()
+        }
 
-        val variant = ApiVariant.entries.firstOrNull { it.key == rawVariant } ?: return
-        runtimeRepo.updateVariant(variant)
+        runtimeRepo.updateVariant(resolvedVariant)
+        return resolvedVariant
     }
 
     private fun startProxySpeedTest() {

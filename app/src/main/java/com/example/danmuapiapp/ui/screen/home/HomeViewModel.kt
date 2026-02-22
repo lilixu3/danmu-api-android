@@ -211,9 +211,16 @@ class HomeViewModel @Inject constructor(
             runtimeRepo.addLog(LogLevel.Info, "正在下载 ${variant.label}...")
             coreRepo.installCore(variant).fold(
                 onSuccess = {
-                    runtimeRepo.addLog(LogLevel.Info, "${variant.label} 安装成功")
                     isInstallingCore = false
-                    runtimeRepo.startService()
+                    runtimeRepo.updateVariant(variant)
+                    runtimeRepo.addLog(LogLevel.Info, "${variant.label} 安装成功，已切换为当前核心")
+                    val status = runtimeState.value.status
+                    if (status == ServiceStatus.Running) {
+                        runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用新核心...")
+                        runtimeRepo.restartService()
+                    } else {
+                        runtimeRepo.startService()
+                    }
                 },
                 onFailure = {
                     runtimeRepo.addLog(LogLevel.Error, "安装失败: ${it.message}")
@@ -579,7 +586,12 @@ class HomeViewModel @Inject constructor(
                     coreRepo.isCoreInstalled(variant)
                 }
                 if (!installed) {
-                    runtimeRepo.addLog(LogLevel.Warn, "${variant.label} 未安装，请先下载核心")
+                    runtimeRepo.updateVariant(variant)
+                    runtimeRepo.addLog(LogLevel.Warn, "${variant.label} 未安装，已切换选择，下载后可直接使用")
+                    if (current.status == ServiceStatus.Running) {
+                        runtimeRepo.addLog(LogLevel.Info, "服务仍在运行当前核心，下载后会自动重启应用新核心")
+                    }
+                    appUpdateMessage = "${variant.label} 尚未安装，请先下载核心"
                     showNoCoreDialog = true
                     return@launch
                 }

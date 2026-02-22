@@ -22,15 +22,18 @@ object AppAppearancePrefs {
 
     fun readNightMode(prefs: SharedPreferences): NightModePreference {
         if (!prefs.contains(PREF_KEY_NIGHT_MODE)) {
-            return if (prefs.safeGetBoolean(PREF_KEY_DARK_THEME_LEGACY, true)) {
-                NightModePreference.Dark
-            } else {
-                NightModePreference.Light
+            if (prefs.contains(PREF_KEY_DARK_THEME_LEGACY)) {
+                return if (prefs.safeGetBoolean(PREF_KEY_DARK_THEME_LEGACY, false)) {
+                    NightModePreference.Dark
+                } else {
+                    NightModePreference.Light
+                }
             }
+            return NightModePreference.FollowSystem
         }
         val raw = prefs.safeGetInt(
             PREF_KEY_NIGHT_MODE,
-            NightModePreference.Light.storageValue
+            NightModePreference.FollowSystem.storageValue
         )
         return NightModePreference.fromStorageValue(raw)
     }
@@ -39,7 +42,7 @@ object AppAppearancePrefs {
         val legacyDark = when (mode) {
             NightModePreference.Dark -> true
             NightModePreference.Light -> false
-            NightModePreference.FollowSystem -> prefs.safeGetBoolean(PREF_KEY_DARK_THEME_LEGACY, true)
+            NightModePreference.FollowSystem -> prefs.safeGetBoolean(PREF_KEY_DARK_THEME_LEGACY, false)
         }
         prefs.edit()
             .putInt(PREF_KEY_NIGHT_MODE, mode.storageValue)
