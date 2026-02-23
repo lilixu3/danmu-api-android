@@ -247,7 +247,12 @@ private fun SearchDownloadPage(
 ) {
     val inDetail = viewModel.currentAnime != null
     val visibleEpisodes = viewModel.visibleEpisodes()
-    val episodeSummary = if (inDetail) viewModel.visibleStateSummary() else EpisodeStateSummary()
+    val episodeStateMap = viewModel.episodeStates
+    val episodeSummary = if (inDetail) {
+        buildEpisodeStateSummaryFromMap(visibleEpisodes, episodeStateMap)
+    } else {
+        EpisodeStateSummary()
+    }
     val selectedCount = if (inDetail) {
         visibleEpisodes.count { viewModel.selectedEpisodeIds.contains(it.episodeId) }
     } else 0
@@ -428,7 +433,28 @@ private fun SearchDownloadPage(
                     item { ThrottleHintBanner(hint) }
                 }
                 // Episode list
-                if (visibleEpisodes.isEmpty()) {
+                if (viewModel.isLoadingEpisodes) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Text(
+                                    "正在加载剧集…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else if (visibleEpisodes.isEmpty()) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(vertical = 24.dp),
                             contentAlignment = Alignment.Center) {
@@ -438,7 +464,12 @@ private fun SearchDownloadPage(
                         }
                     }
                 } else {
-                    items(visibleEpisodes, key = { it.episodeId }) { episode ->
+                    items(
+                        visibleEpisodes,
+                        key = { episode ->
+                            "${episode.source}|${episode.episodeId}|${episode.episodeNumber}|${episode.title}"
+                        }
+                    ) { episode ->
                         EpisodeRow(
                             episode = episode,
                             selected = viewModel.selectedEpisodeIds.contains(episode.episodeId),
@@ -586,6 +617,40 @@ private fun CompactConfigSection(
             )
         }
     }
+}
+
+private fun buildEpisodeStateSummaryFromMap(
+    episodes: List<DownloadEpisodeCandidate>,
+    stateMap: Map<Long, EpisodeDownloadUiState>
+): EpisodeStateSummary {
+    var idle = 0
+    var queued = 0
+    var running = 0
+    var success = 0
+    var failed = 0
+    var skipped = 0
+    var canceled = 0
+    episodes.forEach { episode ->
+        when (stateMap[episode.episodeId]?.state ?: EpisodeDownloadState.Idle) {
+            EpisodeDownloadState.Idle -> idle++
+            EpisodeDownloadState.Queued -> queued++
+            EpisodeDownloadState.Running -> running++
+            EpisodeDownloadState.Success -> success++
+            EpisodeDownloadState.Failed -> failed++
+            EpisodeDownloadState.Skipped -> skipped++
+            EpisodeDownloadState.Canceled -> canceled++
+        }
+    }
+    return EpisodeStateSummary(
+        total = episodes.size,
+        idle = idle,
+        queued = queued,
+        running = running,
+        success = success,
+        failed = failed,
+        skipped = skipped,
+        canceled = canceled
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════
