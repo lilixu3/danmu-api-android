@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.home
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
@@ -113,6 +114,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.domain.model.RunMode
@@ -120,14 +122,18 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
+import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
+import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
 
 @Composable
 fun HomeScreen(
     onOpenCacheManagement: () -> Unit = {},
+    onOpenDanmuDownload: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -143,6 +149,17 @@ fun HomeScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = remember(context) { context.findActivity() }
+    val componentActivity = activity as? ComponentActivity
+    val downloadViewModel = if (componentActivity != null) {
+        hiltViewModel<DanmuDownloadViewModel>(viewModelStoreOwner = componentActivity)
+    } else {
+        null
+    }
+    val emptyQueueState = remember { mutableStateOf<List<DanmuDownloadTask>>(emptyList()) }
+    val downloadQueueTasks by (
+        downloadViewModel?.queueTasks?.collectAsStateWithLifecycle()
+            ?: emptyQueueState
+        )
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showRunModePickerDialog by remember { mutableStateOf(false) }
@@ -199,6 +216,24 @@ fun HomeScreen(
     }
     val hasInAppDownload = viewModel.appUpdatePromptDownloadUrls.isNotEmpty() &&
         !viewModel.appUpdatePromptLatestVersion.isNullOrBlank()
+    val queueSummary = downloadViewModel?.queueSummary() ?: DownloadQueueSummary(
+        total = downloadQueueTasks.size
+    )
+    val queueCompletedCount = queueSummary.success + queueSummary.failed + queueSummary.skipped + queueSummary.canceled
+    val queueProgress = if (queueSummary.total <= 0) {
+        0f
+    } else {
+        queueCompletedCount.toFloat() / queueSummary.total.toFloat()
+    }
+    val queueLiveProgress = if (downloadViewModel?.isDownloading == true) {
+        max(queueProgress, downloadViewModel.overallProgress.coerceIn(0f, 1f))
+    } else {
+        queueProgress
+    }
+    val hasActiveDownloadTasks = queueSummary.pending > 0 || queueSummary.running > 0 || downloadViewModel?.isDownloading == true
+    val queueRunningDetail = downloadViewModel?.queueRunningStatusText().orEmpty()
+    val queueProgressSummary = downloadViewModel?.progressSummary ?: "当前没有待处理任务"
+    val queueThrottleHint = downloadViewModel?.throttleHint
 
     LaunchedEffect(state.runMode) {
         if (state.runMode == RunMode.Normal) {
@@ -397,6 +432,22 @@ fun HomeScreen(
                     hasUpdate = hasUpdate,
                     latestVersion = latestVersion
                 )
+
+                AnimatedVisibility(
+                    visible = hasActiveDownloadTasks,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    DownloadQueueLiveCard(
+                        isDownloading = downloadViewModel?.isDownloading == true,
+                        summary = queueSummary,
+                        progress = queueLiveProgress,
+                        progressSummary = queueProgressSummary,
+                        runningDetail = queueRunningDetail,
+                        throttleHint = queueThrottleHint,
+                        onOpenDanmuDownload = onOpenDanmuDownload
+                    )
+                }
 
                 AnimatedVisibility(
                     visible = isRunning,
@@ -1049,6 +1100,205 @@ fun HomeScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun DownloadQueueLiveCard(
+    isDownloading: Boolean,
+    summary: DownloadQueueSummary,
+    progress: Float,
+    progressSummary: String,
+    runningDetail: String,
+    throttleHint: String?,
+    onOpenDanmuDownload: () -> Unit
+) {
+    val completed = summary.success + summary.failed + summary.skipped + summary.canceled
+    val badgeColor = if (isDownloading) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.tertiary
+    }
+    val displayProgress = progress.coerceIn(0f, 1f)
+    val displayPercent = (displayProgress * 100f).toInt().coerceIn(0, 100)
+    val shouldShowRunningDetail = runningDetail.isNotBlank() && runningDetail != "当前无运行中的任务"
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = badgeColor.copy(alpha = 0.15f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DownloadForOffline,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(6.dp)
+                                .size(16.dp),
+                            tint = badgeColor
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "弹幕下载队列",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (isDownloading) {
+                                "正在执行 ${summary.running.coerceAtLeast(1)} 项，待处理 ${summary.pending} 项"
+                            } else {
+                                "队列待处理 ${summary.pending} 项"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                FilledTonalIconButton(
+                    onClick = onOpenDanmuDownload,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ChevronRight,
+                        contentDescription = "打开弹幕下载",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            LinearProgressIndicator(
+                progress = { displayProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(999.dp)),
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                color = badgeColor
+            )
+            Text(
+                text = "总进度 $displayPercent% · 已完成 $completed/${summary.total.coerceAtLeast(0)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (shouldShowRunningDetail) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
+                ) {
+                    Text(
+                        text = runningDetail,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Text(
+                text = progressSummary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+
+            if (!throttleHint.isNullOrBlank()) {
+                Text(
+                    text = throttleHint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QueueMetricBadge(
+                    modifier = Modifier.weight(1f),
+                    label = "待处理",
+                    value = summary.pending
+                )
+                QueueMetricBadge(
+                    modifier = Modifier.weight(1f),
+                    label = "运行",
+                    value = summary.running
+                )
+                QueueMetricBadge(
+                    modifier = Modifier.weight(1f),
+                    label = "完成",
+                    value = summary.success + summary.skipped + summary.canceled
+                )
+                QueueMetricBadge(
+                    modifier = Modifier.weight(1f),
+                    label = "失败",
+                    value = summary.failed
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueMetricBadge(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: Int
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value.coerceAtLeast(0).toString(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }
 
