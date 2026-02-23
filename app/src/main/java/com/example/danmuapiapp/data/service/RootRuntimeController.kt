@@ -24,6 +24,14 @@ object RootRuntimeController {
     private const val PID_FILE_NAME = "root_node.pid"
     private val mainClassName = RootNodeEntry::class.java.name
 
+    private data class RuntimeEnvSnapshot(
+        val variant: String,
+        val port: Int,
+        val logLevel: String,
+        val tokenConfigured: Boolean,
+        val token: String
+    )
+
     private fun pidFile(context: Context): File = File(context.filesDir, PID_FILE_NAME)
     private fun shellQuote(input: String): String = "'" + input.replace("'", "'\"'\"'") + "'"
 
@@ -92,15 +100,15 @@ object RootRuntimeController {
             return OpResult(false, "Root 授权失败", "请确认设备已 Root，并允许本应用获取 Root 权限")
         }
 
-        if (!skipSync || !rootProjectMainJsExists(context)) {
-            // 快速路径：已有可启动 root 工程时跳过同步，减少开机耗时。
-            val sync = syncWorkDirToRoot(context)
-            if (!sync.ok) {
-                val hasReadyRootProject = rootProjectMainJsExists(context)
-                if (!hasReadyRootProject) {
-                    return sync
-                }
-            }
+        // Root 与普通模式目录要彻底隔离：
+        // 1) 仅在 Root 目录缺失时才从普通目录引导一次；
+        // 2) Root 目录已存在时仅同步 Root 自身环境变量，不再回灌普通目录内容。
+        val prepare = ensureRootRuntimeReady(
+            context = context,
+            refreshEnvWhenReady = !skipSync
+        )
+        if (!prepare.ok) {
+            return OpResult(false, "Root 模式启动失败", prepare.detail.ifBlank { prepare.message })
         }
 
         val rootProject = rootProjectDir(context)
@@ -260,20 +268,30 @@ object RootRuntimeController {
     }
 
     fun syncRuntimeEnvOnly(context: Context): OpResult {
-        val project = runCatching {
-            val sourceProjectDir = RuntimePaths.normalProjectDir(context)
-            val dir = NodeProjectManager.ensureProjectExtracted(context, sourceProjectDir)
-            NodeProjectManager.writeRuntimeEnv(context, dir)
-            dir
-        }.getOrElse {
-            return OpResult(false, "运行时准备失败", it.message ?: "无法初始化工作目录")
+        if (!RootShell.hasRoot(2500L)) {
+            return OpResult(false, "同步 Root 环境失败", "缺少 Root 权限")
         }
 
-        val envSyncResult = syncRuntimeEnvToRoot(context, project)
+        val envSyncResult = syncRuntimeEnvToRootFromPrefs(context)
         if (!envSyncResult.ok) return envSyncResult
         val normalize = normalizeRootProjectPermissions(context)
         if (!normalize.ok) return normalize
         return OpResult(true, "Root 环境同步完成")
+    }
+
+    fun ensureRootRuntimeReady(
+        context: Context,
+        refreshEnvWhenReady: Boolean = true
+    ): OpResult {
+        return if (rootProjectMainJsExists(context)) {
+            if (refreshEnvWhenReady) {
+                syncRuntimeEnvOnly(context)
+            } else {
+                OpResult(true, "Root 运行目录已就绪")
+            }
+        } else {
+            syncWorkDirToRoot(context)
+        }
     }
 
     fun syncWorkDirToRoot(context: Context): OpResult {
@@ -295,6 +313,100 @@ object RootRuntimeController {
         val normalize = normalizeRootProjectPermissions(context)
         if (!normalize.ok) return normalize
         return OpResult(true, "同步完成")
+    }
+
+    private fun syncRuntimeEnvToRootFromPrefs(context: Context): OpResult {
+        val snapshot = buildRuntimeEnvSnapshot(context)
+        val rootEnvPath = "${rootProjectDir(context)}/config/.env"
+        val tokenConfigured = if (snapshot.tokenConfigured) "1" else "0"
+
+        val script = """
+            ENV_FILE=${shellQuote(rootEnvPath)}
+            VARIANT=${shellQuote(snapshot.variant)}
+            PORT=${shellQuote(snapshot.port.toString())}
+            LOG_LEVEL=${shellQuote(snapshot.logLevel)}
+            TOKEN_CONFIGURED=${shellQuote(tokenConfigured)}
+            TOKEN_VALUE=${shellQuote(snapshot.token)}
+            TMP_PREFIX="${'$'}ENV_FILE.tmp"
+
+            mkdir -p "${'$'}(dirname "${'$'}ENV_FILE")" >/dev/null 2>&1 || true
+            [ -f "${'$'}ENV_FILE" ] || touch "${'$'}ENV_FILE"
+
+            upsert_env() {
+              K="${'$'}1"
+              V="${'$'}2"
+              TMP="${'$'}TMP_PREFIX.${'$'}$"
+              awk -v k="${'$'}K" -v v="${'$'}V" '
+                BEGIN { done = 0 }
+                $0 ~ "^[[:space:]]*" k "=" {
+                  if (!done) {
+                    print k "=" v
+                    done = 1
+                  }
+                  next
+                }
+                { print }
+                END {
+                  if (!done) print k "=" v
+                }
+              ' "${'$'}ENV_FILE" > "${'$'}TMP" && mv "${'$'}TMP" "${'$'}ENV_FILE"
+            }
+
+            remove_env() {
+              K="${'$'}1"
+              TMP="${'$'}TMP_PREFIX.${'$'}$"
+              awk -v k="${'$'}K" '
+                $0 ~ "^[[:space:]]*" k "=" { next }
+                { print }
+              ' "${'$'}ENV_FILE" > "${'$'}TMP" && mv "${'$'}TMP" "${'$'}ENV_FILE"
+            }
+
+            upsert_env "DANMU_API_VARIANT" "${'$'}VARIANT"
+            upsert_env "DANMU_API_PORT" "${'$'}PORT"
+            upsert_env "LOG_LEVEL" "${'$'}LOG_LEVEL"
+            upsert_env "DANMU_API_LOG_TO_FILE" "0"
+            upsert_env "DANMU_API_LOG_MAX_BYTES" "1048576"
+            upsert_env "APP_LOG_TO_FILE" "0"
+            upsert_env "APP_LOG_MAX_BYTES" "1048576"
+
+            if [ "${'$'}TOKEN_CONFIGURED" = "1" ]; then
+              if [ -n "${'$'}TOKEN_VALUE" ]; then
+                upsert_env "TOKEN" "${'$'}TOKEN_VALUE"
+              else
+                remove_env "TOKEN"
+              fi
+            fi
+
+            [ -f "${'$'}ENV_FILE" ]
+        """.trimIndent()
+
+        val result = RootShell.exec(script, timeoutMs = 12_000L)
+        if (!result.ok) {
+            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
+            return OpResult(false, "同步 Root 环境失败", if (err.isBlank()) "未知错误" else err)
+        }
+        return OpResult(true, "Root 环境同步完成")
+    }
+
+    private fun buildRuntimeEnvSnapshot(context: Context): RuntimeEnvSnapshot {
+        val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+        val rawVariant = prefs.getString("variant", "stable").orEmpty().trim().lowercase()
+        val variant = when (rawVariant) {
+            "dev", "develop", "development" -> "dev"
+            "custom" -> "custom"
+            else -> "stable"
+        }
+        val port = prefs.getInt("port", 9321).coerceIn(1, 65535)
+        val logLevel = prefs.getString("log_level", "info").orEmpty().trim().ifBlank { "info" }
+        val tokenConfigured = prefs.contains("token")
+        val token = prefs.getString("token", "").orEmpty().trim()
+        return RuntimeEnvSnapshot(
+            variant = variant,
+            port = port,
+            logLevel = logLevel,
+            tokenConfigured = tokenConfigured,
+            token = token
+        )
     }
 
     private fun syncProjectToRoot(context: Context, srcProjectDir: File): OpResult {

@@ -21,7 +21,11 @@ object RootAutoStartModule {
             return OpResult(false, "未获得 Root 权限")
         }
 
-        val sync = RootRuntimeController.syncWorkDirToRoot(context)
+        // 仅在 Root 目录缺失时做首次引导，避免每次启用时覆盖 Root 独立工作目录。
+        val sync = RootRuntimeController.ensureRootRuntimeReady(
+            context = context,
+            refreshEnvWhenReady = true
+        )
         if (!sync.ok) {
             return OpResult(false, sync.detail.ifBlank { sync.message })
         }
