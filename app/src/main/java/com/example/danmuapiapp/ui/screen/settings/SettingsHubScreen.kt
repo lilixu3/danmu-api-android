@@ -32,6 +32,7 @@ fun SettingsHubScreen(
     onOpenThemeDisplay: () -> Unit,
     onOpenWorkDir: () -> Unit,
     onOpenServiceConfig: () -> Unit,
+    onOpenDanmuDownload: () -> Unit,
     onOpenNetwork: () -> Unit,
     onOpenBackupRestore: () -> Unit,
     onOpenGithubToken: () -> Unit,
@@ -128,6 +129,13 @@ fun SettingsHubScreen(
                     subtitle = ".env 导入导出 · WebDAV 同步",
                     icon = Icons.Rounded.CloudSync,
                     onClick = onOpenBackupRestore
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "弹幕下载",
+                    subtitle = "保存路径、格式、命名规则与冲突策略",
+                    icon = Icons.Rounded.CloudDownload,
+                    onClick = onOpenDanmuDownload
                 )
             }
 

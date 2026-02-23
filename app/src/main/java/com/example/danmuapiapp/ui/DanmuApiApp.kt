@@ -17,14 +17,17 @@ import com.example.danmuapiapp.ui.navigation.Screen
 import com.example.danmuapiapp.ui.navigation.SettingsRoute
 import com.example.danmuapiapp.ui.navigation.ToolRoute
 import com.example.danmuapiapp.ui.screen.apitest.ApiTestScreen
+import com.example.danmuapiapp.ui.screen.cache.CacheManagementScreen
 import com.example.danmuapiapp.ui.screen.config.ConfigScreen
 import com.example.danmuapiapp.ui.screen.console.ConsoleScreen
 import com.example.danmuapiapp.ui.screen.core.CoreScreen
 import com.example.danmuapiapp.ui.screen.deviceaccess.DeviceAccessScreen
+import com.example.danmuapiapp.ui.screen.download.DanmuDownloadScreen
 import com.example.danmuapiapp.ui.screen.home.HomeScreen
 import com.example.danmuapiapp.ui.screen.push.PushDanmuScreen
 import com.example.danmuapiapp.ui.screen.records.RequestRecordsScreen
 import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
+import com.example.danmuapiapp.ui.screen.settings.DownloadSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
@@ -117,17 +120,23 @@ fun DanmuApiApp() {
                     slideOutHorizontally(animationSpec = tween(200)) { it / 6 }
             }
         ) {
-            composable(Screen.Home.route) { HomeScreen() }
+            composable(Screen.Home.route) {
+                HomeScreen(
+                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) }
+                )
+            }
             composable(Screen.Core.route) { CoreScreen() }
             composable(Screen.Tools.route) {
                 ToolsScreen(
                     onOpenApiTest = { navController.navigate(ToolRoute.ApiTest) },
                     onOpenPushDanmu = { navController.navigate(ToolRoute.PushDanmu) },
+                    onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
                     onOpenRequestRecords = { navController.navigate(ToolRoute.RequestRecords) },
                     onOpenConsole = { navController.navigate(ToolRoute.Console) },
                     onOpenConfig = { navController.navigate(ToolRoute.Config) },
                     onOpenDeviceAccess = { navController.navigate(ToolRoute.DeviceAccess) },
-                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
+                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) }
                 )
             }
             composable(Screen.Settings.route) {
@@ -136,6 +145,7 @@ fun DanmuApiApp() {
                     onOpenThemeDisplay = { navController.navigate(SettingsRoute.ThemeDisplay) },
                     onOpenWorkDir = { navController.navigate(SettingsRoute.WorkDir) },
                     onOpenServiceConfig = { navController.navigate(SettingsRoute.ServiceConfig) },
+                    onOpenDanmuDownload = { navController.navigate(SettingsRoute.DanmuDownload) },
                     onOpenNetwork = { navController.navigate(SettingsRoute.Network) },
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
                     onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
@@ -154,6 +164,9 @@ fun DanmuApiApp() {
             }
             composable(SettingsRoute.ServiceConfig) {
                 ServiceConfigScreen(onBack = { navController.popBackStack() })
+            }
+            composable(SettingsRoute.DanmuDownload) {
+                DownloadSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.Network) {
                 NetworkSettingsScreen(onBack = { navController.popBackStack() })
@@ -177,6 +190,12 @@ fun DanmuApiApp() {
             composable(ToolRoute.PushDanmu) {
                 PushDanmuScreen(onBack = { navController.popBackStack() })
             }
+            composable(ToolRoute.DanmuDownload) {
+                DanmuDownloadScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenDownloadSettings = { navController.navigate(SettingsRoute.DanmuDownload) }
+                )
+            }
             composable(ToolRoute.RequestRecords) {
                 RequestRecordsScreen(onBack = { navController.popBackStack() })
             }
@@ -191,6 +210,9 @@ fun DanmuApiApp() {
                     onBack = { navController.popBackStack() },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
                 )
+            }
+            composable(ToolRoute.CacheManagement) {
+                CacheManagementScreen(onBack = { navController.popBackStack() })
             }
         }
     }
