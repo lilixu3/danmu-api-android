@@ -122,7 +122,6 @@ fun DanmuApiApp() {
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
-                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
                     onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) }
                 )
             }
