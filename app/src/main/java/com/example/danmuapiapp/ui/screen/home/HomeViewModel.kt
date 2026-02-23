@@ -1,6 +1,9 @@
 package com.example.danmuapiapp.ui.screen.home
 
 import android.app.Activity
+import android.content.Context
+import android.os.Build
+import android.os.FileObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,13 +12,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.domain.repository.CacheRepository
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
-import com.example.danmuapiapp.domain.repository.CacheRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +29,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,6 +37,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val runtimeRepo: RuntimeRepository,
     private val coreRepo: CoreRepository,
     private val requestRecordRepo: RequestRecordRepository,
@@ -40,6 +47,13 @@ class HomeViewModel @Inject constructor(
     private val appUpdateService: AppUpdateService,
     private val cacheRepo: CacheRepository
 ) : ViewModel() {
+    companion object {
+        private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
+        private const val CACHE_FILE_OBSERVER_MASK = FileObserver.CLOSE_WRITE or
+            FileObserver.MODIFY or
+            FileObserver.CREATE or
+            FileObserver.MOVED_TO
+    }
 
     val runtimeState = runtimeRepo.runtimeState
     val coreInfoList = coreRepo.coreInfoList
@@ -122,6 +136,10 @@ class HomeViewModel @Inject constructor(
     private val ignoredUpdateVersionMap = mutableMapOf<ApiVariant, String?>()
     private var proxyTestJob: Job? = null
     private var pendingProxyAction: PendingProxyAction? = null
+    private var cacheRefreshJob: Job? = null
+    private var cacheFileRefreshDebounceJob: Job? = null
+    private var cacheFileObserver: FileObserver? = null
+    private var cacheObserverRootPath: String? = null
 
     private sealed interface PendingProxyAction {
         data class Install(val variant: ApiVariant) : PendingProxyAction
@@ -139,8 +157,8 @@ class HomeViewModel @Inject constructor(
         observeForegroundAppUpdate()
         observeRuntimeDrivenCoreRefresh()
         observeRuntimeDrivenRequestRecordRefresh()
+        observeRuntimeDrivenCacheRefresh()
         refreshRequestRecords()
-        refreshCache()
     }
 
     private fun observeRuntimeDrivenCoreRefresh() {
@@ -167,6 +185,23 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private fun observeRuntimeDrivenCacheRefresh() {
+        viewModelScope.launch {
+            runtimeState
+                .map { it.runMode to it.status }
+                .distinctUntilChanged()
+                .collect { (runMode, status) ->
+                    if (status == ServiceStatus.Running && runMode == RunMode.Normal) {
+                        startCacheFileObserver(runMode)
+                    } else {
+                        stopCacheFileObserver()
+                    }
+                    // 状态切换时强制刷新，避免被上一轮请求占用导致漏刷
+                    refreshCacheInternal(force = true)
+                }
+        }
+    }
+
     private fun refreshRequestRecords() {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
@@ -176,8 +211,89 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshCache() {
-        viewModelScope.launch(Dispatchers.IO) {
+        refreshCacheInternal(force = true)
+    }
+
+    private fun refreshCacheInternal(force: Boolean = false) {
+        if (force) {
+            cacheRefreshJob?.cancel()
+        } else if (cacheRefreshJob?.isActive == true) {
+            return
+        }
+        cacheRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             runCatching { cacheRepo.refresh() }
+        }
+    }
+
+    private fun startCacheFileObserver(runMode: RunMode) {
+        val cacheDir = File(RuntimePaths.projectDir(appContext, runMode), ".cache")
+        if (!cacheDir.exists()) {
+            cacheDir.mkdirs()
+        }
+        if (!cacheDir.exists() || !cacheDir.isDirectory) {
+            stopCacheFileObserver()
+            return
+        }
+        val rootPath = cacheDir.absolutePath
+        if (cacheFileObserver != null && cacheObserverRootPath == rootPath) {
+            return
+        }
+        stopCacheFileObserver()
+        val observer = createFileObserver(cacheDir) { event, path ->
+            if (event and CACHE_FILE_OBSERVER_MASK == 0) return@createFileObserver
+            if (!shouldHandleCacheFileChange(path)) return@createFileObserver
+            scheduleCacheRefreshFromFileEvent()
+        }
+        observer.startWatching()
+        cacheFileObserver = observer
+        cacheObserverRootPath = rootPath
+    }
+
+    private fun stopCacheFileObserver() {
+        cacheFileObserver?.let { observer ->
+            runCatching { observer.stopWatching() }
+        }
+        cacheFileObserver = null
+        cacheObserverRootPath = null
+        cacheFileRefreshDebounceJob?.cancel()
+        cacheFileRefreshDebounceJob = null
+    }
+
+    private fun scheduleCacheRefreshFromFileEvent() {
+        cacheFileRefreshDebounceJob?.cancel()
+        cacheFileRefreshDebounceJob = viewModelScope.launch {
+            delay(CACHE_FILE_REFRESH_DEBOUNCE_MS)
+            refreshCacheInternal()
+        }
+    }
+
+    private fun shouldHandleCacheFileChange(path: String?): Boolean {
+        val name = path
+            ?.substringAfterLast('/')
+            ?.trim()
+            ?.lowercase()
+            .orEmpty()
+        if (name.isBlank()) return false
+        return name == "reqrecords" || name == "todayreqnum"
+    }
+
+    private fun createFileObserver(
+        dir: File,
+        onEvent: (Int, String?) -> Unit
+    ): FileObserver {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            object : FileObserver(dir, CACHE_FILE_OBSERVER_MASK) {
+                override fun onEvent(event: Int, path: String?) {
+                    onEvent.invoke(event, path)
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            object : FileObserver(dir.absolutePath, CACHE_FILE_OBSERVER_MASK) {
+                override fun onEvent(event: Int, path: String?) {
+                    onEvent.invoke(event, path)
+                }
+            }
         }
     }
 
@@ -838,5 +954,12 @@ class HomeViewModel @Inject constructor(
             v >= kb -> String.format("%.1fKB", v / kb)
             else -> "${v}B"
         }
+    }
+
+    override fun onCleared() {
+        stopCacheFileObserver()
+        cacheRefreshJob?.cancel()
+        stopProxySpeedTest()
+        super.onCleared()
     }
 }
