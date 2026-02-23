@@ -77,6 +77,42 @@ interface AccessControlRepository {
     ): Result<DeviceAccessSnapshot>
 }
 
+interface CacheRepository {
+    val cacheStats: StateFlow<CacheStats>
+    val cacheEntries: StateFlow<List<CacheEntry>>
+    val isLoading: StateFlow<Boolean>
+    suspend fun refresh()
+    suspend fun clearAll(): Result<Unit>
+}
+
+interface DanmuDownloadRepository {
+    val settings: StateFlow<DanmuDownloadSettings>
+    val records: StateFlow<List<DanmuDownloadRecord>>
+    val queueTasks: StateFlow<List<DanmuDownloadTask>>
+    fun setSaveTreeUri(uri: String, displayName: String)
+    fun clearSaveTreeUri()
+    fun setDefaultFormat(format: DanmuDownloadFormat)
+    fun setFileNameTemplate(template: String)
+    fun setConflictPolicy(policy: DownloadConflictPolicy)
+    fun setThrottlePreset(preset: DownloadThrottlePreset)
+    fun enqueueTasks(inputs: List<DanmuDownloadInput>): Int
+    fun setQueueTaskStatus(
+        taskId: Long,
+        status: DownloadQueueStatus,
+        detail: String = "",
+        incrementAttempt: Boolean = false
+    )
+    fun resetQueueTasks(taskIds: Set<Long>, detail: String = "等待重试"): Int
+    fun markRunningTasksAsPending(detail: String = "等待恢复"): Int
+    fun clearQueueTasks()
+    fun clearCompletedQueueTasks(): Int
+    suspend fun downloadEpisode(
+        input: DanmuDownloadInput,
+        onProgress: (Float, String) -> Unit = { _, _ -> }
+    ): Result<DanmuDownloadResult>
+    fun clearRecords()
+}
+
 interface AdminSessionRepository {
     val sessionState: StateFlow<AdminSessionState>
     fun refresh()

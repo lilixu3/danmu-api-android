@@ -33,11 +33,13 @@ import java.util.*
 fun ToolsScreen(
     onOpenApiTest: () -> Unit,
     onOpenPushDanmu: () -> Unit,
+    onOpenDanmuDownload: () -> Unit,
     onOpenRequestRecords: () -> Unit,
     onOpenConsole: () -> Unit,
     onOpenConfig: () -> Unit,
     onOpenDeviceAccess: () -> Unit,
     onOpenAdminMode: () -> Unit,
+    onOpenCacheManagement: () -> Unit,
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
@@ -117,6 +119,13 @@ fun ToolsScreen(
         )
 
         ToolEntryCard(
+            title = "弹幕下载",
+            subtitle = "下载弹幕到本地目录并记录历史",
+            icon = { Icon(Icons.Rounded.CloudDownload, null) },
+            onClick = onOpenDanmuDownload
+        )
+
+        ToolEntryCard(
             title = "请求记录",
             subtitle = "查看最近接口调用历史",
             icon = { Icon(Icons.Rounded.History, null) },
@@ -128,6 +137,13 @@ fun ToolsScreen(
             subtitle = "黑名单管理、访问排行与局域网检测",
             icon = { Icon(Icons.Rounded.Shield, null) },
             onClick = onOpenDeviceAccess
+        )
+
+        ToolEntryCard(
+            title = "缓存管理",
+            subtitle = "查看与清理核心缓存数据",
+            icon = { Icon(Icons.Rounded.Storage, null) },
+            onClick = onOpenCacheManagement
         )
     }
 }

@@ -15,6 +15,7 @@ import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.domain.repository.CacheRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +37,8 @@ class HomeViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val githubProxyService: GithubProxyService,
     private val appForegroundUpdateChecker: AppForegroundUpdateChecker,
-    private val appUpdateService: AppUpdateService
+    private val appUpdateService: AppUpdateService,
+    private val cacheRepo: CacheRepository
 ) : ViewModel() {
 
     val runtimeState = runtimeRepo.runtimeState
@@ -44,6 +46,9 @@ class HomeViewModel @Inject constructor(
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val tokenVisible = settingsRepo.tokenVisible
     val proxyOptions = githubProxyService.proxyOptions()
+    val cacheStats = cacheRepo.cacheStats
+    val cacheEntries = cacheRepo.cacheEntries
+    val isCacheLoading = cacheRepo.isLoading
     val requestTotalCount: StateFlow<Int> = requestRecordRepo.records
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -124,6 +129,9 @@ class HomeViewModel @Inject constructor(
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
     }
 
+    var isClearingCache by mutableStateOf(false)
+        private set
+
     init {
         coreRepo.refreshCoreInfo()
         loadIgnoredUpdateVersions()
@@ -132,6 +140,7 @@ class HomeViewModel @Inject constructor(
         observeRuntimeDrivenCoreRefresh()
         observeRuntimeDrivenRequestRecordRefresh()
         refreshRequestRecords()
+        refreshCache()
     }
 
     private fun observeRuntimeDrivenCoreRefresh() {
@@ -163,6 +172,24 @@ class HomeViewModel @Inject constructor(
             runCatching {
                 requestRecordRepo.refreshFromService()
             }
+        }
+    }
+
+    fun refreshCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { cacheRepo.refresh() }
+        }
+    }
+
+    fun quickClearCache() {
+        if (isClearingCache) return
+        isClearingCache = true
+        viewModelScope.launch(Dispatchers.IO) {
+            cacheRepo.clearAll().fold(
+                onSuccess = { appUpdateMessage = "缓存已清理" },
+                onFailure = { appUpdateMessage = "清理失败：${it.message}" }
+            )
+            isClearingCache = false
         }
     }
 

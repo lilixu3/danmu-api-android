@@ -34,6 +34,12 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindAdminSessionRepository(impl: AdminSessionRepositoryImpl): AdminSessionRepository
+
+    @Binds @Singleton
+    abstract fun bindCacheRepository(impl: CacheRepositoryImpl): CacheRepository
+
+    @Binds @Singleton
+    abstract fun bindDanmuDownloadRepository(impl: DanmuDownloadRepositoryImpl): DanmuDownloadRepository
 }
 
 @Module
