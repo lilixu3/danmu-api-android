@@ -729,56 +729,48 @@ class DanmuDownloadViewModel @Inject constructor(
             return
         }
 
-        // Find all anime candidates with the same title to merge sources
-        // Title format: "藏海传(2025)【电视剧】from youku" — strip "from xxx" and normalize
-        val normalize = { s: String ->
-            s.replace(Regex("\\s*from\\s+.*$", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("[\\s\\p{Punct}　【】（）()\\[\\]「」]"), "")
-                .lowercase()
-        }
-        val target = normalize(anime.title)
-        val sameTitle = animeCandidates.filter { normalize(it.title) == target }.ifEmpty { listOf(anime) }
-
         viewModelScope.launch {
             isLoadingEpisodes = true
             errorMessage = null
-            val allEpisodes = mutableListOf<DownloadEpisodeCandidate>()
-            var anySuccess = false
-
-            for (candidate in sameTitle) {
-                val url = "$apiBase/api/v2/bangumi/${candidate.animeId}"
-                val result = withContext(Dispatchers.IO) { requestGet(url) }
-                result.fold(
-                    onSuccess = { (code, body) ->
-                        if (code in 200..299) {
-                            allEpisodes += parseEpisodeCandidates(body)
-                            anySuccess = true
-                        }
-                    },
-                    onFailure = { /* skip failed sources */ }
-                )
-            }
-
-            if (anySuccess) {
-                val merged = allEpisodes
-                    .distinctBy { it.episodeId }
-                    .sortedWith(compareBy<DownloadEpisodeCandidate> { it.source }.thenBy { it.episodeNumber }.thenBy { it.episodeId })
-                currentAnime = anime
-                episodeCandidates = merged
-                selectedEpisodeIds = emptySet()
-                episodeStates = emptyMap()
-                sourceFilter = null
-                val sourceCount = merged.map { it.source }.distinct().size
-                operationMessage = if (merged.isEmpty()) {
-                    "该动漫暂无可下载剧集"
-                } else {
-                    "共加载 ${merged.size} 集（$sourceCount 个来源），可选择后下载"
+            currentAnime = anime
+            episodeCandidates = emptyList()
+            selectedEpisodeIds = emptySet()
+            episodeStates = emptyMap()
+            sourceFilter = null
+            val fallbackSource = extractSourceFromAnimeTitle(anime.title)
+            val url = "$apiBase/api/v2/bangumi/${anime.animeId}"
+            val result = withContext(Dispatchers.IO) {
+                requestGet(url).mapCatching { (code, body) ->
+                    if (code !in 200..299) {
+                        error("加载剧集失败：HTTP $code")
+                    }
+                    parseEpisodeCandidates(body, fallbackSource = fallbackSource)
                 }
-            } else {
-                errorMessage = "加载剧集失败"
-                currentAnime = null
-                episodeCandidates = emptyList()
             }
+
+            result.fold(
+                onSuccess = { episodes ->
+                    val initialStates = withContext(Dispatchers.Default) {
+                        buildInitialEpisodeStates(
+                            animeTitle = anime.title,
+                            episodes = episodes,
+                            queueTasksSnapshot = queueTasks.value,
+                            recordsSnapshot = records.value
+                        )
+                    }
+                    episodeCandidates = episodes
+                    episodeStates = initialStates
+                    operationMessage = if (episodes.isEmpty()) {
+                        "该动漫暂无可下载剧集"
+                    } else {
+                        "共加载 ${episodes.size} 集"
+                    }
+                },
+                onFailure = { throwable ->
+                    errorMessage = throwable.message ?: "加载剧集失败"
+                    episodeCandidates = emptyList()
+                }
+            )
             isLoadingEpisodes = false
         }
     }
@@ -1429,52 +1421,11 @@ class DanmuDownloadViewModel @Inject constructor(
     }
 
     fun episodeUiState(episode: DownloadEpisodeCandidate): EpisodeDownloadUiState {
-        episodeStates[episode.episodeId]?.let { return it }
-        val queueTask = latestQueueTaskForEpisode(episode)
-        if (queueTask != null) {
-            val mappedState = when (queueTask.statusEnum()) {
-                DownloadQueueStatus.Pending -> EpisodeDownloadState.Queued
-                DownloadQueueStatus.Running -> EpisodeDownloadState.Running
-                DownloadQueueStatus.Success -> EpisodeDownloadState.Success
-                DownloadQueueStatus.Failed -> EpisodeDownloadState.Failed
-                DownloadQueueStatus.Skipped -> EpisodeDownloadState.Skipped
-                DownloadQueueStatus.Canceled -> EpisodeDownloadState.Canceled
-            }
-            val progress = when (mappedState) {
-                EpisodeDownloadState.Success,
-                EpisodeDownloadState.Failed,
-                EpisodeDownloadState.Skipped,
-                EpisodeDownloadState.Canceled -> 1f
-                EpisodeDownloadState.Running -> 0.15f
-                EpisodeDownloadState.Queued,
-                EpisodeDownloadState.Idle -> 0f
-            }
-            return EpisodeDownloadUiState(
-                state = mappedState,
-                progress = progress,
-                detail = queueTask.lastDetail
-            )
-        }
-        // 再回退到下载记录，按剧名+平台+集序号匹配，避免跨剧误判。
-        val record = latestRecordForEpisode(episode)
-        if (record != null) {
-            val recStatus = record.statusEnum()
-            val mappedState = when (recStatus) {
-                DownloadRecordStatus.Success -> EpisodeDownloadState.Success
-                DownloadRecordStatus.Failed -> EpisodeDownloadState.Failed
-                DownloadRecordStatus.Skipped -> EpisodeDownloadState.Skipped
-            }
-            return EpisodeDownloadUiState(
-                state = mappedState,
-                progress = 1f,
-                detail = record.relativePath.ifBlank { record.errorMessage ?: "" }
-            )
-        }
-        return EpisodeDownloadUiState()
+        return episodeStates[episode.episodeId] ?: EpisodeDownloadUiState()
     }
 
     private fun stateOfEpisode(episode: DownloadEpisodeCandidate): EpisodeDownloadState {
-        return episodeUiState(episode).state
+        return episodeStates[episode.episodeId]?.state ?: EpisodeDownloadState.Idle
     }
 
     private fun latestQueueTaskForEpisode(episode: DownloadEpisodeCandidate): DanmuDownloadTask? {
@@ -1543,7 +1494,7 @@ class DanmuDownloadViewModel @Inject constructor(
         return out.distinctBy { it.animeId }
     }
 
-    private fun parseEpisodeCandidates(raw: String): List<DownloadEpisodeCandidate> {
+    private fun parseEpisodeCandidates(raw: String, fallbackSource: String = ""): List<DownloadEpisodeCandidate> {
         val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
         val bangumi = root.optJSONObject("bangumi")
             ?: root.optJSONObject("data")
@@ -1560,7 +1511,12 @@ class DanmuDownloadViewModel @Inject constructor(
             val number = readInt(item, "episodeNumber", "number", "sort", "index")
                 .takeIf { it > 0 } ?: (i + 1)
             val rawTitle = readString(item, "episodeTitle", "title", "name")
-            val source = parseSource(rawTitle)
+            val parsedSource = parseSource(rawTitle)
+            val source = if (parsedSource == "unknown") {
+                fallbackSource.ifBlank { "unknown" }
+            } else {
+                parsedSource
+            }
             val title = stripSourceTag(rawTitle).ifBlank { "第${number}集" }
             out += DownloadEpisodeCandidate(
                 episodeId = episodeId,
@@ -1569,9 +1525,99 @@ class DanmuDownloadViewModel @Inject constructor(
                 source = source
             )
         }
-        return out
-            .distinctBy { it.episodeId }
+        val dedupByEpisode = LinkedHashMap<String, DownloadEpisodeCandidate>(out.size)
+        out.forEach { episode ->
+            val titleKey = normalizeEpisodeTitleForMatch(episode.title)
+            val key = if (titleKey.isNotBlank()) {
+                "${episode.episodeNumber}|$titleKey"
+            } else {
+                "id-${episode.episodeId}"
+            }
+            dedupByEpisode.putIfAbsent(key, episode)
+        }
+        return dedupByEpisode.values
             .sortedWith(compareBy<DownloadEpisodeCandidate> { it.episodeNumber }.thenBy { it.episodeId })
+    }
+
+    private fun buildInitialEpisodeStates(
+        animeTitle: String,
+        episodes: List<DownloadEpisodeCandidate>,
+        queueTasksSnapshot: List<DanmuDownloadTask>,
+        recordsSnapshot: List<com.example.danmuapiapp.domain.model.DanmuDownloadRecord>
+    ): Map<Long, EpisodeDownloadUiState> {
+        if (episodes.isEmpty()) return emptyMap()
+        val animeKey = normalizeAnimeTitleForMatch(animeTitle)
+        val filteredQueue = queueTasksSnapshot.filter { task ->
+            animeKey.isBlank() || normalizeAnimeTitleForMatch(task.animeTitle) == animeKey
+        }
+        val filteredRecords = recordsSnapshot.filter { record ->
+            animeKey.isBlank() || normalizeAnimeTitleForMatch(record.animeTitle) == animeKey
+        }
+        val stateMap = LinkedHashMap<Long, EpisodeDownloadUiState>(episodes.size)
+        episodes.forEach { episode ->
+            val sourceKey = canonicalSourceKey(episode.source)
+            val titleKey = normalizeEpisodeTitleForMatch(episode.title)
+            val queueTask = filteredQueue
+                .asSequence()
+                .filter { task ->
+                    val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(task.source) == sourceKey
+                    val numberMatches = task.episodeNo == episode.episodeNumber
+                    val idMatches = task.episodeId == episode.episodeId
+                    val titleMatches = titleKey.isNotBlank() &&
+                        normalizeEpisodeTitleForMatch(task.episodeTitle) == titleKey
+                    sourceMatches && (numberMatches || idMatches || titleMatches)
+                }
+                .maxByOrNull { it.updatedAt }
+            if (queueTask != null) {
+                val mappedState = when (queueTask.statusEnum()) {
+                    DownloadQueueStatus.Pending -> EpisodeDownloadState.Queued
+                    DownloadQueueStatus.Running -> EpisodeDownloadState.Running
+                    DownloadQueueStatus.Success -> EpisodeDownloadState.Success
+                    DownloadQueueStatus.Failed -> EpisodeDownloadState.Failed
+                    DownloadQueueStatus.Skipped -> EpisodeDownloadState.Skipped
+                    DownloadQueueStatus.Canceled -> EpisodeDownloadState.Canceled
+                }
+                val progress = when (mappedState) {
+                    EpisodeDownloadState.Success,
+                    EpisodeDownloadState.Failed,
+                    EpisodeDownloadState.Skipped,
+                    EpisodeDownloadState.Canceled -> 1f
+                    EpisodeDownloadState.Running -> 0.15f
+                    EpisodeDownloadState.Queued,
+                    EpisodeDownloadState.Idle -> 0f
+                }
+                stateMap[episode.episodeId] = EpisodeDownloadUiState(
+                    state = mappedState,
+                    progress = progress,
+                    detail = queueTask.lastDetail
+                )
+                return@forEach
+            }
+            val record = filteredRecords
+                .asSequence()
+                .filter { record ->
+                    val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(record.source) == sourceKey
+                    val numberMatches = record.episodeNo == episode.episodeNumber
+                    val idMatches = record.episodeId == episode.episodeId
+                    val titleMatches = titleKey.isNotBlank() &&
+                        normalizeEpisodeTitleForMatch(record.episodeTitle) == titleKey
+                    sourceMatches && (numberMatches || idMatches || titleMatches)
+                }
+                .maxByOrNull { it.createdAt }
+            if (record != null) {
+                val mappedState = when (record.statusEnum()) {
+                    DownloadRecordStatus.Success -> EpisodeDownloadState.Success
+                    DownloadRecordStatus.Failed -> EpisodeDownloadState.Failed
+                    DownloadRecordStatus.Skipped -> EpisodeDownloadState.Skipped
+                }
+                stateMap[episode.episodeId] = EpisodeDownloadUiState(
+                    state = mappedState,
+                    progress = 1f,
+                    detail = record.relativePath.ifBlank { record.errorMessage ?: "" }
+                )
+            }
+        }
+        return stateMap
     }
 
     private fun parseSource(rawTitle: String): String {
@@ -1699,7 +1745,10 @@ class DanmuDownloadViewModel @Inject constructor(
                 val bangumiResp = withContext(Dispatchers.IO) { requestGet(bangumiUrl) }.getOrElse { continue }
                 val bangumiCode = bangumiResp.first
                 if (bangumiCode !in 200..299) continue
-                val episodes = parseEpisodeCandidates(bangumiResp.second)
+                val episodes = parseEpisodeCandidates(
+                    bangumiResp.second,
+                    fallbackSource = extractSourceFromAnimeTitle(candidate.title)
+                )
                 val matchedEpisode = pickEpisodeForTask(task, episodes) ?: continue
                 return@runCatching DanmuDownloadInput(
                     apiBaseUrl = apiBase,

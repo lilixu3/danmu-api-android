@@ -20,6 +20,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
@@ -55,7 +58,6 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.SystemUpdateAlt
@@ -235,20 +237,25 @@ fun HomeScreen(
     val queueRunningDetail = downloadViewModel?.queueRunningStatusText().orEmpty()
     val queueProgressSummary = downloadViewModel?.progressSummary ?: "当前没有待处理任务"
     val queueThrottleHint = downloadViewModel?.throttleHint
-    val queuePreviewTasks = remember(downloadQueueTasks) {
-        downloadQueueTasks.sortedWith(
-            compareBy<DanmuDownloadTask> { task ->
-                when (task.statusEnum()) {
-                    DownloadQueueStatus.Running -> 0
-                    DownloadQueueStatus.Pending -> 1
-                    DownloadQueueStatus.Failed -> 2
-                    DownloadQueueStatus.Success -> 3
-                    DownloadQueueStatus.Skipped -> 4
-                    DownloadQueueStatus.Canceled -> 5
-                }
-            }.thenByDescending { it.updatedAt }
-        ).take(8)
+    val queueTileBadge = when {
+        isQueueDownloading -> "下载中"
+        isQueuePaused -> "暂停中"
+        else -> "队列空"
     }
+    val queueTileValue = when {
+        isQueueDownloading -> "待 ${queueSummary.pending} · 运行 ${queueSummary.running.coerceAtLeast(1)}"
+        isQueuePaused -> "待 ${queueSummary.pending} · 点按继续"
+        else -> "点按查看详情"
+    }
+    val queueTileAccent = when {
+        isQueueDownloading -> MaterialTheme.colorScheme.primary
+        isQueuePaused -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val queueDialogGroups = remember(downloadQueueTasks) {
+        buildDownloadQueueGroups(downloadQueueTasks)
+    }
+    var expandedQueueGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     LaunchedEffect(state.runMode) {
         if (state.runMode == RunMode.Normal) {
@@ -291,6 +298,19 @@ fun HomeScreen(
         if (!message.isNullOrBlank()) {
             snackbarHostState.showSnackbar(message)
             downloadViewModel.dismissMessage()
+        }
+    }
+    LaunchedEffect(showDownloadQueueDialog, queueDialogGroups) {
+        if (!showDownloadQueueDialog) return@LaunchedEffect
+        val validKeys = queueDialogGroups.map { it.key }.toSet()
+        if (validKeys.isEmpty()) {
+            expandedQueueGroupKeys = emptySet()
+            return@LaunchedEffect
+        }
+        expandedQueueGroupKeys = if (expandedQueueGroupKeys.isEmpty()) {
+            setOf(queueDialogGroups.first().key)
+        } else {
+            expandedQueueGroupKeys.intersect(validKeys).ifEmpty { setOf(queueDialogGroups.first().key) }
         }
     }
     val backgroundGradient = if (isDarkTheme) {
@@ -397,9 +417,9 @@ fun HomeScreen(
                     status = state.status,
                     isDarkTheme = isDarkTheme,
                     runMode = state.runMode,
-                    queueStatusText = queueStatusText,
-                    queuePendingCount = queueSummary.pending,
-                    queueRunningCount = queueSummary.running,
+                    queueTileBadge = queueTileBadge,
+                    queueTileValue = queueTileValue,
+                    queueTileAccent = queueTileAccent,
                     onOpenDownloadQueue = { showDownloadQueueDialog = true },
                     token = state.token,
                     maskedToken = maskedToken,
@@ -1115,7 +1135,7 @@ fun HomeScreen(
                         )
                     }
 
-                    if (queuePreviewTasks.isEmpty()) {
+                    if (queueDialogGroups.isEmpty()) {
                         Text(
                             text = "队列暂无任务",
                             style = MaterialTheme.typography.bodySmall,
@@ -1123,33 +1143,48 @@ fun HomeScreen(
                         )
                     } else {
                         Text(
-                            text = "最近任务",
+                            text = "任务分组",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                queuePreviewTasks.forEach { task ->
-                                    DownloadQueueTaskRow(task = task)
-                                }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            queueDialogGroups.forEach { group ->
+                                val expanded = expandedQueueGroupKeys.contains(group.key)
+                                DownloadQueueGroupCard(
+                                    group = group,
+                                    expanded = expanded,
+                                    onToggle = {
+                                        expandedQueueGroupKeys = if (expanded) {
+                                            expandedQueueGroupKeys - group.key
+                                        } else {
+                                            expandedQueueGroupKeys + group.key
+                                        }
+                                    }
+                                )
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val actionScroll = rememberScrollState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(actionScroll),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    TextButton(
+                        onClick = { showDownloadQueueDialog = false }
+                    ) {
+                        Text("取消")
+                    }
+                    TextButton(onClick = {
+                        showDownloadQueueDialog = false
+                        onOpenDanmuDownload()
+                    }) {
+                        Text("下载页")
+                    }
                     TextButton(
                         enabled = if (isQueueDownloading) true else isQueuePaused,
                         onClick = {
@@ -1160,7 +1195,7 @@ fun HomeScreen(
                             }
                         }
                     ) {
-                        Text(if (isQueueDownloading) "暂停下载" else "继续下载")
+                        Text(if (isQueueDownloading) "暂停" else "继续")
                     }
                     TextButton(
                         enabled = !isQueueDownloading && queueSummary.total > 0,
@@ -1168,24 +1203,134 @@ fun HomeScreen(
                             downloadViewModel?.clearQueueTasks()
                         }
                     ) {
-                        Text("清空队列")
-                    }
-                }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = {
-                        showDownloadQueueDialog = false
-                        onOpenDanmuDownload()
-                    }) {
-                        Text("打开下载页")
-                    }
-                    TextButton(onClick = { showDownloadQueueDialog = false }) {
-                        Text("关闭")
+                        Text("清空")
                     }
                 }
             }
         )
+    }
+}
+
+private data class DownloadQueueDialogGroup(
+    val key: String,
+    val animeTitle: String,
+    val total: Int,
+    val pending: Int,
+    val running: Int,
+    val completed: Int,
+    val failed: Int,
+    val tasks: List<DanmuDownloadTask>
+)
+
+private fun buildDownloadQueueGroups(tasks: List<DanmuDownloadTask>): List<DownloadQueueDialogGroup> {
+    if (tasks.isEmpty()) return emptyList()
+
+    val indexed = tasks.withIndex()
+    val grouped = indexed.groupBy { indexedTask ->
+        indexedTask.value.animeTitle.trim().ifBlank { "未命名剧集" }
+    }
+    return grouped.entries
+        .map { (title, entries) ->
+            val rawTasks = entries.map { it.value }
+            var pending = 0
+            var running = 0
+            var success = 0
+            var skipped = 0
+            var canceled = 0
+            var failed = 0
+            rawTasks.forEach { task ->
+                when (task.statusEnum()) {
+                    DownloadQueueStatus.Pending -> pending++
+                    DownloadQueueStatus.Running -> running++
+                    DownloadQueueStatus.Success -> success++
+                    DownloadQueueStatus.Skipped -> skipped++
+                    DownloadQueueStatus.Canceled -> canceled++
+                    DownloadQueueStatus.Failed -> failed++
+                }
+            }
+            DownloadQueueDialogGroup(
+                key = title,
+                animeTitle = title,
+                total = rawTasks.size,
+                pending = pending,
+                running = running,
+                completed = success + skipped + canceled,
+                failed = failed,
+                tasks = rawTasks.sortedWith(
+                    compareBy<DanmuDownloadTask> { it.episodeNo }
+                        .thenBy { it.source.lowercase() }
+                        .thenByDescending { it.updatedAt }
+                )
+            ) to (entries.minOfOrNull { it.index } ?: Int.MAX_VALUE)
+        }
+        .sortedBy { it.second }
+        .map { it.first }
+}
+
+@Composable
+private fun DownloadQueueGroupCard(
+    group: DownloadQueueDialogGroup,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = group.animeTitle,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "共 ${group.total} · 待 ${group.pending} · 运行 ${group.running} · 完成 ${group.completed} · 失败 ${group.failed}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    group.tasks.forEach { task ->
+                        DownloadQueueTaskRow(task = task)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1610,9 +1755,9 @@ private fun SnapshotStrip(
     status: ServiceStatus,
     isDarkTheme: Boolean,
     runMode: RunMode,
-    queueStatusText: String,
-    queuePendingCount: Int,
-    queueRunningCount: Int,
+    queueTileBadge: String,
+    queueTileValue: String,
+    queueTileAccent: Color,
     onOpenDownloadQueue: () -> Unit,
     token: String,
     maskedToken: String,
@@ -1648,11 +1793,12 @@ private fun SnapshotStrip(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                DownloadQueueMetricTile(
+                MetricTile(
                     modifier = Modifier.weight(1f),
-                    queueStatusText = queueStatusText,
-                    queuePendingCount = queuePendingCount,
-                    queueRunningCount = queueRunningCount,
+                    title = "下载任务",
+                    value = queueTileValue,
+                    badge = queueTileBadge,
+                    accent = queueTileAccent,
                     onClick = onOpenDownloadQueue
                 )
                 MetricTile(
@@ -1690,74 +1836,6 @@ private fun SnapshotStrip(
                     onClick = onCheckCoreUpdate
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun DownloadQueueMetricTile(
-    modifier: Modifier = Modifier,
-    queueStatusText: String,
-    queuePendingCount: Int,
-    queueRunningCount: Int,
-    onClick: () -> Unit
-) {
-    val accentColor = when (queueStatusText) {
-        "队列下载中" -> MaterialTheme.colorScheme.primary
-        "队列已暂停" -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val detailText = when (queueStatusText) {
-        "队列下载中" -> "运行中 $queueRunningCount · 待处理 $queuePendingCount"
-        "队列已暂停" -> "待处理 $queuePendingCount · 点击继续"
-        else -> "点击查看队列详情"
-    }
-    Surface(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(7.dp),
-                    color = accentColor.copy(alpha = 0.14f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DownloadForOffline,
-                        contentDescription = null,
-                        tint = accentColor,
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .size(12.dp)
-                    )
-                }
-                Text(
-                    text = "下载任务",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                text = queueStatusText,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = accentColor,
-                maxLines = 1
-            )
-            Text(
-                text = detailText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
         }
     }
 }
