@@ -19,7 +19,7 @@ object NodeProjectManager {
 
     private const val TAG = "NodeProjectManager"
     private const val APP_VERSION_FILE = ".app_version"
-    private const val NODE_HANDLER_PATCH_MARK = "DanmuApiApp env path compatibility"
+    private const val LEGACY_NODE_HANDLER_PATCH_MARK = "DanmuApiApp env path compatibility"
 
     private val json = Json { ignoreUnknownKeys = true }
     private val coreDirNameRegex = Regex("^danmu[-_]api$", RegexOption.IGNORE_CASE)
@@ -225,7 +225,7 @@ object NodeProjectManager {
 
             if (File(coreDir, "worker.js").exists()) {
                 ensureCorePackageJson(coreDir)
-                patchCoreNodeHandlerEnvPath(coreDir)
+                cleanupLegacyNodeHandlerPatch(coreDir)
                 return true
             }
 
@@ -251,7 +251,7 @@ object NodeProjectManager {
                 }
                 nested.deleteRecursively()
                 ensureCorePackageJson(coreDir)
-                patchCoreNodeHandlerEnvPath(coreDir)
+                cleanupLegacyNodeHandlerPatch(coreDir)
                 true
             }.getOrElse {
                 Log.w(TAG, "normalizeCoreLayout failed: ${coreDir.absolutePath}", it)
@@ -360,95 +360,40 @@ object NodeProjectManager {
         }
     }
 
-    private fun patchCoreNodeHandlerEnvPath(coreDir: File) {
-        val handlerFiles = findNodeHandlerFiles(coreDir)
-        if (handlerFiles.isEmpty()) return
-        handlerFiles.forEach { patchSingleNodeHandler(it) }
-    }
-
-    private fun findNodeHandlerFiles(coreDir: File): List<File> {
-        if (!coreDir.exists() || !coreDir.isDirectory) return emptyList()
-        val out = ArrayList<File>()
-        val stack = ArrayDeque<File>()
-        stack.add(coreDir)
-        while (stack.isNotEmpty()) {
-            val dir = stack.removeLast()
-            val children = runCatching { dir.listFiles() }.getOrNull() ?: continue
-            for (child in children) {
-                if (child.isDirectory) {
-                    stack.add(child)
-                    continue
-                }
-                if (!child.isFile) continue
-                if (child.name != "node-handler.js") continue
-                val normalized = child.absolutePath.replace('\\', '/')
-                if (!normalized.contains("/handlers/")) continue
-                out.add(child)
-            }
+    private fun cleanupLegacyNodeHandlerPatch(coreDir: File) {
+        val candidates = listOf(
+            File(coreDir, "configs/handlers/node-handler.js"),
+            File(coreDir, "config/handlers/node-handler.js")
+        )
+        candidates.forEach { file ->
+            if (!file.exists() || !file.isFile) return@forEach
+            cleanupSingleLegacyNodeHandlerPatch(file)
         }
-        return out
     }
 
-    private fun patchSingleNodeHandler(handlerFile: File) {
+    private fun cleanupSingleLegacyNodeHandlerPatch(handlerFile: File) {
         val source = runCatching { handlerFile.readText(Charsets.UTF_8) }
             .getOrElse {
                 Log.w(TAG, "读取 node-handler 失败：${handlerFile.absolutePath}", it)
                 return
             }
-        if (source.contains(NODE_HANDLER_PATCH_MARK)) return
-        if (!source.contains("const envPath")) return
+        if (!source.contains(LEGACY_NODE_HANDLER_PATCH_MARK)) return
 
-        val envPathRegex = Regex(
-            """const\s+envPath\s*=\s*path\.join\([\s\S]*?['"]config['"][\s\S]*?['"]\.env['"][\s\S]*?\);"""
+        val legacyHelperRegex = Regex(
+            """(?s)\n*// DanmuApiApp env path compatibility\s*function resolveEnvPath\(importMetaUrl\) \{.*?\n\}\n\n"""
         )
-        if (!envPathRegex.containsMatchIn(source)) return
 
-        val importRegex = Regex("""import\s+\{\s*fileURLToPath\s*\}\s+from\s+['"]url['"];""")
-        val importMatch = importRegex.find(source) ?: return
-
-        val helper = """
-// $NODE_HANDLER_PATCH_MARK
-function resolveEnvPath(importMetaUrl) {
-  const __filename = fileURLToPath(importMetaUrl);
-  const __dirname = path.dirname(__filename);
-
-  const candidates = [];
-  const home = String((typeof process !== 'undefined' && process.env && process.env.DANMU_API_HOME) || '').trim();
-  if (home) {
-    candidates.push(path.join(home, 'config', '.env'));
-  }
-  candidates.push(path.join(__dirname, '..', '..', '..', '..', 'config', '.env'));
-  candidates.push(path.join(__dirname, '..', '..', '..', 'config', '.env'));
-
-  const cwd = (typeof process !== 'undefined' && typeof process.cwd === 'function')
-    ? String(process.cwd() || '').trim()
-    : '';
-  if (cwd) {
-    candidates.push(path.join(cwd, 'config', '.env'));
-  }
-
-  for (const p of candidates) {
-    if (!p) continue;
-    try {
-      if (fs.existsSync(p)) return p;
-    } catch {}
-  }
-  return candidates.find(Boolean) || path.join(__dirname, '..', '..', '..', 'config', '.env');
-}
-""".trimIndent()
-
-        val withImport = source.replaceRange(
-            importMatch.range.first,
-            importMatch.range.last + 1,
-            importMatch.value + "\n\n" + helper
+        val withoutHelper = source.replace(legacyHelperRegex, "\n")
+        val cleaned = withoutHelper.replace(
+            "const envPath = resolveEnvPath(import.meta.url);",
+            "const envPath = path.join(__dirname, '..', '..', '..', 'config', '.env');"
         )
-        val replaced = envPathRegex.replace(withImport, "const envPath = resolveEnvPath(import.meta.url);")
-        if (replaced == source || replaced == withImport) return
+        if (cleaned == source) return
 
         runCatching {
-            handlerFile.writeText(replaced, Charsets.UTF_8)
+            handlerFile.writeText(cleaned, Charsets.UTF_8)
         }.onFailure {
-            Log.w(TAG, "写入 node-handler 兼容补丁失败：${handlerFile.absolutePath}", it)
+            Log.w(TAG, "回滚 node-handler 兼容补丁失败：${handlerFile.absolutePath}", it)
         }
     }
 

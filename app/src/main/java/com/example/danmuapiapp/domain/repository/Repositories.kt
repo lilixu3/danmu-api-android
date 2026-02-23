@@ -106,6 +106,7 @@ interface DanmuDownloadRepository {
     fun markRunningTasksAsPending(detail: String = "等待恢复"): Int
     fun clearQueueTasks()
     fun clearCompletedQueueTasks(): Int
+    fun reorderQueueTasks(reorderedTasks: List<DanmuDownloadTask>)
     suspend fun downloadEpisode(
         input: DanmuDownloadInput,
         onProgress: (Float, String) -> Unit = { _, _ -> }
