@@ -214,6 +214,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         return removed
     }
 
+    override fun reorderQueueTasks(reorderedTasks: List<DanmuDownloadTask>) {
+        persistQueueTasks(reorderedTasks)
+    }
+
     override suspend fun downloadEpisode(
         input: DanmuDownloadInput,
         onProgress: (Float, String) -> Unit

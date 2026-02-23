@@ -158,7 +158,8 @@ object RootRuntimeController {
             fi
 
             mkdir -p "${'$'}(dirname "${'$'}PID_FILE")" >/dev/null 2>&1 || true
-            cd "${'$'}(dirname "${'$'}ENTRY")" >/dev/null 2>&1 || true
+            export DANMU_API_HOME="${'$'}(dirname "${'$'}ENTRY")"
+            cd "${'$'}DANMU_API_HOME" >/dev/null 2>&1 || true
 
             if command -v setsid >/dev/null 2>&1; then
               setsid "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >/dev/null 2>&1 < /dev/null &
@@ -279,7 +280,6 @@ object RootRuntimeController {
         val project = runCatching {
             val sourceProjectDir = RuntimePaths.normalProjectDir(context)
             val dir = NodeProjectManager.ensureProjectExtracted(context, sourceProjectDir)
-            mergeRootEnvToWorkDirIfNeeded(context, dir)
             NodeProjectManager.migrateAllCoreLayouts(dir)
             NodeProjectManager.writeRuntimeEnv(context, dir)
             dir
@@ -303,17 +303,19 @@ object RootRuntimeController {
         val bootstrap = !rootProjectMainJsExists(context)
 
         val script = if (bootstrap) {
-            // 首次引导：完整复制，确保 root 目录具备可启动的完整运行时。
+            // 首次引导：复制运行时文件，但不继承普通模式缓存。
             """
                 SRC=${shellQuote(src)}
                 DST=${shellQuote(dst)}
                 rm -rf "${'$'}DST" 2>/dev/null || true
                 mkdir -p "${'$'}DST" 2>/dev/null || true
                 cp -a "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || true
+                rm -rf "${'$'}DST/.cache" 2>/dev/null || true
+                mkdir -p "${'$'}DST/.cache" 2>/dev/null || true
                 test -f "${'$'}DST/main.js"
             """.trimIndent()
         } else {
-            // 增量同步：仅同步 App 托管文件，保留 Root 工作目录中的 config 与 danmu_api_*。
+            // 增量同步：仅同步 App 托管文件，保留 Root 工作目录中的 config、danmu_api_* 与 .cache。
             // 注意：config/.env 会在 syncRuntimeEnvToRoot 中单独同步，确保运行时关键变量生效。
             """
                 SRC=${shellQuote(src)}
@@ -323,7 +325,7 @@ object RootRuntimeController {
                 rm -rf "${'$'}TMP" 2>/dev/null || true
                 mkdir -p "${'$'}TMP" 2>/dev/null || true
                 cp -a "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || true
-                rm -rf "${'$'}TMP/config" "${'$'}TMP/logs" "${'$'}TMP"/danmu_api_* 2>/dev/null || true
+                rm -rf "${'$'}TMP/config" "${'$'}TMP/logs" "${'$'}TMP/.cache" "${'$'}TMP"/danmu_api_* 2>/dev/null || true
                 cp -a "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || true
                 rm -rf "${'$'}TMP" 2>/dev/null || true
                 test -f "${'$'}DST/main.js"
@@ -380,43 +382,6 @@ object RootRuntimeController {
             return OpResult(false, "Root 目录权限修复失败", if (err.isBlank()) "未知错误" else err)
         }
         return OpResult(true, "Root 目录权限已修复")
-    }
-
-    private fun mergeRootEnvToWorkDirIfNeeded(context: Context, workProjectDir: File) {
-        val rootEnvText = readRuntimeEnvFromRoot(context) ?: return
-        if (rootEnvText.isBlank()) return
-        val normalizedRootEnv = rootEnvText.replace("\r\n", "\n").let { text ->
-            if (text.endsWith('\n')) text else "$text\n"
-        }
-        val workEnvFile = File(workProjectDir, "config/.env")
-        val currentWorkEnv = runCatching {
-            if (workEnvFile.exists()) workEnvFile.readText(Charsets.UTF_8) else ""
-        }.getOrElse { "" }
-        if (currentWorkEnv == normalizedRootEnv) return
-        runCatching {
-            workEnvFile.parentFile?.mkdirs()
-            workEnvFile.writeText(normalizedRootEnv, Charsets.UTF_8)
-        }
-    }
-
-    private fun readRuntimeEnvFromRoot(context: Context): String? {
-        val candidates = buildRootEnvPathCandidates(context)
-        for (path in candidates) {
-            val script = """
-                FILE=${shellQuote(path)}
-                if [ ! -f "${'$'}FILE" ]; then
-                  exit 3
-                fi
-                cat "${'$'}FILE"
-            """.trimIndent()
-            val result = RootShell.exec(script, timeoutMs = 5000L)
-            if (result.ok) return result.stdout
-        }
-        return null
-    }
-
-    private fun buildRootEnvPathCandidates(context: Context): List<String> {
-        return listOf("${rootProjectDir(context)}/config/.env")
     }
 
     private fun ensureSelectedCoreReady(context: Context, normalProjectDir: File): OpResult {

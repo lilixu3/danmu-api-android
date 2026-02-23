@@ -434,6 +434,15 @@ const __dirname = path.dirname(__filename);
 
 // Persistent home (config/logs are stored outside the module folder)
 const HOME = process.env.DANMU_API_HOME || __dirname;
+if (!process.env.DANMU_API_HOME || !String(process.env.DANMU_API_HOME).trim()) {
+  process.env.DANMU_API_HOME = HOME;
+}
+try {
+  const current = (typeof process.cwd === 'function') ? String(process.cwd() || '').trim() : '';
+  if (current !== HOME) {
+    process.chdir(HOME);
+  }
+} catch {}
 const CONFIG_DIR = path.join(HOME, 'config');
 
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
@@ -498,6 +507,29 @@ function maybeReloadConfigOnTraffic() {
 
 const LOG_DIR = path.join(HOME, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'danmuapi.log');
+
+function _resolveCacheProbeDir() {
+  const envHome = String(process.env.DANMU_API_HOME || '').trim();
+  const cwd = (typeof process.cwd === 'function') ? String(process.cwd() || '').trim() : '';
+  const base = envHome || cwd || __dirname;
+  return path.join(base, '.cache');
+}
+
+function _checkCacheProbeWritable(cacheDir) {
+  const probeName = `.health_probe_${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const probePath = path.join(cacheDir, probeName);
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(probePath, 'ok', 'utf8');
+    fs.unlinkSync(probePath);
+    return true;
+  } catch {
+    try {
+      if (fs.existsSync(probePath)) fs.unlinkSync(probePath);
+    } catch {}
+    return false;
+  }
+}
 
 // App-managed log settings (written by Android into config/.env):
 //   DANMU_API_LOG_TO_FILE=1|0            (default: 0)
@@ -1630,6 +1662,8 @@ function createMainServer() {
       if (strippedPathname === '/__health') {
         const variantKey = _getVariant();
         const info = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
+        const cacheProbeDir = _resolveCacheProbeDir();
+        const cacheProbeWritable = _checkCacheProbeWritable(cacheProbeDir);
         const payload = {
           ok: true,
           time: new Date().toISOString(),
@@ -1638,6 +1672,11 @@ function createMainServer() {
           uptimeSec: Math.floor(process.uptime()),
           host: HOST,
           ports: { main: PORT, proxy: PROXY_PORT },
+          cwd: process.cwd(),
+          envHome: String(process.env.DANMU_API_HOME || ''),
+          resolvedHome: HOME,
+          cacheProbeDir,
+          cacheProbeWritable,
           variant: variantKey,
           variantLabel: info.label,
           requestCount: METRICS.requestCount,
@@ -1963,6 +2002,8 @@ async function main() {
   // .env 读取后再解析监听地址，确保 App 设置端口生效。
   _refreshListenConfigFromEnv();
   _refreshRuntimeFlags();
+  const startupCacheDir = _resolveCacheProbeDir();
+  log(`[runtime] cwd=${process.cwd()} envHome=${String(process.env.DANMU_API_HOME || '')} home=${HOME} cacheDir=${startupCacheDir}`);
   // Enable file logging after .env has been loaded (LOG_LEVEL takes effect)
   setupFileLogging();
   await _loadHandleRequestForVariant();
