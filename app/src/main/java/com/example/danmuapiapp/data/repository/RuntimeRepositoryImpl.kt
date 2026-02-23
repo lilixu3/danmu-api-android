@@ -147,10 +147,14 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun loadInitialState(): RuntimeState {
         val mode = RuntimeModePrefs.get(context)
         val defaultTokenEnvFile = runCatching {
-            if (mode == RunMode.Normal) {
-                NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
+            when (mode) {
+                RunMode.Normal -> {
+                    NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
+                    File(RuntimePaths.normalProjectDir(context), "config/.env")
+                }
+                // Root 模式不再读取普通模式 .env，避免两种模式的默认配置相互污染。
+                RunMode.Root -> null
             }
-            File(RuntimePaths.normalProjectDir(context), "config/.env")
         }.getOrNull()
         val envValues = readRuntimeEnvValues(defaultTokenEnvFile)
         val portFromEnv = envValues["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
@@ -490,24 +494,27 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun syncRuntimeEnvFromPrefs(mode: RunMode) {
-        val normalDir = runCatching {
-            NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
-        }.getOrElse {
-            addLog(LogLevel.Warn, "同步运行时配置失败：${it.message ?: "无法初始化工作目录"}")
+        if (mode == RunMode.Normal) {
+            val normalDir = runCatching {
+                NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
+            }.getOrElse {
+                addLog(LogLevel.Warn, "同步运行时配置失败：${it.message ?: "无法初始化工作目录"}")
+                return
+            }
+
+            runCatching {
+                NodeProjectManager.writeRuntimeEnv(context, normalDir)
+            }.onFailure {
+                addLog(LogLevel.Warn, "写入运行时配置失败：${it.message ?: "未知错误"}")
+                return
+            }
             return
         }
 
-        runCatching {
-            NodeProjectManager.writeRuntimeEnv(context, normalDir)
-        }.onFailure {
-            addLog(LogLevel.Warn, "写入运行时配置失败：${it.message ?: "未知错误"}")
-            return
-        }
-
-        if (mode != RunMode.Root) return
-        val syncResult = RootRuntimeController.syncRuntimeEnvOnly(context)
-        if (!syncResult.ok) {
-            val detail = syncResult.detail.ifBlank { syncResult.message }
+        // Root 模式仅同步 Root 目录，避免改配置时回写普通模式目录。
+        val rootSyncResult = RootRuntimeController.syncRuntimeEnvOnly(context)
+        if (!rootSyncResult.ok) {
+            val detail = rootSyncResult.detail.ifBlank { rootSyncResult.message }
             addLog(LogLevel.Warn, "同步 Root 运行时配置失败：$detail")
         }
     }
