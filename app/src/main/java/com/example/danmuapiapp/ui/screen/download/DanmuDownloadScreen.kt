@@ -1,5 +1,8 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -74,6 +77,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -99,8 +103,12 @@ import java.util.Locale
 fun DanmuDownloadScreen(
     onBack: () -> Unit,
     onOpenDownloadSettings: () -> Unit,
-    viewModel: DanmuDownloadViewModel = hiltViewModel()
+    providedViewModel: DanmuDownloadViewModel? = null
 ) {
+    val activity = LocalContext.current.findActivity()
+    val viewModel = providedViewModel ?: hiltViewModel<DanmuDownloadViewModel>(
+        viewModelStoreOwner = checkNotNull(activity) { "无法获取 Activity 作用域" }
+    )
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val records by viewModel.records.collectAsStateWithLifecycle()
     val queueTasks by viewModel.queueTasks.collectAsStateWithLifecycle()
@@ -217,6 +225,14 @@ fun DanmuDownloadScreen(
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = { TextButton(onClick = viewModel::clearError) { Text("知道了") } }
         )
+    }
+}
+
+private tailrec fun Context.findActivity(): ComponentActivity? {
+    return when (this) {
+        is ComponentActivity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 }
 
