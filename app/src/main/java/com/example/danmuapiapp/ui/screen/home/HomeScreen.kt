@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
@@ -51,6 +54,7 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.SystemUpdateAlt
@@ -109,20 +113,30 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CacheEntry
+import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    onOpenCacheManagement: () -> Unit = {},
+    viewModel: HomeViewModel = hiltViewModel()
+) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
     val tokenVisible by viewModel.tokenVisible.collectAsStateWithLifecycle()
+    val cacheStats by viewModel.cacheStats.collectAsStateWithLifecycle()
+    val cacheEntries by viewModel.cacheEntries.collectAsStateWithLifecycle()
+    val isCacheLoading by viewModel.isCacheLoading.collectAsStateWithLifecycle()
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     val clipboardManager = LocalClipboard.current
@@ -141,6 +155,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     var quickTokenText by remember { mutableStateOf("") }
     var quickTokenError by remember { mutableStateOf<String?>(null) }
     var showCoreUpdateConfirmDialog by remember { mutableStateOf(false) }
+    var showCacheSheet by remember { mutableStateOf(false) }
     var isBatteryWhitelisted by remember {
         mutableStateOf(NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context))
     }
@@ -343,7 +358,10 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                         quickPortError = null
                         showQuickPortDialog = true
                     },
-                    onCheckCoreUpdate = { showCoreUpdateConfirmDialog = true }
+                    onCheckCoreUpdate = { showCoreUpdateConfirmDialog = true },
+                    cacheStats = cacheStats,
+                    isCacheLoading = isCacheLoading,
+                    onOpenCache = { showCacheSheet = true }
                 )
 
                 AnimatedVisibility(
@@ -909,6 +927,129 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             }
         )
     }
+
+    if (showCacheSheet) {
+        AlertDialog(
+            onDismissRequest = { showCacheSheet = false },
+            icon = { Icon(Icons.Rounded.Storage, null) },
+            title = { Text("缓存管理") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isCacheLoading) {
+                        Text(
+                            "正在加载缓存信息…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else if (!cacheStats.isAvailable) {
+                        Text(
+                            "服务未运行，无法获取缓存信息。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    "请求记录 ${cacheStats.reqRecordsCount} 条",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    "今日 ${cacheStats.todayReqNum} 次",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        if (cacheEntries.isNotEmpty()) {
+                            val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    cacheEntries.take(6).forEach { entry ->
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                dateFormat.format(Date(entry.createdAt)),
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                            )
+                                            Text(
+                                                entry.key.ifBlank { "未知接口" },
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Text(
+                            "清理将重置搜索缓存、弹幕缓存、请求记录等所有内存数据。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = cacheStats.isAvailable && !viewModel.isClearingCache && !isCacheLoading,
+                    onClick = {
+                        showCacheSheet = false
+                        viewModel.quickClearCache()
+                    }
+                ) {
+                    Text(if (viewModel.isClearingCache) "清理中…" else "清理缓存")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { showCacheSheet = false }) {
+                        Text("取消")
+                    }
+                    TextButton(onClick = {
+                        showCacheSheet = false
+                        onOpenCacheManagement()
+                    }) {
+                        Text("查看详情")
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1230,7 +1371,10 @@ private fun SnapshotStrip(
     coreVersionAccent: Color,
     isActionBusy: Boolean,
     onEditPort: () -> Unit,
-    onCheckCoreUpdate: () -> Unit
+    onCheckCoreUpdate: () -> Unit,
+    cacheStats: com.example.danmuapiapp.domain.model.CacheStats,
+    isCacheLoading: Boolean,
+    onOpenCache: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1254,11 +1398,11 @@ private fun SnapshotStrip(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                MetricTile(
+                CacheMetricTile(
                     modifier = Modifier.weight(1f),
-                    title = "服务状态",
-                    value = statusShortLabel(status),
-                    accent = statusAccentColor(status)
+                    stats = cacheStats,
+                    isLoading = isCacheLoading,
+                    onClick = onOpenCache
                 )
                 MetricTile(
                     modifier = Modifier.weight(1f),
@@ -1295,6 +1439,49 @@ private fun SnapshotStrip(
                     onClick = onCheckCoreUpdate
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CacheMetricTile(
+    modifier: Modifier = Modifier,
+    stats: com.example.danmuapiapp.domain.model.CacheStats,
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "缓存管理",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = when {
+                    isLoading -> "加载中…"
+                    !stats.isAvailable -> "服务未运行"
+                    else -> "${stats.reqRecordsCount} 条记录"
+                },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
         }
     }
 }

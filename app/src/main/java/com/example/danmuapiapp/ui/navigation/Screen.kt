@@ -22,9 +22,11 @@ object ToolRoute {
     const val Console = "tool_console"
     const val ApiTest = "tool_api_test"
     const val PushDanmu = "tool_push_danmu"
+    const val DanmuDownload = "tool_danmu_download"
     const val RequestRecords = "tool_request_records"
     const val Config = "tool_config"
     const val DeviceAccess = "tool_device_access"
+    const val CacheManagement = "tool_cache_management"
 }
 
 object SettingsRoute {
@@ -32,6 +34,7 @@ object SettingsRoute {
     const val ThemeDisplay = "settings_theme_display"
     const val WorkDir = "settings_work_dir"
     const val ServiceConfig = "settings_service_config"
+    const val DanmuDownload = "settings_danmu_download"
     const val Network = "settings_network"
     const val GithubToken = "settings_github_token"
     const val BackupRestore = "settings_backup_restore"
