@@ -13,7 +13,7 @@ import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.DownloadConflictPolicy
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
-import com.example.danmuapiapp.domain.model.DownloadThrottlePreset
+import com.example.danmuapiapp.domain.model.DownloadThrottleConfig
 import com.example.danmuapiapp.domain.repository.DanmuDownloadRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -866,7 +866,7 @@ class DanmuDownloadViewModel @Inject constructor(
             var summaryMessage: String? = null
             val prepareChainForThisRun = requireQueuePreparationBeforeRun
             requireQueuePreparationBeforeRun = false
-            val throttle = settings.value.throttle()
+            val throttle = settings.value.throttleConfig()
             val sourceCooldownUntil = mutableMapOf<String, Long>()
             val sourceBackoffLevel = mutableMapOf<String, Int>()
             var processed = 0
@@ -1457,13 +1457,13 @@ class DanmuDownloadViewModel @Inject constructor(
         return random.nextInt(bound).toLong()
     }
 
-    private fun backoffDelayMs(preset: DownloadThrottlePreset, level: Int): Long {
-        var delayMs = preset.backoffBaseMs.coerceAtLeast(0L)
+    private fun backoffDelayMs(config: DownloadThrottleConfig, level: Int): Long {
+        var delayMs = config.backoffBaseMs.coerceAtLeast(0L)
         val rounds = (level - 1).coerceAtLeast(0).coerceAtMost(10)
         repeat(rounds) {
-            delayMs = (delayMs * 2L).coerceAtMost(preset.backoffMaxMs)
+            delayMs = (delayMs * 2L).coerceAtMost(config.backoffMaxMs)
         }
-        delayMs = (delayMs + nextJitterMs(min(1500L, preset.jitterMaxMs))).coerceAtMost(preset.backoffMaxMs)
+        delayMs = (delayMs + nextJitterMs(min(1500L, config.jitterMaxMs))).coerceAtMost(config.backoffMaxMs)
         return delayMs.coerceAtLeast(1000L)
     }
 

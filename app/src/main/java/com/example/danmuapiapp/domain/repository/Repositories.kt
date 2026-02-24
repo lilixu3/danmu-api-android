@@ -95,6 +95,14 @@ interface DanmuDownloadRepository {
     fun setFileNameTemplate(template: String)
     fun setConflictPolicy(policy: DownloadConflictPolicy)
     fun setThrottlePreset(preset: DownloadThrottlePreset)
+    fun setCustomThrottleConfig(
+        baseDelayMs: Long,
+        jitterMaxMs: Long,
+        batchSize: Int,
+        batchRestMs: Long,
+        backoffBaseMs: Long,
+        backoffMaxMs: Long
+    )
     fun enqueueTasks(inputs: List<DanmuDownloadInput>): Int
     fun setQueueTaskStatus(
         taskId: Long,

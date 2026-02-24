@@ -50,6 +50,26 @@ class DownloadSettingsViewModel @Inject constructor(
         operationMessage = "流控预设已切换为 ${preset.label}"
     }
 
+    fun setCustomThrottleConfig(
+        baseDelayMs: Long,
+        jitterMaxMs: Long,
+        batchSize: Int,
+        batchRestMs: Long,
+        backoffBaseMs: Long,
+        backoffMaxMs: Long
+    ) {
+        repository.setCustomThrottleConfig(
+            baseDelayMs = baseDelayMs,
+            jitterMaxMs = jitterMaxMs,
+            batchSize = batchSize,
+            batchRestMs = batchRestMs,
+            backoffBaseMs = backoffBaseMs,
+            backoffMaxMs = backoffMaxMs
+        )
+        repository.setThrottlePreset(DownloadThrottlePreset.Custom)
+        operationMessage = "自定义流控参数已保存"
+    }
+
     fun setFileNameTemplate(template: String) {
         repository.setFileNameTemplate(template)
         operationMessage = "命名模板已保存"
