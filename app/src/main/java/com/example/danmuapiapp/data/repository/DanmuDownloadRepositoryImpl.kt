@@ -26,7 +26,6 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
-import java.net.URI
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -330,15 +329,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     }
 
     private fun requestDanmuPayload(url: String): Pair<Int, ByteArray> {
-        val requestBuilder = Request.Builder()
+        val request = Request.Builder()
             .url(url)
             .get()
-        // 仅对本地服务下载请求注入独立来源 IP，避免下载链路触发核心全局限流。
-        buildDownloadBypassIp(url)?.let { spoofIp ->
-            requestBuilder.header("X-Forwarded-For", spoofIp)
-            requestBuilder.header("X-Real-IP", spoofIp)
-        }
-        val request = requestBuilder.build()
+            .build()
         httpClient.newCall(request).execute().use { response ->
             val code = response.code
             val body = response.body
@@ -353,48 +347,6 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             }
             return code to body.bytes()
         }
-    }
-
-    private fun buildDownloadBypassIp(url: String): String? {
-        val host = runCatching { URI(url).host?.trim() }.getOrNull().orEmpty()
-        if (!isDownloadBypassHost(host)) return null
-
-        val seed = System.nanoTime().toULong()
-        val second = ((seed shr 8) % 250u).toInt() + 1
-        val third = ((seed shr 24) % 250u).toInt() + 1
-        val fourth = ((seed shr 40) % 250u).toInt() + 1
-        return "10.$second.$third.$fourth"
-    }
-
-    private fun isDownloadBypassHost(rawHost: String): Boolean {
-        if (rawHost.isBlank()) return false
-        val host = rawHost.trim().lowercase(Locale.ROOT).trim('[', ']')
-        if (host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1") {
-            return true
-        }
-        if (host.endsWith(".local")) return true
-
-        val parts = host.split('.')
-        if (parts.size == 4) {
-            val nums = parts.map { it.toIntOrNull() ?: return false }
-            if (nums.any { it !in 0..255 }) return false
-            val a = nums[0]
-            val b = nums[1]
-            val isPrivateIpv4 = a == 10 ||
-                a == 127 ||
-                a == 0 ||
-                (a == 172 && b in 16..31) ||
-                (a == 192 && b == 168) ||
-                (a == 169 && b == 254)
-            if (isPrivateIpv4) return true
-        }
-
-        if (host.contains(':')) {
-            if (host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd")) {
-                return true
-            }
-        }
-        return false
     }
 
     private fun buildCommentUrl(input: DanmuDownloadInput): String {
@@ -554,7 +506,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         return DanmuDownloadSettings(
             saveTreeUri = prefs.getString(KEY_SAVE_TREE_URI, "").orEmpty(),
             saveDirDisplayName = prefs.getString(KEY_SAVE_DIR_DISPLAY, "").orEmpty(),
-            defaultFormat = prefs.getString(KEY_DEFAULT_FORMAT, DanmuDownloadFormat.Json.value).orEmpty(),
+            defaultFormat = prefs.getString(KEY_DEFAULT_FORMAT, DanmuDownloadFormat.Xml.value).orEmpty(),
             fileNameTemplate = prefs.getString(KEY_FILE_TEMPLATE, DanmuDownloadSettings().fileNameTemplate).orEmpty(),
             conflictPolicy = prefs.getString(KEY_CONFLICT_POLICY, DownloadConflictPolicy.Rename.key).orEmpty(),
             throttlePreset = prefs.getString(KEY_THROTTLE_PRESET, DownloadThrottlePreset.Conservative.key).orEmpty()
