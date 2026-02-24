@@ -23,8 +23,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
@@ -66,6 +69,7 @@ import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -108,8 +112,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -559,170 +566,55 @@ fun HomeScreen(
     }
 
     if (showQuickPortDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!isBusy) {
-                    showQuickPortDialog = false
-                }
+        QuickPortDialog(
+            isBusy = isBusy,
+            status = state.status,
+            runMode = state.runMode,
+            currentPort = state.port,
+            quickPortText = quickPortText,
+            quickPortError = quickPortError,
+            onPortTextChange = {
+                quickPortText = it
+                quickPortError = null
             },
-            icon = { Icon(Icons.Rounded.Lan, null) },
-            title = { Text("快速修改端口") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = if (state.status == ServiceStatus.Running) {
-                            "保存后会先停止旧端口，再启动新端口。"
-                        } else {
-                            "服务未运行，保存后将直接更新端口配置。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = quickPortText,
-                        onValueChange = {
-                            quickPortText = it
-                            quickPortError = null
-                        },
-                        label = { Text("端口") },
-                        singleLine = true,
-                        isError = quickPortError != null,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = KeyboardType.Number
-                        ),
-                        supportingText = {
-                            val hint = if (state.runMode == RunMode.Normal) {
-                                "普通模式支持 1024 – 65535（Root 支持 1 – 65535）"
-                            } else {
-                                "范围 1 – 65535"
-                            }
-                            Text(quickPortError ?: hint)
-                        }
-                    )
-                }
+            onDismiss = { showQuickPortDialog = false },
+            onApply = { port ->
+                viewModel.applyPortQuick(port)
+                showQuickPortDialog = false
             },
-            confirmButton = {
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = {
-                        val port = quickPortText.trim().toIntOrNull()
-                        if (port == null || port !in 1..65535) {
-                            quickPortError = "请输入有效端口（1-65535）"
-                            return@TextButton
-                        }
-                        if (state.runMode == RunMode.Normal && port in 1..1023) {
-                            quickPortError = "普通模式仅支持 1024-65535，请切换 Root 模式后再使用低位端口"
-                            return@TextButton
-                        }
-                        if (port == state.port) {
-                            quickPortError = "端口未变化"
-                            return@TextButton
-                        }
-                        viewModel.applyPortQuick(port)
-                        showQuickPortDialog = false
-                    }
-                ) {
-                    Text(if (state.status == ServiceStatus.Running) "保存并重启" else "保存")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = { showQuickPortDialog = false }
-                ) {
-                    Text("取消")
-                }
-            }
+            onPortError = { quickPortError = it }
         )
     }
 
     if (showQuickTokenDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!isBusy) {
-                    showQuickTokenDialog = false
-                }
+        QuickTokenDialog(
+            isBusy = isBusy,
+            status = state.status,
+            currentToken = state.token,
+            quickTokenText = quickTokenText,
+            quickTokenError = quickTokenError,
+            onTokenTextChange = {
+                quickTokenText = it
+                quickTokenError = null
             },
-            icon = { Icon(Icons.Rounded.Tune, null) },
-            title = { Text("快速修改 Token") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = if (state.status == ServiceStatus.Running) {
-                            "保存后将热更新到运行中的服务，无需重启。"
-                        } else {
-                            "保存后将写入运行配置，启动时自动生效。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = quickTokenText,
-                        onValueChange = {
-                            quickTokenText = it
-                            quickTokenError = null
-                        },
-                        label = { Text("Token（可留空）") },
-                        singleLine = true,
-                        isError = quickTokenError != null,
-                        supportingText = {
-                            Text(quickTokenError ?: "留空将恢复核心默认 Token")
-                        }
-                    )
-                }
+            onDismiss = { showQuickTokenDialog = false },
+            onApply = { token ->
+                viewModel.applyTokenQuick(token)
+                showQuickTokenDialog = false
             },
-            confirmButton = {
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = {
-                        val normalized = quickTokenText.trim()
-                        if (normalized == state.token) {
-                            quickTokenError = "Token 未变化"
-                            return@TextButton
-                        }
-                        viewModel.applyTokenQuick(normalized)
-                        showQuickTokenDialog = false
-                    }
-                ) {
-                    Text("保存")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = { showQuickTokenDialog = false }
-                ) {
-                    Text("取消")
-                }
-            }
+            onTokenError = { quickTokenError = it }
         )
     }
 
     if (showCoreUpdateConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showCoreUpdateConfirmDialog = false },
-            icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
-            title = { Text("检查核心更新") },
-            text = {
-                Text(
-                    text = "将检查 ${state.variant.label} 是否有新版本。为避免误触，是否继续？",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showCoreUpdateConfirmDialog = false
-                        viewModel.quickCheckCurrentCoreUpdate()
-                    }
-                ) {
-                    Text("继续检查")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCoreUpdateConfirmDialog = false }) {
-                    Text("取消")
-                }
+        CoreUpdateConfirmDialog(
+            variantLabel = state.variant.label,
+            currentVersion = currentCoreVersion,
+            latestVersion = latestVersion,
+            onDismiss = { showCoreUpdateConfirmDialog = false },
+            onConfirm = {
+                showCoreUpdateConfirmDialog = false
+                viewModel.quickCheckCurrentCoreUpdate()
             }
         )
     }
@@ -1007,208 +899,657 @@ fun HomeScreen(
     }
 
     if (showDownloadQueueDialog) {
-        AlertDialog(
-            onDismissRequest = { showDownloadQueueDialog = false },
-            icon = { Icon(Icons.Rounded.DownloadForOffline, null) },
-            title = { Text("下载任务队列") },
-            text = {
-                val completed = queueSummary.success + queueSummary.skipped + queueSummary.canceled
-                val displayProgress = queueLiveProgress.coerceIn(0f, 1f)
-                val displayPercent = (displayProgress * 100f).toInt().coerceIn(0, 100)
-                val showRunningDetail = queueRunningDetail.isNotBlank() &&
-                    queueRunningDetail != "当前无运行中的任务"
-                val dialogScroll = rememberScrollState()
+        DownloadQueueDialog(
+            queueSummary = queueSummary,
+            queueLiveProgress = queueLiveProgress,
+            queueStatusText = queueStatusText,
+            queueRunningDetail = queueRunningDetail,
+            queueProgressSummary = queueProgressSummary,
+            queueThrottleHint = queueThrottleHint,
+            isQueueDownloading = isQueueDownloading,
+            isQueuePaused = isQueuePaused,
+            queueDialogGroups = queueDialogGroups,
+            expandedQueueGroupKeys = expandedQueueGroupKeys,
+            onExpandedQueueGroupKeysChange = { expandedQueueGroupKeys = it },
+            onDismiss = { showDownloadQueueDialog = false },
+            onOpenDownloadPage = {
+                showDownloadQueueDialog = false
+                onOpenDanmuDownload()
+            },
+            onTogglePauseResume = {
+                if (isQueueDownloading) {
+                    downloadViewModel?.pauseDownload()
+                } else {
+                    downloadViewModel?.resumePendingQueue()
+                }
+            },
+            onClearQueue = { downloadViewModel?.clearQueueTasks() }
+        )
+    }
+}
 
-                Column(
+@Composable
+private fun HomePanelDialog(
+    onDismissRequest: () -> Unit,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    canDismiss: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+    actions: @Composable RowScope.() -> Unit
+) {
+    Dialog(
+        onDismissRequest = {
+            if (canDismiss) onDismissRequest()
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .widthIn(max = 540.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 2.dp,
+            shadowElevation = 20.dp,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f)
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(dialogScroll),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.88f)
+                                )
+                            )
+                        )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f)
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = when {
-                                isQueueDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                isQueuePaused -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
-                                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
-                            }
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                queueStatusText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = when {
-                                    isQueueDownloading -> MaterialTheme.colorScheme.primary
-                                    isQueuePaused -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ) {
-                            Text(
-                                "总任务 ${queueSummary.total}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
-
-                    LinearProgressIndicator(
-                        progress = { displayProgress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(999.dp)),
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        color = if (isQueueDownloading) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.tertiary
-                        }
-                    )
-                    Text(
-                        text = "总进度 $displayPercent% · 已完成 $completed/${queueSummary.total.coerceAtLeast(0)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (showRunningDetail) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ) {
-                            Text(
-                                text = queueRunningDetail,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = queueProgressSummary,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (!queueThrottleHint.isNullOrBlank()) {
-                        Text(
-                            text = queueThrottleHint,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        QueueMetricBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "待处理",
-                            value = queueSummary.pending
-                        )
-                        QueueMetricBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "运行",
-                            value = queueSummary.running
-                        )
-                        QueueMetricBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "完成",
-                            value = queueSummary.success + queueSummary.skipped + queueSummary.canceled
-                        )
-                        QueueMetricBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "失败",
-                            value = queueSummary.failed
-                        )
-                    }
-
-                    if (queueDialogGroups.isEmpty()) {
                         Text(
-                            text = "队列暂无任务",
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    } else {
+                    }
+                }
+
+                content()
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    content = actions
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogActionButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    primary: Boolean = false
+) {
+    if (primary) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        ) {
+            Icon(icon, null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(text)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(text)
+        }
+    }
+}
+
+@Composable
+private fun QuickPortDialog(
+    isBusy: Boolean,
+    status: ServiceStatus,
+    runMode: RunMode,
+    currentPort: Int,
+    quickPortText: String,
+    quickPortError: String?,
+    onPortTextChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onApply: (Int) -> Unit,
+    onPortError: (String) -> Unit
+) {
+    val modeHint = if (runMode == RunMode.Normal) {
+        "普通模式支持 1024 – 65535（Root 支持 1 – 65535）"
+    } else {
+        "Root 模式支持 1 – 65535"
+    }
+    val subtitle = if (status == ServiceStatus.Running) {
+        "保存后自动重启服务以应用新端口"
+    } else {
+        "当前未运行，保存后写入启动配置"
+    }
+
+    HomePanelDialog(
+        onDismissRequest = onDismiss,
+        canDismiss = !isBusy,
+        icon = Icons.Rounded.Lan,
+        title = "快速修改端口",
+        subtitle = subtitle,
+        content = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                )
+            ) {
+                Text(
+                    text = "当前端口：TCP $currentPort · $modeHint",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            val quickPorts = if (runMode == RunMode.Root) {
+                listOf("80", "9321", "2233")
+            } else {
+                listOf("9321", "2233", "5000")
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                quickPorts.forEach { target ->
+                    DialogActionButton(
+                        text = target,
+                        icon = Icons.Rounded.Tune,
+                        onClick = { onPortTextChange(target) },
+                        enabled = !isBusy && quickPortText != target,
+                        primary = quickPortText == target
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = quickPortText,
+                onValueChange = onPortTextChange,
+                label = { Text("端口") },
+                singleLine = true,
+                isError = quickPortError != null,
+                shape = RoundedCornerShape(14.dp),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = KeyboardType.Number
+                ),
+                supportingText = {
+                    Text(quickPortError ?: modeHint)
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        actions = {
+            DialogActionButton(
+                text = "取消",
+                icon = Icons.Rounded.Close,
+                onClick = onDismiss,
+                enabled = !isBusy
+            )
+            DialogActionButton(
+                text = if (status == ServiceStatus.Running) "保存并重启" else "保存",
+                icon = if (status == ServiceStatus.Running) {
+                    Icons.Rounded.PowerSettingsNew
+                } else {
+                    Icons.Rounded.CheckCircle
+                },
+                onClick = {
+                    val port = quickPortText.trim().toIntOrNull()
+                    if (port == null || port !in 1..65535) {
+                        onPortError("请输入有效端口（1-65535）")
+                        return@DialogActionButton
+                    }
+                    if (runMode == RunMode.Normal && port in 1..1023) {
+                        onPortError("普通模式仅支持 1024-65535，请切换 Root 模式后再使用低位端口")
+                        return@DialogActionButton
+                    }
+                    if (port == currentPort) {
+                        onPortError("端口未变化")
+                        return@DialogActionButton
+                    }
+                    onApply(port)
+                },
+                enabled = !isBusy,
+                primary = true
+            )
+        }
+    )
+}
+
+@Composable
+private fun QuickTokenDialog(
+    isBusy: Boolean,
+    status: ServiceStatus,
+    currentToken: String,
+    quickTokenText: String,
+    quickTokenError: String?,
+    onTokenTextChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onApply: (String) -> Unit,
+    onTokenError: (String) -> Unit
+) {
+    val subtitle = if (status == ServiceStatus.Running) {
+        "保存后会热更新到运行中服务"
+    } else {
+        "保存后会写入运行配置"
+    }
+    val preview = when {
+        quickTokenText.isBlank() -> "空（将恢复核心默认 Token）"
+        quickTokenText.length <= 8 -> quickTokenText
+        else -> "${quickTokenText.take(4)}****${quickTokenText.takeLast(2)}"
+    }
+
+    HomePanelDialog(
+        onDismissRequest = onDismiss,
+        canDismiss = !isBusy,
+        icon = Icons.Rounded.Tune,
+        title = "快速修改 Token",
+        subtitle = subtitle,
+        content = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "当前：${if (currentToken.isBlank()) "空（默认）" else currentToken}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "待保存：$preview",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = quickTokenText,
+                onValueChange = onTokenTextChange,
+                label = { Text("Token（可留空）") },
+                singleLine = true,
+                isError = quickTokenError != null,
+                shape = RoundedCornerShape(14.dp),
+                supportingText = {
+                    Text(quickTokenError ?: "留空将恢复核心默认 Token")
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        actions = {
+            DialogActionButton(
+                text = "取消",
+                icon = Icons.Rounded.Close,
+                onClick = onDismiss,
+                enabled = !isBusy
+            )
+            DialogActionButton(
+                text = "保存",
+                icon = Icons.Rounded.CheckCircle,
+                onClick = {
+                    val normalized = quickTokenText.trim()
+                    if (normalized == currentToken) {
+                        onTokenError("Token 未变化")
+                        return@DialogActionButton
+                    }
+                    onApply(normalized)
+                },
+                enabled = !isBusy,
+                primary = true
+            )
+        }
+    )
+}
+
+@Composable
+private fun CoreUpdateConfirmDialog(
+    variantLabel: String,
+    currentVersion: String?,
+    latestVersion: String?,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    HomePanelDialog(
+        onDismissRequest = onDismiss,
+        icon = Icons.Rounded.SystemUpdateAlt,
+        title = "检查核心更新",
+        subtitle = "检查当前核心分支是否有可用更新",
+        content = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "分支：$variantLabel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "当前版本：${currentVersion?.let { "v$it" } ?: "--"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "远程版本：${latestVersion?.let { "v$it" } ?: "待查询"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        },
+        actions = {
+            DialogActionButton(
+                text = "取消",
+                icon = Icons.Rounded.Close,
+                onClick = onDismiss
+            )
+            DialogActionButton(
+                text = "继续检查",
+                icon = Icons.Rounded.SystemUpdate,
+                onClick = onConfirm,
+                primary = true
+            )
+        }
+    )
+}
+
+@Composable
+private fun DownloadQueueDialog(
+    queueSummary: DownloadQueueSummary,
+    queueLiveProgress: Float,
+    queueStatusText: String,
+    queueRunningDetail: String,
+    queueProgressSummary: String,
+    queueThrottleHint: String?,
+    isQueueDownloading: Boolean,
+    isQueuePaused: Boolean,
+    queueDialogGroups: List<DownloadQueueDialogGroup>,
+    expandedQueueGroupKeys: Set<String>,
+    onExpandedQueueGroupKeysChange: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+    onOpenDownloadPage: () -> Unit,
+    onTogglePauseResume: () -> Unit,
+    onClearQueue: () -> Unit
+) {
+    val completed = queueSummary.success + queueSummary.skipped + queueSummary.canceled
+    val displayProgress = queueLiveProgress.coerceIn(0f, 1f)
+    val displayPercent = (displayProgress * 100f).toInt().coerceIn(0, 100)
+    val showRunningDetail = queueRunningDetail.isNotBlank() &&
+        queueRunningDetail != "当前无运行中的任务"
+    val statusSubtitle = "总任务 ${queueSummary.total} · 待处理 ${queueSummary.pending} · 运行 ${queueSummary.running}"
+
+    HomePanelDialog(
+        onDismissRequest = onDismiss,
+        icon = Icons.Rounded.DownloadForOffline,
+        title = "下载任务队列",
+        subtitle = statusSubtitle,
+        content = {
+            val dialogScroll = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(dialogScroll),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = when {
+                            isQueueDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            isQueuePaused -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
+                            else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                        }
+                    ) {
                         Text(
-                            text = "任务分组",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
+                            queueStatusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when {
+                                isQueueDownloading -> MaterialTheme.colorScheme.primary
+                                isQueuePaused -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            queueDialogGroups.forEach { group ->
-                                val expanded = expandedQueueGroupKeys.contains(group.key)
-                                DownloadQueueGroupCard(
-                                    group = group,
-                                    expanded = expanded,
-                                    onToggle = {
-                                        expandedQueueGroupKeys = if (expanded) {
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        Text(
+                            "总进度 $displayPercent%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                LinearProgressIndicator(
+                    progress = { displayProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(999.dp)),
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    color = if (isQueueDownloading) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.tertiary
+                    }
+                )
+                Text(
+                    text = "已完成 $completed/${queueSummary.total.coerceAtLeast(0)} · 失败 ${queueSummary.failed}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (showRunningDetail) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
+                        Text(
+                            text = queueRunningDetail,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Text(
+                    text = queueProgressSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!queueThrottleHint.isNullOrBlank()) {
+                    Text(
+                        text = queueThrottleHint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QueueMetricBadge(
+                        modifier = Modifier.weight(1f),
+                        label = "待处理",
+                        value = queueSummary.pending
+                    )
+                    QueueMetricBadge(
+                        modifier = Modifier.weight(1f),
+                        label = "运行",
+                        value = queueSummary.running
+                    )
+                    QueueMetricBadge(
+                        modifier = Modifier.weight(1f),
+                        label = "完成",
+                        value = queueSummary.success + queueSummary.skipped + queueSummary.canceled
+                    )
+                    QueueMetricBadge(
+                        modifier = Modifier.weight(1f),
+                        label = "失败",
+                        value = queueSummary.failed
+                    )
+                }
+
+                if (queueDialogGroups.isEmpty()) {
+                    Text(
+                        text = "队列暂无任务",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = "任务分组",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        queueDialogGroups.forEach { group ->
+                            val expanded = expandedQueueGroupKeys.contains(group.key)
+                            DownloadQueueGroupCard(
+                                group = group,
+                                expanded = expanded,
+                                onToggle = {
+                                    onExpandedQueueGroupKeysChange(
+                                        if (expanded) {
                                             expandedQueueGroupKeys - group.key
                                         } else {
                                             expandedQueueGroupKeys + group.key
                                         }
-                                    }
-                                )
-                            }
+                                    )
+                                }
+                            )
                         }
-                    }
-                }
-            },
-            confirmButton = {
-                val actionScroll = rememberScrollState()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(actionScroll),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    TextButton(
-                        onClick = { showDownloadQueueDialog = false }
-                    ) {
-                        Text("取消")
-                    }
-                    TextButton(onClick = {
-                        showDownloadQueueDialog = false
-                        onOpenDanmuDownload()
-                    }) {
-                        Text("下载页")
-                    }
-                    TextButton(
-                        enabled = if (isQueueDownloading) true else isQueuePaused,
-                        onClick = {
-                            if (isQueueDownloading) {
-                                downloadViewModel?.pauseDownload()
-                            } else {
-                                downloadViewModel?.resumePendingQueue()
-                            }
-                        }
-                    ) {
-                        Text(if (isQueueDownloading) "暂停" else "继续")
-                    }
-                    TextButton(
-                        enabled = !isQueueDownloading && queueSummary.total > 0,
-                        onClick = {
-                            downloadViewModel?.clearQueueTasks()
-                        }
-                    ) {
-                        Text("清空")
                     }
                 }
             }
-        )
-    }
+        },
+        actions = {
+            DialogActionButton(
+                text = "关闭",
+                icon = Icons.Rounded.Close,
+                onClick = onDismiss
+            )
+            DialogActionButton(
+                text = "下载页",
+                icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                onClick = onOpenDownloadPage
+            )
+            DialogActionButton(
+                text = if (isQueueDownloading) "暂停" else "继续",
+                icon = if (isQueueDownloading) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                onClick = onTogglePauseResume,
+                enabled = if (isQueueDownloading) true else isQueuePaused,
+                primary = isQueueDownloading || isQueuePaused
+            )
+            DialogActionButton(
+                text = "清空",
+                icon = Icons.Rounded.CloudOff,
+                onClick = onClearQueue,
+                enabled = !isQueueDownloading && queueSummary.total > 0
+            )
+        }
+    )
 }
 
 private data class DownloadQueueDialogGroup(
