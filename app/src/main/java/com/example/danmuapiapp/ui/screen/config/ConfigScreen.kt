@@ -56,6 +56,7 @@ private const val KEY_MERGE_SOURCE_PAIRS = "MERGE_SOURCE_PAIRS"
 private const val KEY_PLATFORM_ORDER = "PLATFORM_ORDER"
 private const val KEY_TITLE_MAPPING_TABLE = "TITLE_MAPPING_TABLE"
 private const val KEY_TITLE_PLATFORM_OFFSET_TABLE = "TITLE_PLATFORM_OFFSET_TABLE"
+private const val KEY_AI_API_KEY = "AI_API_KEY"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -135,7 +136,8 @@ fun ConfigScreen(
             onDismiss = { viewModel.closeEditor() },
             onGenerateBiliQr = { viewModel.generateBilibiliQr() },
             onPollBiliQr = { key -> viewModel.pollBilibiliQr(key) },
-            onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) }
+            onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) },
+            onVerifyAiConnectivity = { apiKey -> viewModel.verifyAiConnectivity(apiKey) }
         )
     }
 
@@ -496,6 +498,7 @@ private fun EnvVarEditDialog(
     onGenerateBiliQr: suspend () -> Result<BilibiliQrGenerateResult>,
     onPollBiliQr: suspend (String) -> Result<BilibiliQrPollResult>,
     onVerifyBiliCookie: suspend (String) -> Result<BilibiliCookieVerifyResult>,
+    onVerifyAiConnectivity: suspend (String) -> Result<AiConnectivityVerifyResult>,
 ) {
     var value by remember(def.key, currentValue) { mutableStateOf(currentValue) }
     var showPassword by remember(def.key) { mutableStateOf(false) }
@@ -595,6 +598,15 @@ private fun EnvVarEditDialog(
                             onGenerateBiliQr = onGenerateBiliQr,
                             onPollBiliQr = onPollBiliQr,
                             onVerifyBiliCookie = onVerifyBiliCookie
+                        )
+                        true
+                    }
+
+                    KEY_AI_API_KEY -> {
+                        AiApiKeyEditor(
+                            value = value,
+                            onValueChange = { value = it },
+                            onVerifyAiConnectivity = onVerifyAiConnectivity
                         )
                         true
                     }
@@ -1553,6 +1565,178 @@ private fun PlatformMultiSelectDialog(
 }
 
 @Composable
+private fun AiApiKeyEditor(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onVerifyAiConnectivity: suspend (String) -> Result<AiConnectivityVerifyResult>,
+) {
+    val scope = rememberCoroutineScope()
+    var showKey by remember { mutableStateOf(false) }
+    var verifyLoading by remember { mutableStateOf(false) }
+    var verifyResult by remember { mutableStateOf<AiConnectivityVerifyResult?>(null) }
+    var verifyError by remember { mutableStateOf<String?>(null) }
+
+    val statusTitle = when {
+        value.isBlank() -> "未配置"
+        verifyLoading -> "检测中"
+        verifyResult?.isReachable == true -> "连通正常"
+        verifyResult != null -> "连通失败"
+        else -> "待测试"
+    }
+    val statusSubtitle = when {
+        value.isBlank() -> "请输入 AI API Key 后测试连通性"
+        verifyLoading -> "正在校验 AI 服务连通性..."
+        verifyResult?.isReachable == true -> verifyResult?.message.ifNullOrBlank("AI 服务可用")
+        verifyResult != null -> verifyResult?.message.ifNullOrBlank("AI 服务不可用")
+        else -> "点击“连通性测试”快速验证"
+    }
+
+    fun verifyNow(targetValue: String = value) {
+        val apiKey = targetValue.trim()
+        if (apiKey.isBlank()) {
+            verifyResult = null
+            verifyError = "请先输入 API Key"
+            return
+        }
+        verifyLoading = true
+        verifyError = null
+        scope.launch {
+            val result = onVerifyAiConnectivity(apiKey)
+            verifyLoading = false
+            result.onSuccess {
+                verifyResult = it
+                if (!it.isReachable) {
+                    verifyError = it.message.ifBlank { "连通性测试失败" }
+                }
+            }.onFailure {
+                verifyResult = null
+                verifyError = it.message ?: "连通性测试失败"
+            }
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = when {
+                    value.isBlank() -> MaterialTheme.colorScheme.surfaceVariant
+                    verifyLoading -> MaterialTheme.colorScheme.secondaryContainer
+                    verifyResult?.isReachable == true -> MaterialTheme.colorScheme.primaryContainer
+                    verifyResult != null -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        statusTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = when {
+                            value.isBlank() -> MaterialTheme.colorScheme.onSurfaceVariant
+                            verifyLoading -> MaterialTheme.colorScheme.onSecondaryContainer
+                            verifyResult?.isReachable == true -> MaterialTheme.colorScheme.onPrimaryContainer
+                            verifyResult != null -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                    Text(
+                        statusSubtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            value.isBlank() -> MaterialTheme.colorScheme.onSurfaceVariant
+                            verifyLoading -> MaterialTheme.colorScheme.onSecondaryContainer
+                            verifyResult?.isReachable == true -> MaterialTheme.colorScheme.onPrimaryContainer
+                            verifyResult != null -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                    Text(
+                        "提供商：${verifyResult?.provider ?: "--"}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "模型：${verifyResult?.model ?: "--"}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "延迟：${formatLatencyMs(verifyResult?.latencyMs)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { verifyNow(value) },
+                    enabled = value.isNotBlank() && !verifyLoading
+                ) {
+                    if (verifyLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else {
+                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text("连通性测试")
+                }
+            }
+
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    onValueChange(it)
+                    verifyError = null
+                    verifyResult = null
+                },
+                label = { Text("AI API Key") },
+                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { showKey = !showKey }) {
+                        Icon(
+                            if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            "显示/隐藏"
+                        )
+                    }
+                },
+                singleLine = false,
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(
+                "测试使用当前输入值，不必先保存配置。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (!verifyError.isNullOrBlank()) {
+                Text(
+                    verifyError!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BilibiliCookieEditor(
     value: String,
     onValueChange: (String) -> Unit,
@@ -1960,6 +2144,16 @@ private fun formatEpochMs(epochMs: Long?): String {
         else -> "（不到 1 小时）"
     }
     return dateText + tail
+}
+
+private fun formatLatencyMs(latencyMs: Long?): String {
+    val value = latencyMs ?: return "--"
+    if (value <= 0L) return "--"
+    return if (value < 1000L) {
+        "${value}ms"
+    } else {
+        String.format(Locale.getDefault(), "%.2fs", value / 1000f)
+    }
 }
 
 private fun buildQrBitmap(content: String, sizePx: Int): ImageBitmap {

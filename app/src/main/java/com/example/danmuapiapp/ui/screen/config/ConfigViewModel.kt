@@ -173,6 +173,29 @@ class ConfigViewModel @Inject constructor(
         }
     }
 
+    suspend fun verifyAiConnectivity(apiKey: String): Result<AiConnectivityVerifyResult> {
+        return runCatching {
+            val key = apiKey.trim()
+            if (key.isBlank()) {
+                error("请先输入 API Key")
+            }
+
+            val payload = JSONObject().put("aiApiKey", key)
+            val root = postJson("/api/ai/verify", payload)
+            val data = root.optJSONObject("data")
+            val rootExplicitFailure = root.has("success") && !root.optBoolean("success", false)
+            val reachable = resolveAiConnectivityResult(root, data, rootExplicitFailure)
+
+            AiConnectivityVerifyResult(
+                isReachable = reachable,
+                message = extractAiVerifyMessage(root, data, reachable),
+                provider = readFirstStringField(data, root, listOf("provider", "vendor", "platform")),
+                model = readFirstStringField(data, root, listOf("model", "modelName", "aiModel")),
+                latencyMs = readFirstLongField(data, root, listOf("latencyMs", "durationMs", "elapsedMs"))
+            )
+        }
+    }
+
     private suspend fun postJson(path: String, payload: JSONObject? = null): JSONObject {
         return withContext(Dispatchers.IO) {
             val bodyText = (payload ?: JSONObject()).toString()
@@ -220,6 +243,94 @@ class ConfigViewModel @Inject constructor(
         return root.optString("message").trim().ifBlank { fallback }
     }
 
+    private fun resolveAiConnectivityResult(
+        root: JSONObject,
+        data: JSONObject?,
+        rootExplicitFailure: Boolean
+    ): Boolean {
+        if (rootExplicitFailure) return false
+
+        val keys = listOf("isConnected", "connected", "isReachable", "reachable", "ok", "success")
+        keys.forEach { key ->
+            readBooleanField(data, key)?.let { return it }
+        }
+        keys.forEach { key ->
+            readBooleanField(root, key)?.let { return it }
+        }
+        return true
+    }
+
+    private fun readBooleanField(target: JSONObject?, key: String): Boolean? {
+        if (target == null || !target.has(key)) return null
+        return when (val raw = target.opt(key)) {
+            is Boolean -> raw
+            is Number -> raw.toInt() != 0
+            is String -> {
+                when (raw.trim().lowercase()) {
+                    "true", "1", "yes", "ok", "success" -> true
+                    "false", "0", "no", "fail", "failed" -> false
+                    else -> null
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun extractAiVerifyMessage(
+        root: JSONObject,
+        data: JSONObject?,
+        reachable: Boolean
+    ): String {
+        val dataMsg = data?.optString("message").orEmpty().trim()
+        if (dataMsg.isNotBlank()) return dataMsg
+
+        val rootMsg = root.optString("message").trim()
+        if (rootMsg.isNotBlank()) return rootMsg
+
+        return if (reachable) "AI 连通性正常" else "AI 连通性测试失败"
+    }
+
+    private fun readFirstStringField(
+        data: JSONObject?,
+        root: JSONObject,
+        keys: List<String>
+    ): String? {
+        keys.forEach { key ->
+            if (data != null && data.has(key)) {
+                val value = data.optString(key).trim()
+                if (value.isNotBlank()) return value
+            }
+            if (root.has(key)) {
+                val value = root.optString(key).trim()
+                if (value.isNotBlank()) return value
+            }
+        }
+        return null
+    }
+
+    private fun readFirstLongField(
+        data: JSONObject?,
+        root: JSONObject,
+        keys: List<String>
+    ): Long? {
+        keys.forEach { key ->
+            parseLongField(data, key)?.let { return it }
+            parseLongField(root, key)?.let { return it }
+        }
+        return null
+    }
+
+    private fun parseLongField(target: JSONObject?, key: String): Long? {
+        if (target == null || !target.has(key)) return null
+        val raw = target.opt(key)
+        val value = when (raw) {
+            is Number -> raw.toLong()
+            is String -> raw.trim().toLongOrNull()
+            else -> null
+        } ?: return null
+        return value.takeIf { it > 0L }
+    }
+
     fun dismissMessage() {
         _operationMessage.value = null
     }
@@ -249,4 +360,12 @@ data class BilibiliCookieVerifyResult(
     val uname: String?,
     val expiresAtMs: Long?,
     val message: String,
+)
+
+data class AiConnectivityVerifyResult(
+    val isReachable: Boolean,
+    val message: String,
+    val provider: String?,
+    val model: String?,
+    val latencyMs: Long?,
 )
