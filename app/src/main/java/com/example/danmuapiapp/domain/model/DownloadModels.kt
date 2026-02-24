@@ -27,7 +27,7 @@ enum class DanmuDownloadFormat(
     companion object {
         fun fromValue(raw: String?): DanmuDownloadFormat {
             val value = raw?.trim()?.lowercase().orEmpty()
-            return entries.firstOrNull { it.value == value } ?: Json
+            return entries.firstOrNull { it.value == value } ?: Xml
         }
     }
 }
@@ -187,7 +187,7 @@ fun renderFileNameTemplatePreview(
 data class DanmuDownloadSettings(
     val saveTreeUri: String = "",
     val saveDirDisplayName: String = "",
-    val defaultFormat: String = DanmuDownloadFormat.Json.value,
+    val defaultFormat: String = DanmuDownloadFormat.Xml.value,
     val fileNameTemplate: String = "{animeTitle}_E{episodeNo2}_{episodeTitle}_{source}.{ext}",
     val conflictPolicy: String = DownloadConflictPolicy.Rename.key,
     val throttlePreset: String = DownloadThrottlePreset.Conservative.key
@@ -234,7 +234,7 @@ data class DanmuDownloadTask(
     val episodeId: Long = 0L,
     val episodeNo: Int = 0,
     val source: String = "",
-    val format: String = DanmuDownloadFormat.Json.value,
+    val format: String = DanmuDownloadFormat.Xml.value,
     val fileNameTemplate: String = DanmuDownloadSettings().fileNameTemplate,
     val conflictPolicy: String = DownloadConflictPolicy.Rename.key,
     val status: String = DownloadQueueStatus.Pending.key,

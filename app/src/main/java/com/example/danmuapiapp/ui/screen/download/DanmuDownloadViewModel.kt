@@ -21,8 +21,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -117,12 +119,22 @@ data class AnimeQueueGroup(
         get() = if (total <= 0) 0f else completed.toFloat() / total.toFloat()
 }
 
+private data class RateLimitBypassSession(
+    val originalValue: String,
+    val bypassApplied: Boolean
+)
+
 @HiltViewModel
 class DanmuDownloadViewModel @Inject constructor(
     runtimeRepository: RuntimeRepository,
     private val downloadRepository: DanmuDownloadRepository,
     private val httpClient: OkHttpClient
 ) : ViewModel() {
+    companion object {
+        private const val RATE_LIMIT_ENV_KEY = "RATE_LIMIT_MAX_REQUESTS"
+        private const val RATE_LIMIT_BYPASS_VALUE = "0"
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+    }
 
     val runtimeState = runtimeRepository.runtimeState
     val settings = downloadRepository.settings
@@ -135,7 +147,7 @@ class DanmuDownloadViewModel @Inject constructor(
     var keyword by mutableStateOf("")
         private set
 
-    var selectedFormat by mutableStateOf(DanmuDownloadFormat.Json)
+    var selectedFormat by mutableStateOf(DanmuDownloadFormat.Xml)
         private set
 
     var fileNameTemplate by mutableStateOf("")
@@ -206,7 +218,6 @@ class DanmuDownloadViewModel @Inject constructor(
 
     private var cancelRequested by mutableStateOf(false)
     private var requireQueuePreparationBeforeRun by mutableStateOf(false)
-    private var downloadOptionInitialized by mutableStateOf(false)
     private val random = Random(System.currentTimeMillis())
 
     init {
@@ -217,10 +228,7 @@ class DanmuDownloadViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settings.collect { config ->
-                if (!downloadOptionInitialized) {
-                    selectedFormat = config.format()
-                    downloadOptionInitialized = true
-                }
+                selectedFormat = config.format()
                 fileNameTemplate = config.fileNameTemplate
             }
         }
@@ -244,6 +252,7 @@ class DanmuDownloadViewModel @Inject constructor(
 
     fun updateFormat(format: DanmuDownloadFormat) {
         selectedFormat = format
+        downloadRepository.setDefaultFormat(format)
     }
 
     fun updateFileNameTemplate(value: String) {
@@ -853,6 +862,8 @@ class DanmuDownloadViewModel @Inject constructor(
         viewModelScope.launch {
             isDownloading = true
             cancelRequested = false
+            val rateLimitBypassSession = prepareRateLimitBypassForDownload()
+            var summaryMessage: String? = null
             val prepareChainForThisRun = requireQueuePreparationBeforeRun
             requireQueuePreparationBeforeRun = false
             val throttle = settings.value.throttle()
@@ -864,7 +875,8 @@ class DanmuDownloadViewModel @Inject constructor(
             var skipped = 0
             progressSummary = "队列执行中：待处理 $pendingCount 集 · 流控${throttle.label}"
 
-            while (true) {
+            try {
+                while (true) {
                 if (cancelRequested) break
                 val task = queueTasks.value.firstOrNull { it.statusEnum() == DownloadQueueStatus.Pending } ?: break
                 setActiveTask(
@@ -1268,17 +1280,35 @@ class DanmuDownloadViewModel @Inject constructor(
                 }
             }
 
-            val remain = queueTasks.value.count { it.statusEnum() == DownloadQueueStatus.Pending }
-            if (cancelRequested) {
-                progressSummary = "队列已暂停，待处理 $remain 集"
-                operationMessage = progressSummary
-            } else {
-                progressSummary = "队列执行完成：成功 $success，失败 $failed，跳过 $skipped"
-                operationMessage = progressSummary
+                val remain = queueTasks.value.count { it.statusEnum() == DownloadQueueStatus.Pending }
+                if (cancelRequested) {
+                    progressSummary = "队列已暂停，待处理 $remain 集"
+                    summaryMessage = progressSummary
+                } else {
+                    progressSummary = "队列执行完成：成功 $success，失败 $failed，跳过 $skipped"
+                    summaryMessage = progressSummary
+                }
+            } catch (throwable: Throwable) {
+                val fallback = throwable.message ?: "队列执行失败"
+                progressSummary = fallback
+                summaryMessage = fallback
+            } finally {
+                val restoreError = restoreRateLimitBypassForDownload(rateLimitBypassSession)
+                when {
+                    !summaryMessage.isNullOrBlank() && !restoreError.isNullOrBlank() -> {
+                        operationMessage = "${summaryMessage}（$restoreError）"
+                    }
+                    !summaryMessage.isNullOrBlank() -> {
+                        operationMessage = summaryMessage
+                    }
+                    !restoreError.isNullOrBlank() -> {
+                        operationMessage = restoreError
+                    }
+                }
+                clearActiveTask()
+                throttleHint = null
+                isDownloading = false
             }
-            clearActiveTask()
-            throttleHint = null
-            isDownloading = false
         }
     }
 
@@ -1308,6 +1338,117 @@ class DanmuDownloadViewModel @Inject constructor(
             detail = "等待恢复"
         )
         clearActiveTask()
+    }
+
+    private suspend fun prepareRateLimitBypassForDownload(): RateLimitBypassSession? {
+        val originalValue = fetchRateLimitEnvValue().getOrElse { return null }
+        val normalized = originalValue.trim()
+        if (normalized == RATE_LIMIT_BYPASS_VALUE) {
+            return RateLimitBypassSession(
+                originalValue = normalized,
+                bypassApplied = false
+            )
+        }
+        val setResult = setRateLimitEnvValue(RATE_LIMIT_BYPASS_VALUE)
+        if (setResult.isFailure) {
+            return null
+        }
+        return RateLimitBypassSession(
+            originalValue = originalValue,
+            bypassApplied = true
+        )
+    }
+
+    private suspend fun restoreRateLimitBypassForDownload(
+        session: RateLimitBypassSession?
+    ): String? {
+        if (session == null || !session.bypassApplied) return null
+        val restoreValue = session.originalValue
+        val result = setRateLimitEnvValue(restoreValue)
+        return result.exceptionOrNull()?.message
+    }
+
+    private suspend fun fetchRateLimitEnvValue(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(buildLocalControlApiUrl("/api/config"))
+                .get()
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                val raw = response.body.string()
+                if (!response.isSuccessful) {
+                    val fallback = "读取 $RATE_LIMIT_ENV_KEY 失败：HTTP ${response.code}"
+                    val message = runCatching {
+                        JSONObject(raw).optString("message").trim().ifBlank { fallback }
+                    }.getOrDefault(fallback)
+                    error(message)
+                }
+                val root = if (raw.isBlank()) JSONObject() else JSONObject(raw)
+                val value = extractEnvValueFromConfig(root, RATE_LIMIT_ENV_KEY)
+                    ?: error("读取 $RATE_LIMIT_ENV_KEY 失败：配置项不存在")
+                value
+            }
+        }
+    }
+
+    private suspend fun setRateLimitEnvValue(value: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = JSONObject()
+                .put("key", RATE_LIMIT_ENV_KEY)
+                .put("value", value)
+                .toString()
+                .toRequestBody(JSON_MEDIA_TYPE)
+            val request = Request.Builder()
+                .url(buildLocalControlApiUrl("/api/env/set"))
+                .post(payload)
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                val raw = response.body.string()
+                val fallback = "设置 $RATE_LIMIT_ENV_KEY 失败：HTTP ${response.code}"
+                if (!response.isSuccessful) {
+                    val message = runCatching {
+                        JSONObject(raw).optString("message").trim().ifBlank { fallback }
+                    }.getOrDefault(fallback)
+                    error(message)
+                }
+                if (raw.isBlank()) return@use
+                val root = runCatching { JSONObject(raw) }.getOrNull() ?: return@use
+                if (root.has("success") && !root.optBoolean("success", false)) {
+                    val message = root.optString("message").trim().ifBlank { "设置 $RATE_LIMIT_ENV_KEY 失败" }
+                    error(message)
+                }
+            }
+        }
+    }
+
+    private fun buildLocalControlApiUrl(path: String): String {
+        val state = runtimeState.value
+        val token = state.token.trim().trim('/')
+        val tokenPath = if (token.isBlank()) "" else "/$token"
+        return "http://127.0.0.1:${state.port}$tokenPath$path"
+    }
+
+    private fun extractEnvValueFromConfig(root: JSONObject, key: String): String? {
+        val original = root.optJSONObject("originalEnvVars")?.opt(key)
+        envValueToString(original)?.let { return it }
+
+        val envs = root.optJSONObject("envs")?.opt(key)
+        envValueToString(envs)?.let { return it }
+
+        return null
+    }
+
+    private fun envValueToString(raw: Any?): String? {
+        if (raw == null || raw == JSONObject.NULL) return null
+        return when (raw) {
+            is JSONObject -> {
+                val inner = raw.opt("value")
+                if (inner == null || inner == JSONObject.NULL) null else inner.toString()
+            }
+            is Number -> raw.toString()
+            is Boolean -> raw.toString()
+            else -> raw.toString()
+        }?.trim()
     }
 
     private fun nextJitterMs(maxMs: Long): Long {

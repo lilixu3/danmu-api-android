@@ -12,15 +12,18 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -44,6 +47,7 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TaskAlt
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -61,12 +65,12 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -77,11 +81,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -94,10 +99,6 @@ import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-// ═══════════════════════════════════════════════════════════════
-//  Main Screen — Tab-based layout
-// ═══════════════════════════════════════════════════════════════
 
 @Composable
 fun DanmuDownloadScreen(
@@ -130,90 +131,226 @@ fun DanmuDownloadScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // ── Header ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 16.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxSize()
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilledIconButton(
-                        onClick = {
-                            if (inEpisodeDetail) viewModel.backToAnimeList()
-                            else onBack()
-                        },
-                        colors = primaryActionIconButtonColors(),
-                        modifier = Modifier.size(36.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
+                        FilledIconButton(
+                            onClick = {
+                                if (inEpisodeDetail) viewModel.backToAnimeList() else onBack()
+                            },
+                            colors = primaryActionIconButtonColors(),
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (inEpisodeDetail) {
+                                    viewModel.currentAnime?.title ?: "弹幕下载"
+                                } else {
+                                    "弹幕下载中心"
+                                },
+                                style = MaterialTheme.typography.headlineLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (inEpisodeDetail) {
+                                    "剧集选择与批量下载"
+                                } else {
+                                    "搜索动漫并管理下载队列"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    FilledIconButton(
+                        onClick = onOpenDownloadSettings,
+                        colors = primaryActionIconButtonColors(),
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(Icons.Rounded.Settings, "下载设置", Modifier.size(18.dp))
+                    }
+                }
+
+                DownloadPanelCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StatBadge("活动", queueSummary.active)
+                        StatBadge("队列", queueTasks.size)
+                        StatBadge("记录", records.size, MaterialTheme.colorScheme.tertiary)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    val summaryText = when {
+                        queueSummary.running > 0 -> "队列运行中：${viewModel.queueRunningStatusText()}"
+                        queueSummary.pending > 0 -> "队列已暂停，剩余 ${queueSummary.pending} 项待处理"
+                        else -> "当前队列空闲，可在搜索页选择剧集后开始下载"
                     }
                     Text(
-                        if (inEpisodeDetail) viewModel.currentAnime?.title ?: "弹幕下载" else "弹幕下载",
-                        style = MaterialTheme.typography.headlineLarge,
-                        maxLines = 1,
+                        summaryText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                FilledIconButton(
-                    onClick = onOpenDownloadSettings,
-                    colors = primaryActionIconButtonColors(),
-                    modifier = Modifier.size(36.dp)
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.26f)
+                    )
                 ) {
-                    Icon(Icons.Rounded.Settings, "下载设置", Modifier.size(18.dp))
+                    val queueActive = queueSummary.active
+                    PrimaryTabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = { Text("搜索下载") }
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("任务队列")
+                                    if (queueActive > 0) {
+                                        Badge(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ) {
+                                            Text("$queueActive")
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                        Tab(
+                            selected = selectedTab == 2,
+                            onClick = { selectedTab = 2 },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("下载记录")
+                                    if (records.isNotEmpty()) {
+                                        Badge(
+                                            containerColor = MaterialTheme.colorScheme.tertiary,
+                                            contentColor = MaterialTheme.colorScheme.onTertiary
+                                        ) {
+                                            Text("${records.size}")
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    when (selectedTab) {
+                        0 -> SearchDownloadPage(viewModel = viewModel, settings = settings)
+                        1 -> QueuePage(viewModel = viewModel, queueTasks = queueTasks)
+                        2 -> RecordsPage(records = records, onClear = viewModel::clearRecords)
+                    }
                 }
             }
-            // ── Tabs ──
-            val queueActive = queueSummary.active
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
-                    text = { Text("搜索下载") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("任务队列")
-                            if (queueActive > 0) {
-                                Badge(containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ) { Text("$queueActive") }
-                            }
-                        }
-                    })
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("下载记录")
-                            if (records.isNotEmpty()) {
-                                Badge(containerColor = MaterialTheme.colorScheme.tertiary,
-                                    contentColor = MaterialTheme.colorScheme.onTertiary
-                                ) { Text("${records.size}") }
-                            }
-                        }
-                    })
-            }
 
-            // ── Tab Content ──
-            when (selectedTab) {
-                0 -> SearchDownloadPage(viewModel = viewModel, settings = settings)
-                1 -> QueuePage(viewModel = viewModel, queueTasks = queueTasks)
-                2 -> RecordsPage(records = records, onClear = viewModel::clearRecords)
+            if (inEpisodeDetail) {
+                val selectedCount = viewModel
+                    .visibleEpisodes()
+                    .count { viewModel.selectedEpisodeIds.contains(it.episodeId) }
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter),
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+                    tonalElevation = 6.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "已选 $selectedCount 集",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "支持跨来源混合下载，重复项会自动去重",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (viewModel.isDownloading) {
+                                OutlinedButton(onClick = viewModel::cancelDownload) {
+                                    Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("取消")
+                                }
+                            }
+                            Button(
+                                onClick = viewModel::startDownloadSelectedEpisodes,
+                                enabled = !viewModel.isDownloading && selectedCount > 0,
+                                colors = primaryActionButtonColors()
+                            ) {
+                                Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("下载（$selectedCount）")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -236,10 +373,6 @@ private tailrec fun Context.findActivity(): ComponentActivity? {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Tab 0 — Search & Download
-// ═══════════════════════════════════════════════════════════════
-
 @Composable
 private fun SearchDownloadPage(
     viewModel: DanmuDownloadViewModel,
@@ -247,57 +380,60 @@ private fun SearchDownloadPage(
 ) {
     val inDetail = viewModel.currentAnime != null
     val visibleEpisodes = viewModel.visibleEpisodes()
-    val episodeStateMap = viewModel.episodeStates
     val episodeSummary = if (inDetail) {
-        buildEpisodeStateSummaryFromMap(visibleEpisodes, episodeStateMap)
+        buildEpisodeStateSummaryFromMap(visibleEpisodes, viewModel.episodeStates)
     } else {
         EpisodeStateSummary()
     }
-    val selectedCount = if (inDetail) {
-        visibleEpisodes.count { viewModel.selectedEpisodeIds.contains(it.episodeId) }
-    } else 0
     var configExpanded by rememberSaveable { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 20.dp, end = 20.dp, top = 12.dp,
-                bottom = if (inDetail) 80.dp else 16.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // ── Config Section ──
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 20.dp,
+            end = 20.dp,
+            top = 2.dp,
+            bottom = if (inDetail) 96.dp else 16.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            CompactConfigSection(
+                expanded = configExpanded,
+                onToggle = { configExpanded = !configExpanded },
+                sourceBase = viewModel.sourceBase,
+                onSourceBaseChange = viewModel::updateSourceBase,
+                onUseLocal = viewModel::useLocalBase,
+                onUseLan = viewModel::useLanBase,
+                selectedFormat = viewModel.selectedFormat,
+                onSelectFormat = viewModel::updateFormat,
+                fileNamePreview = renderFileNameTemplatePreview(
+                    template = settings.fileNameTemplate,
+                    format = viewModel.selectedFormat
+                ),
+                saveDirName = settings.saveDirDisplayName,
+                conflictLabel = settings.policy().label
+            )
+        }
+
+        if (!inDetail) {
             item {
-                CompactConfigSection(
-                    expanded = configExpanded,
-                    onToggle = { configExpanded = !configExpanded },
-                    sourceBase = viewModel.sourceBase,
-                    onSourceBaseChange = viewModel::updateSourceBase,
-                    onUseLocal = viewModel::useLocalBase,
-                    onUseLan = viewModel::useLanBase,
-                    selectedFormat = viewModel.selectedFormat,
-                    onSelectFormat = viewModel::updateFormat,
-                    fileNamePreview = renderFileNameTemplatePreview(
-                        template = settings.fileNameTemplate,
-                        format = viewModel.selectedFormat
-                    ),
-                    saveDirName = settings.saveDirDisplayName,
-                    conflictLabel = settings.policy().label
-                )
-            }
-            if (!inDetail) {
-                // ── Search Mode ──
-                item {
+                DownloadPanelCard {
+                    Text("动漫检索", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = viewModel.keyword,
                         onValueChange = viewModel::updateKeyword,
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("搜索动漫，如：凡人修仙传") },
+                        placeholder = { Text("例如：凡人修仙传") },
                         singleLine = true,
+                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         trailingIcon = {
                             if (viewModel.isSearching) {
-                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
                             } else {
                                 IconButton(onClick = viewModel::searchAnime) {
                                     Icon(Icons.Rounded.Search, "搜索")
@@ -306,161 +442,146 @@ private fun SearchDownloadPage(
                         },
                         shape = RoundedCornerShape(14.dp)
                     )
-                }
-                if (viewModel.isSearching) {
-                    item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
-                } else if (viewModel.hasSearchedAnime && viewModel.animeCandidates.isEmpty()) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                            contentAlignment = Alignment.Center) {
-                            Text("未找到匹配动漫",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-                if (viewModel.animeCandidates.isNotEmpty()) {
-                    item {
-                        Text("搜索结果（${viewModel.animeCandidates.size}）",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    items(viewModel.animeCandidates, key = { it.animeId }) { anime ->
-                        AnimeEntryRow(
-                            anime = anime,
-                            loading = viewModel.isLoadingEpisodes,
-                            onClick = { viewModel.openAnimeDetail(anime) }
+                    if (viewModel.isSearching) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    } else {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "支持关键词模糊匹配，点选结果进入剧集下载页",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            } else {
-                // ── Anime Detail Mode ──
-                val anime = viewModel.currentAnime
-                if (anime != null) {
+            }
+
+            if (!viewModel.isSearching && viewModel.hasSearchedAnime && viewModel.animeCandidates.isEmpty()) {
+                item {
+                    DownloadPanelCard {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "未找到匹配动漫",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (viewModel.animeCandidates.isNotEmpty()) {
+                item {
+                    Text(
+                        "搜索结果 ${viewModel.animeCandidates.size} 项",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+                items(viewModel.animeCandidates, key = { it.animeId }) { anime ->
+                    AnimeEntryRow(
+                        anime = anime,
+                        loading = viewModel.isLoadingEpisodes,
+                        onClick = { viewModel.openAnimeDetail(anime) }
+                    )
+                }
+            }
+        } else {
+            val anime = viewModel.currentAnime
+            if (anime != null) {
                 item {
                     AnimeInfoHeader(
                         anime = anime,
                         visibleCount = visibleEpisodes.size,
-                        onBackToSearch = viewModel::backToAnimeList
+                        sourceOptions = viewModel.sourceOptions(),
+                        sourceFilter = viewModel.sourceFilter,
+                        onSelectSource = viewModel::selectSourceFilter,
+                        summary = episodeSummary,
+                        isDownloading = viewModel.isDownloading,
+                        onBackToSearch = viewModel::backToAnimeList,
+                        onToggleSelectAll = viewModel::toggleSelectAllVisible,
+                        onSelectFailed = viewModel::selectFailedVisibleEpisodes,
+                        onSelectUnfinished = viewModel::selectUnfinishedVisibleEpisodes,
+                        onClearSelection = viewModel::clearSelection,
+                        onRetryFailed = if (episodeSummary.failed > 0) {
+                            viewModel::retryFailedVisibleEpisodes
+                        } else {
+                            null
+                        }
                     )
                 }
-                // Source filter chips (only show when multiple sources exist)
-                val sourceOptions = viewModel.sourceOptions()
-                if (sourceOptions.size > 1) {
-                    item {
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = viewModel.sourceFilter == null,
-                                onClick = { viewModel.selectSourceFilter(null) },
-                                colors = primarySelectionFilterChipColors(),
-                                label = { Text("全部来源") }
-                            )
-                            sourceOptions.forEach { source ->
-                                FilterChip(
-                                    selected = viewModel.sourceFilter == source,
-                                    onClick = { viewModel.selectSourceFilter(source) },
-                                    colors = primarySelectionFilterChipColors(),
-                                    label = { Text(source) },
-                                    leadingIcon = if (viewModel.sourceFilter == source) {
-                                        { Icon(Icons.Rounded.FilterAlt, null, Modifier.size(16.dp)) }
-                                    } else null
-                                )
-                            }
-                        }
-                    }
-                }
-                // Stat badges + quick select
-                item {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        StatBadge("成功", episodeSummary.success, Color(0xFF2E7D32))
-                        StatBadge("失败", episodeSummary.failed, Color(0xFFC62828))
-                        StatBadge("跳过", episodeSummary.skipped, Color(0xFFF57C00))
-                        StatBadge("未完成", episodeSummary.unfinished)
-                    }
-                }
-                item {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AssistChip(onClick = viewModel::toggleSelectAllVisible,
-                            enabled = !viewModel.isDownloading,
-                            label = { Text("全选/反选") },
-                            leadingIcon = { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) })
-                        AssistChip(onClick = viewModel::selectFailedVisibleEpisodes,
-                            enabled = !viewModel.isDownloading,
-                            label = { Text("选失败") },
-                            leadingIcon = { Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(16.dp)) })
-                        AssistChip(onClick = viewModel::selectUnfinishedVisibleEpisodes,
-                            enabled = !viewModel.isDownloading,
-                            label = { Text("选未完成") },
-                            leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp)) })
-                        AssistChip(onClick = viewModel::clearSelection,
-                            enabled = !viewModel.isDownloading,
-                            label = { Text("清空") },
-                            leadingIcon = { Icon(Icons.Rounded.ClearAll, null, Modifier.size(16.dp)) })
-                        if (episodeSummary.failed > 0) {
-                            AssistChip(onClick = viewModel::retryFailedVisibleEpisodes,
-                                enabled = !viewModel.isDownloading,
-                                label = { Text("重试失败") },
-                                leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(16.dp)) })
-                        }
-                    }
-                }
-                // Progress
+
                 if (viewModel.isDownloading || viewModel.overallProgress > 0f) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DownloadPanelCard {
+                            Text("下载进度", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(8.dp))
                             LinearProgressIndicator(
                                 progress = { viewModel.overallProgress.coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            Text(viewModel.progressSummary,
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                viewModel.progressSummary,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
-                // Throttle hint banner
+
                 val hint = viewModel.throttleHint
                 if (hint != null) {
                     item { ThrottleHintBanner(hint) }
                 }
-                // Episode list
+
                 if (viewModel.isLoadingEpisodes) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        DownloadPanelCard {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Text(
-                                    "正在加载剧集…",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text(
+                                        "正在加载剧集…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
                 } else if (visibleEpisodes.isEmpty()) {
                     item {
-                        Box(Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                            contentAlignment = Alignment.Center) {
-                            Text("当前来源筛选下暂无剧集",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        DownloadPanelCard {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "当前来源筛选下暂无剧集",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 } else {
@@ -479,53 +600,10 @@ private fun SearchDownloadPage(
                         )
                     }
                 }
-                } // if (anime != null)
-            }
-        }
-        // ── Bottom Action Bar (anime detail only) ──
-        if (inDetail) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 3.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("已选 $selectedCount 集",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (viewModel.isDownloading) {
-                            OutlinedButton(onClick = viewModel::cancelDownload) {
-                                Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("取消")
-                            }
-                        }
-                        Button(
-                            onClick = viewModel::startDownloadSelectedEpisodes,
-                            enabled = !viewModel.isDownloading && selectedCount > 0,
-                            colors = primaryActionButtonColors()
-                        ) {
-                            Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("下载（$selectedCount）")
-                        }
-                    }
-                }
             }
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Compact Config Section
-// ═══════════════════════════════════════════════════════════════
 
 @Composable
 private fun CompactConfigSection(
@@ -541,79 +619,115 @@ private fun CompactConfigSection(
     saveDirName: String,
     conflictLabel: String
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    DownloadPanelCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Tune,
+                            null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("下载配置", style = MaterialTheme.typography.labelLarge)
+                    Text("下载配置", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "${saveDirName.ifBlank { "未设置目录" }} · ${selectedFormat.label} · $conflictLabel",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis
-                    )
-                }
-                IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        "展开配置", Modifier.size(18.dp)
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically(),
-                exit = shrinkVertically()
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = sourceBase,
-                        onValueChange = onSourceBaseChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("弹幕源 Base URL") },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        leadingIcon = { Icon(Icons.Rounded.Link, null) },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(onClick = onUseLocal, label = { Text("本机地址") })
-                        AssistChip(onClick = onUseLan, label = { Text("局域网地址") })
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DanmuDownloadFormat.entries.forEach { format ->
-                            FilterChip(
-                                selected = selectedFormat == format,
-                                onClick = { onSelectFormat(format) },
-                                colors = primarySelectionFilterChipColors(),
-                                label = { Text(format.label) },
-                                leadingIcon = if (selectedFormat == format) {
-                                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                                } else null
-                            )
-                        }
-                    }
-                    Text(
-                        "命名模板请在「下载设置」中统一配置",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    "展开配置",
+                    Modifier.size(18.dp)
+                )
             }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = sourceBase,
+                    onValueChange = onSourceBaseChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("弹幕源 Base URL") },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    leadingIcon = { Icon(Icons.Rounded.Link, null) },
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistChip(onClick = onUseLocal, label = { Text("本机地址") })
+                    AssistChip(onClick = onUseLan, label = { Text("局域网地址") })
+                }
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DanmuDownloadFormat.entries.forEach { format ->
+                        FilterChip(
+                            selected = selectedFormat == format,
+                            onClick = { onSelectFormat(format) },
+                            colors = primarySelectionFilterChipColors(),
+                            label = { Text(format.label) },
+                            leadingIcon = if (selectedFormat == format) {
+                                { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+                Text(
+                    "命名模板请在「下载设置」中统一配置",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(Modifier.height(2.dp))
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.52f)
+        ) {
             Text(
-                "命名示例：凡人修仙传/$fileNamePreview",
+                text = "命名示例：凡人修仙传/$fileNamePreview",
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -653,56 +767,132 @@ private fun buildEpisodeStateSummaryFromMap(
     )
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Anime Info Header
-// ═══════════════════════════════════════════════════════════════
-
 @Composable
 private fun AnimeInfoHeader(
     anime: DownloadAnimeCandidate,
     visibleCount: Int,
-    onBackToSearch: () -> Unit
+    sourceOptions: List<String>,
+    sourceFilter: String?,
+    onSelectSource: (String?) -> Unit,
+    summary: EpisodeStateSummary,
+    isDownloading: Boolean,
+    onBackToSearch: () -> Unit,
+    onToggleSelectAll: () -> Unit,
+    onSelectFailed: () -> Unit,
+    onSelectUnfinished: () -> Unit,
+    onClearSelection: () -> Unit,
+    onRetryFailed: (() -> Unit)?
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
-    ) {
+    DownloadPanelCard {
         Row(
-            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(anime.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
                 Text(
-                    "AnimeID: ${anime.animeId} · 官方 ${anime.episodeCount} 集 · 可见 $visibleCount 集",
+                    "AnimeID: ${anime.animeId} · 官方 ${anime.episodeCount} 集 · 当前可见 $visibleCount 集",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Surface(
+            FilledIconButton(
                 onClick = onBackToSearch,
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp)
+                colors = primaryActionIconButtonColors(),
+                modifier = Modifier.size(34.dp)
             ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack, "返回搜索",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    "返回搜索",
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        if (sourceOptions.size > 1) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = sourceFilter == null,
+                    onClick = { onSelectSource(null) },
+                    colors = primarySelectionFilterChipColors(),
+                    label = { Text("全部来源") }
+                )
+                sourceOptions.forEach { source ->
+                    FilterChip(
+                        selected = sourceFilter == source,
+                        onClick = { onSelectSource(source) },
+                        colors = primarySelectionFilterChipColors(),
+                        label = { Text(source) },
+                        leadingIcon = if (sourceFilter == source) {
+                            { Icon(Icons.Rounded.FilterAlt, null, Modifier.size(16.dp)) }
+                        } else {
+                            null
+                        }
                     )
                 }
             }
         }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            StatBadge("成功", summary.success, Color(0xFF2E7D32))
+            StatBadge("失败", summary.failed, Color(0xFFC62828))
+            StatBadge("跳过", summary.skipped, Color(0xFFF57C00))
+            StatBadge("排队", summary.queued)
+            StatBadge("下载中", summary.running, MaterialTheme.colorScheme.primary)
+            StatBadge("未完成", summary.unfinished)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AssistChip(
+                onClick = onToggleSelectAll,
+                enabled = !isDownloading,
+                label = { Text("全选/反选") },
+                leadingIcon = { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+            )
+            AssistChip(
+                onClick = onSelectFailed,
+                enabled = !isDownloading,
+                label = { Text("选失败") },
+                leadingIcon = { Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(16.dp)) }
+            )
+            AssistChip(
+                onClick = onSelectUnfinished,
+                enabled = !isDownloading,
+                label = { Text("选未完成") },
+                leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp)) }
+            )
+            AssistChip(
+                onClick = onClearSelection,
+                enabled = !isDownloading,
+                label = { Text("清空") },
+                leadingIcon = { Icon(Icons.Rounded.ClearAll, null, Modifier.size(16.dp)) }
+            )
+            if (onRetryFailed != null) {
+                AssistChip(
+                    onClick = onRetryFailed,
+                    enabled = !isDownloading,
+                    label = { Text("重试失败") },
+                    leadingIcon = { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(16.dp)) }
+                )
+            }
+        }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Anime Search Result Row
-// ═══════════════════════════════════════════════════════════════
 
 @Composable
 private fun AnimeEntryRow(
@@ -712,13 +902,15 @@ private fun AnimeEntryRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)),
         onClick = onClick
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -731,18 +923,23 @@ private fun AnimeEntryRow(
                 )
             }
             if (loading) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
-                Icon(Icons.Rounded.Search, null, Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        "进入",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Episode Row
-// ═══════════════════════════════════════════════════════════════
 
 @Composable
 private fun EpisodeRow(
@@ -753,9 +950,9 @@ private fun EpisodeRow(
     onSelect: () -> Unit
 ) {
     val (statusText, statusColor) = when (state.state) {
-        EpisodeDownloadState.Idle -> "—" to MaterialTheme.colorScheme.onSurfaceVariant
-        EpisodeDownloadState.Queued -> "排队" to MaterialTheme.colorScheme.onSurfaceVariant
-        EpisodeDownloadState.Running -> "下载中" to MaterialTheme.colorScheme.primary
+        EpisodeDownloadState.Idle -> "待选" to MaterialTheme.colorScheme.onSurfaceVariant
+        EpisodeDownloadState.Queued -> "排队" to MaterialTheme.colorScheme.primary
+        EpisodeDownloadState.Running -> "下载中" to Color(0xFF1565C0)
         EpisodeDownloadState.Success -> "成功" to Color(0xFF2E7D32)
         EpisodeDownloadState.Failed -> "失败" to Color(0xFFC62828)
         EpisodeDownloadState.Skipped -> "跳过" to Color(0xFFF57C00)
@@ -764,19 +961,25 @@ private fun EpisodeRow(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)
+        },
         border = BorderStroke(
             1.dp,
-            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            if (selected) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+            }
         ),
         onClick = { if (enabled) onSelect() }
     ) {
         Column(
-            modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -791,23 +994,25 @@ private fun EpisodeRow(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         "第${episode.episodeNumber}集  ${episode.title}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        "来源:${episode.source}",
+                        "来源：${episode.source}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                // Status indicator
                 Surface(
                     shape = RoundedCornerShape(999.dp),
-                    color = statusColor.copy(alpha = 0.12f)
+                    color = statusColor.copy(alpha = 0.14f)
                 ) {
                     Text(
                         statusText,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = statusColor
                     )
@@ -816,7 +1021,9 @@ private fun EpisodeRow(
             if (state.state == EpisodeDownloadState.Running) {
                 LinearProgressIndicator(
                     progress = { state.progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().padding(start = 36.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 36.dp)
                 )
             }
             if (state.detail.isNotBlank()) {
@@ -825,16 +1032,13 @@ private fun EpisodeRow(
                     modifier = Modifier.padding(start = 36.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Tab 1 — Task Queue
-// ═══════════════════════════════════════════════════════════════
 
 @Composable
 private fun QueuePage(
@@ -855,103 +1059,102 @@ private fun QueuePage(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Summary card
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+            DownloadPanelCard {
+                Text("队列控制台", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("队列概览", style = MaterialTheme.typography.titleSmall)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        StatBadge("待处理", summary.pending)
-                        StatBadge("下载中", summary.running)
-                        StatBadge("成功", summary.success, Color(0xFF2E7D32))
-                        StatBadge("失败", summary.failed, Color(0xFFC62828))
-                        StatBadge("跳过", summary.skipped, Color(0xFFF57C00))
-                    }
-                    LinearProgressIndicator(
-                        progress = { overallProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        "进度 $completed/${summary.total.coerceAtLeast(0)} · $runningText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val hint = viewModel.throttleHint
-                    if (hint != null) {
-                        ThrottleHintBanner(hint)
-                    }
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (viewModel.isDownloading) {
-                            Button(
-                                onClick = viewModel::pauseDownload,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFC62828),
-                                    contentColor = Color.White
-                                )
-                            ) {
-                                Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("暂停")
-                            }
-                        } else {
-                            Button(
-                                onClick = viewModel::resumePendingQueue,
-                                enabled = summary.pending > 0,
-                                colors = primaryActionButtonColors()
-                            ) {
-                                Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("恢复队列")
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = viewModel::retryFailedQueueTasks,
-                            enabled = !viewModel.isDownloading && summary.failed > 0
+                    StatBadge("待处理", summary.pending)
+                    StatBadge("下载中", summary.running, MaterialTheme.colorScheme.primary)
+                    StatBadge("成功", summary.success, Color(0xFF2E7D32))
+                    StatBadge("失败", summary.failed, Color(0xFFC62828))
+                    StatBadge("跳过", summary.skipped, Color(0xFFF57C00))
+                    StatBadge("取消", summary.canceled)
+                }
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { overallProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "进度 $completed/${summary.total.coerceAtLeast(0)} · $runningText",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val hint = viewModel.throttleHint
+                if (hint != null) {
+                    Spacer(Modifier.height(8.dp))
+                    ThrottleHintBanner(hint)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (viewModel.isDownloading) {
+                        Button(
+                            onClick = viewModel::pauseDownload,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFC62828),
+                                contentColor = Color.White
+                            )
                         ) {
-                            Icon(Icons.Rounded.RestartAlt, null, Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("重试失败项")
+                            Text("暂停")
+                        }
+                    } else {
+                        Button(
+                            onClick = viewModel::resumePendingQueue,
+                            enabled = summary.pending > 0,
+                            colors = primaryActionButtonColors()
+                        ) {
+                            Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("恢复队列")
                         }
                     }
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    OutlinedButton(
+                        onClick = viewModel::retryFailedQueueTasks,
+                        enabled = !viewModel.isDownloading && summary.failed > 0
                     ) {
-                        OutlinedButton(
-                            onClick = viewModel::clearCompletedQueueTasks,
-                            enabled = !viewModel.isDownloading
-                        ) { Text("清理已完成") }
-                        OutlinedButton(
-                            onClick = viewModel::clearQueueTasks,
-                            enabled = !viewModel.isDownloading
-                        ) { Text("清空") }
+                        Icon(Icons.Rounded.RestartAlt, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("重试失败项")
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::clearCompletedQueueTasks,
+                        enabled = !viewModel.isDownloading
+                    ) {
+                        Text("清理已完成")
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::clearQueueTasks,
+                        enabled = !viewModel.isDownloading
+                    ) {
+                        Text("清空队列")
                     }
                 }
             }
         }
 
-        // Queue groups
         if (groups.isNotEmpty()) {
             item {
-                Text("按动漫分组（长按上下箭头调整优先级）", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "分组队列（点击展开剧集，箭头调整优先级）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
             }
             items(groups, key = { it.animeTitle }) { group ->
                 QueueGroupRow(
@@ -974,10 +1177,19 @@ private fun QueuePage(
 
         if (queueTasks.isEmpty()) {
             item {
-                Box(Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text("队列为空", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                DownloadPanelCard {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 26.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "队列为空",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -994,26 +1206,38 @@ private fun QueueGroupRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit
 ) {
+    val accentColor = when {
+        group.running > 0 -> MaterialTheme.colorScheme.primary
+        group.failed > 0 -> Color(0xFFC62828)
+        group.pending > 0 -> MaterialTheme.colorScheme.tertiary
+        else -> Color(0xFF2E7D32)
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.28f))
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onToggleExpand)
-                    .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                    .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(group.animeTitle, style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        group.animeTitle,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     LinearProgressIndicator(
                         progress = { group.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        color = accentColor
                     )
                     val stateText = when {
                         group.runningEpisodeNo != null -> "正在下载第${group.runningEpisodeNo}集"
@@ -1026,6 +1250,15 @@ private fun QueueGroupRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        StatBadge("待", group.pending)
+                        StatBadge("跑", group.running, accentColor)
+                        StatBadge("成", group.success, Color(0xFF2E7D32))
+                        if (group.failed > 0) StatBadge("败", group.failed, Color(0xFFC62828))
+                    }
                     if (group.detail.isNotBlank()) {
                         Text(
                             group.detail,
@@ -1052,6 +1285,7 @@ private fun QueueGroupRow(
                     }
                 }
             }
+
             AnimatedVisibility(
                 visible = expanded && group.episodes.isNotEmpty(),
                 enter = expandVertically(),
@@ -1087,8 +1321,8 @@ private fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.52f),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
     ) {
         Column(
@@ -1109,7 +1343,7 @@ private fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
                 )
                 Surface(
                     shape = RoundedCornerShape(999.dp),
-                    color = statusColor.copy(alpha = 0.12f)
+                    color = statusColor.copy(alpha = 0.14f)
                 ) {
                     Text(
                         task.status.label,
@@ -1137,12 +1371,11 @@ private fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Tab 2 — Download Records
-// ═══════════════════════════════════════════════════════════════
-
 private enum class RecordFilter(val label: String) {
-    All("全部"), Success("成功"), Failed("失败"), Skipped("跳过")
+    All("全部"),
+    Success("成功"),
+    Failed("失败"),
+    Skipped("跳过")
 }
 
 @Composable
@@ -1165,64 +1398,80 @@ private fun RecordsPage(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header + filter
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("下载记录", style = MaterialTheme.typography.titleSmall)
-                IconButton(onClick = onClear, enabled = records.isNotEmpty(),
-                    modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.ClearAll, "清空记录", Modifier.size(18.dp))
+            DownloadPanelCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("下载记录", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "最多展示最近 80 条，支持按状态筛选",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = onClear,
+                        enabled = records.isNotEmpty(),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Rounded.ClearAll, "清空记录", Modifier.size(18.dp))
+                    }
                 }
-            }
-        }
-        item {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = filter == RecordFilter.All,
-                    onClick = { filter = RecordFilter.All },
-                    colors = primarySelectionFilterChipColors(),
-                    label = { Text("全部 ${records.size}") }
-                )
-                FilterChip(
-                    selected = filter == RecordFilter.Success,
-                    onClick = { filter = RecordFilter.Success },
-                    colors = primarySelectionFilterChipColors(),
-                    label = { Text("成功 $successCount") }
-                )
-                FilterChip(
-                    selected = filter == RecordFilter.Failed,
-                    onClick = { filter = RecordFilter.Failed },
-                    colors = primarySelectionFilterChipColors(),
-                    label = { Text("失败 $failedCount") }
-                )
-                FilterChip(
-                    selected = filter == RecordFilter.Skipped,
-                    onClick = { filter = RecordFilter.Skipped },
-                    colors = primarySelectionFilterChipColors(),
-                    label = { Text("跳过 $skippedCount") }
-                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = filter == RecordFilter.All,
+                        onClick = { filter = RecordFilter.All },
+                        colors = primarySelectionFilterChipColors(),
+                        label = { Text("全部 ${records.size}") }
+                    )
+                    FilterChip(
+                        selected = filter == RecordFilter.Success,
+                        onClick = { filter = RecordFilter.Success },
+                        colors = primarySelectionFilterChipColors(),
+                        label = { Text("成功 $successCount") }
+                    )
+                    FilterChip(
+                        selected = filter == RecordFilter.Failed,
+                        onClick = { filter = RecordFilter.Failed },
+                        colors = primarySelectionFilterChipColors(),
+                        label = { Text("失败 $failedCount") }
+                    )
+                    FilterChip(
+                        selected = filter == RecordFilter.Skipped,
+                        onClick = { filter = RecordFilter.Skipped },
+                        colors = primarySelectionFilterChipColors(),
+                        label = { Text("跳过 $skippedCount") }
+                    )
+                }
             }
         }
 
         if (filtered.isEmpty()) {
             item {
-                Box(Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text(
-                        if (records.isEmpty()) "暂无下载记录" else "当前筛选下无记录",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                DownloadPanelCard {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (records.isEmpty()) "暂无下载记录" else "当前筛选下无记录",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         } else {
@@ -1234,7 +1483,8 @@ private fun RecordsPage(
                     Text(
                         "仅展示最近 ${display.size} 条，共 ${filtered.size} 条",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
             }
@@ -1258,19 +1508,18 @@ private fun RecordItem(record: DanmuDownloadRecord, formatter: SimpleDateFormat)
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // Status icon
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = color.copy(alpha = 0.12f),
+                color = color.copy(alpha = 0.14f),
                 modifier = Modifier.size(32.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
@@ -1286,32 +1535,42 @@ private fun RecordItem(record: DanmuDownloadRecord, formatter: SimpleDateFormat)
                     Text(
                         "${record.animeTitle} · E${record.episodeNo}",
                         style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Text(status.label, style = MaterialTheme.typography.labelSmall, color = color)
+                    Text(
+                        status.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = color,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
                 }
                 Text(
                     record.episodeTitle,
                     style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     "${formatter.format(Date(record.createdAt))} · ${record.formatEnum().label} · ${record.source}",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 val detail = when {
                     record.relativePath.isNotBlank() -> record.relativePath
                     !record.errorMessage.isNullOrBlank() -> record.errorMessage
                     else -> null
                 }
-                if (detail != null) {
+                if (!detail.isNullOrBlank()) {
                     Text(
                         detail,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1319,16 +1578,16 @@ private fun RecordItem(record: DanmuDownloadRecord, formatter: SimpleDateFormat)
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Shared Components
-// ═══════════════════════════════════════════════════════════════
-
 @Composable
 private fun ThrottleHintBanner(hint: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f)
+        )
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1343,7 +1602,9 @@ private fun ThrottleHintBanner(hint: String) {
             Text(
                 hint,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1358,7 +1619,7 @@ private fun StatBadge(
     Surface(
         shape = RoundedCornerShape(999.dp),
         color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.24f))
+        border = BorderStroke(1.dp, color.copy(alpha = 0.22f))
     ) {
         Text(
             "$label $value",
@@ -1369,9 +1630,26 @@ private fun StatBadge(
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Color Helpers
-// ═══════════════════════════════════════════════════════════════
+@Composable
+private fun DownloadPanelCard(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    borderColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = color,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            content = content
+        )
+    }
+}
 
 @Composable
 private fun primaryActionButtonColors() = ButtonDefaults.buttonColors(
