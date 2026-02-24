@@ -115,7 +115,29 @@ enum class DownloadThrottlePreset(
         batchRestMs = 12000L,
         backoffBaseMs = 8000L,
         backoffMaxMs = 180000L
+    ),
+    Custom(
+        key = "custom",
+        label = "自定义",
+        baseDelayMs = 1400L,
+        jitterMaxMs = 600L,
+        batchSize = 10,
+        batchRestMs = 20000L,
+        backoffBaseMs = 10000L,
+        backoffMaxMs = 240000L
     );
+
+    fun toConfig(): DownloadThrottleConfig {
+        return DownloadThrottleConfig(
+            preset = this,
+            baseDelayMs = baseDelayMs,
+            jitterMaxMs = jitterMaxMs,
+            batchSize = batchSize,
+            batchRestMs = batchRestMs,
+            backoffBaseMs = backoffBaseMs,
+            backoffMaxMs = backoffMaxMs
+        )
+    }
 
     companion object {
         fun fromKey(raw: String?): DownloadThrottlePreset {
@@ -123,6 +145,19 @@ enum class DownloadThrottlePreset(
             return entries.firstOrNull { it.key == key } ?: Conservative
         }
     }
+}
+
+data class DownloadThrottleConfig(
+    val preset: DownloadThrottlePreset,
+    val baseDelayMs: Long,
+    val jitterMaxMs: Long,
+    val batchSize: Int,
+    val batchRestMs: Long,
+    val backoffBaseMs: Long,
+    val backoffMaxMs: Long
+) {
+    val label: String
+        get() = preset.label
 }
 
 data class DanmuFileNameTemplatePreset(
@@ -190,11 +225,39 @@ data class DanmuDownloadSettings(
     val defaultFormat: String = DanmuDownloadFormat.Xml.value,
     val fileNameTemplate: String = "{animeTitle}_E{episodeNo2}_{episodeTitle}_{source}.{ext}",
     val conflictPolicy: String = DownloadConflictPolicy.Rename.key,
-    val throttlePreset: String = DownloadThrottlePreset.Conservative.key
+    val throttlePreset: String = DownloadThrottlePreset.Conservative.key,
+    val customBaseDelayMs: Long = DownloadThrottlePreset.Custom.baseDelayMs,
+    val customJitterMaxMs: Long = DownloadThrottlePreset.Custom.jitterMaxMs,
+    val customBatchSize: Int = DownloadThrottlePreset.Custom.batchSize,
+    val customBatchRestMs: Long = DownloadThrottlePreset.Custom.batchRestMs,
+    val customBackoffBaseMs: Long = DownloadThrottlePreset.Custom.backoffBaseMs,
+    val customBackoffMaxMs: Long = DownloadThrottlePreset.Custom.backoffMaxMs
 ) {
     fun format(): DanmuDownloadFormat = DanmuDownloadFormat.fromValue(defaultFormat)
     fun policy(): DownloadConflictPolicy = DownloadConflictPolicy.fromKey(conflictPolicy)
     fun throttle(): DownloadThrottlePreset = DownloadThrottlePreset.fromKey(throttlePreset)
+
+    fun throttleConfig(): DownloadThrottleConfig {
+        val preset = throttle()
+        if (preset != DownloadThrottlePreset.Custom) {
+            return preset.toConfig()
+        }
+        val baseDelay = customBaseDelayMs.coerceIn(100L, 120_000L)
+        val jitter = customJitterMaxMs.coerceIn(0L, 20_000L)
+        val batch = customBatchSize.coerceIn(1, 500)
+        val batchRest = customBatchRestMs.coerceIn(0L, 900_000L)
+        val backoffBase = customBackoffBaseMs.coerceIn(1_000L, 900_000L)
+        val backoffMax = customBackoffMaxMs.coerceIn(backoffBase, 1_800_000L)
+        return DownloadThrottleConfig(
+            preset = DownloadThrottlePreset.Custom,
+            baseDelayMs = baseDelay,
+            jitterMaxMs = jitter,
+            batchSize = batch,
+            batchRestMs = batchRest,
+            backoffBaseMs = backoffBase,
+            backoffMaxMs = backoffMax
+        )
+    }
 }
 
 @Serializable

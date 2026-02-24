@@ -10,6 +10,7 @@ import com.example.danmuapiapp.domain.model.DanmuDownloadResult
 import com.example.danmuapiapp.domain.model.DanmuDownloadSettings
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.DownloadConflictPolicy
+import com.example.danmuapiapp.domain.model.DownloadThrottleConfig
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.domain.model.DownloadThrottlePreset
@@ -47,6 +48,12 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         private const val KEY_FILE_TEMPLATE = "file_template"
         private const val KEY_CONFLICT_POLICY = "conflict_policy"
         private const val KEY_THROTTLE_PRESET = "throttle_preset"
+        private const val KEY_THROTTLE_CUSTOM_BASE_DELAY = "throttle_custom_base_delay_ms"
+        private const val KEY_THROTTLE_CUSTOM_JITTER = "throttle_custom_jitter_ms"
+        private const val KEY_THROTTLE_CUSTOM_BATCH_SIZE = "throttle_custom_batch_size"
+        private const val KEY_THROTTLE_CUSTOM_BATCH_REST = "throttle_custom_batch_rest_ms"
+        private const val KEY_THROTTLE_CUSTOM_BACKOFF_BASE = "throttle_custom_backoff_base_ms"
+        private const val KEY_THROTTLE_CUSTOM_BACKOFF_MAX = "throttle_custom_backoff_max_ms"
         private const val KEY_RECORDS_JSON = "records_json"
         private const val KEY_QUEUE_JSON = "queue_json"
         private const val MAX_RECORDS = 500
@@ -101,6 +108,33 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
 
     override fun setThrottlePreset(preset: DownloadThrottlePreset) {
         val next = _settings.value.copy(throttlePreset = preset.key)
+        persistSettings(next)
+    }
+
+    override fun setCustomThrottleConfig(
+        baseDelayMs: Long,
+        jitterMaxMs: Long,
+        batchSize: Int,
+        batchRestMs: Long,
+        backoffBaseMs: Long,
+        backoffMaxMs: Long
+    ) {
+        val sanitized = sanitizeCustomThrottle(
+            baseDelayMs = baseDelayMs,
+            jitterMaxMs = jitterMaxMs,
+            batchSize = batchSize,
+            batchRestMs = batchRestMs,
+            backoffBaseMs = backoffBaseMs,
+            backoffMaxMs = backoffMaxMs
+        )
+        val next = _settings.value.copy(
+            customBaseDelayMs = sanitized.baseDelayMs,
+            customJitterMaxMs = sanitized.jitterMaxMs,
+            customBatchSize = sanitized.batchSize,
+            customBatchRestMs = sanitized.batchRestMs,
+            customBackoffBaseMs = sanitized.backoffBaseMs,
+            customBackoffMaxMs = sanitized.backoffMaxMs
+        )
         persistSettings(next)
     }
 
@@ -472,6 +506,31 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         return collapsed.take(120)
     }
 
+    private fun sanitizeCustomThrottle(
+        baseDelayMs: Long,
+        jitterMaxMs: Long,
+        batchSize: Int,
+        batchRestMs: Long,
+        backoffBaseMs: Long,
+        backoffMaxMs: Long
+    ): DownloadThrottleConfig {
+        val baseDelay = baseDelayMs.coerceIn(100L, 120_000L)
+        val jitter = jitterMaxMs.coerceIn(0L, 20_000L)
+        val batch = batchSize.coerceIn(1, 500)
+        val batchRest = batchRestMs.coerceIn(0L, 900_000L)
+        val backoffBase = backoffBaseMs.coerceIn(1_000L, 900_000L)
+        val backoffMax = backoffMaxMs.coerceIn(backoffBase, 1_800_000L)
+        return DownloadThrottleConfig(
+            preset = DownloadThrottlePreset.Custom,
+            baseDelayMs = baseDelay,
+            jitterMaxMs = jitter,
+            batchSize = batch,
+            batchRestMs = batchRest,
+            backoffBaseMs = backoffBase,
+            backoffMaxMs = backoffMax
+        )
+    }
+
     private fun persistSettings(next: DanmuDownloadSettings) {
         _settings.value = next
         prefs.edit()
@@ -481,6 +540,12 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             .putString(KEY_FILE_TEMPLATE, next.fileNameTemplate)
             .putString(KEY_CONFLICT_POLICY, next.conflictPolicy)
             .putString(KEY_THROTTLE_PRESET, next.throttlePreset)
+            .putLong(KEY_THROTTLE_CUSTOM_BASE_DELAY, next.customBaseDelayMs)
+            .putLong(KEY_THROTTLE_CUSTOM_JITTER, next.customJitterMaxMs)
+            .putInt(KEY_THROTTLE_CUSTOM_BATCH_SIZE, next.customBatchSize)
+            .putLong(KEY_THROTTLE_CUSTOM_BATCH_REST, next.customBatchRestMs)
+            .putLong(KEY_THROTTLE_CUSTOM_BACKOFF_BASE, next.customBackoffBaseMs)
+            .putLong(KEY_THROTTLE_CUSTOM_BACKOFF_MAX, next.customBackoffMaxMs)
             .apply()
     }
 
@@ -509,7 +574,31 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             defaultFormat = prefs.getString(KEY_DEFAULT_FORMAT, DanmuDownloadFormat.Xml.value).orEmpty(),
             fileNameTemplate = prefs.getString(KEY_FILE_TEMPLATE, DanmuDownloadSettings().fileNameTemplate).orEmpty(),
             conflictPolicy = prefs.getString(KEY_CONFLICT_POLICY, DownloadConflictPolicy.Rename.key).orEmpty(),
-            throttlePreset = prefs.getString(KEY_THROTTLE_PRESET, DownloadThrottlePreset.Conservative.key).orEmpty()
+            throttlePreset = prefs.getString(KEY_THROTTLE_PRESET, DownloadThrottlePreset.Conservative.key).orEmpty(),
+            customBaseDelayMs = prefs.getLong(
+                KEY_THROTTLE_CUSTOM_BASE_DELAY,
+                DanmuDownloadSettings().customBaseDelayMs
+            ),
+            customJitterMaxMs = prefs.getLong(
+                KEY_THROTTLE_CUSTOM_JITTER,
+                DanmuDownloadSettings().customJitterMaxMs
+            ),
+            customBatchSize = prefs.getInt(
+                KEY_THROTTLE_CUSTOM_BATCH_SIZE,
+                DanmuDownloadSettings().customBatchSize
+            ),
+            customBatchRestMs = prefs.getLong(
+                KEY_THROTTLE_CUSTOM_BATCH_REST,
+                DanmuDownloadSettings().customBatchRestMs
+            ),
+            customBackoffBaseMs = prefs.getLong(
+                KEY_THROTTLE_CUSTOM_BACKOFF_BASE,
+                DanmuDownloadSettings().customBackoffBaseMs
+            ),
+            customBackoffMaxMs = prefs.getLong(
+                KEY_THROTTLE_CUSTOM_BACKOFF_MAX,
+                DanmuDownloadSettings().customBackoffMaxMs
+            )
         )
     }
 
