@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
+import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.domain.model.RequestRecord
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
@@ -13,11 +15,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.URLDecoder
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -144,7 +141,10 @@ class RequestRecordRepositoryImpl @Inject constructor(
         index: Int
     ): Long {
         val key = "$timestamp|$method|$path|$clientIp|$index"
-        return key.hashCode().toLong()
+        // 使用两个不同种子的哈希组合成 64 位，降低碰撞概率
+        val h1 = key.hashCode().toLong() and 0xFFFFFFFFL
+        val h2 = key.reversed().hashCode().toLong() and 0xFFFFFFFFL
+        return (h1 shl 32) or h2
     }
 
     private fun readDurationMs(obj: JSONObject): Long {
@@ -154,29 +154,6 @@ class RequestRecordRepositoryImpl @Inject constructor(
             if (value != Long.MIN_VALUE && value >= 0L) return value
         }
         return 0L
-    }
-
-    private fun parseTimestamp(raw: String): Long {
-        if (raw.isBlank()) return System.currentTimeMillis()
-
-        return runCatching {
-            Instant.parse(raw).toEpochMilli()
-        }.getOrElse {
-            runCatching {
-                val local = LocalDateTime.parse(
-                    raw,
-                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                )
-                local.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            }.getOrElse { System.currentTimeMillis() }
-        }
-    }
-
-    private fun decodeUtf8(raw: String): String {
-        if (raw.isBlank()) return ""
-        return runCatching {
-            URLDecoder.decode(raw, Charsets.UTF_8.name())
-        }.getOrDefault(raw)
     }
 
     private fun formatParams(raw: Any?): String {

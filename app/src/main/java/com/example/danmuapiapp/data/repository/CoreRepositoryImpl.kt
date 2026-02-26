@@ -10,6 +10,7 @@ import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -844,10 +845,6 @@ class CoreRepositoryImpl @Inject constructor(
         val result = RootShell.exec(script, timeoutMs = 4500L)
         if (!result.ok) return null
         return result.stdout
-    }
-
-    private fun shellQuote(input: String): String {
-        return "'" + input.replace("'", "'\"'\"'") + "'"
     }
 
     private fun extractDanmuFolder(zipStream: InputStream, outDir: File): Boolean {

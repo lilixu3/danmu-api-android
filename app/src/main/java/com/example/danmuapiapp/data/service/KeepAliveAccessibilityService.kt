@@ -32,7 +32,12 @@ class KeepAliveAccessibilityService : AccessibilityService() {
             if (status == NodeService.STATUS_STOPPED || status == NodeService.STATUS_ERROR) {
                 handler.post { runCatching { tickOnce() } }
             } else {
-                handler.post { runCatching { refreshA11yEventListeningMode() } }
+                handler.post {
+                    runCatching {
+                        refreshA11yEventListeningMode()
+                        refreshHeartbeatSchedule()
+                    }
+                }
             }
         }
     }
@@ -42,6 +47,12 @@ class KeepAliveAccessibilityService : AccessibilityService() {
             if (intent?.action == NodeKeepAlivePrefs.disableSelfAction(packageName)) {
                 disableSelfAndCleanup()
             }
+        }
+    }
+
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            runCatching { tickOnce() }
         }
     }
 
@@ -55,21 +66,27 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         registerStatusReceiverSafe()
         registerControlReceiverSafe()
         refreshA11yEventListeningMode()
+        refreshHeartbeatSchedule()
         handler.postDelayed({ runCatching { tickOnce() } }, 600L)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (NodeKeepAlivePrefs.isRootMode(this)) return
+        if (NodeKeepAlivePrefs.isRootMode(this)) {
+            refreshHeartbeatSchedule()
+            return
+        }
 
         if (!NodeKeepAlivePrefs.shouldAllowA11yRestart(this)) {
             if (!NodeKeepAlivePrefs.shouldEnableA11yKeepAlive(this)) {
                 disableSelfAndCleanup()
             }
+            refreshHeartbeatSchedule()
             return
         }
 
         if (isNodeRunning()) {
             refreshA11yEventListeningMode()
+            refreshHeartbeatSchedule()
             return
         }
 
@@ -89,50 +106,54 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     }
 
     private fun tickOnce() {
-        if (NodeKeepAlivePrefs.isRootMode(this)) {
-            disableSelfAndCleanup()
-            return
-        }
-
-        if (!NodeKeepAlivePrefs.shouldEnableA11yKeepAlive(this)) {
-            disableSelfAndCleanup()
-            return
-        }
-
-        if (!NodeKeepAlivePrefs.isDesiredRunning(this)) return
-
-        if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(this)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val now = System.currentTimeMillis()
-                if (now - lastPermToastMs > 10 * 60_000L) {
-                    lastPermToastMs = now
-                    Toast.makeText(
-                        this,
-                        "无障碍保活需要通知权限才能稳定拉起前台服务",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+        try {
+            if (NodeKeepAlivePrefs.isRootMode(this)) {
+                disableSelfAndCleanup()
+                return
             }
-            return
-        }
 
-        if (isNodeRunning()) {
+            if (!NodeKeepAlivePrefs.shouldEnableA11yKeepAlive(this)) {
+                disableSelfAndCleanup()
+                return
+            }
+
+            if (!NodeKeepAlivePrefs.isDesiredRunning(this)) return
+
+            if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(this)) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPermToastMs > 10 * 60_000L) {
+                        lastPermToastMs = now
+                        Toast.makeText(
+                            this,
+                            "无障碍保活需要通知权限才能稳定拉起前台服务",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                return
+            }
+
+            if (isNodeRunning()) {
+                refreshA11yEventListeningMode()
+                return
+            }
+
+            val projectDir = runCatching {
+                NodeProjectManager.ensureProjectExtracted(
+                    this,
+                    RuntimePaths.normalProjectDir(this)
+                )
+            }.getOrNull()
+            if (projectDir == null || !NodeProjectManager.hasSelectedCoreInstalled(this, projectDir)) {
+                return
+            }
+
+            runCatching { NodeService.start(this) }
             refreshA11yEventListeningMode()
-            return
+        } finally {
+            refreshHeartbeatSchedule()
         }
-
-        val projectDir = runCatching {
-            NodeProjectManager.ensureProjectExtracted(
-                this,
-                RuntimePaths.normalProjectDir(this)
-            )
-        }.getOrNull()
-        if (projectDir == null || !NodeProjectManager.hasSelectedCoreInstalled(this, projectDir)) {
-            return
-        }
-
-        runCatching { NodeService.start(this) }
-        refreshA11yEventListeningMode()
     }
 
     private fun isNodeRunning(): Boolean {
@@ -157,6 +178,13 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         info.eventTypes = if (shouldListen) activeEventTypes else 0
         runCatching { setServiceInfo(info) }
         isEventListeningEnabled = shouldListen
+    }
+
+    private fun refreshHeartbeatSchedule() {
+        handler.removeCallbacks(heartbeatRunnable)
+        if (!NodeKeepAlivePrefs.shouldRunA11yHeartbeat(this)) return
+        val delayMs = NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(this) * 60_000L
+        handler.postDelayed(heartbeatRunnable, delayMs)
     }
 
     private fun disableSelfAndCleanup() {

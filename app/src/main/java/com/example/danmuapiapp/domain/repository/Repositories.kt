@@ -40,6 +40,9 @@ interface SettingsRepository {
     val githubToken: StateFlow<String>
     val autoStart: StateFlow<Boolean>
     val keepAlive: StateFlow<Boolean>
+    val keepAliveHeartbeatEnabled: StateFlow<Boolean>
+    val keepAliveHeartbeatMode: StateFlow<KeepAliveHeartbeatMode>
+    val keepAliveHeartbeatIntervalMinutes: StateFlow<Int>
     val nightMode: StateFlow<NightModePreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
@@ -50,6 +53,9 @@ interface SettingsRepository {
     fun setGithubToken(token: String)
     fun setAutoStart(enabled: Boolean)
     fun setKeepAlive(enabled: Boolean)
+    fun setKeepAliveHeartbeatEnabled(enabled: Boolean)
+    fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode)
+    fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int)
     fun setNightMode(mode: NightModePreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)

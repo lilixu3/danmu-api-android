@@ -39,4 +39,5 @@ object SettingsRoute {
     const val GithubToken = "settings_github_token"
     const val BackupRestore = "settings_backup_restore"
     const val AdminMode = "settings_admin_mode"
+    const val About = "settings_about"
 }

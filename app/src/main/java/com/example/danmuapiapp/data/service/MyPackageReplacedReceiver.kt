@@ -12,6 +12,8 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
 
+        SystemHeartbeatScheduler.refresh(context.applicationContext)
+
         if (RuntimeModePrefs.get(context) != RunMode.Normal) return
         if (!NodeKeepAlivePrefs.isKeepAliveEnabled(context)) return
         if (!NodeKeepAlivePrefs.isDesiredRunning(context)) return

@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
+import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.domain.model.DeviceAccessConfig
 import com.example.danmuapiapp.domain.model.DeviceAccessDevice
@@ -30,11 +32,6 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.net.URLDecoder
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -257,7 +254,7 @@ class AccessControlRepositoryImpl @Inject constructor(
 
             val item = out.getOrPut(ip) { HistoryDevice(ip = ip) }
             item.totalRequests += 1
-            val timestampMs = parseTimestamp(obj.optString("timestamp", ""))
+            val timestampMs = parseTimestamp(obj.optString("timestamp", ""), 0L)
             if (timestampMs >= item.lastSeenAtMs) {
                 item.lastSeenAtMs = timestampMs
                 item.lastMethod = obj.optString("method", "GET").uppercase().ifBlank { "GET" }
@@ -742,25 +739,4 @@ class AccessControlRepositoryImpl @Inject constructor(
         return ip == "::1" || ip == "0:0:0:0:0:0:0:1" || ip.startsWith("127.")
     }
 
-    private fun parseTimestamp(raw: String): Long {
-        if (raw.isBlank()) return 0L
-        return runCatching {
-            Instant.parse(raw).toEpochMilli()
-        }.getOrElse {
-            runCatching {
-                val local = LocalDateTime.parse(
-                    raw,
-                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                )
-                local.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            }.getOrDefault(0L)
-        }
-    }
-
-    private fun decodeUtf8(raw: String): String {
-        if (raw.isBlank()) return ""
-        return runCatching {
-            URLDecoder.decode(raw, Charsets.UTF_8.name())
-        }.getOrDefault(raw)
-    }
 }

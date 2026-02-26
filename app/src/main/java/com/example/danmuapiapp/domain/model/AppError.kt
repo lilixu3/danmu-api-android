@@ -54,7 +54,10 @@ object ErrorHandler {
         return when (error) {
             is java.net.UnknownHostException,
             is java.net.SocketTimeoutException,
-            is java.net.ConnectException,
+            is java.net.ConnectException -> AppError.NetworkError(
+                message = error.message ?: "网络连接失败",
+                cause = error
+            )
             is java.io.FileNotFoundException -> AppError.FileError(
                 message = error.message ?: "文件未找到",
                 cause = error

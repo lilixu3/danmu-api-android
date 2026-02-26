@@ -7,6 +7,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.net.URL
 
 /**
@@ -33,7 +34,6 @@ object RootRuntimeController {
     )
 
     private fun pidFile(context: Context): File = File(context.filesDir, PID_FILE_NAME)
-    private fun shellQuote(input: String): String = "'" + input.replace("'", "'\"'\"'") + "'"
 
     private fun rootBaseDir(context: Context): String {
         return RuntimePaths.rootBaseDir(context).absolutePath

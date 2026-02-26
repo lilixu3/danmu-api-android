@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.EnvType
 import com.example.danmuapiapp.domain.model.EnvVarDef
@@ -116,10 +117,6 @@ object EnvVarConfigLoader {
         """.trimIndent()
         val result = RootShell.exec(script, timeoutMs = 4500L)
         return if (result.ok) result.stdout else null
-    }
-
-    private fun shellQuote(input: String): String {
-        return "'" + input.replace("'", "'\"'\"'") + "'"
     }
 
     private fun parseEnvsJs(content: String): List<EnvVarDef> {

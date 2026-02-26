@@ -7,6 +7,7 @@ import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -39,6 +40,19 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private val _keepAlive = MutableStateFlow(NodeKeepAlivePrefs.isKeepAliveEnabled(context))
     override val keepAlive: StateFlow<Boolean> = _keepAlive.asStateFlow()
+
+    private val _keepAliveHeartbeatEnabled =
+        MutableStateFlow(NodeKeepAlivePrefs.isHeartbeatEnabled(context))
+    override val keepAliveHeartbeatEnabled: StateFlow<Boolean> = _keepAliveHeartbeatEnabled.asStateFlow()
+
+    private val _keepAliveHeartbeatMode =
+        MutableStateFlow(NodeKeepAlivePrefs.getHeartbeatMode(context))
+    override val keepAliveHeartbeatMode: StateFlow<KeepAliveHeartbeatMode> = _keepAliveHeartbeatMode.asStateFlow()
+
+    private val _keepAliveHeartbeatIntervalMinutes =
+        MutableStateFlow(NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context))
+    override val keepAliveHeartbeatIntervalMinutes: StateFlow<Int> =
+        _keepAliveHeartbeatIntervalMinutes.asStateFlow()
 
     private val _nightMode = MutableStateFlow(AppAppearancePrefs.readNightMode(uiPrefs))
     override val nightMode: StateFlow<NightModePreference> = _nightMode.asStateFlow()
@@ -89,6 +103,22 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setKeepAlive(enabled: Boolean) {
         NodeKeepAlivePrefs.setKeepAliveEnabled(context, enabled)
         _keepAlive.value = enabled
+    }
+
+    override fun setKeepAliveHeartbeatEnabled(enabled: Boolean) {
+        NodeKeepAlivePrefs.setHeartbeatEnabled(context, enabled)
+        _keepAliveHeartbeatEnabled.value = enabled
+    }
+
+    override fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode) {
+        NodeKeepAlivePrefs.setHeartbeatMode(context, mode)
+        _keepAliveHeartbeatMode.value = mode
+    }
+
+    override fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int) {
+        val normalized = NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(minutes)
+        NodeKeepAlivePrefs.setHeartbeatIntervalMinutes(context, normalized)
+        _keepAliveHeartbeatIntervalMinutes.value = normalized
     }
 
     override fun setNightMode(mode: NightModePreference) {

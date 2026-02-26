@@ -18,9 +18,11 @@ import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.service.WebDavService
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.RunMode
@@ -65,6 +67,9 @@ class SettingsViewModel @Inject constructor(
     val customRepo = settingsRepo.customRepo
     val tokenVisible = settingsRepo.tokenVisible
     val keepAlive = settingsRepo.keepAlive
+    val keepAliveHeartbeatEnabled = settingsRepo.keepAliveHeartbeatEnabled
+    val keepAliveHeartbeatMode = settingsRepo.keepAliveHeartbeatMode
+    val keepAliveHeartbeatIntervalMinutes = settingsRepo.keepAliveHeartbeatIntervalMinutes
     val nightMode = settingsRepo.nightMode
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
@@ -215,6 +220,7 @@ class SettingsViewModel @Inject constructor(
                 runtimeRepo.updateRunMode(mode)
                 refreshRuntimeRelatedStates()
                 refreshWorkDirInfo()
+                SystemHeartbeatScheduler.refresh(context)
             } finally {
                 isRunModeSwitching = false
             }
@@ -238,11 +244,38 @@ class SettingsViewModel @Inject constructor(
         if (!enabled) {
             NodeKeepAlivePrefs.requestDisableAccessibilityService(context)
         }
+        SystemHeartbeatScheduler.refresh(context)
         operationMessage = if (enabled) {
             "已开启无障碍保活，请在系统无障碍中启用服务"
         } else {
             "已关闭无障碍保活"
         }
+    }
+
+    fun setKeepAliveHeartbeatEnabled(enabled: Boolean) {
+        settingsRepo.setKeepAliveHeartbeatEnabled(enabled)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = if (enabled) {
+            "已开启心跳兜底检查"
+        } else {
+            "已关闭心跳兜底检查"
+        }
+    }
+
+    fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode) {
+        settingsRepo.setKeepAliveHeartbeatMode(mode)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = when (mode) {
+            KeepAliveHeartbeatMode.Accessibility -> "已切换为无障碍心跳"
+            KeepAliveHeartbeatMode.System -> "已切换为系统定时心跳（实验）"
+        }
+    }
+
+    fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int) {
+        val normalized = NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(minutes)
+        settingsRepo.setKeepAliveHeartbeatIntervalMinutes(normalized)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = "心跳间隔已更新为 ${normalized} 分钟"
     }
 
     fun setNightMode(mode: NightModePreference) {

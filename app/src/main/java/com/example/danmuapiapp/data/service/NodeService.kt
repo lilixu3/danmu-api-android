@@ -51,7 +51,9 @@ class NodeService : Service() {
 
         fun start(context: Context) {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
-            NodeKeepAlivePrefs.setDesiredRunning(context.applicationContext, true)
+            val appContext = context.applicationContext
+            NodeKeepAlivePrefs.setDesiredRunning(appContext, true)
+            SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
             }
@@ -64,7 +66,9 @@ class NodeService : Service() {
 
         fun stop(context: Context) {
             // 在调用进程先写入期望状态，确保保活侧立即可见“用户要停止”。
-            NodeKeepAlivePrefs.setDesiredRunning(context.applicationContext, false)
+            val appContext = context.applicationContext
+            NodeKeepAlivePrefs.setDesiredRunning(appContext, false)
+            SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_STOP
             }
@@ -87,23 +91,31 @@ class NodeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                val shouldStart = synchronized(stateLock) {
-                    !(isRunning || nodeThread?.isAlive == true || isStopping)
-                }
-                if (shouldStart) {
-                    startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
-                    startNode()
-                }
-                return START_STICKY
-            }
+        val action = intent?.action
+        when (action) {
             ACTION_STOP -> {
                 stopNode()
                 return START_NOT_STICKY
             }
+            ACTION_START -> Unit
+            null -> {
+                // START_STICKY 重建会传入 null intent，仅在用户期望运行时恢复。
+                if (!NodeKeepAlivePrefs.isDesiredRunning(this)) {
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+            }
+            else -> return START_NOT_STICKY
         }
-        return START_NOT_STICKY
+
+        val shouldStart = synchronized(stateLock) {
+            !(isRunning || nodeThread?.isAlive == true || isStopping)
+        }
+        if (shouldStart) {
+            startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
+            startNode()
+        }
+        return START_STICKY
     }
 
     private fun startNode() {
@@ -235,14 +247,11 @@ class NodeService : Service() {
     }
 
     private fun resolveCandidatePorts(): Set<Int> {
-        val prefs = getSharedPreferences("runtime", MODE_PRIVATE)
-        val configuredPort = prefs.getInt("port", 9321)
         val envPort = readPortFromEnvFile()
 
-        // 停止时覆盖历史端口和默认端口，防止运行端口漂移导致停不掉。
+        // 跨进程读取 SharedPreferences 不安全，优先以 .env 文件为准，兜底默认端口。
         return linkedSetOf<Int>().apply {
             if (envPort in 1..65535) add(envPort)
-            if (configuredPort in 1..65535) add(configuredPort)
             add(9321)
         }
     }
