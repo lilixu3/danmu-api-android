@@ -1,14 +1,9 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -16,15 +11,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.ui.component.*
 import com.example.danmuapiapp.BuildConfig
 import androidx.compose.ui.graphics.Color
-import java.util.Locale
 
 @Composable
 fun SettingsHubScreen(
@@ -37,25 +29,16 @@ fun SettingsHubScreen(
     onOpenBackupRestore: () -> Unit,
     onOpenGithubToken: () -> Unit,
     onOpenAdminMode: () -> Unit,
+    onOpenAbout: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val adminSessionState by viewModel.adminSessionState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
+    val hideFromRecents by viewModel.hideFromRecents.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val runModeLabel = state.runMode.label
-    val hasInAppDownload = viewModel.appUpdateDownloadUrls.isNotEmpty() &&
-        !viewModel.appUpdateLatestVersion.isNullOrBlank()
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
     val adminSummary = remember(adminSessionState) { viewModel.adminModeSummary() }
-    val updateSubtitle = when {
-        viewModel.isCheckingAppUpdate -> "正在检查新版本..."
-        viewModel.isDownloadingAppUpdate -> "正在下载：${viewModel.appUpdateDownloadDetail}"
-        viewModel.appUpdateLatestVersion == null -> "当前 v${viewModel.appUpdateCurrentVersion} · 点击检查"
-        viewModel.appUpdateHasUpdate -> "发现新版本 v${viewModel.appUpdateLatestVersion}"
-        else -> "已是最新版本 v${viewModel.appUpdateCurrentVersion}"
-    }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
@@ -156,227 +139,25 @@ fun SettingsHubScreen(
                     onClick = onOpenThemeDisplay
                 )
                 SettingsDivider()
-                SettingsValueItem(
-                    title = "版本",
-                    value = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                    icon = Icons.Rounded.Info
+                SettingsSwitchItem(
+                    title = "隐藏最近任务",
+                    subtitle = if (hideFromRecents) {
+                        "最近任务中已隐藏本应用"
+                    } else {
+                        "最近任务中显示本应用"
+                    },
+                    icon = Icons.Rounded.VisibilityOff,
+                    checked = hideFromRecents,
+                    onCheckedChange = viewModel::setHideFromRecents
                 )
                 SettingsDivider()
                 SettingsItem(
-                    title = "检查应用更新",
-                    subtitle = updateSubtitle,
-                    icon = Icons.Rounded.SystemUpdate,
-                    onClick = viewModel::checkAppUpdate,
-                    trailing = {
-                        if (viewModel.isCheckingAppUpdate) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                Icons.Rounded.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-                            )
-                        }
-                    }
+                    title = "关于",
+                    subtitle = "v${BuildConfig.VERSION_NAME} · 更新、链接与使用指南",
+                    icon = Icons.Rounded.Info,
+                    onClick = onOpenAbout
                 )
             }
         }
-    }
-
-    if (viewModel.showAppUpdateAvailableDialog && viewModel.appUpdateLatestVersion != null) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissAppUpdateAvailableDialog,
-            title = { Text("发现新版本 v${viewModel.appUpdateLatestVersion}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "当前版本：v${viewModel.appUpdateCurrentVersion}\n最新版本：v${viewModel.appUpdateLatestVersion}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = if (hasInAppDownload) {
-                            "可选择应用内下载（含进度显示）或跳转浏览器下载。"
-                        } else {
-                            "未找到可安装 APK，建议跳转浏览器下载。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val preview = viewModel.appUpdateReleaseNotes.trim().take(320)
-                    if (preview.isNotBlank()) {
-                        Text(
-                            text = preview,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::openAppUpdateMethodDialog) {
-                    Text("立即更新")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissAppUpdateAvailableDialog) {
-                    Text("稍后")
-                }
-            }
-        )
-    }
-
-    if (viewModel.showAppUpdateMethodDialog) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissAppUpdateMethodDialog,
-            title = { Text("选择更新方式") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilledTonalButton(
-                        onClick = viewModel::startInAppUpdateDownload,
-                        enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("应用内下载")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            val alive = activity
-                            if (alive == null) {
-                                viewModel.postMessage("当前页面无法打开浏览器")
-                            } else {
-                                viewModel.openBrowserDownload(alive)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("浏览器下载")
-                    }
-                    if (!hasInAppDownload) {
-                        Text(
-                            text = "当前版本未找到可安装 APK，应用内下载暂不可用。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        text = "首次安装新版本可能需要“安装未知应用”权限，授权后返回 App 会自动继续安装。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::dismissAppUpdateMethodDialog) {
-                    Text("取消")
-                }
-            }
-        )
-    }
-
-    if (viewModel.isDownloadingAppUpdate) {
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("正在下载更新") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val progress = viewModel.appUpdateDownloadPercent
-                    if (progress in 0..100) {
-                        LinearProgressIndicator(
-                            progress = { progress / 100f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            text = "$progress% · ${viewModel.appUpdateDownloadDetail}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            text = viewModel.appUpdateDownloadDetail,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Text(
-                        text = "下载完成后会弹出安装提示。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {}
-        )
-    }
-
-    if (viewModel.showInstallAppUpdateDialog && viewModel.downloadedAppUpdate != null) {
-        val apk = viewModel.downloadedAppUpdate!!
-        AlertDialog(
-            onDismissRequest = viewModel::dismissInstallAppUpdateDialog,
-            title = { Text("下载完成") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("文件：${apk.displayName}")
-                    Text("位置：${apk.displayPath}", style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        "大小：${formatBytes(apk.sizeBytes)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    TextButton(onClick = {
-                        val alive = activity
-                        if (alive == null) {
-                            viewModel.postMessage("当前页面无法打开下载列表")
-                        } else {
-                            viewModel.openDownloadsApp(alive)
-                        }
-                    }) {
-                        Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("打开系统下载")
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val alive = activity
-                    if (alive == null) {
-                        viewModel.postMessage("当前页面无法拉起安装器")
-                    } else {
-                        viewModel.installDownloadedAppUpdate(alive)
-                    }
-                }) { Text("立即安装") }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissInstallAppUpdateDialog) { Text("稍后") }
-            }
-        )
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? {
-    return when (this) {
-        is Activity -> this
-        is ContextWrapper -> baseContext.findActivity()
-        else -> null
-    }
-}
-
-private fun formatBytes(v: Long): String {
-    if (v <= 0) return "未知"
-    val kb = 1024.0
-    val mb = kb * 1024
-    val gb = mb * 1024
-    return when {
-        v >= gb -> String.format(Locale.getDefault(), "%.2fGB", v / gb)
-        v >= mb -> String.format(Locale.getDefault(), "%.2fMB", v / mb)
-        v >= kb -> String.format(Locale.getDefault(), "%.1fKB", v / kb)
-        else -> "${v}B"
     }
 }

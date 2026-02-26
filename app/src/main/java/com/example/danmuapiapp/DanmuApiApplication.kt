@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.UserManager
 import android.util.Log
+import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import dagger.hilt.android.HiltAndroidApp
 
@@ -26,6 +27,12 @@ class DanmuApiApplication : Application() {
             AppAppearancePrefs.applyNightMode(AppAppearancePrefs.readNightMode(prefs))
         }.onFailure {
             Log.w(TAG, "初始化夜间模式失败，已跳过：${it.message}")
+        }
+
+        runCatching {
+            SystemHeartbeatScheduler.refresh(this)
+        }.onFailure {
+            Log.w(TAG, "初始化系统心跳调度失败，已跳过：${it.message}")
         }
     }
 

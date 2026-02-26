@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.RunMode
 
 /**
@@ -19,6 +20,14 @@ object NodeKeepAlivePrefs {
     private const val PREFS_SETTINGS = "danmu_keep_alive_prefs"
     private const val KEY_KEEP_ALIVE_ENABLED = "keep_alive_enabled"
     private const val KEY_DESIRED_RUNNING = "desired_running"
+    private const val KEY_HEARTBEAT_ENABLED = "heartbeat_enabled"
+    private const val KEY_HEARTBEAT_MODE = "heartbeat_mode"
+    private const val KEY_HEARTBEAT_INTERVAL_MINUTES = "heartbeat_interval_minutes"
+
+    const val HEARTBEAT_INTERVAL_MIN_MINUTES = 1
+    const val HEARTBEAT_INTERVAL_MAX_MINUTES = 24 * 60
+    const val HEARTBEAT_INTERVAL_DEFAULT_MINUTES = 30
+    const val HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES = 15
 
     fun isKeepAliveEnabled(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
@@ -54,6 +63,70 @@ object NodeKeepAlivePrefs {
 
     fun shouldAllowA11yRestart(context: Context): Boolean {
         return shouldEnableA11yKeepAlive(context) && isDesiredRunning(context)
+    }
+
+    fun isHeartbeatEnabled(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_HEARTBEAT_ENABLED, false)
+    }
+
+    fun setHeartbeatEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_HEARTBEAT_ENABLED, enabled)
+            .apply()
+    }
+
+    fun getHeartbeatMode(context: Context): KeepAliveHeartbeatMode {
+        val raw = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .getString(KEY_HEARTBEAT_MODE, KeepAliveHeartbeatMode.Accessibility.key)
+        return KeepAliveHeartbeatMode.fromKey(raw)
+    }
+
+    fun setHeartbeatMode(context: Context, mode: KeepAliveHeartbeatMode) {
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_HEARTBEAT_MODE, mode.key)
+            .apply()
+    }
+
+    fun getHeartbeatIntervalMinutes(context: Context): Int {
+        val raw = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .getInt(KEY_HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_INTERVAL_DEFAULT_MINUTES)
+        return normalizeHeartbeatIntervalMinutes(raw)
+    }
+
+    fun setHeartbeatIntervalMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_HEARTBEAT_INTERVAL_MINUTES, normalizeHeartbeatIntervalMinutes(minutes))
+            .apply()
+    }
+
+    fun normalizeHeartbeatIntervalMinutes(minutes: Int): Int {
+        return minutes.coerceIn(
+            HEARTBEAT_INTERVAL_MIN_MINUTES,
+            HEARTBEAT_INTERVAL_MAX_MINUTES
+        )
+    }
+
+    fun getEffectiveSystemHeartbeatIntervalMinutes(context: Context): Int {
+        return getHeartbeatIntervalMinutes(context).coerceAtLeast(HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES)
+    }
+
+    fun shouldRunA11yHeartbeat(context: Context): Boolean {
+        return shouldAllowA11yRestart(context) &&
+            isHeartbeatEnabled(context) &&
+            getHeartbeatMode(context) == KeepAliveHeartbeatMode.Accessibility
+    }
+
+    fun shouldScheduleSystemHeartbeat(context: Context): Boolean {
+        return !isRootMode(context) &&
+            isKeepAliveEnabled(context) &&
+            isDesiredRunning(context) &&
+            hasPostNotificationsPermission(context) &&
+            isHeartbeatEnabled(context) &&
+            getHeartbeatMode(context) == KeepAliveHeartbeatMode.System
     }
 
     fun hasPostNotificationsPermission(context: Context): Boolean {

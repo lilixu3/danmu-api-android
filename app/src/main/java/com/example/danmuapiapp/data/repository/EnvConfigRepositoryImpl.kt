@@ -7,6 +7,7 @@ import com.example.danmuapiapp.data.parser.EnvVarConfigLoader
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
@@ -205,10 +206,6 @@ class EnvConfigRepositoryImpl @Inject constructor(
         return RootShell.exec(script, timeoutMs = 7000L).ok
     }
 
-    private fun shellQuote(input: String): String {
-        return "'" + input.replace("'", "'\"'\"'") + "'"
-    }
-
     private fun parseEnvFile(text: String): Map<String, String> {
         val map = LinkedHashMap<String, String>()
         for (line in text.lines()) {
@@ -248,8 +245,9 @@ class EnvConfigRepositoryImpl @Inject constructor(
     }
 
     private fun formatValue(value: String): String {
-        return if (value.contains(' ') || value.contains('=') || value.contains('#')) {
-            "\"$value\""
+        return if (value.contains(' ') || value.contains('=') || value.contains('#') || value.contains('"')) {
+            val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+            "\"$escaped\""
         } else value
     }
 }

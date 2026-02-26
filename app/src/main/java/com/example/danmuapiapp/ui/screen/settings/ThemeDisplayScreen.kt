@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -47,7 +45,6 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
-import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 import androidx.compose.ui.graphics.Color
 import kotlin.math.roundToInt
 
@@ -61,7 +58,6 @@ fun ThemeDisplayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
-    val hideFromRecents by viewModel.hideFromRecents.collectAsStateWithLifecycle()
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
     val appCurrentDpi = context.resources.displayMetrics.densityDpi
     val effectiveDpi = if (appDpiOverride > 0) appDpiOverride else systemDpi
@@ -188,18 +184,6 @@ fun ThemeDisplayScreen(
                         }
                     }
                 }
-                SettingsDivider()
-                SettingsSwitchItem(
-                    title = "隐藏最近任务",
-                    subtitle = if (hideFromRecents) {
-                        "最近任务中已隐藏本应用"
-                    } else {
-                        "最近任务中显示本应用"
-                    },
-                    icon = Icons.Rounded.VisibilityOff,
-                    checked = hideFromRecents,
-                    onCheckedChange = viewModel::setHideFromRecents
-                )
                 SettingsDivider()
                 Text(
                     text = "修改 DPI 后会自动刷新当前界面；如果无变化请手动重启应用。",
