@@ -34,6 +34,7 @@ import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
 import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
+import com.example.danmuapiapp.ui.screen.settings.AboutScreen
 import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
@@ -122,7 +123,8 @@ fun DanmuApiApp() {
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
-                    onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) }
+                    onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
+                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) }
                 )
             }
             composable(Screen.Core.route) { CoreScreen() }
@@ -149,7 +151,8 @@ fun DanmuApiApp() {
                     onOpenNetwork = { navController.navigate(SettingsRoute.Network) },
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
                     onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
-                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
+                    onOpenAbout = { navController.navigate(SettingsRoute.About) }
                 )
             }
 
@@ -179,6 +182,9 @@ fun DanmuApiApp() {
             }
             composable(SettingsRoute.AdminMode) {
                 AdminModeScreen(onBack = { navController.popBackStack() })
+            }
+            composable(SettingsRoute.About) {
+                AboutScreen(onBack = { navController.popBackStack() })
             }
 
             composable(ToolRoute.Console) {

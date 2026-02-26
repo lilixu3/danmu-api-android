@@ -18,6 +18,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.Locale
 import javax.inject.Inject
 
 data class PushAnimeCandidate(
@@ -31,6 +32,41 @@ data class PushEpisodeCandidate(
     val episodeNumber: Int,
     val title: String
 )
+
+enum class PushClientSupportLevel {
+    OfficialDoc,
+    RepoDoc,
+    CompatibilityVerified
+}
+
+data class PushClientSupport(
+    val id: String,
+    val name: String,
+    val note: String,
+    val endpointExample: String,
+    val docUrl: String,
+    val level: PushClientSupportLevel
+)
+
+data class PushLanDeviceCandidate(
+    val ip: String,
+    val isSelf: Boolean,
+    val port9978Open: Boolean,
+    val verifiedPushApi: Boolean,
+    val latencyMs: Int?,
+    val ifName: String?,
+    val mac: String?
+) {
+    val targetTemplate: String
+        get() = "http://$ip:9978/action?do=refresh&type=danmaku&path="
+
+    val supportLabel: String
+        get() = when {
+            verifiedPushApi -> "已验证 OK/FongMi 接口"
+            port9978Open -> "9978 端口可达"
+            else -> "未检测到 9978 接口"
+        }
+}
 
 @HiltViewModel
 class PushDanmuViewModel @Inject constructor(
@@ -73,6 +109,34 @@ class PushDanmuViewModel @Inject constructor(
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
+    var isScanningLan by mutableStateOf(false)
+        private set
+
+    var lanScanStatus by mutableStateOf("未扫描")
+        private set
+
+    var lanDevices by mutableStateOf<List<PushLanDeviceCandidate>>(emptyList())
+        private set
+
+    val clientSupports: List<PushClientSupport> = listOf(
+        PushClientSupport(
+            id = "ok",
+            name = "OK 影视",
+            note = "兼容验证：已实测支持该接口与 offset/fontSize 参数（参考 FongMi API）",
+            endpointExample = "/action?do=refresh&type=danmaku&path=",
+            docUrl = "https://github.com/FongMi/TV?tab=readme-ov-file#api",
+            level = PushClientSupportLevel.CompatibilityVerified
+        ),
+        PushClientSupport(
+            id = "fongmi",
+            name = "FongMi 影视 / TV",
+            note = "官方 README 明确提供弹幕推送接口",
+            endpointExample = "/action?do=refresh&type=danmaku&path=",
+            docUrl = "https://github.com/FongMi/TV?tab=readme-ov-file#api",
+            level = PushClientSupportLevel.OfficialDoc
+        )
+    )
+
     fun clearResult() {
         resultText = ""
         errorMessage = null
@@ -80,6 +144,72 @@ class PushDanmuViewModel @Inject constructor(
 
     fun clearError() {
         errorMessage = null
+    }
+
+    fun clearLanScan() {
+        lanDevices = emptyList()
+        lanScanStatus = "未扫描"
+    }
+
+    fun scanLanDevices(runtimeLanUrl: String) {
+        if (isScanningLan || isSearching || isLoadingEpisodes) return
+
+        val selfIp = PushLanScanner.resolveSelfLanIpv4(runtimeLanUrl)
+        if (selfIp.isNullOrBlank()) {
+            errorMessage = "未获取到本机局域网 IP，请连接同一 Wi-Fi 后重试"
+            return
+        }
+
+        viewModelScope.launch {
+            isScanningLan = true
+            errorMessage = null
+            lanScanStatus = "扫描中：正在探测 $selfIp 所在网段..."
+            val startedAt = System.currentTimeMillis()
+
+            val result = withContext(Dispatchers.IO) {
+                runCatching { PushLanScanner.scanLan(selfIp = selfIp, httpClient = httpClient) }
+            }
+
+            result.fold(
+                onSuccess = { scanned ->
+                    val filtered = scanned
+                        .asSequence()
+                        .map { device ->
+                            PushLanDeviceCandidate(
+                                ip = device.ip,
+                                isSelf = device.ip == selfIp || device.ip == "127.0.0.1",
+                                port9978Open = device.port9978Open,
+                                verifiedPushApi = device.verifiedPushApi,
+                                latencyMs = device.latencyMs,
+                                ifName = device.ifName,
+                                mac = device.mac
+                            )
+                        }
+                        .filter { it.port9978Open || it.verifiedPushApi || it.isSelf }
+                        .sortedWith(
+                            compareByDescending<PushLanDeviceCandidate> { it.verifiedPushApi }
+                                .thenByDescending { it.port9978Open }
+                                .thenBy { it.latencyMs ?: Int.MAX_VALUE }
+                                .thenBy { it.ip }
+                        )
+                        .toList()
+                    lanDevices = filtered
+                    val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+                    lanScanStatus = buildLanScanStatus(
+                        selfIp = selfIp,
+                        devices = filtered,
+                        elapsedMs = elapsed
+                    )
+                },
+                onFailure = { throwable ->
+                    lanDevices = emptyList()
+                    lanScanStatus = "扫描失败"
+                    errorMessage = throwable.message ?: "局域网扫描失败"
+                }
+            )
+
+            isScanningLan = false
+        }
     }
 
     fun backToAnimeList() {
@@ -470,5 +600,22 @@ class PushDanmuViewModel @Inject constructor(
 
     private fun urlEncode(raw: String): String {
         return URLEncoder.encode(raw, Charsets.UTF_8.name())
+    }
+
+    private fun buildLanScanStatus(
+        selfIp: String,
+        devices: List<PushLanDeviceCandidate>,
+        elapsedMs: Long
+    ): String {
+        val verified = devices.count { it.verifiedPushApi }
+        val open9978 = devices.count { it.port9978Open }
+        val elapsedText = if (elapsedMs < 1000L) "${elapsedMs}ms" else {
+            String.format(Locale.getDefault(), "%.1fs", elapsedMs / 1000f)
+        }
+        return if (devices.isEmpty()) {
+            "本机：$selfIp · 未发现可用推送端（耗时 $elapsedText）"
+        } else {
+            "本机：$selfIp · 可达端口 $open9978 台 · 已验证接口 $verified 台 · 耗时 $elapsedText"
+        }
     }
 }

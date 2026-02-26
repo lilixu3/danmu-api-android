@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
@@ -150,7 +151,7 @@ class CacheRepositoryImpl @Inject constructor(
                     key = path,
                     type = method,
                     sizeBytes = 0L,
-                    hitCount = statusCode ?: 0,
+                    hitCount = 1,
                     createdAt = timestamp
                 )
             }
@@ -165,18 +166,4 @@ class CacheRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun parseTimestamp(raw: String): Long {
-        if (raw.isBlank()) return System.currentTimeMillis()
-        return runCatching {
-            java.time.Instant.parse(raw).toEpochMilli()
-        }.getOrElse {
-            runCatching {
-                val local = java.time.LocalDateTime.parse(
-                    raw,
-                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                )
-                local.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-            }.getOrElse { System.currentTimeMillis() }
-        }
-    }
 }

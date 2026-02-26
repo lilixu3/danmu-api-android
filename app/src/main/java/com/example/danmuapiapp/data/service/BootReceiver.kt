@@ -11,6 +11,8 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_USER_UNLOCKED
         ) return
 
+        SystemHeartbeatScheduler.refresh(context.applicationContext)
+
         if (!NormalAutoStartPrefs.isBootAutoStartEnabled(context)) return
 
         val pending = goAsync()

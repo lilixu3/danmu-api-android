@@ -38,6 +38,7 @@ object RuntimeModePrefs {
         // 维持 runtime 镜像，避免监听 runtime 偏好的逻辑失效。
         val runtimePrefs = context.getSharedPreferences(RUNTIME_MIRROR_PREFS, Context.MODE_PRIVATE)
         put(runtimePrefs, mode)
+        runCatching { SystemHeartbeatScheduler.refresh(context.applicationContext) }
     }
 
     fun put(prefs: SharedPreferences, mode: RunMode) {

@@ -93,7 +93,9 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             when (intent.getStringExtra(NodeService.EXTRA_STATUS)) {
                 NodeService.STATUS_RUNNING -> {
-                    markRunning(forceNewStart = true)
+                    // 仅用户主动启动(Starting)时重置计时；进程重建后重连不重置。
+                    val explicit = _runtimeState.value.status == ServiceStatus.Starting
+                    markRunning(forceNewStart = explicit)
                     addLog(LogLevel.Info, "服务已启动")
                 }
 
@@ -204,9 +206,6 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
                 saveRuntimeStartedAt(startedAt)
             }
-        } else if (startedAt > 0L) {
-            clearRuntimeStartedAt()
-            startedAt = 0L
         }
 
         val uptimeSeconds = if (running && startedAt > 0L) {
