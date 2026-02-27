@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.home
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import android.app.Activity
 import android.content.Context
@@ -37,7 +39,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -74,6 +78,7 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -82,6 +87,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -115,6 +121,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -683,6 +690,8 @@ fun HomeScreen(
                 showRunModePickerDialog = false
                 pendingRunModeTarget = null
             },
+            style = AppBottomSheetStyle.Selection,
+            tone = AppBottomSheetTone.Brand,
             icon = { Icon(Icons.Rounded.PowerSettingsNew, null) },
             title = { Text("切换运行模式") },
             text = {
@@ -765,6 +774,8 @@ fun HomeScreen(
     if (viewModel.showAppUpdatePromptDialog && !viewModel.appUpdatePromptLatestVersion.isNullOrBlank()) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdatePrompt,
+            style = AppBottomSheetStyle.Status,
+            tone = AppBottomSheetTone.Info,
             icon = { Icon(Icons.Rounded.SystemUpdate, null) },
             title = { Text("发现应用更新") },
             text = {
@@ -799,6 +810,8 @@ fun HomeScreen(
     if (viewModel.showAppUpdateMethodDialog) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdateMethodDialog,
+            style = AppBottomSheetStyle.Selection,
+            tone = AppBottomSheetTone.Info,
             title = { Text("选择更新方式") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -851,6 +864,8 @@ fun HomeScreen(
     if (viewModel.isDownloadingAppUpdate) {
         AppBottomSheetDialog(
             onDismissRequest = {},
+            style = AppBottomSheetStyle.Status,
+            tone = AppBottomSheetTone.Neutral,
             title = { Text("正在下载更新") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -873,7 +888,6 @@ fun HomeScreen(
                     }
                 }
             },
-            confirmButton = {}
         )
     }
 
@@ -881,6 +895,8 @@ fun HomeScreen(
         val apk = viewModel.downloadedAppUpdate!!
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissInstallAppUpdateDialog,
+            style = AppBottomSheetStyle.Form,
+            tone = AppBottomSheetTone.Brand,
             title = { Text("下载完成") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -976,37 +992,33 @@ private fun HomePanelDialog(
     actions: @Composable RowScope.() -> Unit
 ) {
     val panelSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val panelMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
+
     ModalBottomSheet(
         onDismissRequest = {
             if (canDismiss) onDismissRequest()
         },
         sheetState = panelSheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+            )
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = panelMaxHeight)
+                .imePadding()
+                .navigationBarsPadding()
                 .padding(horizontal = 18.dp)
-                .padding(bottom = 18.dp),
+                .padding(top = 4.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.86f)
-                            )
-                        )
-                    )
-            )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1044,12 +1056,30 @@ private fun HomePanelDialog(
                 }
             }
 
-            content()
+            Box(
+                modifier = Modifier
+                    .height(2.dp)
+                    .widthIn(max = 120.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+            )
 
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content
+            )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 content = actions
             )
@@ -1648,19 +1678,29 @@ private fun DownloadQueueSheet(
         MaterialTheme.colorScheme.tertiary
     }
     val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val queueSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = queueSheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 2.dp,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+            )
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = queueSheetMaxHeight)
+                .imePadding()
+                .navigationBarsPadding()
                 .padding(horizontal = 18.dp)
-                .padding(bottom = 24.dp),
+                .padding(top = 4.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Header
@@ -2540,6 +2580,8 @@ private fun ServiceRuntimeInfoDialog(
 
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Status,
+        tone = AppBottomSheetTone.Info,
         icon = { Icon(Icons.Rounded.HourglassBottom, null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("服务运行信息") },
         text = {
@@ -3124,6 +3166,8 @@ private fun UpdatePromptDialog(
     if (variant == null || latestVersion.isNullOrBlank()) return
     AppBottomSheetDialog(
         onDismissRequest = onIgnore,
+        style = AppBottomSheetStyle.Confirm,
+        tone = AppBottomSheetTone.Brand,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
         title = { Text("发现核心更新") },
         text = {
@@ -3143,6 +3187,8 @@ private fun NoCoreDialog(
 ) {
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Warning,
         icon = { Icon(Icons.Rounded.DownloadForOffline, null) },
         title = { Text("核心未安装") },
         text = {
@@ -3183,7 +3229,6 @@ private fun NoCoreDialog(
                 }
             }
         },
-        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         }
@@ -3201,14 +3246,29 @@ private fun VariantPickerSheet(
     onDismiss: () -> Unit
 ) {
     val variantSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val variantSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = variantSheetState
+        sheetState = variantSheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+            )
+        }
     ) {
         Column(
             modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = variantSheetMaxHeight)
+                .imePadding()
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
+                .padding(top = 4.dp, bottom = 10.dp)
         ) {
             Text(
                 "切换 API 核心",

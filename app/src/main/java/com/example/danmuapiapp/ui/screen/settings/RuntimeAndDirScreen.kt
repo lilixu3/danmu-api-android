@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import android.content.Intent
 import android.provider.Settings
@@ -367,6 +369,8 @@ fun RuntimeAndDirScreen(
     if (showEnableRootAutoStartDialog) {
         AppBottomSheetDialog(
             onDismissRequest = { showEnableRootAutoStartDialog = false },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Brand,
             title = { Text("开启开机自启") },
             text = {
                 Text("将安装 Magisk/KernelSU 模块，开机后以 Root 触发一次启动，不轮询保活，更省电。")
@@ -386,6 +390,8 @@ fun RuntimeAndDirScreen(
     if (showDisableRootAutoStartDialog) {
         AppBottomSheetDialog(
             onDismissRequest = { showDisableRootAutoStartDialog = false },
+            style = AppBottomSheetStyle.Selection,
+            tone = AppBottomSheetTone.Warning,
             title = { Text("关闭开机自启") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -415,6 +421,8 @@ fun RuntimeAndDirScreen(
     if (showKeepAliveGuideDialog && state.runMode == RunMode.Normal) {
         AppBottomSheetDialog(
             onDismissRequest = { showKeepAliveGuideDialog = false },
+            style = AppBottomSheetStyle.Selection,
+            tone = AppBottomSheetTone.Info,
             title = { Text("保活建议") },
             text = {
                 val guideButtonColors = ButtonDefaults.outlinedButtonColors(

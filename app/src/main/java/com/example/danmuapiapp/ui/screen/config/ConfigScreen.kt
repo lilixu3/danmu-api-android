@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.config
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
@@ -510,6 +512,8 @@ private fun EnvVarEditDialog(
     if (showDeleteConfirm) {
         AppBottomSheetDialog(
             onDismissRequest = { showDeleteConfirm = false },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("确认删除") },
             text = { Text("确定要从 .env 中删除 ${def.key} 吗？") },
             confirmButton = {
@@ -528,6 +532,8 @@ private fun EnvVarEditDialog(
 
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Form,
+        tone = AppBottomSheetTone.Brand,
         title = {
             Column {
                 Text(def.key, style = MaterialTheme.typography.titleMedium)
@@ -1478,6 +1484,8 @@ private fun PlatformMultiSelectDialog(
 
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Info,
         title = { Text("选择平台") },
         text = {
             Column(
@@ -2023,6 +2031,8 @@ private fun BilibiliCookieEditor(
     if (qrVisible) {
         AppBottomSheetDialog(
             onDismissRequest = { closeQrDialog() },
+            style = AppBottomSheetStyle.Status,
+            tone = AppBottomSheetTone.Info,
             title = { Text("扫码登录 Bilibili") },
             text = {
                 Column(

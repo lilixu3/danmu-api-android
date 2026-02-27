@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.push
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -335,6 +337,8 @@ fun PushDanmuScreen(
     if (viewModel.errorMessage != null) {
         AppBottomSheetDialog(
             onDismissRequest = { viewModel.clearError() },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
@@ -382,6 +386,8 @@ private fun SupportClientsDialog(
 ) {
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Info,
         title = { Text("支持客户端") },
         text = {
             Column(

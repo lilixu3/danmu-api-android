@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import android.content.Intent
 import android.net.Uri
@@ -249,6 +251,8 @@ fun WorkDirScreen(
     if (showWorkDirDialog) {
         AppBottomSheetDialog(
             onDismissRequest = { showWorkDirDialog = false },
+            style = AppBottomSheetStyle.Form,
+            tone = AppBottomSheetTone.Brand,
             title = { Text("设置工作目录") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -292,6 +296,8 @@ fun WorkDirScreen(
                 showAllFilesAccessDialog = false
                 pendingWorkDirPathForPermission = null
             },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Warning,
             title = { Text("需要完整存储权限") },
             text = {
                 Text("Android 11 及以上系统访问此目录需要“所有文件访问权限”，授权后会自动继续切换。")

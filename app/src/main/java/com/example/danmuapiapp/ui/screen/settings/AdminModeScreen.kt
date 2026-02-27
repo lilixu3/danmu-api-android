@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -206,6 +208,8 @@ fun AdminModeScreen(
     if (viewModel.errorMessage != null) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissError,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {

@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -226,6 +228,8 @@ fun ApiTestScreen(
     if (viewModel.errorMessage != null) {
         AppBottomSheetDialog(
             onDismissRequest = { viewModel.clearResult() },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("请求失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
