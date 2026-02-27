@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.download
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -362,6 +364,8 @@ fun DanmuDownloadScreen(
     if (viewModel.errorMessage != null) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::clearError,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = { TextButton(onClick = viewModel::clearError) { Text("知道了") } }

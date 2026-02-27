@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.deviceaccess
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -182,6 +184,8 @@ fun DeviceAccessScreen(
     if (viewModel.errorMessage != null) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissError,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {

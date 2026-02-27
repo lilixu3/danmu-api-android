@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.cache
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -188,6 +190,8 @@ fun CacheManagementScreen(
     if (viewModel.showClearConfirmDialog) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissClearConfirm,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             icon = { Icon(Icons.Rounded.DeleteSweep, null) },
             title = { Text("确认清理缓存") },
             text = {

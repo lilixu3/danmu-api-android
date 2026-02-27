@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,15 +81,28 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     // Settings bottom sheet
     if (showSettings) {
         val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+        val settingsSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
         ModalBottomSheet(
             onDismissRequest = { showSettings = false },
-            sheetState = settingsSheetState
+            sheetState = settingsSheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            dragHandle = {
+                BottomSheetDefaults.DragHandle(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+                )
+            }
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 32.dp),
+                    .heightIn(max = settingsSheetMaxHeight)
+                    .imePadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 4.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text("日志设置", style = MaterialTheme.typography.titleMedium)

@@ -36,6 +36,8 @@ fun GithubProxyPickerDialog(
 ) {
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Info,
         title = { Text(title) },
         text = {
             Column(
