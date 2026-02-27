@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
@@ -48,7 +50,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -96,6 +97,9 @@ import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
+import com.example.danmuapiapp.ui.theme.appDangerButtonColors
+import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
+import com.example.danmuapiapp.ui.theme.appPrimaryIconButtonColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -356,7 +360,7 @@ fun DanmuDownloadScreen(
     }
 
     if (viewModel.errorMessage != null) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::clearError,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
@@ -1103,10 +1107,7 @@ private fun QueuePage(
                     if (viewModel.isDownloading) {
                         Button(
                             onClick = viewModel::pauseDownload,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFC62828),
-                                contentColor = Color.White
-                            )
+                            colors = appDangerButtonColors()
                         ) {
                             Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
@@ -1652,20 +1653,10 @@ private fun DownloadPanelCard(
 }
 
 @Composable
-private fun primaryActionButtonColors() = ButtonDefaults.buttonColors(
-    containerColor = MaterialTheme.colorScheme.primary,
-    contentColor = MaterialTheme.colorScheme.onPrimary,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-)
+private fun primaryActionButtonColors() = appPrimaryButtonColors()
 
 @Composable
-private fun primaryActionIconButtonColors() = IconButtonDefaults.filledIconButtonColors(
-    containerColor = MaterialTheme.colorScheme.primary,
-    contentColor = MaterialTheme.colorScheme.onPrimary,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-)
+private fun primaryActionIconButtonColors() = appPrimaryIconButtonColors()
 
 @Composable
 private fun primarySelectionFilterChipColors() = FilterChipDefaults.filterChipColors(

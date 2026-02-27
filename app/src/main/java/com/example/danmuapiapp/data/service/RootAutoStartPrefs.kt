@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * Root 模式开机自启偏好（模块方案）。
@@ -16,9 +17,8 @@ object RootAutoStartPrefs {
     }
 
     fun setBootAutoStartEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_BOOT_AUTOSTART_ENABLED, enabled)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_BOOT_AUTOSTART_ENABLED, enabled)
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.WebDavConfig
@@ -60,11 +61,11 @@ class WebDavService @Inject constructor(
     }
 
     fun saveConfig(config: WebDavConfig) {
-        prefs.edit()
-            .putString(KEY_URL, config.url.trim())
-            .putString(KEY_USER, config.username.trim())
-            .putString(KEY_PATH, config.folderPath.trim())
-            .apply()
+        prefs.edit {
+            putString(KEY_URL, config.url.trim())
+            putString(KEY_USER, config.username.trim())
+            putString(KEY_PATH, config.folderPath.trim())
+        }
         secureStore.put(KEY_PASS, config.password)
     }
 

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -183,7 +184,7 @@ class DanmuDownloadViewModel @Inject constructor(
     var episodeStates by mutableStateOf<Map<Long, EpisodeDownloadUiState>>(emptyMap())
         private set
 
-    var overallProgress by mutableStateOf(0f)
+    var overallProgress by mutableFloatStateOf(0f)
         private set
 
     var progressSummary by mutableStateOf("等待开始")
@@ -210,7 +211,7 @@ class DanmuDownloadViewModel @Inject constructor(
     var activeTaskDetail by mutableStateOf("")
         private set
 
-    var activeTaskProgress by mutableStateOf(0f)
+    var activeTaskProgress by mutableFloatStateOf(0f)
         private set
 
     var throttleHint by mutableStateOf<String?>(null)

@@ -2,6 +2,8 @@ package com.example.danmuapiapp.data.repository
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DanmuDownloadInput
@@ -264,7 +266,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 error("请先在下载设置中选择保存目录")
             }
 
-            val treeUri = Uri.parse(treeUriText)
+            val treeUri = treeUriText.toUri()
             val root = DocumentFile.fromTreeUri(context, treeUri)
                 ?: error("保存目录无效，请重新选择")
             if (!root.canWrite()) {
@@ -335,7 +337,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
 
     override fun clearRecords() {
         _records.value = emptyList()
-        prefs.edit().putString(KEY_RECORDS_JSON, "[]").apply()
+        prefs.edit { putString(KEY_RECORDS_JSON, "[]") }
     }
 
     private fun buildRecord(
@@ -533,20 +535,20 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
 
     private fun persistSettings(next: DanmuDownloadSettings) {
         _settings.value = next
-        prefs.edit()
-            .putString(KEY_SAVE_TREE_URI, next.saveTreeUri)
-            .putString(KEY_SAVE_DIR_DISPLAY, next.saveDirDisplayName)
-            .putString(KEY_DEFAULT_FORMAT, next.defaultFormat)
-            .putString(KEY_FILE_TEMPLATE, next.fileNameTemplate)
-            .putString(KEY_CONFLICT_POLICY, next.conflictPolicy)
-            .putString(KEY_THROTTLE_PRESET, next.throttlePreset)
-            .putLong(KEY_THROTTLE_CUSTOM_BASE_DELAY, next.customBaseDelayMs)
-            .putLong(KEY_THROTTLE_CUSTOM_JITTER, next.customJitterMaxMs)
-            .putInt(KEY_THROTTLE_CUSTOM_BATCH_SIZE, next.customBatchSize)
-            .putLong(KEY_THROTTLE_CUSTOM_BATCH_REST, next.customBatchRestMs)
-            .putLong(KEY_THROTTLE_CUSTOM_BACKOFF_BASE, next.customBackoffBaseMs)
-            .putLong(KEY_THROTTLE_CUSTOM_BACKOFF_MAX, next.customBackoffMaxMs)
-            .apply()
+        prefs.edit {
+            putString(KEY_SAVE_TREE_URI, next.saveTreeUri)
+            putString(KEY_SAVE_DIR_DISPLAY, next.saveDirDisplayName)
+            putString(KEY_DEFAULT_FORMAT, next.defaultFormat)
+            putString(KEY_FILE_TEMPLATE, next.fileNameTemplate)
+            putString(KEY_CONFLICT_POLICY, next.conflictPolicy)
+            putString(KEY_THROTTLE_PRESET, next.throttlePreset)
+            putLong(KEY_THROTTLE_CUSTOM_BASE_DELAY, next.customBaseDelayMs)
+            putLong(KEY_THROTTLE_CUSTOM_JITTER, next.customJitterMaxMs)
+            putInt(KEY_THROTTLE_CUSTOM_BATCH_SIZE, next.customBatchSize)
+            putLong(KEY_THROTTLE_CUSTOM_BATCH_REST, next.customBatchRestMs)
+            putLong(KEY_THROTTLE_CUSTOM_BACKOFF_BASE, next.customBackoffBaseMs)
+            putLong(KEY_THROTTLE_CUSTOM_BACKOFF_MAX, next.customBackoffMaxMs)
+        }
     }
 
     private fun appendRecord(record: DanmuDownloadRecord) {
@@ -556,7 +558,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         val payload = runCatching {
             json.encodeToString(ListSerializer(DanmuDownloadRecord.serializer()), trimmed)
         }.getOrDefault("[]")
-        prefs.edit().putString(KEY_RECORDS_JSON, payload).apply()
+        prefs.edit { putString(KEY_RECORDS_JSON, payload) }
     }
 
     private fun persistQueueTasks(tasks: List<DanmuDownloadTask>) {
@@ -564,7 +566,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         val payload = runCatching {
             json.encodeToString(ListSerializer(DanmuDownloadTask.serializer()), tasks)
         }.getOrDefault("[]")
-        prefs.edit().putString(KEY_QUEUE_JSON, payload).apply()
+        prefs.edit { putString(KEY_QUEUE_JSON, payload) }
     }
 
     private fun loadSettings(): DanmuDownloadSettings {

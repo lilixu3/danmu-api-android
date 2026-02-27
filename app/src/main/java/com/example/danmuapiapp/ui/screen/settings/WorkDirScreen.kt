@@ -1,9 +1,12 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.net.toUri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -28,7 +31,6 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -245,7 +247,7 @@ fun WorkDirScreen(
     }
 
     if (showWorkDirDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showWorkDirDialog = false },
             title = { Text("设置工作目录") },
             text = {
@@ -285,7 +287,7 @@ fun WorkDirScreen(
     }
 
     if (showAllFilesAccessDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = {
                 showAllFilesAccessDialog = false
                 pendingWorkDirPathForPermission = null
@@ -299,7 +301,7 @@ fun WorkDirScreen(
                     showAllFilesAccessDialog = false
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                            data = Uri.parse("package:${context.packageName}")
+                            data = "package:${context.packageName}".toUri()
                         }
                         val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
                         runCatching { allFilesAccessLauncher.launch(appIntent) }.getOrElse {

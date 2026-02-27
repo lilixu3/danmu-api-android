@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -58,8 +59,9 @@ fun ThemeDisplayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
+    val configuration = LocalConfiguration.current
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
-    val appCurrentDpi = context.resources.displayMetrics.densityDpi
+    val appCurrentDpi = configuration.densityDpi
     val effectiveDpi = if (appDpiOverride > 0) appDpiOverride else systemDpi
     val presetDpi = remember(systemDpi) {
         listOf(

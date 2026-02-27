@@ -90,7 +90,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyHideFromRecents(hide: Boolean) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
         runCatching {
             val am = getSystemService(ACTIVITY_SERVICE) as? ActivityManager ?: return@runCatching
             am.appTasks.forEach { task ->

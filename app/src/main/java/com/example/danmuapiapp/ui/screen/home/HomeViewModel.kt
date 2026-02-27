@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.FileObserver
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -33,6 +34,7 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -122,7 +124,7 @@ class HomeViewModel @Inject constructor(
         private set
     var isDownloadingAppUpdate by mutableStateOf(false)
         private set
-    var appUpdateDownloadPercent by mutableStateOf(0)
+    var appUpdateDownloadPercent by mutableIntStateOf(0)
         private set
     var appUpdateDownloadDetail by mutableStateOf("等待下载")
         private set
@@ -784,8 +786,8 @@ class HomeViewModel @Inject constructor(
         val h = seconds / 3600
         val m = (seconds % 3600) / 60
         val s = seconds % 60
-        return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
-        else String.format("%02d:%02d", m, s)
+        return if (h > 0) String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s)
+        else String.format(Locale.getDefault(), "%02d:%02d", m, s)
     }
 
     private suspend fun waitForStatus(statuses: Set<ServiceStatus>, timeoutMs: Long): ServiceStatus? {
@@ -949,9 +951,9 @@ class HomeViewModel @Inject constructor(
         val mb = kb * 1024
         val gb = mb * 1024
         return when {
-            v >= gb -> String.format("%.2fGB", v / gb)
-            v >= mb -> String.format("%.2fMB", v / mb)
-            v >= kb -> String.format("%.1fKB", v / kb)
+            v >= gb -> String.format(Locale.getDefault(), "%.2fGB", v / gb)
+            v >= mb -> String.format(Locale.getDefault(), "%.2fMB", v / mb)
+            v >= kb -> String.format(Locale.getDefault(), "%.1fKB", v / kb)
             else -> "${v}B"
         }
     }

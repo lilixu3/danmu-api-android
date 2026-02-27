@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.GithubProxyOption
@@ -70,12 +71,12 @@ class GithubProxyService @Inject constructor(
     }
 
     fun clearUserSelection() {
-        prefs.edit()
-            .putBoolean(KEY_HAS_USER_SELECTED, false)
-            .putString(KEY_SELECTED_PROXY_ID, PROXY_ID_ORIGINAL)
-            .putBoolean(KEY_AUTO_SELECT, true)
-            .putString(KEY_GITHUB_PROXY, "")
-            .apply()
+        prefs.edit {
+            putBoolean(KEY_HAS_USER_SELECTED, false)
+            putString(KEY_SELECTED_PROXY_ID, PROXY_ID_ORIGINAL)
+            putBoolean(KEY_AUTO_SELECT, true)
+            putString(KEY_GITHUB_PROXY, "")
+        }
         _hasUserSelected.value = false
         _selectedProxyId.value = PROXY_ID_ORIGINAL
     }
@@ -167,12 +168,12 @@ class GithubProxyService @Inject constructor(
 
     private fun persistSelection(proxyId: String, markSelected: Boolean) {
         val option = allOptions.firstOrNull { it.id == proxyId } ?: allOptions.first()
-        prefs.edit()
-            .putString(KEY_SELECTED_PROXY_ID, option.id)
-            .putBoolean(KEY_HAS_USER_SELECTED, markSelected)
-            .putBoolean(KEY_AUTO_SELECT, !markSelected)
-            .putString(KEY_GITHUB_PROXY, if (option.isOriginal) "" else option.baseUrl)
-            .apply()
+        prefs.edit {
+            putString(KEY_SELECTED_PROXY_ID, option.id)
+            putBoolean(KEY_HAS_USER_SELECTED, markSelected)
+            putBoolean(KEY_AUTO_SELECT, !markSelected)
+            putString(KEY_GITHUB_PROXY, if (option.isOriginal) "" else option.baseUrl)
+        }
 
         _selectedProxyId.value = option.id
         _hasUserSelected.value = markSelected

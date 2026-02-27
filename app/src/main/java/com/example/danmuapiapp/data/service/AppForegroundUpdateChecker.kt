@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,13 +75,13 @@ class AppForegroundUpdateChecker @Inject constructor(
     fun snoozeReminderForToday() {
         val until = System.currentTimeMillis() + REMIND_SNOOZE_MS
         remindSnoozeUntilTime.set(until)
-        prefs.edit().putLong(KEY_REMIND_SNOOZE_UNTIL_TS, until).apply()
+        prefs.edit { putLong(KEY_REMIND_SNOOZE_UNTIL_TS, until) }
         _latestUpdate.value = null
     }
 
     private fun persistLastAutoCheckTime(ts: Long) {
         lastAutoCheckTime.set(ts)
-        prefs.edit().putLong(KEY_LAST_AUTO_CHECK_TS, ts).apply()
+        prefs.edit { putLong(KEY_LAST_AUTO_CHECK_TS, ts) }
     }
 
     private fun isInRemindSnooze(now: Long): Boolean {

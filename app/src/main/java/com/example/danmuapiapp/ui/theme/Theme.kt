@@ -8,46 +8,44 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    // 暗色主题：霓虹夜景风（灵感来自 Tokyo Night / Catppuccin）
-    primary            = Color(0xFF7DCFFF),
-    onPrimary          = Color(0xFF031A28),
-    primaryContainer   = Color(0xFF12324A),
+    // 暗色主题：保持原风格，仅去掉紫色分支
+    primary = Color(0xFF7DCFFF),
+    onPrimary = Color(0xFF031A28),
+    primaryContainer = Color(0xFF12324A),
     onPrimaryContainer = Color(0xFFBEE8FF),
 
-    secondary            = Color(0xFFC4B5FD),
-    onSecondary          = Color(0xFF2B1D46),
-    secondaryContainer   = Color(0xFF3A2B5A),
-    onSecondaryContainer = Color(0xFFE9DDFF),
+    secondary = Color(0xFF7EAFFF),
+    onSecondary = Color(0xFF0A2342),
+    secondaryContainer = Color(0xFF2B4168),
+    onSecondaryContainer = Color(0xFFDCE7FF),
 
-    tertiary            = Color(0xFF73DACA),
-    onTertiary          = Color(0xFF042620),
-    tertiaryContainer   = Color(0xFF123F38),
+    tertiary = Color(0xFF73DACA),
+    onTertiary = Color(0xFF042620),
+    tertiaryContainer = Color(0xFF123F38),
     onTertiaryContainer = Color(0xFFB7F4EA),
 
-    background   = Color(0xFF090E19),
+    background = Color(0xFF090E19),
     onBackground = Color(0xFFE6EAFA),
-    surface      = Color(0xFF0E1422),
-    onSurface    = Color(0xFFE6EAFA),
+    surface = Color(0xFF0E1422),
+    onSurface = Color(0xFFE6EAFA),
 
-    surfaceVariant   = Color(0xFF202A42),
+    surfaceVariant = Color(0xFF202A42),
     onSurfaceVariant = Color(0xFF9CA8CA),
 
-    outline        = Color(0xFF4F5E86),
+    outline = Color(0xFF4F5E86),
     outlineVariant = Color(0xFF313D60),
 
-    surfaceContainerLowest  = Color(0xFF060A13),
-    surfaceContainerLow     = Color(0xFF0A1020),
-    surfaceContainer        = Color(0xFF111A2E),
-    surfaceContainerHigh    = Color(0xFF17233A),
+    surfaceContainerLowest = Color(0xFF060A13),
+    surfaceContainerLow = Color(0xFF0A1020),
+    surfaceContainer = Color(0xFF111A2E),
+    surfaceContainerHigh = Color(0xFF17233A),
     surfaceContainerHighest = Color(0xFF1F2D47),
 
-    error            = Color(0xFFFF8BA7),
-    onError          = Color(0xFF3A0618),
-    errorContainer   = Color(0xFF5A1A32),
+    error = Color(0xFFFF8BA7),
+    onError = Color(0xFF3A0618),
+    errorContainer = Color(0xFF5A1A32),
     onErrorContainer = Color(0xFFFFD9E3),
 )
-
-// 浅色主题保持现有风格
 
 private val Blue40 = Color(0xFF4E6498)
 private val BlueGrey40 = Color(0xFF5D667C)
@@ -56,13 +54,14 @@ private val Indigo40 = Color(0xFF6A6393)
 private val LightColorScheme = lightColorScheme(
     primary = Blue40,
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFDDE5F8),
+    // 浅色主容器仅加深一点，保持同色系观感
+    primaryContainer = Color(0xFFD2DCF4),
     onPrimaryContainer = Color(0xFF26324D),
     secondary = BlueGrey40,
-    secondaryContainer = Color(0xFFE3E7F1),
+    secondaryContainer = Color(0xFFDCE2EE),
     onSecondaryContainer = Color(0xFF2C3344),
     tertiary = Indigo40,
-    tertiaryContainer = Color(0xFFE5E1F4),
+    tertiaryContainer = Color(0xFFDDD9EE),
     onTertiaryContainer = Color(0xFF322F4B),
     background = Color(0xFFF4F5FA),
     surface = Color(0xFFF4F5FA),
