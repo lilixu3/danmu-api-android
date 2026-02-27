@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.SystemClock
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -68,19 +67,11 @@ object SystemHeartbeatScheduler {
 
         val intervalMinutes = NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(context)
         val triggerAt = SystemClock.elapsedRealtime() + intervalMinutes * 60_000L
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAt,
-                pendingIntent
-            )
-        } else {
-            alarmManager.set(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAt,
-                pendingIntent
-            )
-        }
+        alarmManager.setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            triggerAt,
+            pendingIntent
+        )
     }
 
     fun cancel(context: Context) {
@@ -92,11 +83,7 @@ object SystemHeartbeatScheduler {
     }
 
     private fun buildPendingIntent(context: Context, create: Boolean): PendingIntent? {
-        val flagsBase = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_IMMUTABLE
-        } else {
-            0
-        }
+        val flagsBase = PendingIntent.FLAG_IMMUTABLE
         val flags = if (create) {
             flagsBase or PendingIntent.FLAG_UPDATE_CURRENT
         } else {

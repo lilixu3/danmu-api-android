@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.FileObserver
+import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NodeProjectManager
@@ -23,6 +24,7 @@ import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
+import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -44,7 +46,8 @@ import javax.inject.Singleton
 
 @Singleton
 class RuntimeRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) : RuntimeRepository {
 
     companion object {
@@ -311,11 +314,10 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateVariant(variant: ApiVariant) {
-        prefs.edit().putString("variant", variant.key).apply()
-        context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
-            .edit()
-            .putString("variant", variant.key)
-            .apply()
+        prefs.edit { putString("variant", variant.key) }
+        context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE).edit {
+            putString("variant", variant.key)
+        }
         _runtimeState.update { it.copy(variant = variant) }
     }
 
@@ -462,7 +464,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         applyPort: Boolean,
         applyToken: Boolean
     ) {
-        prefs.edit().apply {
+        prefs.edit {
             if (applyPort) {
                 putInt("port", port)
             }
@@ -473,7 +475,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     putString("token", token)
                 }
             }
-        }.apply()
+        }
 
         val lanIp = getLanIp()
         _runtimeState.update { state ->
@@ -526,7 +528,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     override fun addLog(level: LogLevel, message: String) {
         _eventLogs.update { current ->
-            (current + LogEntry(level = level, message = message)).takeLast(500)
+            (current + LogEntry(level = level, message = message)).takeLast(settingsRepository.logMaxCount.value)
         }
         publishMergedLogs()
     }
@@ -803,11 +805,12 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun publishMergedLogs() {
         val merged = (serviceLogsCache + _eventLogs.value)
             .sortedBy { it.timestamp }
-            .takeLast(500)
+            .takeLast(settingsRepository.logMaxCount.value)
         _logs.value = merged
     }
 
     private fun refreshLogsOnce() {
+        if (!settingsRepository.logEnabled.value) return
         runCatching {
             val serviceLogs = collectServiceLogsOnce()
             if (serviceLogs.isNotEmpty() || serviceLogsCache.isNotEmpty()) {
@@ -857,7 +860,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 level = LogLevel.Info,
                 message = line
             )
-        }.takeLast(400)
+        }.takeLast(settingsRepository.logMaxCount.value)
     }
 
     private fun parseStructuredLogLine(line: String): LogEntry? {
@@ -1231,11 +1234,11 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun saveRuntimeStartedAt(startedAt: Long) {
-        prefs.edit().putLong(KEY_RUNTIME_STARTED_AT_MS, startedAt).apply()
+        prefs.edit { putLong(KEY_RUNTIME_STARTED_AT_MS, startedAt) }
     }
 
     private fun clearRuntimeStartedAt() {
-        prefs.edit().remove(KEY_RUNTIME_STARTED_AT_MS).apply()
+        prefs.edit { remove(KEY_RUNTIME_STARTED_AT_MS) }
     }
 
     private fun uptimeSecondsFrom(startedAtMs: Long): Long {
@@ -1322,7 +1325,6 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun getLanIp(): String {
         val activeNetworkIp = runCatching {
             val cm = connectivityManager ?: return@runCatching null
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return@runCatching null
             val activeNetwork = cm.activeNetwork ?: return@runCatching null
             val properties = cm.getLinkProperties(activeNetwork) ?: return@runCatching null
             properties.linkAddresses

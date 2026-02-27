@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.net.toUri
 import java.util.Locale
 
 object NormalModeKeepAliveGuideNavigator {
@@ -18,17 +19,18 @@ object NormalModeKeepAliveGuideNavigator {
     }
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
         return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
 
     fun openAppBatterySettings(context: Context): Boolean {
-        val packageUri = Uri.parse("package:${context.packageName}")
+        val packageUri = "package:${context.packageName}".toUri()
         val candidates = listOf(
             Intent("android.settings.APP_BATTERY_SETTINGS").apply {
                 data = packageUri
-                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                }
             },
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = packageUri
@@ -38,13 +40,11 @@ object NormalModeKeepAliveGuideNavigator {
     }
 
     fun requestIgnoreBatteryOptimization(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
         if (isIgnoringBatteryOptimizations(context)) return false
-        val packageUri = Uri.parse("package:${context.packageName}")
+        val packageUri = "package:${context.packageName}".toUri()
         val candidates = listOf(
-            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = packageUri
-            },
+            Intent("android.settings.APP_BATTERY_SETTINGS").apply { data = packageUri },
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = packageUri },
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
         )
         return candidates.any { launchIntent(context, it) }
@@ -84,7 +84,7 @@ object NormalModeKeepAliveGuideNavigator {
         if (candidates.any { launchIntent(context, it) }) return true
 
         val appInfoIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.parse("package:${context.packageName}")
+            data = "package:${context.packageName}".toUri()
         }
         return launchIntent(context, appInfoIntent)
     }
@@ -102,7 +102,7 @@ object NormalModeKeepAliveGuideNavigator {
             else -> ""
         }
         val url = if (slug.isBlank()) "https://dontkillmyapp.com/" else "https://dontkillmyapp.com/$slug"
-        return launchIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        return launchIntent(context, Intent(Intent.ACTION_VIEW, url.toUri()))
     }
 
     fun recentsLockHint(): String {

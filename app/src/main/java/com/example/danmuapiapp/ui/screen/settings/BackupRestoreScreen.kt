@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 
 @Composable
 fun BackupRestoreScreen(
@@ -122,10 +125,7 @@ fun BackupRestoreScreen(
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                                contentColor = MaterialTheme.colorScheme.primary
-                            )
+                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -158,10 +158,7 @@ fun BackupRestoreScreen(
                             modifier = Modifier.weight(1f),
                             enabled = !viewModel.isWebDavOperating,
                             shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                                contentColor = MaterialTheme.colorScheme.primary
-                            )
+                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.CloudUpload, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -210,7 +207,7 @@ fun BackupRestoreScreen(
 
     // ── Import confirm dialog ──
     if (showImportConfirmDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showImportConfirmDialog = false },
             title = { Text("确认导入 .env") },
             text = { Text("导入将覆盖当前配置，是否继续？") },
@@ -237,7 +234,7 @@ fun BackupRestoreScreen(
 
     // ── WebDAV restore confirm dialog ──
     if (showWebDavRestoreConfirmDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showWebDavRestoreConfirmDialog = false },
             title = { Text("确认云端恢复") },
             text = { Text("将从 WebDAV 下载并覆盖当前 .env，是否继续？") },
@@ -284,7 +281,7 @@ private fun WebDavConfigDialog(
     onDismiss: () -> Unit
 ) {
     var showPassword by remember { mutableStateOf(false) }
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         title = { Text("WebDAV 设置") },
         text = {

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
@@ -354,7 +355,7 @@ private fun GuideSection(
 
 private fun Context.openUrl(url: String) {
     runCatching {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         })
     }

@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
 import android.Manifest
@@ -48,7 +50,7 @@ object RuntimePaths {
         if (raw.isNotBlank()) return raw
         val uriText = prefs.safeGetString(KEY_CUSTOM_BASE_URI).trim()
         if (uriText.isBlank()) return null
-        val uri = runCatching { Uri.parse(uriText) }.getOrNull() ?: return null
+        val uri = runCatching { uriText.toUri() }.getOrNull() ?: return null
         return resolveTreeUriToPath(uri)
     }
 
@@ -88,23 +90,22 @@ object RuntimePaths {
     fun isCustomEnabled(context: Context): Boolean = readCustomBasePath(context) != null
 
     fun clearCustomBasePath(context: Context) {
-        context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE)
-            .edit()
-            .remove(KEY_CUSTOM_BASE_PATH)
-            .remove(KEY_CUSTOM_BASE_URI)
-            .commit()
+        context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE).edit(commit = true) {
+            remove(KEY_CUSTOM_BASE_PATH)
+            remove(KEY_CUSTOM_BASE_URI)
+        }
     }
 
     fun setCustomBasePath(context: Context, path: String?) {
         val prefs = context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE)
-        val editor = prefs.edit()
         val value = path?.trim().orEmpty()
-        if (value.isBlank()) {
-            editor.remove(KEY_CUSTOM_BASE_PATH)
-        } else {
-            editor.putString(KEY_CUSTOM_BASE_PATH, value)
+        prefs.edit(commit = true) {
+            if (value.isBlank()) {
+                remove(KEY_CUSTOM_BASE_PATH)
+            } else {
+                putString(KEY_CUSTOM_BASE_PATH, value)
+            }
         }
-        editor.commit()
     }
 
     fun buildWorkDirInfo(context: Context): WorkDirInfo {

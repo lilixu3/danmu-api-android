@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import androidx.core.content.edit
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.RunMode
 
@@ -35,10 +36,9 @@ object NodeKeepAlivePrefs {
     }
 
     fun setKeepAliveEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_KEEP_ALIVE_ENABLED, enabled)
-            .apply()
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_KEEP_ALIVE_ENABLED, enabled)
+        }
     }
 
     fun isDesiredRunning(context: Context): Boolean {
@@ -47,10 +47,9 @@ object NodeKeepAlivePrefs {
     }
 
     fun setDesiredRunning(context: Context, desired: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_DESIRED_RUNNING, desired)
-            .apply()
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_DESIRED_RUNNING, desired)
+        }
     }
 
     fun isRootMode(context: Context): Boolean {
@@ -71,10 +70,9 @@ object NodeKeepAlivePrefs {
     }
 
     fun setHeartbeatEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_HEARTBEAT_ENABLED, enabled)
-            .apply()
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_HEARTBEAT_ENABLED, enabled)
+        }
     }
 
     fun getHeartbeatMode(context: Context): KeepAliveHeartbeatMode {
@@ -84,10 +82,9 @@ object NodeKeepAlivePrefs {
     }
 
     fun setHeartbeatMode(context: Context, mode: KeepAliveHeartbeatMode) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_HEARTBEAT_MODE, mode.key)
-            .apply()
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+            putString(KEY_HEARTBEAT_MODE, mode.key)
+        }
     }
 
     fun getHeartbeatIntervalMinutes(context: Context): Int {
@@ -97,10 +94,9 @@ object NodeKeepAlivePrefs {
     }
 
     fun setHeartbeatIntervalMinutes(context: Context, minutes: Int) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_HEARTBEAT_INTERVAL_MINUTES, normalizeHeartbeatIntervalMinutes(minutes))
-            .apply()
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+            putInt(KEY_HEARTBEAT_INTERVAL_MINUTES, normalizeHeartbeatIntervalMinutes(minutes))
+        }
     }
 
     fun normalizeHeartbeatIntervalMinutes(minutes: Int): Int {

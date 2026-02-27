@@ -2,6 +2,7 @@ package com.example.danmuapiapp.data.service
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import com.example.danmuapiapp.domain.model.RunMode
 
 /**
@@ -42,10 +43,10 @@ object RuntimeModePrefs {
     }
 
     fun put(prefs: SharedPreferences, mode: RunMode) {
-        prefs.edit()
-            .putString(KEY_RUN_MODE, mode.key)
+        prefs.edit {
+            putString(KEY_RUN_MODE, mode.key)
             // 兼容旧逻辑：仅 Root 模式视为“高权限模式”
-            .putBoolean(KEY_ROOT_MODE_LEGACY, mode == RunMode.Root)
-            .apply()
+            putBoolean(KEY_ROOT_MODE_LEGACY, mode == RunMode.Root)
+        }
     }
 }

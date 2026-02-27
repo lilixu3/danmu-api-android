@@ -1,10 +1,10 @@
 package com.example.danmuapiapp.data.util
 
 import android.content.SharedPreferences
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -39,21 +39,20 @@ class SecureStringStore(
 
     fun put(key: String, value: String) {
         if (value.isBlank()) {
-            prefs.edit().putString(key, "").apply()
+            prefs.edit { putString(key, "") }
             return
         }
         val encrypted = encrypt(value)
-        prefs.edit().putString(key, encrypted ?: value).apply()
+        prefs.edit { putString(key, encrypted ?: value) }
     }
 
     private fun migratePlainValue(key: String, value: String) {
         if (value.isBlank()) return
         val encrypted = encrypt(value) ?: return
-        prefs.edit().putString(key, encrypted).apply()
+        prefs.edit { putString(key, encrypted) }
     }
 
     private fun encrypt(value: String): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         return runCatching {
             val secretKey = getOrCreateSecretKey() ?: return null
             val cipher = Cipher.getInstance(TRANSFORMATION).apply {
@@ -68,7 +67,6 @@ class SecureStringStore(
     }
 
     private fun decrypt(payloadText: String): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         return runCatching {
             val secretKey = getOrCreateSecretKey() ?: return null
             val payload = Base64.decode(payloadText, Base64.DEFAULT)
@@ -83,7 +81,6 @@ class SecureStringStore(
     }
 
     private fun getOrCreateSecretKey(): SecretKey? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         val ks = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         val existing = ks.getKey(keyAlias, null) as? SecretKey
         if (existing != null) return existing

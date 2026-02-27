@@ -1,7 +1,10 @@
 package com.example.danmuapiapp.ui.screen.config
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import androidx.core.graphics.createBitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -505,7 +508,7 @@ private fun EnvVarEditDialog(
     var showDeleteConfirm by remember(def.key) { mutableStateOf(false) }
 
     if (showDeleteConfirm) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("确认删除") },
             text = { Text("确定要从 .env 中删除 ${def.key} 吗？") },
@@ -523,7 +526,7 @@ private fun EnvVarEditDialog(
 
     val normalizedKey = remember(def.key) { def.key.trim().uppercase(Locale.getDefault()) }
 
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
@@ -1473,7 +1476,7 @@ private fun PlatformMultiSelectDialog(
         mutableStateOf(canonicalizePlatformSelection(initialSelected, options))
     }
 
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         title = { Text("选择平台") },
         text = {
@@ -2018,7 +2021,7 @@ private fun BilibiliCookieEditor(
     }
 
     if (qrVisible) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { closeQrDialog() },
             title = { Text("扫码登录 Bilibili") },
             text = {
@@ -2158,7 +2161,7 @@ private fun formatLatencyMs(latencyMs: Long?): String {
 
 private fun buildQrBitmap(content: String, sizePx: Int): ImageBitmap {
     val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx)
-    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val bitmap = createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val pixels = IntArray(sizePx * sizePx)
     for (y in 0 until sizePx) {
         for (x in 0 until sizePx) {

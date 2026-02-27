@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -35,7 +37,7 @@ fun ApiTestScreen(
     val clipboard = LocalClipboard.current
 
     var endpointExpanded by remember { mutableStateOf(false) }
-    var endpointIndex by remember { mutableStateOf(0) }
+    var endpointIndex by remember { mutableIntStateOf(0) }
     var baseUrl by remember(runtimeState.localUrl, runtimeState.lanUrl) {
         mutableStateOf(RuntimeUrlParser.extractBase(runtimeState.localUrl))
     }
@@ -222,7 +224,7 @@ fun ApiTestScreen(
 
     // Error dialog
     if (viewModel.errorMessage != null) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { viewModel.clearResult() },
             title = { Text("请求失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },

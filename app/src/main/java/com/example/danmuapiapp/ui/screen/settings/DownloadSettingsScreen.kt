@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,11 +29,9 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -64,6 +64,7 @@ import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsValueItem
+import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -541,7 +542,7 @@ private fun CustomThrottleEditorDialog(
     onResetDefault: () -> Unit,
     onSave: () -> Unit
 ) {
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         title = { Text("编辑自定义流控") },
         text = {
@@ -645,12 +646,7 @@ private fun CustomThrottleEditorDialog(
 }
 
 @Composable
-private fun primaryActionButtonColors() = ButtonDefaults.buttonColors(
-    containerColor = MaterialTheme.colorScheme.primary,
-    contentColor = MaterialTheme.colorScheme.onPrimary,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-)
+private fun primaryActionButtonColors() = appPrimaryButtonColors()
 
 @Composable
 private fun primarySelectionFilterChipColors() = FilterChipDefaults.filterChipColors(

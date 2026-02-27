@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -23,6 +25,9 @@ import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.GithubRelease
 import com.example.danmuapiapp.ui.component.GlassCard
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import com.example.danmuapiapp.ui.theme.appTonalIconButtonColors
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -245,10 +250,7 @@ private fun CoreVariantCard(
                     onClick = { vm.openGearMenu(info.variant) },
                     enabled = !vm.isOperating,
                     modifier = Modifier.size(44.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    colors = appTonalIconButtonColors()
                 ) {
                     Icon(Icons.Rounded.Settings, "核心维护", Modifier.size(20.dp))
                 }
@@ -269,10 +271,7 @@ private fun CoreVariantCard(
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 44.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                        contentColor = MaterialTheme.colorScheme.primary
-                    )
+                    colors = appTonalButtonColors()
                 ) {
                     if (!info.hasUpdate && vm.isCheckingUpdate) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -344,7 +343,7 @@ private fun CoreVariantCard(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("确认删除") },
             text = { Text("确定要删除 ${info.variant.label} 吗？") },
@@ -364,9 +363,9 @@ private fun formatBytes(bytes: Long): String {
     val mb = kb * 1024
     val gb = mb * 1024
     return when {
-        bytes >= gb -> String.format("%.2f GB", bytes / gb)
-        bytes >= mb -> String.format("%.2f MB", bytes / mb)
-        bytes >= kb -> String.format("%.2f KB", bytes / kb)
+        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
+        bytes >= mb -> String.format(Locale.getDefault(), "%.2f MB", bytes / mb)
+        bytes >= kb -> String.format(Locale.getDefault(), "%.2f KB", bytes / kb)
         else -> "$bytes B"
     }
 }
@@ -375,7 +374,7 @@ private fun formatBytes(bytes: Long): String {
 private fun UpdateResultDialog(vm: CoreViewModel) {
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = vm::dismissUpdateDialog,
         icon = {
             Icon(
@@ -414,7 +413,7 @@ private fun RollbackDialog(
     onSelect: (ApiVariant, GithubRelease) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.History, null) },
         title = { Text("回退版本") },
@@ -472,7 +471,7 @@ private fun CustomRepoDialog(
     onDismiss: () -> Unit
 ) {
     var repoText by remember { mutableStateOf(currentRepo) }
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Tune, null) },
         title = { Text("自定义仓库") },

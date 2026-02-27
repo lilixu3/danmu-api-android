@@ -18,11 +18,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -46,6 +44,7 @@ import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.SettingsValueItem
+import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 
 @Composable
 fun GithubTokenScreen(
@@ -119,10 +118,7 @@ fun GithubTokenScreen(
                             enabled = hasChanged,
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                                contentColor = MaterialTheme.colorScheme.primary
-                            )
+                            colors = appTonalButtonColors()
                         ) {
                             Text("保存 Token")
                         }

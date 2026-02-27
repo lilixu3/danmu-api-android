@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.util
 import android.content.Context
 import android.content.res.Configuration
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.appcompat.app.AppCompatDelegate
 import com.example.danmuapiapp.domain.model.NightModePreference
 
@@ -44,10 +45,10 @@ object AppAppearancePrefs {
             NightModePreference.Light -> false
             NightModePreference.FollowSystem -> prefs.safeGetBoolean(PREF_KEY_DARK_THEME_LEGACY, false)
         }
-        prefs.edit()
-            .putInt(PREF_KEY_NIGHT_MODE, mode.storageValue)
-            .putBoolean(PREF_KEY_DARK_THEME_LEGACY, legacyDark)
-            .apply()
+        prefs.edit {
+            putInt(PREF_KEY_NIGHT_MODE, mode.storageValue)
+            putBoolean(PREF_KEY_DARK_THEME_LEGACY, legacyDark)
+        }
     }
 
     fun readHideFromRecents(prefs: SharedPreferences): Boolean {
@@ -55,7 +56,7 @@ object AppAppearancePrefs {
     }
 
     fun writeHideFromRecents(prefs: SharedPreferences, enabled: Boolean) {
-        prefs.edit().putBoolean(PREF_KEY_HIDE_FROM_RECENTS, enabled).apply()
+        prefs.edit { putBoolean(PREF_KEY_HIDE_FROM_RECENTS, enabled) }
     }
 
     fun readAppDpiOverride(prefs: SharedPreferences): Int {
@@ -64,9 +65,9 @@ object AppAppearancePrefs {
     }
 
     fun writeAppDpiOverride(prefs: SharedPreferences, dpi: Int) {
-        prefs.edit()
-            .putInt(PREF_KEY_APP_DPI_OVERRIDE, normalizeAppDpiOverride(dpi))
-            .apply()
+        prefs.edit {
+            putInt(PREF_KEY_APP_DPI_OVERRIDE, normalizeAppDpiOverride(dpi))
+        }
     }
 
     fun normalizeAppDpiOverride(dpi: Int): Int {
