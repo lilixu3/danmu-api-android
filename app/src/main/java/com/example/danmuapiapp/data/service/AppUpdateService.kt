@@ -14,8 +14,10 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
+import androidx.core.content.edit
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -167,7 +169,7 @@ class AppUpdateService @Inject constructor(
             if (!activity.packageManager.canRequestPackageInstalls()) {
                 savePendingInstall(activity, apk)
                 val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                    data = Uri.parse("package:${activity.packageName}")
+                    data = "package:${activity.packageName}".toUri()
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 runCatching { activity.startActivity(intent) }
@@ -194,7 +196,7 @@ class AppUpdateService @Inject constructor(
             return false
         }
 
-        val uri = runCatching { Uri.parse(uriStr) }.getOrNull()
+        val uri = runCatching { uriStr.toUri() }.getOrNull()
         if (uri == null || !isUriReadable(activity, uri)) {
             clearPendingInstall(activity)
             Toast.makeText(activity, "安装包已不可用，请重新下载", Toast.LENGTH_SHORT).show()
@@ -218,7 +220,7 @@ class AppUpdateService @Inject constructor(
     }
 
     fun openUrl(activity: Activity, url: String) {
-        runCatching { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        runCatching { activity.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
 
     private data class ReleaseInfo(
@@ -397,35 +399,91 @@ class AppUpdateService @Inject constructor(
 
     private fun selectBestApk(assets: List<ApkAsset>): ApkAsset? {
         if (assets.isEmpty()) return null
-        val normalized = assets.map { it to it.name.lowercase(Locale.getDefault()) }
-        val abis = Build.SUPPORTED_ABIS.map { it.lowercase(Locale.getDefault()) }
+        data class ParsedAsset(
+            val asset: ApkAsset,
+            val abiTag: String?
+        )
 
-        fun findBySuffix(suffix: String): ApkAsset? {
-            return normalized.firstOrNull { it.second.contains(suffix) }?.first
+        val parsed = assets.map { asset ->
+            ParsedAsset(
+                asset = asset,
+                abiTag = parseAbiTagFromFileName(asset.name)
+            )
         }
 
-        for (abi in abis) {
-            val match = findBySuffix("-$abi.apk") ?: findBySuffix("_$abi.apk")
-            if (match != null) return match
+        fun findByAbiTag(tag: String): ApkAsset? {
+            return parsed.firstOrNull { it.abiTag == tag }?.asset
         }
 
-        val universal = findBySuffix("-universal.apk")
-            ?: normalized.firstOrNull { it.second.contains("universal") }?.first
-        if (universal != null) return universal
+        // 按设备 ABI 优先级选择，确保下载到可安装架构。
+        val preferredAbiOrder = buildPreferredAbiOrder(Build.SUPPORTED_ABIS.toList())
+        preferredAbiOrder.forEach { abiTag ->
+            findByAbiTag(abiTag)?.let { return it }
+        }
 
-        if (abis.any { it.startsWith("arm64") }) {
-            return findBySuffix("-arm64-v8a.apk") ?: findBySuffix("-armeabi-v7a.apk") ?: assets.first()
+        // 如果存在通用包，优先使用通用包。
+        findByAbiTag("universal")?.let { return it }
+
+        // 文件名无法识别 ABI 时，若只有一个 APK，则保留兼容旧发布行为。
+        val unknownAbiAssets = parsed.filter { it.abiTag == null }.map { it.asset }
+        if (unknownAbiAssets.size == 1) return unknownAbiAssets.first()
+
+        // 若全部是已识别但不兼容的 ABI，则返回 null，避免误下错架构安装包。
+        if (parsed.any { it.abiTag != null }) return null
+
+        // 最后兜底：旧格式且无法识别时，保持原行为。
+        return assets.firstOrNull()
+    }
+
+    private fun buildPreferredAbiOrder(abis: List<String>): List<String> {
+        val normalizedAbis = abis.map { normalizeAbiTag(it) }.distinct()
+        val order = mutableListOf<String>()
+        normalizedAbis.forEach { abi ->
+            when (abi) {
+                "arm64-v8a" -> {
+                    order += "arm64-v8a"
+                    // arm64 设备通常兼容 32 位包，作为降级兜底。
+                    order += "armeabi-v7a"
+                }
+                "armeabi-v7a", "armeabi" -> {
+                    order += "armeabi-v7a"
+                }
+                "x86_64" -> {
+                    order += "x86_64"
+                    order += "x86"
+                }
+                "x86" -> {
+                    order += "x86"
+                }
+            }
         }
-        if (abis.any { it.startsWith("armeabi") }) {
-            return findBySuffix("-armeabi-v7a.apk") ?: assets.first()
+        return order.distinct()
+    }
+
+    private fun normalizeAbiTag(raw: String): String {
+        val abi = raw.trim().lowercase(Locale.getDefault())
+        return when {
+            abi.contains("arm64") -> "arm64-v8a"
+            abi.contains("armeabi-v7a") -> "armeabi-v7a"
+            abi == "armeabi" -> "armeabi"
+            abi.contains("x86_64") -> "x86_64"
+            abi == "x86" -> "x86"
+            else -> abi
         }
-        if (abis.any { it.startsWith("x86_64") }) {
-            return findBySuffix("-x86_64.apk") ?: findBySuffix("-x86.apk") ?: assets.first()
+    }
+
+    private fun parseAbiTagFromFileName(fileName: String): String? {
+        val name = fileName.lowercase(Locale.getDefault())
+        fun hasToken(pattern: String): Boolean = Regex(pattern).containsMatchIn(name)
+
+        return when {
+            hasToken("""(^|[-_.])arm64-v8a($|[-_.])""") -> "arm64-v8a"
+            hasToken("""(^|[-_.])armeabi-v7a($|[-_.])""") -> "armeabi-v7a"
+            hasToken("""(^|[-_.])x86_64($|[-_.])""") -> "x86_64"
+            hasToken("""(^|[-_.])x86(?!_?64)($|[-_.])""") -> "x86"
+            hasToken("""(^|[-_.])(universal|noarch|all)($|[-_.])""") -> "universal"
+            else -> null
         }
-        if (abis.any { it.startsWith("x86") }) {
-            return findBySuffix("-x86.apk") ?: assets.first()
-        }
-        return assets.first()
     }
 
     private fun isNewerVersion(latest: String, current: String): Boolean {
@@ -550,25 +608,23 @@ class AppUpdateService @Inject constructor(
     }
 
     private fun savePendingInstall(context: Context, apk: DownloadedApk) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_PENDING_INSTALL_URI, apk.uri.toString())
-            .putString(KEY_PENDING_INSTALL_NAME, apk.displayName)
-            .putString(KEY_PENDING_INSTALL_VERSION, apk.version)
-            .putString(KEY_PENDING_INSTALL_PATH, apk.displayPath)
-            .putLong(KEY_PENDING_INSTALL_TS, System.currentTimeMillis())
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putString(KEY_PENDING_INSTALL_URI, apk.uri.toString())
+            putString(KEY_PENDING_INSTALL_NAME, apk.displayName)
+            putString(KEY_PENDING_INSTALL_VERSION, apk.version)
+            putString(KEY_PENDING_INSTALL_PATH, apk.displayPath)
+            putLong(KEY_PENDING_INSTALL_TS, System.currentTimeMillis())
+        }
     }
 
     private fun clearPendingInstall(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove(KEY_PENDING_INSTALL_URI)
-            .remove(KEY_PENDING_INSTALL_NAME)
-            .remove(KEY_PENDING_INSTALL_VERSION)
-            .remove(KEY_PENDING_INSTALL_PATH)
-            .remove(KEY_PENDING_INSTALL_TS)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            remove(KEY_PENDING_INSTALL_URI)
+            remove(KEY_PENDING_INSTALL_NAME)
+            remove(KEY_PENDING_INSTALL_VERSION)
+            remove(KEY_PENDING_INSTALL_PATH)
+            remove(KEY_PENDING_INSTALL_TS)
+        }
     }
 
     private fun isUriReadable(context: Context, uri: Uri): Boolean {

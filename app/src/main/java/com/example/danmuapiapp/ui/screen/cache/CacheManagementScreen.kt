@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.cache
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -184,7 +186,7 @@ fun CacheManagementScreen(
     }
 
     if (viewModel.showClearConfirmDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissClearConfirm,
             icon = { Icon(Icons.Rounded.DeleteSweep, null) },
             title = { Text("确认清理缓存") },
@@ -332,9 +334,9 @@ fun formatBytes(bytes: Long): String {
     val mb = kb * 1024
     val gb = mb * 1024
     return when {
-        bytes >= gb -> String.format("%.2f GB", bytes / gb)
-        bytes >= mb -> String.format("%.1f MB", bytes / mb)
-        bytes >= kb -> String.format("%.1f KB", bytes / kb)
+        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
+        bytes >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytes / mb)
+        bytes >= kb -> String.format(Locale.getDefault(), "%.1f KB", bytes / kb)
         else -> "$bytes B"
     }
 }

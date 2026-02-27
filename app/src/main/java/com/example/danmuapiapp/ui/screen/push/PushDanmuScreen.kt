@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.push
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -38,7 +40,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -332,7 +333,7 @@ fun PushDanmuScreen(
     }
 
     if (viewModel.errorMessage != null) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { viewModel.clearError() },
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
@@ -379,7 +380,7 @@ private fun SupportClientsDialog(
     onOpenDoc: (String) -> Unit,
     onCopyDoc: (String) -> Unit
 ) {
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         title = { Text("支持客户端") },
         text = {

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * 普通模式开机自启偏好。
@@ -21,14 +22,12 @@ object NormalAutoStartPrefs {
     }
 
     fun setBootAutoStartEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_BOOT, enabled)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_BOOT, enabled)
+        }
         // 同步旧键，兼容历史逻辑
-        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean("auto_start", enabled)
-            .apply()
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit {
+            putBoolean("auto_start", enabled)
+        }
     }
 }

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.deviceaccess
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,7 +30,6 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -60,6 +61,7 @@ import com.example.danmuapiapp.domain.model.DeviceAccessDevice
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.model.DeviceAccessSource
+import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -178,7 +180,7 @@ fun DeviceAccessScreen(
     }
 
     if (viewModel.errorMessage != null) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissError,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
@@ -644,12 +646,7 @@ private fun AdminActionsCard(
 }
 
 @Composable
-private fun primaryActionButtonColors() = ButtonDefaults.buttonColors(
-    containerColor = MaterialTheme.colorScheme.primary,
-    contentColor = MaterialTheme.colorScheme.onPrimary,
-    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-)
+private fun primaryActionButtonColors() = appPrimaryButtonColors()
 
 private fun sourceText(source: DeviceAccessSource): String {
     return when (source) {

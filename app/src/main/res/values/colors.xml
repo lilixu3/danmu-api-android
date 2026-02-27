@@ -41,12 +41,6 @@
 
     <color name="icon_tint">#3B4A65</color>
 
-    <!-- Status colors -->
-    <color name="status_ok">#10B981</color>
-    <color name="status_warn">#F59E0B</color>
-    <color name="status_error">#EF4444</color>
-    <!-- Backward-compat alias (older code may still reference this name) -->
-    <color name="status_neutral">#94A3B8</color>
 
     <!-- Material3 mapping (让 Switch/Chip/Dialog 等组件也跟随统一配色) -->
     <color name="m3_primary">@color/brand_accent</color>
@@ -79,6 +73,4 @@
 
     <!-- API Icon Container 渐变色 (Light) -->
     
-    <!-- Divider 渐变色 (Light) -->
-    <color name="divider_gradient_center">#D9E0F0</color>
 </resources>

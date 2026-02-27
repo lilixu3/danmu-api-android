@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +24,6 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -203,7 +204,7 @@ fun AdminModeScreen(
     }
 
     if (viewModel.errorMessage != null) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissError,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },

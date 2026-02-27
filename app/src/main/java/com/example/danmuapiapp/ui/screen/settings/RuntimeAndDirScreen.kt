@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +25,6 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.SettingsAccessibility
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -364,7 +365,7 @@ fun RuntimeAndDirScreen(
     }
 
     if (showEnableRootAutoStartDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showEnableRootAutoStartDialog = false },
             title = { Text("开启开机自启") },
             text = {
@@ -383,7 +384,7 @@ fun RuntimeAndDirScreen(
     }
 
     if (showDisableRootAutoStartDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showDisableRootAutoStartDialog = false },
             title = { Text("关闭开机自启") },
             text = {
@@ -412,7 +413,7 @@ fun RuntimeAndDirScreen(
     }
 
     if (showKeepAliveGuideDialog && state.runMode == RunMode.Normal) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = { showKeepAliveGuideDialog = false },
             title = { Text("保活建议") },
             text = {

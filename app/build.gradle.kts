@@ -17,13 +17,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.3"
+    ?: "1.0.5.4"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 84
+    ?: 85
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -257,7 +257,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.splashscreen)
     implementation(libs.datastore.prefs)
-    implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation(libs.documentfile)
 
     // Navigation
     implementation(libs.navigation.compose)
@@ -284,7 +284,7 @@ dependencies {
     implementation(libs.coil.compose)
 
     // 提供 XML 主题 Theme.Material3.DayNight.NoActionBar
-    implementation("com.google.android.material:material:1.13.0")
+    implementation(libs.material)
 
     // QR Code
     implementation(libs.zxing.core)

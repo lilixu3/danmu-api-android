@@ -5,6 +5,8 @@ import android.content.Context
 import android.net.Uri
 import android.content.res.Resources
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -102,7 +104,7 @@ class SettingsViewModel @Inject constructor(
         private set
     var appUpdateAssetName by mutableStateOf<String?>(null)
         private set
-    var appUpdateAssetSizeBytes by mutableStateOf(0L)
+    var appUpdateAssetSizeBytes by mutableLongStateOf(0L)
         private set
     var appUpdateHasUpdate by mutableStateOf(false)
         private set
@@ -112,7 +114,7 @@ class SettingsViewModel @Inject constructor(
         private set
     var isDownloadingAppUpdate by mutableStateOf(false)
         private set
-    var appUpdateDownloadPercent by mutableStateOf(0)
+    var appUpdateDownloadPercent by mutableIntStateOf(0)
         private set
     var appUpdateDownloadDetail by mutableStateOf("等待下载")
         private set

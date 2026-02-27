@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.tools
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -44,6 +45,8 @@ fun ToolsScreen(
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
+    val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
+    val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val recentLogs = logs.takeLast(22).reversed()
     val errorCount = logs.count { it.level == LogLevel.Error }
@@ -88,14 +91,32 @@ fun ToolsScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         // Log preview card (first)
-        LogPreviewCard(
-            logs = recentLogs,
-            totalCount = logs.size,
-            errorCount = errorCount,
-            warnCount = warnCount,
-            onViewAll = onOpenConsole,
-            onRefresh = viewModel::refreshLogs
-        )
+        AnimatedVisibility(
+            visible = logPreviewEnabled && logEnabled,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            LogPreviewCard(
+                logs = recentLogs,
+                totalCount = logs.size,
+                errorCount = errorCount,
+                warnCount = warnCount,
+                onViewAll = onOpenConsole,
+                onRefresh = viewModel::refreshLogs
+            )
+        }
+        AnimatedVisibility(
+            visible = !(logPreviewEnabled && logEnabled),
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            ToolEntryCard(
+                title = "运行日志",
+                subtitle = if (!logEnabled) "日志已关闭" else "查看运行日志",
+                icon = { Icon(Icons.Rounded.Terminal, null) },
+                onClick = onOpenConsole
+            )
+        }
 
         ToolEntryCard(
             title = "配置管理",

@@ -49,6 +49,9 @@ interface SettingsRepository {
     val customRepo: StateFlow<String>
     val tokenVisible: StateFlow<Boolean>
     val fileLogEnabled: StateFlow<Boolean>
+    val logEnabled: StateFlow<Boolean>
+    val logPreviewEnabled: StateFlow<Boolean>
+    val logMaxCount: StateFlow<Int>
     fun setGithubProxy(proxy: String)
     fun setGithubToken(token: String)
     fun setAutoStart(enabled: Boolean)
@@ -62,6 +65,9 @@ interface SettingsRepository {
     fun setCustomRepo(repo: String)
     fun setTokenVisible(visible: Boolean)
     fun setFileLogEnabled(enabled: Boolean)
+    fun setLogEnabled(enabled: Boolean)
+    fun setLogPreviewEnabled(enabled: Boolean)
+    fun setLogMaxCount(count: Int)
     fun getIgnoredUpdateVersion(variant: ApiVariant): String?
     fun setIgnoredUpdateVersion(variant: ApiVariant, version: String?)
 }

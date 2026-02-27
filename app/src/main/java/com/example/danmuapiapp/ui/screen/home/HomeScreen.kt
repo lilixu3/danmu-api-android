@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -72,7 +74,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -96,6 +97,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -120,8 +122,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -139,6 +139,9 @@ import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
+import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
+import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
+import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -675,7 +678,7 @@ fun HomeScreen(
 
     if (showRunModePickerDialog) {
         val availableModes = RunMode.entries.filter { it != state.runMode }
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = {
                 showRunModePickerDialog = false
                 pendingRunModeTarget = null
@@ -760,7 +763,7 @@ fun HomeScreen(
     }
 
     if (viewModel.showAppUpdatePromptDialog && !viewModel.appUpdatePromptLatestVersion.isNullOrBlank()) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdatePrompt,
             icon = { Icon(Icons.Rounded.SystemUpdate, null) },
             title = { Text("发现应用更新") },
@@ -794,7 +797,7 @@ fun HomeScreen(
     }
 
     if (viewModel.showAppUpdateMethodDialog) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdateMethodDialog,
             title = { Text("选择更新方式") },
             text = {
@@ -846,7 +849,7 @@ fun HomeScreen(
     }
 
     if (viewModel.isDownloadingAppUpdate) {
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = {},
             title = { Text("正在下载更新") },
             text = {
@@ -876,7 +879,7 @@ fun HomeScreen(
 
     if (viewModel.showInstallAppUpdateDialog && viewModel.downloadedAppUpdate != null) {
         val apk = viewModel.downloadedAppUpdate!!
-        AlertDialog(
+        AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissInstallAppUpdateDialog,
             title = { Text("下载完成") },
             text = {
@@ -961,6 +964,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomePanelDialog(
     onDismissRequest: () -> Unit,
@@ -971,92 +975,84 @@ private fun HomePanelDialog(
     content: @Composable ColumnScope.() -> Unit,
     actions: @Composable RowScope.() -> Unit
 ) {
-    Dialog(
+    val panelSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
         onDismissRequest = {
             if (canDismiss) onDismissRequest()
         },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        sheetState = panelSheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Surface(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .widthIn(max = 540.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 2.dp,
-            shadowElevation = 20.dp,
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f)
-            )
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.88f)
-                                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.86f)
                             )
                         )
-                )
+                    )
+            )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f)
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f)
+                    Box(
+                        modifier = Modifier.size(36.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier.size(36.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
-
-                content()
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    content = actions
-                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
+
+            content()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                content = actions
+            )
         }
     }
 }
@@ -1074,12 +1070,7 @@ private fun DialogActionButton(
             onClick = onClick,
             enabled = enabled,
             shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
+            colors = appPrimaryButtonColors()
         ) {
             Icon(icon, null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
@@ -1656,9 +1647,11 @@ private fun DownloadQueueSheet(
     } else {
         MaterialTheme.colorScheme.tertiary
     }
+    val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = queueSheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -2545,7 +2538,7 @@ private fun ServiceRuntimeInfoDialog(
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
 
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.HourglassBottom, null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("服务运行信息") },
@@ -2683,20 +2676,20 @@ private fun ActionDeck(
                         if (isDarkTheme) {
                             listOf(Color(0xFFDC2626), Color(0xFFEA580C))
                         } else {
-                            listOf(Color(0xFFD63E2F), Color(0xFFF46B3B))
+                            listOf(Color(0xFFD63E2F), Color(0xFFF06A3A))
                         }
                     } else {
                         if (isDarkTheme) {
-                            listOf(Color(0xFF2563EB), Color(0xFF6366F1))
+                            listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
                         } else {
-                            listOf(Color(0xFF1E88E5), Color(0xFF4E5BDD))
+                            listOf(Color(0xFF1E88E5), Color(0xFF4457D2))
                         }
                     },
                     disabledColors = if (isStarting) {
                         if (isDarkTheme) {
-                            listOf(Color(0xFF1A3A5C), Color(0xFF2D3566))
+                            listOf(Color(0xFF1A3A5C), Color(0xFF264064))
                         } else {
-                            listOf(Color(0xFF93AACC), Color(0xFF9A9DD0))
+                            listOf(Color(0xFF899FC4), Color(0xFF9097C9))
                         }
                     } else {
                         listOf(
@@ -2717,9 +2710,9 @@ private fun ActionDeck(
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = if (isDarkTheme) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.17f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
                             } else {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.98f)
                             },
                             contentColor = if (isDarkTheme) {
                                 MaterialTheme.colorScheme.primary
@@ -2762,18 +2755,11 @@ private fun ActionDeck(
                     enabled = (!isTransitioning) && (!isCoreInstalled || hasUpdate),
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = if (!isCoreInstalled || hasUpdate) {
-                            if (isDarkTheme) Color(0xFFDC2626) else Color(0xFFD63E2F)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        },
-                        contentColor = if (!isCoreInstalled || hasUpdate) {
-                            Color.White
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
+                    colors = if (!isCoreInstalled || hasUpdate) {
+                        appDangerTonalButtonColors()
+                    } else {
+                        appTonalButtonColors()
+                    }
                 ) {
                     Icon(
                         imageVector = if (!isCoreInstalled) Icons.Rounded.Download else Icons.Rounded.SystemUpdateAlt,
@@ -2876,7 +2862,7 @@ private fun GatewayItem(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = if (emphasize) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f)
         } else {
             MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
         }
@@ -2904,7 +2890,7 @@ private fun GatewayItem(
                     if (emphasize) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
                         ) {
                             Text(
                                 "推荐",
@@ -2935,7 +2921,7 @@ private fun GatewayItem(
                 onClick = onCopy,
                 modifier = Modifier.size(34.dp),
                 colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             ) {
@@ -3136,7 +3122,7 @@ private fun UpdatePromptDialog(
     onIgnore: () -> Unit
 ) {
     if (variant == null || latestVersion.isNullOrBlank()) return
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onIgnore,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
         title = { Text("发现核心更新") },
@@ -3155,7 +3141,7 @@ private fun NoCoreDialog(
     onDismiss: () -> Unit,
     onInstall: (ApiVariant) -> Unit
 ) {
-    AlertDialog(
+    AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.DownloadForOffline, null) },
         title = { Text("核心未安装") },
@@ -3214,7 +3200,11 @@ private fun VariantPickerSheet(
     onSelect: (ApiVariant) -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val variantSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = variantSheetState
+    ) {
         Column(
             modifier = Modifier
                 .padding(horizontal = 20.dp)
@@ -3343,7 +3333,7 @@ private fun variantAccent(variant: ApiVariant): Color {
     return when (variant) {
         ApiVariant.Stable -> if (dark) Color(0xFF4ADE80) else Color(0xFF43A047)
         ApiVariant.Dev    -> if (dark) Color(0xFFFBBF24) else Color(0xFFE0A106)
-        ApiVariant.Custom -> if (dark) Color(0xFFA78BFA) else Color(0xFF7E57C2)
+        ApiVariant.Custom -> if (dark) Color(0xFF7DCFFF) else Color(0xFF7E57C2)
     }
 }
 

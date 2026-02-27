@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
@@ -72,26 +73,35 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _fileLogEnabled = MutableStateFlow(false)
     override val fileLogEnabled: StateFlow<Boolean> = _fileLogEnabled.asStateFlow()
 
+    private val _logEnabled = MutableStateFlow(settingsPrefs.safeGetBoolean("log_enabled", true))
+    override val logEnabled: StateFlow<Boolean> = _logEnabled.asStateFlow()
+
+    private val _logPreviewEnabled = MutableStateFlow(settingsPrefs.safeGetBoolean("log_preview_enabled", true))
+    override val logPreviewEnabled: StateFlow<Boolean> = _logPreviewEnabled.asStateFlow()
+
+    private val _logMaxCount = MutableStateFlow(settingsPrefs.getInt("log_max_count", 500))
+    override val logMaxCount: StateFlow<Int> = _logMaxCount.asStateFlow()
+
     init {
         // 统一禁用文件日志，日志只走 /api/logs。
         if (settingsPrefs.safeGetBoolean("file_log_enabled", false)) {
-            settingsPrefs.edit().putBoolean("file_log_enabled", false).apply()
+            settingsPrefs.edit { putBoolean("file_log_enabled", false) }
         }
         AppAppearancePrefs.applyNightMode(_nightMode.value)
     }
 
     override fun setGithubProxy(proxy: String) {
         val normalized = proxy.trim().ifBlank { "original" }
-        githubProxyPrefs.edit()
-            .putString("selected_proxy", normalized)
-            .putBoolean("has_user_selected_proxy", normalized != "original")
-            .apply()
+        githubProxyPrefs.edit {
+            putString("selected_proxy", normalized)
+            putBoolean("has_user_selected_proxy", normalized != "original")
+        }
         _githubProxy.value = normalized
     }
 
     override fun setGithubToken(token: String) {
         val normalized = token.trim()
-        githubAuthPrefs.edit().putString("github_token", normalized).apply()
+        githubAuthPrefs.edit { putString("github_token", normalized) }
         _githubToken.value = normalized
     }
 
@@ -140,19 +150,35 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun setCustomRepo(repo: String) {
         val normalized = repo.trim()
-        settingsPrefs.edit().putString("custom_repo", normalized).apply()
+        settingsPrefs.edit { putString("custom_repo", normalized) }
         saveLegacyCustomRepo(normalized)
         _customRepo.value = normalized
     }
 
     override fun setTokenVisible(visible: Boolean) {
-        settingsPrefs.edit().putBoolean("token_visible", visible).apply()
+        settingsPrefs.edit { putBoolean("token_visible", visible) }
         _tokenVisible.value = visible
     }
 
     override fun setFileLogEnabled(enabled: Boolean) {
-        settingsPrefs.edit().putBoolean("file_log_enabled", false).apply()
+        settingsPrefs.edit { putBoolean("file_log_enabled", false) }
         _fileLogEnabled.value = false
+    }
+
+    override fun setLogEnabled(enabled: Boolean) {
+        settingsPrefs.edit { putBoolean("log_enabled", enabled) }
+        _logEnabled.value = enabled
+    }
+
+    override fun setLogPreviewEnabled(enabled: Boolean) {
+        settingsPrefs.edit { putBoolean("log_preview_enabled", enabled) }
+        _logPreviewEnabled.value = enabled
+    }
+
+    override fun setLogMaxCount(count: Int) {
+        val normalized = count.coerceIn(100, 2000)
+        settingsPrefs.edit { putInt("log_max_count", normalized) }
+        _logMaxCount.value = normalized
     }
 
     override fun getIgnoredUpdateVersion(variant: ApiVariant): String? {
@@ -161,9 +187,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun setIgnoredUpdateVersion(variant: ApiVariant, version: String?) {
         val key = "ignored_update_${variant.key}"
-        settingsPrefs.edit().apply {
+        settingsPrefs.edit {
             if (version.isNullOrBlank()) remove(key) else putString(key, version.trim())
-        }.apply()
+        }
     }
 
     private fun resolveCustomRepo(): String {
@@ -182,19 +208,19 @@ class SettingsRepositoryImpl @Inject constructor(
             .trim('/')
 
         if (normalized.isBlank()) {
-            legacyVariantPrefs.edit()
-                .putString("custom_owner", "")
-                .putString("custom_repo", "")
-                .apply()
+            legacyVariantPrefs.edit {
+                putString("custom_owner", "")
+                putString("custom_repo", "")
+            }
             return
         }
 
         val parts = normalized.split('/').filter { it.isNotBlank() }
         val owner = if (parts.size >= 2) parts[0] else ""
         val repo = if (parts.size >= 2) parts[1] else parts[0]
-        legacyVariantPrefs.edit()
-            .putString("custom_owner", owner)
-            .putString("custom_repo", repo)
-            .apply()
+        legacyVariantPrefs.edit {
+            putString("custom_owner", owner)
+            putString("custom_repo", repo)
+        }
     }
 }
