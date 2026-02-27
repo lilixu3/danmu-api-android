@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -209,6 +211,8 @@ fun BackupRestoreScreen(
     if (showImportConfirmDialog) {
         AppBottomSheetDialog(
             onDismissRequest = { showImportConfirmDialog = false },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Warning,
             title = { Text("确认导入 .env") },
             text = { Text("导入将覆盖当前配置，是否继续？") },
             confirmButton = {
@@ -236,6 +240,8 @@ fun BackupRestoreScreen(
     if (showWebDavRestoreConfirmDialog) {
         AppBottomSheetDialog(
             onDismissRequest = { showWebDavRestoreConfirmDialog = false },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Warning,
             title = { Text("确认云端恢复") },
             text = { Text("将从 WebDAV 下载并覆盖当前 .env，是否继续？") },
             confirmButton = {
@@ -283,6 +289,8 @@ private fun WebDavConfigDialog(
     var showPassword by remember { mutableStateOf(false) }
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Form,
+        tone = AppBottomSheetTone.Brand,
         title = { Text("WebDAV 设置") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.core
 
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
+import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
+import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -345,6 +347,8 @@ private fun CoreVariantCard(
     if (showDeleteConfirm) {
         AppBottomSheetDialog(
             onDismissRequest = { showDeleteConfirm = false },
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Danger,
             title = { Text("确认删除") },
             text = { Text("确定要删除 ${info.variant.label} 吗？") },
             confirmButton = {
@@ -376,6 +380,8 @@ private fun UpdateResultDialog(vm: CoreViewModel) {
     val variant = vm.updateDialogVariant
     AppBottomSheetDialog(
         onDismissRequest = vm::dismissUpdateDialog,
+        style = AppBottomSheetStyle.Status,
+        tone = AppBottomSheetTone.Brand,
         icon = {
             Icon(
                 if (info?.hasUpdate == true) Icons.Rounded.SystemUpdate else Icons.Rounded.CheckCircle,
@@ -415,6 +421,8 @@ private fun RollbackDialog(
 ) {
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Info,
         icon = { Icon(Icons.Rounded.History, null) },
         title = { Text("回退版本") },
         text = {
@@ -459,7 +467,6 @@ private fun RollbackDialog(
                 }
             }
         },
-        confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
@@ -473,6 +480,8 @@ private fun CustomRepoDialog(
     var repoText by remember { mutableStateOf(currentRepo) }
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
+        style = AppBottomSheetStyle.Form,
+        tone = AppBottomSheetTone.Brand,
         icon = { Icon(Icons.Rounded.Tune, null) },
         title = { Text("自定义仓库") },
         text = {
