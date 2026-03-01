@@ -549,6 +549,9 @@ class CoreRepositoryImpl @Inject constructor(
         val mode = currentRunMode()
         val location = getCoreLocation(variant, mode)
         val targetDir = location.normalDir
+        val stagingDir = createCoreTempDir(targetDir, "staging")
+        var backupDir: File? = null
+        var targetReplaced = false
 
         updateDownloadProgress(
             variant = variant,
@@ -575,9 +578,6 @@ class CoreRepositoryImpl @Inject constructor(
                     null
                 }
             }.firstOrNull() ?: throw IOException("Download failed")
-
-            targetDir.deleteRecursively()
-            targetDir.mkdirs()
 
             var lastBytes = 0L
             var totalBytes = -1L
@@ -619,11 +619,11 @@ class CoreRepositoryImpl @Inject constructor(
                         }
                     }
 
-                    val extracted = extractDanmuFolder(streamWithProgress, targetDir)
+                    val extracted = extractDanmuFolder(streamWithProgress, stagingDir)
                     if (!extracted) throw IOException("核心压缩包中未找到 danmu_api 或 danmu-api 目录")
                 }
             } catch (e: Exception) {
-                targetDir.deleteRecursively()
+                runCatching { stagingDir.deleteRecursively() }
                 throw e
             }
 
@@ -636,12 +636,15 @@ class CoreRepositoryImpl @Inject constructor(
                 totalBytes = totalBytes
             )
 
-            NodeProjectManager.normalizeCoreLayout(targetDir)
-            NodeProjectManager.ensureCorePackageJson(targetDir, versionHint)
+            NodeProjectManager.normalizeCoreLayout(stagingDir)
+            NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
 
-            if (!NodeProjectManager.hasValidCore(targetDir)) {
+            if (!NodeProjectManager.hasValidCore(stagingDir)) {
                 throw IOException("核心文件不完整，缺少 worker.js")
             }
+
+            backupDir = replaceCoreDirectory(targetDir, stagingDir)
+            targetReplaced = true
 
             if (mode != RunMode.Normal) {
                 syncCoreDirToRoot(targetDir, location.rootDirPath)
@@ -649,11 +652,23 @@ class CoreRepositoryImpl @Inject constructor(
                     throw IOException("Root 核心同步后仍缺少 worker.js")
                 }
             }
+
+            backupDir?.deleteRecursively()
+            backupDir = null
+        } catch (e: Exception) {
+            if (targetReplaced) {
+                runCatching { restoreCoreDirectory(targetDir, backupDir) }
+                if (mode != RunMode.Normal && targetDir.exists()) {
+                    runCatching { syncCoreDirToRoot(targetDir, location.rootDirPath) }
+                }
+            } else {
+                runCatching { stagingDir.deleteRecursively() }
+            }
+            throw e
         } finally {
             _downloadProgress.value = CoreDownloadProgress()
         }
     }
-
     private fun updateDownloadProgress(
         variant: ApiVariant,
         actionLabel: String,
@@ -671,6 +686,63 @@ class CoreRepositoryImpl @Inject constructor(
             downloadedBytes = downloadedBytes,
             totalBytes = totalBytes
         )
+    }
+
+    private fun createCoreTempDir(targetDir: File, suffix: String): File {
+        val parentDir = targetDir.parentFile ?: throw IOException("核心目录路径无效")
+        if (!parentDir.exists() && !parentDir.mkdirs()) {
+            throw IOException("无法创建核心目录: ${parentDir.absolutePath}")
+        }
+        val tempDir = File(parentDir, "${targetDir.name}.${suffix}-${System.currentTimeMillis()}")
+        runCatching { tempDir.deleteRecursively() }
+        if (!tempDir.mkdirs()) {
+            throw IOException("无法创建临时目录: ${tempDir.absolutePath}")
+        }
+        return tempDir
+    }
+
+    private fun replaceCoreDirectory(targetDir: File, stagingDir: File): File? {
+        if (!stagingDir.exists()) throw IOException("临时核心目录不存在")
+        val parentDir = targetDir.parentFile ?: throw IOException("核心目录路径无效")
+        var backupDir: File? = null
+
+        if (targetDir.exists()) {
+            backupDir = File(parentDir, "${targetDir.name}.backup-${System.currentTimeMillis()}")
+            runCatching { backupDir.deleteRecursively() }
+            moveDirectory(targetDir, backupDir)
+        }
+
+        try {
+            moveDirectory(stagingDir, targetDir)
+        } catch (e: Exception) {
+            restoreCoreDirectory(targetDir, backupDir)
+            throw e
+        }
+        return backupDir
+    }
+
+    private fun restoreCoreDirectory(targetDir: File, backupDir: File?) {
+        val backup = backupDir ?: return
+        if (!backup.exists()) return
+        runCatching { if (targetDir.exists()) targetDir.deleteRecursively() }
+        moveDirectory(backup, targetDir)
+    }
+
+    private fun moveDirectory(sourceDir: File, targetDir: File) {
+        if (!sourceDir.exists()) return
+        targetDir.parentFile?.let { parent ->
+            if (!parent.exists() && !parent.mkdirs()) {
+                throw IOException("无法创建目录: ${parent.absolutePath}")
+            }
+        }
+        if (sourceDir.renameTo(targetDir)) return
+        if (targetDir.exists()) {
+            targetDir.deleteRecursively()
+        }
+        sourceDir.copyRecursively(targetDir, overwrite = true)
+        if (!sourceDir.deleteRecursively()) {
+            throw IOException("无法清理目录: ${sourceDir.absolutePath}")
+        }
     }
 
     private fun deleteRootCoreDir(rootDirPath: String) {

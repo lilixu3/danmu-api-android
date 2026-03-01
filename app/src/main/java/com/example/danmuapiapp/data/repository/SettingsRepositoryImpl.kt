@@ -67,6 +67,9 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _customRepo = MutableStateFlow(resolveCustomRepo())
     override val customRepo: StateFlow<String> = _customRepo.asStateFlow()
 
+    private val _customRepoDisplayName = MutableStateFlow(resolveCustomRepoDisplayName())
+    override val customRepoDisplayName: StateFlow<String> = _customRepoDisplayName.asStateFlow()
+
     private val _tokenVisible = MutableStateFlow(settingsPrefs.safeGetBoolean("token_visible", false))
     override val tokenVisible: StateFlow<Boolean> = _tokenVisible.asStateFlow()
 
@@ -155,6 +158,12 @@ class SettingsRepositoryImpl @Inject constructor(
         _customRepo.value = normalized
     }
 
+    override fun setCustomRepoDisplayName(name: String) {
+        val normalized = name.trim()
+        settingsPrefs.edit { putString("custom_repo_display_name", normalized) }
+        _customRepoDisplayName.value = normalized
+    }
+
     override fun setTokenVisible(visible: Boolean) {
         settingsPrefs.edit { putBoolean("token_visible", visible) }
         _tokenVisible.value = visible
@@ -190,6 +199,10 @@ class SettingsRepositoryImpl @Inject constructor(
         settingsPrefs.edit {
             if (version.isNullOrBlank()) remove(key) else putString(key, version.trim())
         }
+    }
+
+    private fun resolveCustomRepoDisplayName(): String {
+        return settingsPrefs.safeGetString("custom_repo_display_name").trim()
     }
 
     private fun resolveCustomRepo(): String {

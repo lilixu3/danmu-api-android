@@ -77,7 +77,11 @@ object NodeProjectManager {
         }
     }
 
-    fun writeRuntimeEnv(context: Context, targetProjectDir: File = projectDir(context)) {
+    fun writeRuntimeEnv(
+        context: Context,
+        targetProjectDir: File = projectDir(context),
+        preferredVariantKey: String? = null
+    ) {
         val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
         val envFile = File(targetProjectDir, "config/.env")
         envFile.parentFile?.mkdirs()
@@ -101,36 +105,28 @@ object NodeProjectManager {
             }
         }
 
-        val legacyVariant = context
-            .getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
-            .safeGetString("variant")
-            .trim()
-
-        fun normalizeVariant(raw: String): String {
-            return when (raw.trim().lowercase()) {
+        fun normalizeVariantOrNull(raw: String?): String? {
+            val value = raw?.trim()?.lowercase().orEmpty()
+            return when (value) {
+                "stable" -> "stable"
                 "dev", "develop", "development" -> "dev"
                 "custom" -> "custom"
-                "stable" -> "stable"
-                else -> "stable"
+                else -> null
             }
         }
 
-        val variantValue = when {
-            prefs.contains("variant") -> {
-                val fromPrefs = prefs.safeGetString("variant").trim()
-                when {
-                    fromPrefs.isNotBlank() -> normalizeVariant(fromPrefs)
-                    existingEnv["DANMU_API_VARIANT"].isNullOrBlank().not() ->
-                        normalizeVariant(existingEnv["DANMU_API_VARIANT"].orEmpty())
-                    legacyVariant.isNotBlank() -> normalizeVariant(legacyVariant)
-                    else -> "stable"
-                }
-            }
-            existingEnv["DANMU_API_VARIANT"].isNullOrBlank().not() ->
-                normalizeVariant(existingEnv["DANMU_API_VARIANT"].orEmpty())
-            legacyVariant.isNotBlank() -> normalizeVariant(legacyVariant)
-            else -> "stable"
-        }
+        val variantFromPreferred = normalizeVariantOrNull(preferredVariantKey)
+        val variantFromPrefs = normalizeVariantOrNull(
+            if (prefs.contains("variant")) prefs.safeGetString("variant") else null
+        )
+        val variantFromLegacy = normalizeVariantOrNull(
+            context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
+                .safeGetString("variant")
+        )
+        val variantFromEnv = normalizeVariantOrNull(existingEnv["DANMU_API_VARIANT"])
+
+        val variantValue =
+            variantFromPreferred ?: variantFromPrefs ?: variantFromLegacy ?: variantFromEnv ?: "stable"
 
         val portFromEnv = existingEnv["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
         val portValue = if (prefs.contains("port")) {
@@ -396,6 +392,8 @@ object NodeProjectManager {
             Log.w(TAG, "回滚 node-handler 兼容补丁失败：${handlerFile.absolutePath}", it)
         }
     }
+
+
 
     private fun copyAssetFolder(
         context: Context,
