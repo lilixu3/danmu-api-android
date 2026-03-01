@@ -47,6 +47,7 @@ interface SettingsRepository {
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
     val customRepo: StateFlow<String>
+    val customRepoDisplayName: StateFlow<String>
     val tokenVisible: StateFlow<Boolean>
     val fileLogEnabled: StateFlow<Boolean>
     val logEnabled: StateFlow<Boolean>
@@ -63,6 +64,7 @@ interface SettingsRepository {
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
     fun setCustomRepo(repo: String)
+    fun setCustomRepoDisplayName(name: String)
     fun setTokenVisible(visible: Boolean)
     fun setFileLogEnabled(enabled: Boolean)
     fun setLogEnabled(enabled: Boolean)
