@@ -20,6 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.data.service.UpdateChecker
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.domain.model.NightModePreference
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var appForegroundUpdateChecker: AppForegroundUpdateChecker
     @Inject lateinit var appUpdateService: AppUpdateService
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var runtimeWarmupCoordinator: RuntimeWarmupCoordinator
 
     override fun attachBaseContext(newBase: Context?) {
         if (newBase == null) {
@@ -52,6 +54,9 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        runtimeWarmupCoordinator.startIfNeeded()
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsRepository.hideFromRecents.collect { hide ->
@@ -59,8 +64,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
         setContent {
             val nightMode by settingsRepository.nightMode.collectAsStateWithLifecycle()
+            val startupUiState by runtimeWarmupCoordinator.uiState.collectAsStateWithLifecycle()
             val darkTheme = when (nightMode) {
                 NightModePreference.FollowSystem -> isSystemInDarkTheme()
                 NightModePreference.Light -> false
@@ -77,7 +84,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             DanmuApiTheme(darkTheme = darkTheme) {
-                DanmuApiApp()
+                DanmuApiApp(startupUiState = startupUiState)
             }
         }
     }
