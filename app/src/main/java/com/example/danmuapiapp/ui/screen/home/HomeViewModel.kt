@@ -745,29 +745,22 @@ class HomeViewModel @Inject constructor(
                 runtimeRepo.updateVariant(variant)
 
                 if (wasRunning) {
-                    runtimeRepo.addLog(LogLevel.Info, "正在停止服务以应用核心切换...")
-                    runtimeRepo.stopService()
-                    waitForStatus(
-                        statuses = setOf(ServiceStatus.Stopped, ServiceStatus.Error),
-                        timeoutMs = 12_000
-                    )
-                    delay(300)
-                    runtimeRepo.addLog(LogLevel.Info, "正在启动新核心...")
-                    runtimeRepo.startService()
-                    val started = waitForStatus(
+                    runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用核心切换...")
+                    val baseline = runtimeState.value.status
+                    runtimeRepo.restartService()
+                    val started = waitForStatusAfterChange(
+                        baseline = baseline,
                         statuses = setOf(ServiceStatus.Running, ServiceStatus.Error, ServiceStatus.Stopped),
-                        timeoutMs = 18_000
+                        timeoutMs = 45_000
                     )
-                    if (started != ServiceStatus.Running && current.runMode == RunMode.Normal) {
-                        runtimeRepo.addLog(LogLevel.Warn, "切换后首次启动未就绪，自动重试一次")
-                        runtimeRepo.startService()
-                        val retry = waitForStatus(
-                            statuses = setOf(ServiceStatus.Running, ServiceStatus.Error, ServiceStatus.Stopped),
-                            timeoutMs = 12_000
-                        )
-                        if (retry != ServiceStatus.Running) {
-                            runtimeRepo.addLog(LogLevel.Error, "切换后服务未成功启动，请查看日志")
+                    if (started != ServiceStatus.Running) {
+                        val reason = when (started) {
+                            ServiceStatus.Error -> "切换后服务启动失败，请查看日志"
+                            ServiceStatus.Stopped -> "切换后服务未运行，请重试启动"
+                            null -> "切换后服务启动超时，请查看日志"
+                            else -> "切换后服务状态异常，请查看日志"
                         }
+                        runtimeRepo.addLog(LogLevel.Error, reason)
                     }
                 }
             } catch (t: Throwable) {
@@ -790,9 +783,16 @@ class HomeViewModel @Inject constructor(
         else String.format(Locale.getDefault(), "%02d:%02d", m, s)
     }
 
-    private suspend fun waitForStatus(statuses: Set<ServiceStatus>, timeoutMs: Long): ServiceStatus? {
+    private suspend fun waitForStatusAfterChange(
+        baseline: ServiceStatus,
+        statuses: Set<ServiceStatus>,
+        timeoutMs: Long
+    ): ServiceStatus? {
         return withTimeoutOrNull(timeoutMs) {
-            runtimeState.first { it.status in statuses }.status
+            runtimeState
+                .map { it.status }
+                .dropWhile { it == baseline }
+                .first { it in statuses }
         }
     }
 

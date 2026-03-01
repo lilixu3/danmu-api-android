@@ -44,10 +44,11 @@ class NodeService : Service() {
         const val STATUS_ERROR = "error"
         const val EXTRA_ERROR = "error_message"
         private val runtimeGeneration = AtomicLong(0L)
-        private const val STOP_SHUTDOWN_ATTEMPTS = 6
+        private const val STOP_SHUTDOWN_ATTEMPTS = 4
         private const val STOP_WAIT_TIMEOUT_MS = 2600L
         private const val START_READY_TIMEOUT_MS = 20_000L
         private const val START_READY_RECHECK_INTERVAL_MS = 2000L
+        private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
 
         fun start(context: Context) {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
@@ -133,7 +134,6 @@ class NodeService : Service() {
             try {
                 val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
                 NodeProjectManager.migrateAllCoreLayouts(projectDir)
-                NodeProjectManager.writeRuntimeEnv(this@NodeService, projectDir)
 
                 val runtimeThread = Thread {
                     try {
@@ -261,7 +261,9 @@ class NodeService : Service() {
         repeat(STOP_SHUTDOWN_ATTEMPTS) { attempt ->
             if (runtimeGeneration.get() != generation) return
 
-            validPorts.forEach { port ->
+            // 只对当前可达端口发送关闭请求，避免在无效端口上消耗长超时。
+            val openPorts = validPorts.filter { isPortOpen(it) }
+            openPorts.forEach { port ->
                 tryShutdownAt(port)
             }
 
@@ -271,9 +273,9 @@ class NodeService : Service() {
 
             val sleepMs = when (attempt) {
                 0 -> 0L
-                1 -> 150L
-                2 -> 240L
-                else -> 360L
+                1 -> 140L
+                2 -> 220L
+                else -> 320L
             }
             if (sleepMs > 0) {
                 delay(sleepMs)
@@ -345,6 +347,8 @@ class NodeService : Service() {
                 nodeThread = null
             }
         }
+        // 主动广播停止，避免仓库层仅靠兜底超时判断导致“已停却报错”。
+        broadcastStatus(STATUS_STOPPED)
         stopForegroundAndSelf()
     }
 
@@ -378,8 +382,8 @@ class NodeService : Service() {
         return try {
             val url = URL("http://127.0.0.1:$port/__shutdown")
             val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 1500
-                readTimeout = 1500
+                connectTimeout = SHUTDOWN_HTTP_TIMEOUT_MS
+                readTimeout = SHUTDOWN_HTTP_TIMEOUT_MS
                 requestMethod = "GET"
             }
             val code = conn.responseCode

@@ -30,6 +30,7 @@ class CoreViewModel @Inject constructor(
     val downloadProgress = coreRepo.downloadProgress
     val runtimeState = runtimeRepo.runtimeState
     val customRepo = settingsRepo.customRepo
+    val customRepoDisplayName = settingsRepo.customRepoDisplayName
     val proxyOptions = githubProxyService.proxyOptions()
 
     var isOperating by mutableStateOf(false)
@@ -186,7 +187,6 @@ class CoreViewModel @Inject constructor(
         viewModelScope.launch {
             isOperating = true
             operationMessage = "正在重装 ${variant.label}..."
-            coreRepo.deleteCore(variant)
             coreRepo.installCore(variant).fold(
                 onSuccess = {
                     postCoreAppliedMessageAndRestartIfNeeded(
@@ -256,10 +256,18 @@ class CoreViewModel @Inject constructor(
     fun openCustomRepoDialog() { showCustomRepoDialog = true }
     fun dismissCustomRepoDialog() { showCustomRepoDialog = false }
 
-    fun saveCustomRepo(repo: String) {
+    fun updateCustomRepo(repo: String) {
         settingsRepo.setCustomRepo(repo)
+    }
+
+    fun saveCustomRepo(repo: String) {
+        updateCustomRepo(repo)
         showCustomRepoDialog = false
         operationMessage = "自定义仓库已保存: $repo"
+    }
+
+    fun updateCustomRepoDisplayName(name: String) {
+        settingsRepo.setCustomRepoDisplayName(name)
     }
 
     fun dismissMessage() {

@@ -38,6 +38,7 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
+    val customRepoDisplayName by viewModel.customRepoDisplayName.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val activeVariant = runtimeState.variant
 
@@ -90,31 +91,52 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
                             selected = activeVariant == variant,
                             onClick = { viewModel.updateVariant(variant) },
                             shape = SegmentedButtonDefaults.itemShape(index, ApiVariant.entries.size)
-                        ) { Text(variant.label) }
+                        ) { Text(resolveVariantLabel(variant, customRepoDisplayName)) }
                     }
                 }
             }
 
             AnimatedVisibility(visible = activeVariant == ApiVariant.Custom) {
-                OutlinedTextField(
-                    value = customRepo,
-                    onValueChange = { viewModel.saveCustomRepo(it.trim()) },
-                    label = { Text("自定义仓库") },
-                    placeholder = { Text("owner/repo") },
-                    leadingIcon = { Icon(Icons.Rounded.Tune, null) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = customRepoDisplayName,
+                        onValueChange = { viewModel.updateCustomRepoDisplayName(it) },
+                        label = { Text("自定义名称") },
+                        placeholder = { Text("例如：追剧版") },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = customRepo,
+                        onValueChange = { viewModel.updateCustomRepo(it) },
+                        label = { Text("自定义仓库") },
+                        placeholder = { Text("owner/repo") },
+                        leadingIcon = { Icon(Icons.Rounded.Tune, null) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             coreList.forEach { info ->
-                CoreVariantCard(info, info.variant == activeVariant, viewModel, downloadProgress)
+                CoreVariantCard(
+                    info = info,
+                    isActive = info.variant == activeVariant,
+                    vm = viewModel,
+                    downloadProgress = downloadProgress,
+                    customRepo = customRepo,
+                    customRepoDisplayName = customRepoDisplayName
+                )
             }
         }
     }
 
-    if (viewModel.showUpdateDialog) { UpdateResultDialog(viewModel) }
+    if (viewModel.showUpdateDialog) {
+        UpdateResultDialog(viewModel, customRepoDisplayName)
+    }
     if (viewModel.showRollbackDialog) {
         RollbackDialog(viewModel.rollbackVariant, viewModel.releaseHistory,
             viewModel.isLoadingHistory, viewModel::rollbackTo, viewModel::dismissRollbackDialog)
@@ -143,13 +165,16 @@ private fun CoreVariantCard(
     info: CoreInfo,
     isActive: Boolean,
     vm: CoreViewModel,
-    downloadProgress: CoreDownloadProgress
+    downloadProgress: CoreDownloadProgress,
+    customRepo: String,
+    customRepoDisplayName: String
 ) {
-    val customRepo by vm.customRepo.collectAsStateWithLifecycle()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val showGearMenu = vm.showGearMenu == info.variant
     val isDownloadingThisCard = downloadProgress.inProgress && downloadProgress.variant == info.variant
     val dark = isSystemInDarkTheme()
+    val variantLabel = resolveVariantLabel(info.variant, customRepoDisplayName)
+    val variantRepo = resolveVariantRepo(info.variant, customRepo)
 
     GlassCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -171,7 +196,7 @@ private fun CoreVariantCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(info.variant.label, style = MaterialTheme.typography.titleMedium,
+                    Text(variantLabel, style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
                     if (isActive) {
                         Surface(shape = RoundedCornerShape(6.dp),
@@ -190,8 +215,8 @@ private fun CoreVariantCard(
                         color = if (info.hasUpdate) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (info.variant.repo.isNotBlank()) {
-                    Text(info.variant.repo, style = MaterialTheme.typography.labelSmall,
+                if (variantRepo.isNotBlank()) {
+                    Text(variantRepo, style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -350,7 +375,7 @@ private fun CoreVariantCard(
             style = AppBottomSheetStyle.Confirm,
             tone = AppBottomSheetTone.Danger,
             title = { Text("确认删除") },
-            text = { Text("确定要删除 ${info.variant.label} 吗？") },
+            text = { Text("确定要删除 $variantLabel 吗？") },
             confirmButton = {
                 TextButton(onClick = { showDeleteConfirm = false; vm.deleteCore(info.variant) },
                     colors = ButtonDefaults.textButtonColors(
@@ -359,6 +384,18 @@ private fun CoreVariantCard(
             dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") } }
         )
     }
+}
+
+private fun resolveVariantLabel(variant: ApiVariant, customRepoDisplayName: String): String {
+    return if (variant == ApiVariant.Custom && customRepoDisplayName.isNotBlank()) {
+        customRepoDisplayName
+    } else {
+        variant.label
+    }
+}
+
+private fun resolveVariantRepo(variant: ApiVariant, customRepo: String): String {
+    return if (variant == ApiVariant.Custom) customRepo else variant.repo
 }
 
 private fun formatBytes(bytes: Long): String {
@@ -375,7 +412,7 @@ private fun formatBytes(bytes: Long): String {
 }
 
 @Composable
-private fun UpdateResultDialog(vm: CoreViewModel) {
+private fun UpdateResultDialog(vm: CoreViewModel, customRepoDisplayName: String) {
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
     AppBottomSheetDialog(
@@ -391,9 +428,9 @@ private fun UpdateResultDialog(vm: CoreViewModel) {
         title = { Text(if (info?.hasUpdate == true) "发现新版本" else "已是最新") },
         text = {
             if (info?.hasUpdate == true) {
-                Text("${info.variant.label}: v${info.version ?: "?"} → v${info.latestVersion}")
+                Text("${resolveVariantLabel(info.variant, customRepoDisplayName)}: v${info.version ?: "?"} → v${info.latestVersion}")
             } else {
-                Text("${info?.variant?.label ?: ""} 当前已是最新版本")
+                Text("${info?.let { resolveVariantLabel(it.variant, customRepoDisplayName) } ?: ""} 当前已是最新版本")
             }
         },
         confirmButton = {

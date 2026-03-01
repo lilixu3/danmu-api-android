@@ -41,6 +41,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,7 +57,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NETWORK_URL_REFRESH_DEBOUNCE_MS = 300L
         private const val NORMAL_START_TIMEOUT_PRIMARY_MS = 15_000L
         private const val NORMAL_START_TIMEOUT_EXTEND_MS = 20_000L
+        private const val NORMAL_STATE_RECONCILE_INTERVAL_MS = 8_000L
+        private const val NORMAL_START_STALE_TIMEOUT_MS =
+            NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
         private const val NORMAL_RESTART_STOP_TIMEOUT_MS = 12_000L
+        private const val NORMAL_STOP_TIMEOUT_MS = 8_000L
         private const val NORMAL_RESTART_START_TIMEOUT_MS = 15_000L
         private const val HOT_RELOAD_DEBOUNCE_MS = 800L
         private const val HOT_RELOAD_MIN_INTERVAL_MS = 2500L
@@ -129,6 +134,9 @@ class RuntimeRepositoryImpl @Inject constructor(
     @Volatile
     private var pendingNormalRestart = false
 
+    @Volatile
+    private var normalStartIssuedAtMs = 0L
+
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -146,6 +154,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         scope.launch {
             reconcileInitialState()
         }
+        startNormalStateReconciler()
         startNetworkMonitor()
     }
 
@@ -169,23 +178,20 @@ class RuntimeRepositoryImpl @Inject constructor(
             portFromEnv ?: 9321
         }
         val token = TokenDefaults.resolveTokenFromPrefs(prefs, context, defaultTokenEnvFile)
-        val legacyVariant = context
-            .getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
-            .getString("variant", "")
-            .orEmpty()
-            .trim()
-        val rawVariant = when {
-            prefs.contains("variant") -> prefs.getString("variant", "stable").orEmpty().trim()
-            envValues["DANMU_API_VARIANT"].isNullOrBlank().not() -> envValues["DANMU_API_VARIANT"].orEmpty().trim()
-            legacyVariant.isNotBlank() -> legacyVariant
-            else -> "stable"
+        val runtimeVariant = normalizeVariantKey(
+            if (prefs.contains("variant")) prefs.getString("variant", null) else null
+        )
+        val legacyVariant = normalizeVariantKey(
+            context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
+                .getString("variant", null)
+        )
+        val envVariant = normalizeVariantKey(envValues["DANMU_API_VARIANT"])
+        val selectedVariantKey = runtimeVariant ?: legacyVariant ?: envVariant ?: ApiVariant.Stable.key
+        val variant = ApiVariant.entries.find { it.key == selectedVariantKey } ?: ApiVariant.Stable
+
+        if (runtimeVariant == null || legacyVariant == null || runtimeVariant != selectedVariantKey || legacyVariant != selectedVariantKey) {
+            persistSelectedVariant(variant, commit = false)
         }
-        val normalizedVariant = when (rawVariant.lowercase()) {
-            "dev", "develop", "development" -> "dev"
-            "custom" -> "custom"
-            else -> "stable"
-        }
-        val variant = ApiVariant.entries.find { it.key == normalizedVariant } ?: ApiVariant.Stable
 
         val portOpen = isPortOpen(port)
         val normalRuntimeAlive = portOpen && isNormalServiceRunning()
@@ -257,7 +263,11 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun startService() {
         scope.launch {
             operationMutex.withLock {
-                startServiceLocked()
+                runCatching {
+                    startServiceLocked()
+                }.onFailure {
+                    handleRuntimeOperationFailure("启动服务", it)
+                }
             }
         }
     }
@@ -265,7 +275,11 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun stopService() {
         scope.launch {
             operationMutex.withLock {
-                stopServiceLocked()
+                runCatching {
+                    stopServiceLocked()
+                }.onFailure {
+                    handleRuntimeOperationFailure("停止服务", it)
+                }
             }
         }
     }
@@ -273,7 +287,11 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun restartService() {
         scope.launch {
             operationMutex.withLock {
-                restartServiceLocked()
+                runCatching {
+                    restartServiceLocked()
+                }.onFailure {
+                    handleRuntimeOperationFailure("重启服务", it)
+                }
             }
         }
     }
@@ -314,11 +332,25 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateVariant(variant: ApiVariant) {
-        prefs.edit { putString("variant", variant.key) }
-        context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE).edit {
+        persistSelectedVariant(variant, commit = true)
+        _runtimeState.update { it.copy(variant = variant) }
+    }
+
+    private fun persistSelectedVariant(variant: ApiVariant, commit: Boolean) {
+        prefs.edit(commit = commit) { putString("variant", variant.key) }
+        context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE).edit(commit = commit) {
             putString("variant", variant.key)
         }
-        _runtimeState.update { it.copy(variant = variant) }
+    }
+
+    private fun normalizeVariantKey(raw: String?): String? {
+        val value = raw?.trim()?.lowercase().orEmpty()
+        return when (value) {
+            "stable" -> "stable"
+            "dev", "develop", "development" -> "dev"
+            "custom" -> "custom"
+            else -> null
+        }
     }
 
     override fun updateRunMode(mode: RunMode) {
@@ -504,7 +536,11 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             runCatching {
-                NodeProjectManager.writeRuntimeEnv(context, normalDir)
+                NodeProjectManager.writeRuntimeEnv(
+                    context = context,
+                    targetProjectDir = normalDir,
+                    preferredVariantKey = _runtimeState.value.variant.key
+                )
             }.onFailure {
                 addLog(LogLevel.Warn, "写入运行时配置失败：${it.message ?: "未知错误"}")
                 return
@@ -540,6 +576,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         _runtimeState.update { it.copy(status = ServiceStatus.Starting, errorMessage = null) }
         clearRuntimeStartedAt()
         addLog(LogLevel.Info, "正在启动服务...")
+        persistSelectedVariant(state.variant, commit = true)
 
         when (state.runMode) {
             RunMode.Normal -> {
@@ -577,7 +614,33 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, reason)
                     return
                 }
-                NodeService.start(context)
+                val envSynced = runCatching {
+                    // 启动前由主进程写入运行配置，避免 :node 进程跨进程读取偏旧偏好导致首启错配。
+                    NodeProjectManager.writeRuntimeEnv(
+                        context = context,
+                        targetProjectDir = projectDir,
+                        preferredVariantKey = state.variant.key
+                    )
+                }
+                if (envSynced.isFailure) {
+                    val reason = envSynced.exceptionOrNull()?.message ?: "未知错误"
+                    markError("运行时配置写入失败：$reason")
+                    addLog(LogLevel.Error, "普通模式启动前写入配置失败: $reason")
+                    return
+                }
+                val startResult = runCatching {
+                    NodeService.start(context)
+                }
+                if (startResult.isFailure) {
+                    val reason = ErrorHandler.buildDetailedMessage(
+                        startResult.exceptionOrNull() ?: IllegalStateException("未知错误")
+                    )
+                    markError("普通模式拉起前台服务失败：$reason")
+                    addLog(LogLevel.Error, "普通模式拉起前台服务失败: $reason")
+                    return
+                }
+                normalStartIssuedAtMs = System.currentTimeMillis()
+
                 scope.launch {
                     delay(NORMAL_START_TIMEOUT_PRIMARY_MS)
                     val snapshot = _runtimeState.value
@@ -626,17 +689,30 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         when (state.runMode) {
             RunMode.Normal -> {
-                NodeService.stop(context)
+                val stopResult = runCatching {
+                    NodeService.stop(context)
+                }
+                if (stopResult.isFailure) {
+                    val reason = ErrorHandler.buildDetailedMessage(
+                        stopResult.exceptionOrNull() ?: IllegalStateException("未知错误")
+                    )
+                    markError("普通模式下发停止指令失败：$reason")
+                    addLog(LogLevel.Error, "普通模式下发停止指令失败: $reason")
+                    return
+                }
+                val stopPort = state.port
                 scope.launch {
-                    delay(4_000)
+                    val stopped = waitForRuntimeStopped(
+                        mode = RunMode.Normal,
+                        oldPort = stopPort,
+                        timeoutMs = NORMAL_STOP_TIMEOUT_MS
+                    )
                     val snapshot = _runtimeState.value
                     if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Stopping) {
-                        if (isNormalServiceStopped() && !isPortOpen(snapshot.port)) {
+                        if (stopped) {
                             markStopped()
-                        } else {
-                            if (!pendingNormalRestart) {
-                                markError("普通模式停止超时")
-                            }
+                        } else if (!pendingNormalRestart) {
+                            markError("普通模式停止超时")
                         }
                     }
                 }
@@ -669,8 +745,13 @@ class RuntimeRepositoryImpl @Inject constructor(
             RunMode.Normal -> {
                 pendingNormalRestart = true
                 try {
+                    val oldPort = state.port
                     stopServiceLocked()
-                    val stopped = waitForNormalServiceStopped(timeoutMs = NORMAL_RESTART_STOP_TIMEOUT_MS)
+                    val stopped = waitForRuntimeStopped(
+                        mode = RunMode.Normal,
+                        oldPort = oldPort,
+                        timeoutMs = NORMAL_RESTART_STOP_TIMEOUT_MS
+                    )
                     if (!stopped) {
                         markError("普通模式重启失败：停止超时")
                         addLog(LogLevel.Error, "普通模式重启失败：停止超时")
@@ -678,9 +759,11 @@ class RuntimeRepositoryImpl @Inject constructor(
                     }
 
                     markStopped()
+                    // 给 Service 一个极短收尾窗口，避免与停止尾流程竞态。
+                    delay(220)
                     startServiceLocked()
                     val started = waitForPort(
-                        state.port,
+                        oldPort,
                         wantOpen = true,
                         timeoutMs = NORMAL_RESTART_START_TIMEOUT_MS
                     )
@@ -715,6 +798,9 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun markRunning(pid: Int? = null, forceNewStart: Boolean = false) {
         val mode = _runtimeState.value.runMode
+        if (mode == RunMode.Normal) {
+            normalStartIssuedAtMs = 0L
+        }
         val startedAt = ensureRuntimeStartedAt(mode, forceNew = forceNewStart)
         val uptime = uptimeSecondsFrom(startedAt)
         val lanIp = getLanIp()
@@ -735,6 +821,9 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun markStopped() {
+        if (_runtimeState.value.runMode == RunMode.Normal) {
+            normalStartIssuedAtMs = 0L
+        }
         clearRuntimeStartedAt()
         _runtimeState.update {
             it.copy(status = ServiceStatus.Stopped, pid = null, uptimeSeconds = 0)
@@ -748,6 +837,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         val stillRunning = isPortOpen(state.port)
         if (!stillRunning) {
             clearRuntimeStartedAt()
+        }
+        if (state.runMode == RunMode.Normal && !stillRunning) {
+            normalStartIssuedAtMs = 0L
         }
 
         _runtimeState.update {
@@ -800,6 +892,71 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun startNormalStateReconciler() {
+        scope.launch {
+            while (isActive) {
+                delay(NORMAL_STATE_RECONCILE_INTERVAL_MS)
+                runCatching {
+                    operationMutex.withLock {
+                        reconcileNormalStateLocked()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun reconcileNormalStateLocked() {
+        val state = _runtimeState.value
+        if (state.runMode != RunMode.Normal) {
+            normalStartIssuedAtMs = 0L
+            return
+        }
+        if (state.status != ServiceStatus.Running &&
+            state.status != ServiceStatus.Starting &&
+            state.status != ServiceStatus.Stopping
+        ) {
+            return
+        }
+
+        val serviceRunning = isNormalServiceRunning()
+        val portOpen = isPortOpen(state.port)
+        val runtimeAlive = serviceRunning || portOpen
+        when (state.status) {
+            ServiceStatus.Running -> {
+                if (!runtimeAlive) {
+                    addLog(LogLevel.Warn, "检测到普通模式进程已退出，状态已自动重置")
+                    markStopped()
+                }
+            }
+
+            ServiceStatus.Starting -> {
+                if (runtimeAlive) return
+                val startAt = normalStartIssuedAtMs
+                if (startAt <= 0L) return
+                if (System.currentTimeMillis() - startAt >= NORMAL_START_STALE_TIMEOUT_MS) {
+                    markError("普通模式启动状态失效，请重试启动")
+                    addLog(LogLevel.Warn, "普通模式长时间未完成启动，已自动恢复为可重试状态")
+                }
+            }
+
+            ServiceStatus.Stopping -> {
+                if (!runtimeAlive) {
+                    markStopped()
+                }
+            }
+
+            ServiceStatus.Stopped,
+            ServiceStatus.Error -> Unit
+        }
+    }
+
+    private fun handleRuntimeOperationFailure(action: String, throwable: Throwable) {
+        val detail = ErrorHandler.buildDetailedMessage(throwable)
+        val message = "${action}异常：$detail"
+        markError(message)
+        addLog(LogLevel.Error, message)
     }
 
     private fun publishMergedLogs() {
@@ -1115,7 +1272,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     ) {
         val rootPath: String = rootDir.absolutePath
         private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
-        private val observers = LinkedHashMap<String, FileObserver>()
+        private val observers = ConcurrentHashMap<String, FileObserver>()
         private val mask = FileObserver.CLOSE_WRITE or
             FileObserver.MODIFY or
             FileObserver.ATTRIB or
@@ -1269,29 +1426,28 @@ class RuntimeRepositoryImpl @Inject constructor(
         return false
     }
 
+    private fun isNormalRuntimeStopped(port: Int): Boolean {
+        val state = _runtimeState.value
+        if (state.runMode == RunMode.Normal && state.status == ServiceStatus.Stopped) {
+            return true
+        }
+        return isNormalServiceStopped() && !isPortOpen(port)
+    }
+
     private suspend fun waitForRuntimeStopped(mode: RunMode, oldPort: Int, timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val stopped = when (mode) {
-                RunMode.Normal -> isNormalServiceStopped() && !isPortOpen(oldPort)
+                RunMode.Normal -> isNormalRuntimeStopped(oldPort)
                 RunMode.Root -> !RootRuntimeController.isRunning(context, oldPort)
             }
             if (stopped) return true
             delay(180)
         }
         return when (mode) {
-            RunMode.Normal -> isNormalServiceStopped() && !isPortOpen(oldPort)
+            RunMode.Normal -> isNormalRuntimeStopped(oldPort)
             RunMode.Root -> !RootRuntimeController.isRunning(context, oldPort)
         }
-    }
-
-    private suspend fun waitForNormalServiceStopped(timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (isNormalServiceStopped()) return true
-            delay(150)
-        }
-        return isNormalServiceStopped()
     }
 
     private fun isNormalServiceStopped(): Boolean {
