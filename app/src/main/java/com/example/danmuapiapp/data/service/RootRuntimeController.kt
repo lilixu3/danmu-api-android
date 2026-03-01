@@ -285,6 +285,21 @@ object RootRuntimeController {
     ): OpResult {
         return if (rootProjectMainJsExists(context)) {
             if (refreshEnvWhenReady) {
+                val normalProject = runCatching {
+                    val sourceProjectDir = RuntimePaths.normalProjectDir(context)
+                    val dir = NodeProjectManager.ensureProjectExtracted(context, sourceProjectDir)
+                    NodeProjectManager.migrateAllCoreLayouts(dir)
+                    dir
+                }.getOrElse {
+                    return OpResult(false, "运行时准备失败", it.message ?: "无法初始化工作目录")
+                }
+
+                val depsSyncResult = syncRootNodeModulesIfNeeded(context, normalProject)
+                if (!depsSyncResult.ok) return depsSyncResult
+
+                val coreReady = ensureSelectedCoreReady(context, normalProject)
+                if (!coreReady.ok) return coreReady
+
                 syncRuntimeEnvOnly(context)
             } else {
                 OpResult(true, "Root 运行目录已就绪")
@@ -293,7 +308,6 @@ object RootRuntimeController {
             syncWorkDirToRoot(context)
         }
     }
-
     fun syncWorkDirToRoot(context: Context): OpResult {
         val project = runCatching {
             val sourceProjectDir = RuntimePaths.normalProjectDir(context)
@@ -504,7 +518,7 @@ object RootRuntimeController {
         val rootCoreDirPath = "${rootProjectDir(context)}/danmu_api_${variant.key}"
 
         if (rootCoreHasWorker(rootCoreDirPath)) {
-            return OpResult(true, "同步完成")
+            return syncRootCoreNodeModulesIfNeeded(normalCoreDir, rootCoreDirPath)
         }
 
         // Root 缺少当前核心时，仅补齐当前核心，避免恢复时覆盖用户已修改的其它核心。
@@ -529,6 +543,8 @@ object RootRuntimeController {
             val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
             return OpResult(false, "补齐 Root 核心失败", if (err.isBlank()) "未知错误" else err)
         }
+        val depsSync = syncRootCoreNodeModulesIfNeeded(normalCoreDir, rootCoreDirPath)
+        if (!depsSync.ok) return depsSync
         return OpResult(true, "同步完成")
     }
 
@@ -543,6 +559,98 @@ object RootRuntimeController {
         return RootShell.exec(script, timeoutMs = 3000L).ok
     }
 
+    private fun syncRootNodeModulesIfNeeded(context: Context, normalProjectDir: File): OpResult {
+        val srcProjectPath = normalProjectDir.absolutePath
+        val dstProjectPath = rootProjectDir(context)
+
+        val script = """
+            SRC=${shellQuote(srcProjectPath)}
+            DST=${shellQuote(dstProjectPath)}
+            SRC_NM="${'$'}SRC/node_modules"
+            DST_NM="${'$'}DST/node_modules"
+            SRC_LOCK="${'$'}SRC/package-lock.json"
+            DST_LOCK="${'$'}DST/package-lock.json"
+            NEED_SYNC=0
+
+            [ -d "${'$'}SRC_NM" ] || exit 0
+            [ -d "${'$'}DST_NM" ] || NEED_SYNC=1
+
+            if [ -f "${'$'}SRC_LOCK" ]; then
+              SRC_SUM="${'$'}(cksum "${'$'}SRC_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_SUM="${'$'}(cksum "${'$'}DST_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
+            fi
+
+            if [ -f "${'$'}SRC_NM/redis/package.json" ] && [ ! -f "${'$'}DST_NM/redis/package.json" ]; then
+              NEED_SYNC=1
+            fi
+
+            if [ "${'$'}NEED_SYNC" -eq 1 ]; then
+              mkdir -p "${'$'}DST_NM" 2>/dev/null || true
+              cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
+            fi
+
+            if [ -f "${'$'}SRC_NM/redis/package.json" ] && [ ! -f "${'$'}DST_NM/redis/package.json" ]; then
+              exit 2
+            fi
+            exit 0
+        """.trimIndent()
+
+        val result = RootShell.exec(script, timeoutMs = 25_000L)
+        if (!result.ok) {
+            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
+            val detail = if (err.isBlank()) "同步 Root 依赖失败（node_modules）" else err
+            return OpResult(false, "同步 Root 依赖失败", detail)
+        }
+        return OpResult(true, "Root 依赖已同步")
+    }
+
+    private fun syncRootCoreNodeModulesIfNeeded(normalCoreDir: File, rootCoreDirPath: String): OpResult {
+        val srcCorePath = normalCoreDir.absolutePath
+        val dstCorePath = rootCoreDirPath
+
+        val script = """
+            SRC=${shellQuote(srcCorePath)}
+            DST=${shellQuote(dstCorePath)}
+            SRC_NM="${'$'}SRC/node_modules"
+            DST_NM="${'$'}DST/node_modules"
+            SRC_LOCK="${'$'}SRC/package-lock.json"
+            DST_LOCK="${'$'}DST/package-lock.json"
+            SRC_PKG="${'$'}SRC/package.json"
+            DST_PKG="${'$'}DST/package.json"
+            NEED_SYNC=0
+
+            [ -d "${'$'}SRC" ] || exit 0
+            [ -d "${'$'}DST" ] || exit 0
+            [ -d "${'$'}SRC_NM" ] || exit 0
+            [ -d "${'$'}DST_NM" ] || NEED_SYNC=1
+
+            if [ -f "${'$'}SRC_LOCK" ]; then
+              SRC_SUM="${'$'}(cksum "${'$'}SRC_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_SUM="${'$'}(cksum "${'$'}DST_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
+            elif [ -f "${'$'}SRC_PKG" ]; then
+              SRC_SUM="${'$'}(cksum "${'$'}SRC_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_SUM="${'$'}(cksum "${'$'}DST_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
+            fi
+
+            if [ "${'$'}NEED_SYNC" -eq 1 ]; then
+              mkdir -p "${'$'}DST_NM" 2>/dev/null || true
+              cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
+            fi
+
+            exit 0
+        """.trimIndent()
+
+        val result = RootShell.exec(script, timeoutMs = 25_000L)
+        if (!result.ok) {
+            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
+            val detail = if (err.isBlank()) "同步 Root 核心依赖失败（core node_modules）" else err
+            return OpResult(false, "同步 Root 核心依赖失败", detail)
+        }
+        return OpResult(true, "Root 核心依赖已同步")
+    }
     private fun readPid(context: Context): Int? {
         val f = pidFile(context)
         if (!f.exists()) return null
