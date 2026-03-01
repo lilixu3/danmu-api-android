@@ -3,16 +3,23 @@ package com.example.danmuapiapp.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.ui.navigation.Screen
 import com.example.danmuapiapp.ui.navigation.SettingsRoute
 import com.example.danmuapiapp.ui.navigation.ToolRoute
@@ -26,22 +33,100 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadScreen
 import com.example.danmuapiapp.ui.screen.home.HomeScreen
 import com.example.danmuapiapp.ui.screen.push.PushDanmuScreen
 import com.example.danmuapiapp.ui.screen.records.RequestRecordsScreen
+import com.example.danmuapiapp.ui.screen.settings.AboutScreen
+import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
 import com.example.danmuapiapp.ui.screen.settings.DownloadSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
-import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
 import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
-import com.example.danmuapiapp.ui.screen.settings.AboutScreen
 import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 
+@Composable
+fun DanmuApiApp(
+    startupUiState: RuntimeWarmupCoordinator.UiState = RuntimeWarmupCoordinator.UiState.Ready
+) {
+    when (startupUiState) {
+        RuntimeWarmupCoordinator.UiState.NotStarted -> {
+            StartupWarmupScreen(
+                title = "正在进入应用",
+                detail = "正在准备启动界面"
+            )
+        }
+
+        is RuntimeWarmupCoordinator.UiState.Running -> {
+            StartupWarmupScreen(
+                title = startupUiState.title,
+                detail = startupUiState.detail
+            )
+        }
+
+        RuntimeWarmupCoordinator.UiState.Ready -> {
+            DanmuApiMainContent()
+        }
+    }
+}
+
+@Composable
+private fun StartupWarmupScreen(title: String, detail: String) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(min = 260.dp, max = 420.dp)
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Autorenew,
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    CircularProgressIndicator(
+                        strokeWidth = 2.8.dp,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DanmuApiApp() {
+private fun DanmuApiMainContent() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
