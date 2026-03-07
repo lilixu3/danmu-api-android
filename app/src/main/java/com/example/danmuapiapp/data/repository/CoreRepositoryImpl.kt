@@ -137,12 +137,13 @@ class CoreRepositoryImpl @Inject constructor(
         if (mode == RunMode.Normal) {
             NodeProjectManager.normalizeCoreLayout(location.normalDir)
         }
-        val version = readLocalCoreVersion(variant, mode)
+        val installed = hasValidCore(variant, mode)
+        val version = if (installed) readLocalCoreVersion(variant, mode) else null
 
         return CoreInfo(
             variant = variant,
             version = version,
-            isInstalled = hasValidCore(variant, mode)
+            isInstalled = installed
         )
     }
 
@@ -799,23 +800,30 @@ class CoreRepositoryImpl @Inject constructor(
             "$rootDirPath/danmu-api/config/globals.js",
             "$rootDirPath/danmu-api/globals.js"
         )
-        for (path in globalsCandidates) {
-            val text = rootReadText(path) ?: continue
-            val version = parseVersionFromSource(text)
-            if (!version.isNullOrBlank()) return version.removePrefix("v")
-        }
-
         val packageCandidates = listOf(
             "$rootDirPath/package.json",
             "$rootDirPath/danmu_api/package.json",
             "$rootDirPath/danmu-api/package.json"
         )
-        for (path in packageCandidates) {
-            val text = rootReadText(path) ?: continue
-            val version = packageVersionRegex.find(text)?.groupValues?.getOrNull(1)?.trim()
-            if (!version.isNullOrBlank()) return version.removePrefix("v")
-        }
-        return null
+        val allCandidates = globalsCandidates + packageCandidates
+        val candidateArgs = allCandidates.joinToString(separator = " ") { shellQuote(it) }
+        val script = """
+            for FILE in \
+            $candidateArgs
+            do
+              [ -f "${'$'}FILE" ] || continue
+              sed -n '1,220p' "${'$'}FILE" 2>/dev/null || cat "${'$'}FILE" 2>/dev/null || true
+              printf '\n'
+            done
+        """.trimIndent()
+        val result = RootShell.exec(script, timeoutMs = 4500L)
+        if (!result.ok) return null
+        val text = result.stdout
+        if (text.isBlank()) return null
+
+        val version = parseVersionFromSource(text)
+            ?: packageVersionRegex.find(text)?.groupValues?.getOrNull(1)?.trim()
+        return version?.removePrefix("v")?.takeIf { it.isNotBlank() }
     }
 
     private fun parseVersionFromSource(text: String): String? {
@@ -904,19 +912,6 @@ class CoreRepositoryImpl @Inject constructor(
             ?: emptyList()
 
         return VersionParts(core = core, preRelease = preRelease)
-    }
-
-    private fun rootReadText(path: String): String? {
-        val script = """
-            FILE=${shellQuote(path)}
-            if [ ! -f "${'$'}FILE" ]; then
-              exit 1
-            fi
-            cat "${'$'}FILE"
-        """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 4500L)
-        if (!result.ok) return null
-        return result.stdout
     }
 
     private fun extractDanmuFolder(zipStream: InputStream, outDir: File): Boolean {

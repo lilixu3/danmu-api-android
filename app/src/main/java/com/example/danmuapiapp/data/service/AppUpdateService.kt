@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.service
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.ClipData
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -49,6 +50,7 @@ class AppUpdateService @Inject constructor(
         private const val KEY_PENDING_INSTALL_VERSION = "pending_install_version"
         private const val KEY_PENDING_INSTALL_PATH = "pending_install_path"
         private const val KEY_PENDING_INSTALL_TS = "pending_install_ts"
+        private const val PENDING_INSTALL_MAX_AGE_MS = 12 * 60 * 60 * 1000L
     }
 
     data class ApkAsset(
@@ -80,6 +82,14 @@ class AppUpdateService @Inject constructor(
         data object NeedUnknownSourcePermission : InstallResult()
         data class Failed(val message: String) : InstallResult()
     }
+
+    private data class PendingInstallRecord(
+        val uri: Uri?,
+        val displayName: String,
+        val version: String,
+        val displayPath: String,
+        val savedAt: Long
+    )
 
     fun currentVersionName(): String {
         return runCatching {
@@ -187,8 +197,7 @@ class AppUpdateService @Inject constructor(
     }
 
     fun tryResumePendingInstall(activity: Activity): Boolean {
-        val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val uriStr = prefs.getString(KEY_PENDING_INSTALL_URI, null) ?: return false
+        val pending = loadPendingInstall(activity) ?: return false
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !activity.packageManager.canRequestPackageInstalls()
@@ -196,18 +205,23 @@ class AppUpdateService @Inject constructor(
             return false
         }
 
-        val uri = runCatching { uriStr.toUri() }.getOrNull()
-        if (uri == null || !isUriReadable(activity, uri)) {
+        val candidates = buildPendingInstallCandidates(activity, pending)
+        if (candidates.isEmpty()) {
             clearPendingInstall(activity)
             Toast.makeText(activity, "安装包已不可用，请重新下载", Toast.LENGTH_SHORT).show()
             return false
         }
 
-        clearPendingInstall(activity)
-        return when (launchInstaller(activity, uri)) {
-            is InstallResult.Launched -> true
-            else -> false
+        candidates.forEach { uri ->
+            when (launchInstaller(activity, uri)) {
+                is InstallResult.Launched -> {
+                    clearPendingInstall(activity)
+                    return true
+                }
+                else -> Unit
+            }
         }
+        return false
     }
 
     fun openDownloadsApp(activity: Activity) {
@@ -617,6 +631,76 @@ class AppUpdateService @Inject constructor(
         }
     }
 
+    private fun loadPendingInstall(context: Context): PendingInstallRecord? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedAt = prefs.getLong(KEY_PENDING_INSTALL_TS, 0L)
+        if (savedAt > 0L && System.currentTimeMillis() - savedAt > PENDING_INSTALL_MAX_AGE_MS) {
+            clearPendingInstall(context)
+            return null
+        }
+
+        val uri = prefs.getString(KEY_PENDING_INSTALL_URI, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { it.toUri() }.getOrNull() }
+        val displayName = prefs.getString(KEY_PENDING_INSTALL_NAME, null).orEmpty().trim()
+        val version = prefs.getString(KEY_PENDING_INSTALL_VERSION, null).orEmpty().trim()
+        val displayPath = prefs.getString(KEY_PENDING_INSTALL_PATH, null).orEmpty().trim()
+
+        if (uri == null && displayName.isBlank() && displayPath.isBlank()) {
+            clearPendingInstall(context)
+            return null
+        }
+
+        return PendingInstallRecord(
+            uri = uri,
+            displayName = displayName,
+            version = version,
+            displayPath = displayPath,
+            savedAt = savedAt
+        )
+    }
+
+    private fun buildPendingInstallCandidates(
+        context: Context,
+        pending: PendingInstallRecord
+    ): List<Uri> {
+        val candidates = linkedSetOf<Uri>()
+        pending.uri?.let { candidates += it }
+        resolveInstallUriFromSavedPath(context, pending.displayPath)?.let { candidates += it }
+        resolveMediaStoreInstallUri(context, pending.displayName)?.let { candidates += it }
+        return candidates.toList()
+    }
+
+    private fun resolveInstallUriFromSavedPath(context: Context, rawPath: String): Uri? {
+        val path = rawPath.trim()
+        if (path.isEmpty()) return null
+        val file = runCatching { File(path) }.getOrNull() ?: return null
+        if (!file.exists() || !file.isFile) return null
+        return runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        }.getOrNull()
+    }
+
+    private fun resolveMediaStoreInstallUri(context: Context, displayName: String): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val name = displayName.trim()
+        if (name.isEmpty()) return null
+        return runCatching {
+            context.contentResolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Downloads._ID),
+                "${MediaStore.Downloads.DISPLAY_NAME}=?",
+                arrayOf(name),
+                "${MediaStore.Downloads.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val id = cursor.getLong(0)
+                ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+            }
+        }.getOrNull()
+    }
+
     private fun clearPendingInstall(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
             remove(KEY_PENDING_INSTALL_URI)
@@ -625,15 +709,6 @@ class AppUpdateService @Inject constructor(
             remove(KEY_PENDING_INSTALL_PATH)
             remove(KEY_PENDING_INSTALL_TS)
         }
-    }
-
-    private fun isUriReadable(context: Context, uri: Uri): Boolean {
-        return runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                stream.read()
-            }
-            true
-        }.getOrDefault(false)
     }
 
     private fun launchInstaller(activity: Activity, apkUri: Uri): InstallResult {

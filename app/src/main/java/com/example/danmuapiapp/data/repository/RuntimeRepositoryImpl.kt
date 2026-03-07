@@ -42,6 +42,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -124,6 +125,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private var uptimeJob: Job? = null
     private var hotReloadWatcher: WorkDirHotReloadWatcher? = null
     private var hotReloadJob: Job? = null
+    private var rootFingerprintCheckJob: Job? = null
     private var pendingHotReloadReason: String? = null
     private var lastHotReloadAtMs: Long = 0L
     private var hotReloadSuppressUntilMs: Long = 0L
@@ -260,39 +262,41 @@ class RuntimeRepositoryImpl @Inject constructor(
         }.getOrDefault(emptyMap())
     }
 
-    override fun startService() {
+    private val userOperationInFlight = AtomicBoolean(false)
+
+    private fun launchSerializedUserOperation(action: String, block: suspend () -> Unit) {
+        if (!userOperationInFlight.compareAndSet(false, true)) return
+        cancelRootFingerprintCheck()
         scope.launch {
-            operationMutex.withLock {
-                runCatching {
-                    startServiceLocked()
-                }.onFailure {
-                    handleRuntimeOperationFailure("启动服务", it)
+            try {
+                operationMutex.withLock {
+                    runCatching {
+                        block()
+                    }.onFailure {
+                        handleRuntimeOperationFailure(action, it)
+                    }
                 }
+            } finally {
+                userOperationInFlight.set(false)
             }
+        }
+    }
+
+    override fun startService() {
+        launchSerializedUserOperation("启动服务") {
+            startServiceLocked()
         }
     }
 
     override fun stopService() {
-        scope.launch {
-            operationMutex.withLock {
-                runCatching {
-                    stopServiceLocked()
-                }.onFailure {
-                    handleRuntimeOperationFailure("停止服务", it)
-                }
-            }
+        launchSerializedUserOperation("停止服务") {
+            stopServiceLocked()
         }
     }
 
     override fun restartService() {
-        scope.launch {
-            operationMutex.withLock {
-                runCatching {
-                    restartServiceLocked()
-                }.onFailure {
-                    handleRuntimeOperationFailure("重启服务", it)
-                }
-            }
+        launchSerializedUserOperation("重启服务") {
+            restartServiceLocked()
         }
     }
 
@@ -303,14 +307,12 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun applyServiceConfig(port: Int, token: String, restartIfRunning: Boolean) {
-        scope.launch {
-            operationMutex.withLock {
-                applyServiceConfigLocked(
-                    port = port,
-                    token = token.trim(),
-                    restartIfRunning = restartIfRunning
-                )
-            }
+        launchSerializedUserOperation("应用服务配置") {
+            applyServiceConfigLocked(
+                port = port,
+                token = token.trim(),
+                restartIfRunning = restartIfRunning
+            )
         }
     }
 
@@ -354,52 +356,50 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateRunMode(mode: RunMode) {
-        scope.launch {
-            operationMutex.withLock {
-                val current = _runtimeState.value
-                if (current.runMode == mode) return@withLock
+        launchSerializedUserOperation("切换运行模式") {
+            val current = _runtimeState.value
+            if (current.runMode == mode) return@launchSerializedUserOperation
 
-                if (mode.requiresRoot) {
-                    val rootCheck = RootShell.exec("id", timeoutMs = 3500L)
-                    if (!rootCheck.ok) {
-                        addLog(LogLevel.Warn, "运行模式切换失败：${rootSwitchDeniedReason(rootCheck)}")
-                        return@withLock
-                    }
+            if (mode.requiresRoot) {
+                val rootCheck = RootShell.exec("id", timeoutMs = 3500L)
+                if (!rootCheck.ok) {
+                    addLog(LogLevel.Warn, "运行模式切换失败：${rootSwitchDeniedReason(rootCheck)}")
+                    return@launchSerializedUserOperation
                 }
+            }
 
-                val shouldResume = current.status == ServiceStatus.Running ||
-                    current.status == ServiceStatus.Starting
+            val shouldResume = current.status == ServiceStatus.Running ||
+                current.status == ServiceStatus.Starting
 
-                if (shouldResume) {
-                    stopServiceLocked()
-                    waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
+            if (shouldResume) {
+                stopServiceLocked()
+                waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
+            }
+
+            clearRuntimeStartedAt()
+            RuntimeModePrefs.put(context, mode)
+            val shouldSyncBootMode = RootAutoStartPrefs.isBootAutoStartEnabled(context)
+            if (shouldSyncBootMode) {
+                val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
+                if (!flagResult.ok) {
+                    addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
                 }
+            }
+            _runtimeState.update {
+                it.copy(
+                    runMode = mode,
+                    status = ServiceStatus.Stopped,
+                    uptimeSeconds = 0,
+                    pid = null,
+                    errorMessage = null
+                )
+            }
+            stopWorkDirHotReload()
 
-                clearRuntimeStartedAt()
-                RuntimeModePrefs.put(context, mode)
-                val shouldSyncBootMode = RootAutoStartPrefs.isBootAutoStartEnabled(context)
-                if (shouldSyncBootMode) {
-                    val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
-                    if (!flagResult.ok) {
-                        addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
-                    }
-                }
-                _runtimeState.update {
-                    it.copy(
-                        runMode = mode,
-                        status = ServiceStatus.Stopped,
-                        uptimeSeconds = 0,
-                        pid = null,
-                        errorMessage = null
-                    )
-                }
-                stopWorkDirHotReload()
+            addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
 
-                addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
-
-                if (shouldResume) {
-                    startServiceLocked()
-                }
+            if (shouldResume) {
+                startServiceLocked()
             }
         }
     }
@@ -1069,7 +1069,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             RunMode.Root -> {
                 // Root 模式以 Root 工作目录为唯一热更新来源，避免普通目录变更干扰。
                 stopNormalWorkDirWatcher()
-                checkRootWorkDirFingerprint()
+                scheduleRootFingerprintCheck()
             }
         }
     }
@@ -1191,11 +1191,32 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun stopWorkDirHotReload() {
         stopNormalWorkDirWatcher()
+        cancelRootFingerprintCheck()
         hotReloadJob?.cancel()
         hotReloadJob = null
         pendingHotReloadReason = null
         rootWorkDirFingerprint = null
         lastRootFingerprintCheckAtMs = 0L
+    }
+
+    private fun cancelRootFingerprintCheck() {
+        rootFingerprintCheckJob?.cancel()
+        rootFingerprintCheckJob = null
+    }
+
+    private fun scheduleRootFingerprintCheck() {
+        val runningJob = rootFingerprintCheckJob
+        if (runningJob != null && runningJob.isActive) return
+        val job = scope.launch {
+            try {
+                checkRootWorkDirFingerprint()
+            } finally {
+                if (rootFingerprintCheckJob === coroutineContext[Job]) {
+                    rootFingerprintCheckJob = null
+                }
+            }
+        }
+        rootFingerprintCheckJob = job
     }
 
     private fun checkRootWorkDirFingerprint() {
