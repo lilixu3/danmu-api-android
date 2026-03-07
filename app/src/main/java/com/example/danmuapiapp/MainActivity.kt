@@ -2,15 +2,15 @@ package com.example.danmuapiapp
 
 import android.app.ActivityManager
 import android.content.Context
-import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
@@ -52,8 +52,8 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, true)
 
         runtimeWarmupCoordinator.startIfNeeded()
 
@@ -73,17 +73,18 @@ class MainActivity : ComponentActivity() {
                 NightModePreference.Light -> false
                 NightModePreference.Dark -> true
             }
-            val view = LocalView.current
-            SideEffect {
-                val insetsController = WindowCompat.getInsetsController(window, view)
-                window.statusBarColor = AndroidColor.TRANSPARENT
-                window.navigationBarColor = AndroidColor.TRANSPARENT
-                insetsController.isAppearanceLightStatusBars = !darkTheme
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    insetsController.isAppearanceLightNavigationBars = !darkTheme
-                }
-            }
             DanmuApiTheme(darkTheme = darkTheme) {
+                val view = LocalView.current
+                val systemBarColor = MaterialTheme.colorScheme.surface.toArgb()
+                SideEffect {
+                    val insetsController = WindowCompat.getInsetsController(window, view)
+                    window.statusBarColor = systemBarColor
+                    window.navigationBarColor = systemBarColor
+                    insetsController.isAppearanceLightStatusBars = !darkTheme
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        insetsController.isAppearanceLightNavigationBars = !darkTheme
+                    }
+                }
                 DanmuApiApp(startupUiState = startupUiState)
             }
         }

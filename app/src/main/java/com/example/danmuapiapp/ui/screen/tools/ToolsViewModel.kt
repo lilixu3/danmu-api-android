@@ -13,6 +13,7 @@ class ToolsViewModel @Inject constructor(
     private val adminSessionRepository: AdminSessionRepository,
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
+    val runtimeState = runtimeRepository.runtimeState
     val logs = runtimeRepository.logs
     val adminSessionState = adminSessionRepository.sessionState
     val logPreviewEnabled = settingsRepository.logPreviewEnabled

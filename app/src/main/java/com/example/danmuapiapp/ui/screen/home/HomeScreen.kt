@@ -229,6 +229,7 @@ fun HomeScreen(
         else -> null
     }
     val coreVersionAccent = when {
+        isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
         !isCoreInstalled -> MaterialTheme.colorScheme.error
         hasUpdate -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
@@ -499,6 +500,7 @@ fun HomeScreen(
                     isInstalling = viewModel.isInstallingCore,
                     isSwitching = viewModel.isSwitchingCore,
                     isUpdating = viewModel.isUpdatingCore,
+                    isCoreInfoLoading = isCoreInfoLoading,
                     isDarkTheme = isDarkTheme,
                     onToggle = viewModel::toggleService,
                     onRestart = viewModel::restartService,
@@ -2675,6 +2677,7 @@ private fun ActionDeck(
     isInstalling: Boolean,
     isSwitching: Boolean,
     isUpdating: Boolean,
+    isCoreInfoLoading: Boolean,
     isDarkTheme: Boolean,
     onToggle: () -> Unit,
     onRestart: () -> Unit,
@@ -2685,6 +2688,8 @@ private fun ActionDeck(
     hasUpdate: Boolean,
     latestVersion: String?
 ) {
+    val coreActionEnabled = !isTransitioning && !isCoreInfoLoading && (!isCoreInstalled || hasUpdate)
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -2794,28 +2799,31 @@ private fun ActionDeck(
                             onOpenUpdatePrompt()
                         }
                     },
-                    enabled = (!isTransitioning) && (!isCoreInstalled || hasUpdate),
+                    enabled = coreActionEnabled,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
-                    colors = if (!isCoreInstalled || hasUpdate) {
+                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || hasUpdate)) {
                         appDangerTonalButtonColors()
                     } else {
                         appTonalButtonColors()
                     }
                 ) {
                     Icon(
-                        imageVector = if (!isCoreInstalled) Icons.Rounded.Download else Icons.Rounded.SystemUpdateAlt,
+                        imageVector = when {
+                            isCoreInfoLoading -> Icons.Rounded.HourglassTop
+                            !isCoreInstalled -> Icons.Rounded.Download
+                            else -> Icons.Rounded.SystemUpdateAlt
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        if (!isCoreInstalled) {
-                            "点击下载"
-                        } else if (hasUpdate) {
-                            "更新 ${latestVersion?.let { "v$it" } ?: "核心"}"
-                        } else {
-                            "暂无更新"
+                        when {
+                            isCoreInfoLoading -> "检测中"
+                            !isCoreInstalled -> "点击下载"
+                            hasUpdate -> "更新 ${latestVersion?.let { "v$it" } ?: "核心"}"
+                            else -> "暂无更新"
                         }
                     )
                 }
