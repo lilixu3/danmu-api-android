@@ -49,6 +49,10 @@ fun RequestRecordsScreen(
     val errorCount = records.count { !it.success }
     val successCount = records.count { it.success }
 
+    LaunchedEffect(adminState.isAdminMode) {
+        viewModel.refresh()
+    }
+
     val filteredRecords = when (filterSuccess) {
         true -> records.filter { it.success }
         false -> records.filter { !it.success }

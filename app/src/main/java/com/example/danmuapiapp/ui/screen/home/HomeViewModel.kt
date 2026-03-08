@@ -16,6 +16,7 @@ import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
@@ -51,7 +52,8 @@ class HomeViewModel @Inject constructor(
     private val githubProxySpeedTester: GithubProxySpeedTester,
     private val appForegroundUpdateChecker: AppForegroundUpdateChecker,
     private val appUpdateService: AppUpdateService,
-    private val cacheRepo: CacheRepository
+    private val cacheRepo: CacheRepository,
+    private val adminSessionRepository: AdminSessionRepository
 ) : ViewModel() {
     companion object {
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
@@ -69,6 +71,7 @@ class HomeViewModel @Inject constructor(
     val cacheStats = cacheRepo.cacheStats
     val cacheEntries = cacheRepo.cacheEntries
     val isCacheLoading = cacheRepo.isLoading
+    val adminSessionState = adminSessionRepository.sessionState
     val requestTotalCount: StateFlow<Int> = requestRecordRepo.records
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -117,6 +120,10 @@ class HomeViewModel @Inject constructor(
     var appUpdatePromptDownloadUrls by mutableStateOf<List<String>>(emptyList())
         private set
     var appUpdateMessage by mutableStateOf<String?>(null)
+        private set
+    var showCacheAdminRequiredDialog by mutableStateOf(false)
+        private set
+    var cacheAdminRequiredMessage by mutableStateOf("")
         private set
 
     val showProxyPickerDialog: Boolean
@@ -315,6 +322,16 @@ class HomeViewModel @Inject constructor(
     }
 
     fun quickClearCache() {
+        val adminState = adminSessionState.value
+        if (!adminState.isAdminMode) {
+            cacheAdminRequiredMessage = if (adminState.hasAdminTokenConfigured) {
+                "清理缓存属于管理员写操作，请先到 设置 > 管理员权限 开启管理员模式。"
+            } else {
+                "当前核心可能要求 ADMIN_TOKEN 才能清理缓存，请先到 设置 > 管理员权限 配置并开启管理员模式。"
+            }
+            showCacheAdminRequiredDialog = true
+            return
+        }
         if (isClearingCache) return
         isClearingCache = true
         viewModelScope.launch(Dispatchers.IO) {
@@ -324,6 +341,11 @@ class HomeViewModel @Inject constructor(
             )
             isClearingCache = false
         }
+    }
+
+    fun dismissCacheAdminRequiredDialog() {
+        showCacheAdminRequiredDialog = false
+        cacheAdminRequiredMessage = ""
     }
 
     fun toggleTokenVisible() {

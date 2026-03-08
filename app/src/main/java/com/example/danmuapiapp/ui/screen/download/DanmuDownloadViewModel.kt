@@ -15,6 +15,7 @@ import com.example.danmuapiapp.domain.model.DownloadConflictPolicy
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.domain.model.DownloadThrottleConfig
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.DanmuDownloadRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,6 +41,7 @@ private data class RateLimitBypassSession(
 class DanmuDownloadViewModel @Inject constructor(
     runtimeRepository: RuntimeRepository,
     private val downloadRepository: DanmuDownloadRepository,
+    private val adminSessionRepository: AdminSessionRepository,
     private val httpClient: OkHttpClient
 ) : ViewModel() {
     companion object {
@@ -1335,8 +1337,13 @@ class DanmuDownloadViewModel @Inject constructor(
 
     private fun buildLocalControlApiUrl(path: String): String {
         val state = runtimeState.value
-        val token = state.token.trim().trim('/')
-        val tokenPath = if (token.isBlank()) "" else "/$token"
+        val runtimeToken = state.token.trim().trim('/')
+        val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim().trim('/')
+        val tokenPath = when {
+            adminSessionRepository.sessionState.value.isAdminMode && adminToken.isNotBlank() -> "/$adminToken"
+            runtimeToken.isNotBlank() -> "/$runtimeToken"
+            else -> ""
+        }
         return "http://127.0.0.1:${state.port}$tokenPath$path"
     }
 

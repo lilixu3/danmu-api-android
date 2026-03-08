@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.console
 
 import androidx.lifecycle.ViewModel
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,10 +12,12 @@ import javax.inject.Inject
 @HiltViewModel
 class ConsoleViewModel @Inject constructor(
     private val runtimeRepo: RuntimeRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val adminSessionRepository: AdminSessionRepository
 ) : ViewModel() {
 
     val logs = runtimeRepo.logs
+    val adminSessionState = adminSessionRepository.sessionState
 
     val logEnabled = settingsRepository.logEnabled
     val logPreviewEnabled = settingsRepository.logPreviewEnabled
