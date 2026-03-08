@@ -5,14 +5,13 @@ import android.content.Context
 import android.net.Uri
 import android.content.res.Resources
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
@@ -35,11 +34,14 @@ import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
+import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.parseEnvContentMap
 import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -56,6 +58,7 @@ class SettingsViewModel @Inject constructor(
     private val adminSessionRepository: AdminSessionRepository,
     private val envConfigRepoLazy: Lazy<EnvConfigRepository>,
     private val githubProxyService: GithubProxyService,
+    private val githubProxySpeedTester: GithubProxySpeedTester,
     private val webDavService: WebDavService,
     private val appUpdateService: AppUpdateService
 ) : ViewModel() {
@@ -104,7 +107,7 @@ class SettingsViewModel @Inject constructor(
         private set
     var appUpdateAssetName by mutableStateOf<String?>(null)
         private set
-    var appUpdateAssetSizeBytes by mutableLongStateOf(0L)
+    var appUpdateAssetSizeBytes by mutableStateOf(0L)
         private set
     var appUpdateHasUpdate by mutableStateOf(false)
         private set
@@ -112,29 +115,30 @@ class SettingsViewModel @Inject constructor(
         private set
     var isCheckingAppUpdate by mutableStateOf(false)
         private set
-    var isDownloadingAppUpdate by mutableStateOf(false)
-        private set
-    var appUpdateDownloadPercent by mutableIntStateOf(0)
-        private set
-    var appUpdateDownloadDetail by mutableStateOf("等待下载")
-        private set
     var showAppUpdateAvailableDialog by mutableStateOf(false)
         private set
-    var showAppUpdateMethodDialog by mutableStateOf(false)
-        private set
-    var downloadedAppUpdate by mutableStateOf<AppUpdateService.DownloadedApk?>(null)
-        private set
-    var showInstallAppUpdateDialog by mutableStateOf(false)
-        private set
 
-    var showProxyPickerDialog by mutableStateOf(false)
-        private set
-    var proxySelectedId by mutableStateOf(githubProxyService.currentSelectedOption().id)
-        private set
-    var proxyTestingIds by mutableStateOf<Set<String>>(emptySet())
-        private set
-    var proxyLatencyMap by mutableStateOf<Map<String, Long>>(emptyMap())
-        private set
+    val showAppUpdateMethodDialog: Boolean
+        get() = appUpdateInstaller.uiState.showMethodDialog
+    val isDownloadingAppUpdate: Boolean
+        get() = appUpdateInstaller.uiState.isDownloading
+    val appUpdateDownloadPercent: Int
+        get() = appUpdateInstaller.uiState.downloadPercent
+    val appUpdateDownloadDetail: String
+        get() = appUpdateInstaller.uiState.downloadDetail
+    val downloadedAppUpdate: AppUpdateService.DownloadedApk?
+        get() = appUpdateInstaller.uiState.downloadedApk
+    val showInstallAppUpdateDialog: Boolean
+        get() = appUpdateInstaller.uiState.showInstallDialog
+
+    val showProxyPickerDialog: Boolean
+        get() = proxyPickerController.uiState.isVisible
+    val proxySelectedId: String
+        get() = proxyPickerController.uiState.selectedId
+    val proxyTestingIds: Set<String>
+        get() = proxyPickerController.uiState.testingIds
+    val proxyLatencyMap: Map<String, Long>
+        get() = proxyPickerController.uiState.latencyMap
     var operationMessage by mutableStateOf<String?>(null)
         private set
     var isWebDavOperating by mutableStateOf(false)
@@ -156,7 +160,17 @@ class SettingsViewModel @Inject constructor(
     var isApplyingWorkDir by mutableStateOf(false)
         private set
 
-    private var proxyTestJob: Job? = null
+    private val proxyPickerController = ProxyPickerController(
+        githubProxyService = githubProxyService,
+        githubProxySpeedTester = githubProxySpeedTester,
+        scope = viewModelScope,
+        proxyOptionsProvider = { proxyOptions }
+    )
+    private val appUpdateInstaller = AppUpdateInstallerController(
+        scope = viewModelScope,
+        appUpdateService = appUpdateService,
+        postMessage = { operationMessage = it }
+    )
 
     fun adminModeSummary(): String {
         val state = adminSessionState.value
@@ -396,20 +410,18 @@ class SettingsViewModel @Inject constructor(
                     if (info.hasUpdate) {
                         appUpdateHasUpdate = true
                         showAppUpdateAvailableDialog = true
-                        showAppUpdateMethodDialog = false
+                        appUpdateInstaller.dismissMethodDialog()
                         operationMessage = "发现新版本 v${info.latestVersion}"
                     } else {
                         appUpdateHasUpdate = false
                         showAppUpdateAvailableDialog = false
-                        showAppUpdateMethodDialog = false
-                        downloadedAppUpdate = null
-                        showInstallAppUpdateDialog = false
+                        appUpdateInstaller.reset()
                         operationMessage = "当前已是最新版本（v${info.currentVersion}）"
                     }
                 },
                 onFailure = {
                     showAppUpdateAvailableDialog = false
-                    showAppUpdateMethodDialog = false
+                    appUpdateInstaller.dismissMethodDialog()
                     operationMessage = "检查更新失败：${it.message ?: "请稍后重试"}"
                 }
             )
@@ -419,48 +431,11 @@ class SettingsViewModel @Inject constructor(
 
     fun downloadLatestAppUpdate() {
         if (isDownloadingAppUpdate || isCheckingAppUpdate) return
-        val urls = appUpdateDownloadUrls
-        val latest = appUpdateLatestVersion?.trim().orEmpty()
-        if (urls.isEmpty() || latest.isBlank()) {
-            operationMessage = "请先检查更新"
-            return
-        }
-
-        viewModelScope.launch {
-            isDownloadingAppUpdate = true
-            showAppUpdateMethodDialog = false
-            appUpdateDownloadPercent = 0
-            appUpdateDownloadDetail = "准备下载..."
-            val result = appUpdateService.downloadApk(
-                urls = urls,
-                version = latest
-            ) { soFar, total ->
-                viewModelScope.launch {
-                    if (total <= 0L) {
-                        appUpdateDownloadPercent = -1
-                        appUpdateDownloadDetail = "已下载 ${humanBytes(soFar)}"
-                    } else {
-                        val pct = ((soFar * 100f) / total).toInt().coerceIn(0, 100)
-                        appUpdateDownloadPercent = pct
-                        appUpdateDownloadDetail = "${humanBytes(soFar)} / ${humanBytes(total)}"
-                    }
-                }
-            }
-
-            result.fold(
-                onSuccess = { apk ->
-                    downloadedAppUpdate = apk
-                    showInstallAppUpdateDialog = true
-                    operationMessage = "下载完成：${apk.displayName}"
-                    appUpdateDownloadDetail = "下载完成"
-                },
-                onFailure = {
-                    operationMessage = "下载失败：${it.message ?: "请稍后重试"}"
-                    appUpdateDownloadDetail = "下载失败"
-                }
-            )
-            isDownloadingAppUpdate = false
-        }
+        appUpdateInstaller.startDownload(
+            urls = appUpdateDownloadUrls,
+            latestVersion = appUpdateLatestVersion,
+            missingMessage = "请先检查更新"
+        )
     }
 
     fun dismissAppUpdateAvailableDialog() {
@@ -469,46 +444,34 @@ class SettingsViewModel @Inject constructor(
 
     fun openAppUpdateMethodDialog() {
         showAppUpdateAvailableDialog = false
-        showAppUpdateMethodDialog = true
+        appUpdateInstaller.openMethodDialog()
     }
 
     fun dismissAppUpdateMethodDialog() {
-        showAppUpdateMethodDialog = false
+        appUpdateInstaller.dismissMethodDialog()
     }
 
     fun startInAppUpdateDownload() {
-        showAppUpdateMethodDialog = false
+        appUpdateInstaller.dismissMethodDialog()
         downloadLatestAppUpdate()
     }
 
     fun installDownloadedAppUpdate(activity: Activity) {
-        val apk = downloadedAppUpdate ?: return
-        when (val result = appUpdateService.installApk(activity, apk)) {
-            is AppUpdateService.InstallResult.Launched -> {
-                showInstallAppUpdateDialog = false
-                operationMessage = "已打开安装器，请按系统提示完成安装"
-            }
-            is AppUpdateService.InstallResult.NeedUnknownSourcePermission -> {
-                showInstallAppUpdateDialog = false
-                operationMessage = "请完成“安装未知应用”授权，返回 App 后将自动续装"
-            }
-            is AppUpdateService.InstallResult.Failed -> {
-                operationMessage = result.message
-            }
-        }
+        appUpdateInstaller.installDownloaded(activity)
     }
 
     fun openBrowserDownload(activity: Activity) {
-        val url = appUpdateDownloadUrls.firstOrNull()
-            ?: appUpdateReleasePage.ifBlank { "https://github.com/lilixu3/danmu-api-android/releases/latest" }
-        showAppUpdateAvailableDialog = false
-        showAppUpdateMethodDialog = false
-        appUpdateService.openUrl(activity, url)
-        operationMessage = "已打开浏览器下载页面"
+        appUpdateInstaller.openBrowserDownload(
+            activity = activity,
+            downloadUrls = appUpdateDownloadUrls,
+            releasePage = appUpdateReleasePage,
+            fallbackReleasePage = "https://github.com/lilixu3/danmu-api-android/releases/latest",
+            beforeOpen = { showAppUpdateAvailableDialog = false }
+        )
     }
 
     fun dismissInstallAppUpdateDialog() {
-        showInstallAppUpdateDialog = false
+        appUpdateInstaller.dismissInstallDialog()
     }
 
     fun openAppUpdateReleasePage(activity: Activity) {
@@ -517,7 +480,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun openDownloadsApp(activity: Activity) {
-        appUpdateService.openDownloadsApp(activity)
+        appUpdateInstaller.openDownloadsApp(activity)
     }
 
     fun setFileLogEnabled(enabled: Boolean) {
@@ -550,28 +513,23 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun openProxyPicker() {
-        showProxyPickerDialog = true
-        proxySelectedId = githubProxyService.currentSelectedOption().id
-        startProxySpeedTest()
+        proxyPickerController.open()
     }
 
     fun dismissProxyPickerDialog() {
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
+        proxyPickerController.dismiss()
     }
 
     fun selectProxy(proxyId: String) {
-        proxySelectedId = proxyId
+        proxyPickerController.select(proxyId)
     }
 
     fun retestProxySpeed() {
-        startProxySpeedTest()
+        proxyPickerController.retest()
     }
 
     fun confirmProxySelection() {
-        githubProxyService.setSelectedProxy(proxySelectedId)
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
+        proxyPickerController.confirm()
     }
 
     fun envFilePath(): String = envConfigRepo.getEnvFilePath()
@@ -803,7 +761,7 @@ class SettingsViewModel @Inject constructor(
         val envFile = java.io.File(projectDir, "config/.env")
         val preferredVariant = if (envFile.exists() && envFile.isFile) {
             val text = runCatching { envFile.readText(Charsets.UTF_8) }.getOrDefault("")
-            val env = parseEnvMap(text)
+            val env = parseEnvContentMap(text)
             val rawVariant = env["DANMU_API_VARIANT"]?.trim()?.lowercase().orEmpty()
             ApiVariant.entries.firstOrNull { it.key == rawVariant }
         } else {
@@ -822,29 +780,9 @@ class SettingsViewModel @Inject constructor(
         return resolvedVariant
     }
 
-    private fun startProxySpeedTest() {
-        stopProxySpeedTest()
-        proxyLatencyMap = emptyMap()
-        proxyTestingIds = proxyOptions.map { it.id }.toSet()
-        proxyTestJob = viewModelScope.launch {
-            proxyOptions.forEach { option ->
-                launch {
-                    val latency = githubProxyService.testLatency(option)
-                    proxyLatencyMap = proxyLatencyMap + (option.id to latency)
-                    proxyTestingIds = proxyTestingIds - option.id
-                }
-            }
-        }
-    }
-
-    private fun stopProxySpeedTest() {
-        proxyTestJob?.cancel()
-        proxyTestJob = null
-        proxyTestingIds = emptySet()
-    }
 
     private fun applyRuntimeFromEnv(content: String) {
-        val env = parseEnvMap(content)
+        val env = parseEnvContentMap(content)
 
         val current = runtimeState.value
         val port = env["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: current.port
@@ -859,59 +797,7 @@ class SettingsViewModel @Inject constructor(
         settingsRepo.setFileLogEnabled(false)
     }
 
-    private fun parseEnvMap(content: String): Map<String, String> {
-        val map = linkedMapOf<String, String>()
-        content.lineSequence().forEach { line ->
-            val trimmed = line.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
-            val idx = trimmed.indexOf('=')
-            if (idx <= 0) return@forEach
-            val key = trimmed.substring(0, idx).trim()
-            var value = trimmed.substring(idx + 1).trim()
-            if ((value.startsWith("\"") && value.endsWith("\"")) ||
-                (value.startsWith("'") && value.endsWith("'"))
-            ) {
-                value = value.substring(1, value.length - 1)
-            }
-            map[key] = value
-        }
-        return map
-    }
 
-    private fun humanBytes(v: Long): String {
-        if (v <= 0) return "0B"
-        val kb = 1024.0
-        val mb = kb * 1024
-        val gb = mb * 1024
-        return when {
-            v >= gb -> String.format(Locale.getDefault(), "%.2fGB", v / gb)
-            v >= mb -> String.format(Locale.getDefault(), "%.2fMB", v / mb)
-            v >= kb -> String.format(Locale.getDefault(), "%.1fKB", v / kb)
-            else -> "${v}B"
-        }
-    }
-
-    private fun buildRootSwitchDeniedMessage(result: RootShell.Result): String {
-        if (result.timedOut) {
-            return "Root 授权超时，请在授权弹窗中允许后重试"
-        }
-        val detail = (result.stderr.ifBlank { result.stdout })
-            .lineSequence()
-            .firstOrNull()
-            ?.trim()
-            .orEmpty()
-        if (detail.contains("not found", ignoreCase = true)) {
-            return "未检测到 su，无法切换到高权限模式"
-        }
-        if (detail.contains("denied", ignoreCase = true)) {
-            return "未授予 Root 权限，无法切换到高权限模式"
-        }
-        return if (detail.isBlank()) {
-            "未获得 Root 权限，无法切换到高权限模式"
-        } else {
-            "未获得 Root 权限，无法切换：$detail"
-        }
-    }
 
     private fun loadWorkDirInfoSafe(): RuntimePaths.WorkDirInfo {
         return runCatching { RuntimePaths.buildWorkDirInfo(context) }

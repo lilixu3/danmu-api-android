@@ -5,7 +5,6 @@ import android.content.Context
 import android.os.Build
 import android.os.FileObserver
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -13,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.*
@@ -21,10 +21,13 @@ import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
+import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -45,6 +48,7 @@ class HomeViewModel @Inject constructor(
     private val requestRecordRepo: RequestRecordRepository,
     private val settingsRepo: SettingsRepository,
     private val githubProxyService: GithubProxyService,
+    private val githubProxySpeedTester: GithubProxySpeedTester,
     private val appForegroundUpdateChecker: AppForegroundUpdateChecker,
     private val appUpdateService: AppUpdateService,
     private val cacheRepo: CacheRepository
@@ -92,8 +96,6 @@ class HomeViewModel @Inject constructor(
         private set
     var isCheckingCoreUpdate by mutableStateOf(false)
         private set
-    var showProxyPickerDialog by mutableStateOf(false)
-        private set
     var showUpdatePromptDialog by mutableStateOf(false)
         private set
     var updatePromptVariant by mutableStateOf<ApiVariant?>(null)
@@ -101,12 +103,6 @@ class HomeViewModel @Inject constructor(
     var updatePromptCurrentVersion by mutableStateOf<String?>(null)
         private set
     var updatePromptLatestVersion by mutableStateOf<String?>(null)
-        private set
-    var proxySelectedId by mutableStateOf(githubProxyService.currentSelectedOption().id)
-        private set
-    var proxyTestingIds by mutableStateOf<Set<String>>(emptySet())
-        private set
-    var proxyLatencyMap by mutableStateOf<Map<String, Long>>(emptyMap())
         private set
     var showAppUpdatePromptDialog by mutableStateOf(false)
         private set
@@ -120,23 +116,42 @@ class HomeViewModel @Inject constructor(
         private set
     var appUpdatePromptDownloadUrls by mutableStateOf<List<String>>(emptyList())
         private set
-    var showAppUpdateMethodDialog by mutableStateOf(false)
-        private set
-    var isDownloadingAppUpdate by mutableStateOf(false)
-        private set
-    var appUpdateDownloadPercent by mutableIntStateOf(0)
-        private set
-    var appUpdateDownloadDetail by mutableStateOf("等待下载")
-        private set
-    var downloadedAppUpdate by mutableStateOf<AppUpdateService.DownloadedApk?>(null)
-        private set
-    var showInstallAppUpdateDialog by mutableStateOf(false)
-        private set
     var appUpdateMessage by mutableStateOf<String?>(null)
         private set
 
+    val showProxyPickerDialog: Boolean
+        get() = proxyPickerController.uiState.isVisible
+    val proxySelectedId: String
+        get() = proxyPickerController.uiState.selectedId
+    val proxyTestingIds: Set<String>
+        get() = proxyPickerController.uiState.testingIds
+    val proxyLatencyMap: Map<String, Long>
+        get() = proxyPickerController.uiState.latencyMap
+    val showAppUpdateMethodDialog: Boolean
+        get() = appUpdateInstaller.uiState.showMethodDialog
+    val isDownloadingAppUpdate: Boolean
+        get() = appUpdateInstaller.uiState.isDownloading
+    val appUpdateDownloadPercent: Int
+        get() = appUpdateInstaller.uiState.downloadPercent
+    val appUpdateDownloadDetail: String
+        get() = appUpdateInstaller.uiState.downloadDetail
+    val downloadedAppUpdate: AppUpdateService.DownloadedApk?
+        get() = appUpdateInstaller.uiState.downloadedApk
+    val showInstallAppUpdateDialog: Boolean
+        get() = appUpdateInstaller.uiState.showInstallDialog
+
     private val ignoredUpdateVersionMap = mutableMapOf<ApiVariant, String?>()
-    private var proxyTestJob: Job? = null
+    private val proxyPickerController = ProxyPickerController(
+        githubProxyService = githubProxyService,
+        githubProxySpeedTester = githubProxySpeedTester,
+        scope = viewModelScope,
+        proxyOptionsProvider = { proxyOptions }
+    )
+    private val appUpdateInstaller = AppUpdateInstallerController(
+        scope = viewModelScope,
+        appUpdateService = appUpdateService,
+        postMessage = { appUpdateMessage = it }
+    )
     private var pendingProxyAction: PendingProxyAction? = null
     private var cacheRefreshJob: Job? = null
     private var cacheFileRefreshDebounceJob: Job? = null
@@ -497,7 +512,7 @@ class HomeViewModel @Inject constructor(
     fun openForegroundAppUpdateMethodDialog() {
         if (appUpdatePromptLatestVersion.isNullOrBlank()) return
         showAppUpdatePromptDialog = false
-        showAppUpdateMethodDialog = true
+        appUpdateInstaller.openMethodDialog()
         appForegroundUpdateChecker.consumeLatestPrompt(appUpdatePromptLatestVersion)
     }
 
@@ -509,86 +524,36 @@ class HomeViewModel @Inject constructor(
     }
 
     fun dismissForegroundAppUpdateMethodDialog() {
-        showAppUpdateMethodDialog = false
+        appUpdateInstaller.dismissMethodDialog()
     }
 
     fun startInAppUpdateDownload() {
-        if (isDownloadingAppUpdate) return
-        val urls = appUpdatePromptDownloadUrls
-        val latest = appUpdatePromptLatestVersion?.trim().orEmpty()
-        if (urls.isEmpty() || latest.isBlank()) {
-            appUpdateMessage = "未找到可用安装包，请使用浏览器下载"
-            return
-        }
-
-        viewModelScope.launch {
-            isDownloadingAppUpdate = true
-            showAppUpdateMethodDialog = false
-            appUpdateDownloadPercent = 0
-            appUpdateDownloadDetail = "准备下载..."
-            val result = appUpdateService.downloadApk(
-                urls = urls,
-                version = latest
-            ) { soFar, total ->
-                viewModelScope.launch {
-                    if (total <= 0L) {
-                        appUpdateDownloadPercent = -1
-                        appUpdateDownloadDetail = "已下载 ${humanBytes(soFar)}"
-                    } else {
-                        val pct = ((soFar * 100f) / total).toInt().coerceIn(0, 100)
-                        appUpdateDownloadPercent = pct
-                        appUpdateDownloadDetail = "${humanBytes(soFar)} / ${humanBytes(total)}"
-                    }
-                }
-            }
-
-            result.fold(
-                onSuccess = { apk ->
-                    downloadedAppUpdate = apk
-                    showInstallAppUpdateDialog = true
-                    appUpdateMessage = "下载完成：${apk.displayName}"
-                    appUpdateDownloadDetail = "下载完成"
-                },
-                onFailure = {
-                    appUpdateMessage = "下载失败：${it.message ?: "请稍后重试"}"
-                    appUpdateDownloadDetail = "下载失败"
-                }
-            )
-            isDownloadingAppUpdate = false
-        }
+        appUpdateInstaller.startDownload(
+            urls = appUpdatePromptDownloadUrls,
+            latestVersion = appUpdatePromptLatestVersion,
+            missingMessage = "未找到可用安装包，请使用浏览器下载"
+        )
     }
 
     fun openBrowserDownload(activity: Activity) {
-        val url = appUpdatePromptDownloadUrls.firstOrNull()
-            ?: appUpdatePromptReleasePage.ifBlank { "https://github.com/lilixu3/danmu-api-android/releases/latest" }
-        showAppUpdateMethodDialog = false
-        appUpdateService.openUrl(activity, url)
-        appUpdateMessage = "已打开浏览器下载页面"
+        appUpdateInstaller.openBrowserDownload(
+            activity = activity,
+            downloadUrls = appUpdatePromptDownloadUrls,
+            releasePage = appUpdatePromptReleasePage,
+            fallbackReleasePage = "https://github.com/lilixu3/danmu-api-android/releases/latest"
+        )
     }
 
     fun installDownloadedAppUpdate(activity: Activity) {
-        val apk = downloadedAppUpdate ?: return
-        when (val result = appUpdateService.installApk(activity, apk)) {
-            is AppUpdateService.InstallResult.Launched -> {
-                showInstallAppUpdateDialog = false
-                appUpdateMessage = "已打开安装器，请按系统提示完成安装"
-            }
-            is AppUpdateService.InstallResult.NeedUnknownSourcePermission -> {
-                showInstallAppUpdateDialog = false
-                appUpdateMessage = "请完成“安装未知应用”授权，返回 App 后将自动续装"
-            }
-            is AppUpdateService.InstallResult.Failed -> {
-                appUpdateMessage = result.message
-            }
-        }
+        appUpdateInstaller.installDownloaded(activity)
     }
 
     fun dismissInstallAppUpdateDialog() {
-        showInstallAppUpdateDialog = false
+        appUpdateInstaller.dismissInstallDialog()
     }
 
     fun openDownloadsApp(activity: Activity) {
-        appUpdateService.openDownloadsApp(activity)
+        appUpdateInstaller.openDownloadsApp(activity)
     }
 
     fun dismissAppUpdateMessage() {
@@ -797,59 +762,35 @@ class HomeViewModel @Inject constructor(
     }
 
     fun dismissProxyPickerDialog() {
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
+        proxyPickerController.dismiss()
         pendingProxyAction = null
     }
 
     fun selectProxy(proxyId: String) {
-        proxySelectedId = proxyId
+        proxyPickerController.select(proxyId)
     }
 
     fun retestProxySpeed() {
-        startProxySpeedTest()
+        proxyPickerController.retest()
     }
 
     fun confirmProxySelection() {
-        githubProxyService.setSelectedProxy(proxySelectedId)
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
-        pendingProxyAction?.let { action ->
-            pendingProxyAction = null
-            when (action) {
-                is PendingProxyAction.Install -> doInstallAndStart(action.variant)
-                is PendingProxyAction.Update -> doUpdateCurrentVariant(action.variant)
-                is PendingProxyAction.CheckUpdate -> doQuickCheckCurrentCoreUpdate(action.variant)
-            }
-        }
-    }
-
-    private fun openProxyPickerDialog() {
-        showProxyPickerDialog = true
-        proxySelectedId = githubProxyService.currentSelectedOption().id
-        startProxySpeedTest()
-    }
-
-    private fun startProxySpeedTest() {
-        stopProxySpeedTest()
-        proxyLatencyMap = emptyMap()
-        proxyTestingIds = proxyOptions.map { it.id }.toSet()
-        proxyTestJob = viewModelScope.launch {
-            proxyOptions.forEach { option ->
-                launch {
-                    val latency = githubProxyService.testLatency(option)
-                    proxyLatencyMap = proxyLatencyMap + (option.id to latency)
-                    proxyTestingIds = proxyTestingIds - option.id
+        proxyPickerController.confirm {
+            pendingProxyAction?.let { action ->
+                pendingProxyAction = null
+                when (action) {
+                    is PendingProxyAction.Install -> doInstallAndStart(action.variant)
+                    is PendingProxyAction.Update -> doUpdateCurrentVariant(action.variant)
+                    is PendingProxyAction.CheckUpdate -> doQuickCheckCurrentCoreUpdate(action.variant)
                 }
             }
         }
     }
 
-    private fun stopProxySpeedTest() {
-        proxyTestJob?.cancel()
-        proxyTestJob = null
-        proxyTestingIds = emptySet()
+    private fun openProxyPickerDialog() {
+        proxyPickerController.open()
     }
+
 
     private fun loadIgnoredUpdateVersions() {
         ApiVariant.entries.forEach { variant ->
@@ -923,45 +864,11 @@ class HomeViewModel @Inject constructor(
         showUpdatePromptDialog = true
     }
 
-    private fun buildRootSwitchDeniedMessage(result: RootShell.Result): String {
-        if (result.timedOut) {
-            return "Root 授权超时，请在授权弹窗中允许后重试"
-        }
-        val detail = (result.stderr.ifBlank { result.stdout })
-            .lineSequence()
-            .firstOrNull()
-            ?.trim()
-            .orEmpty()
-        if (detail.contains("not found", ignoreCase = true)) {
-            return "未检测到 su，无法切换到高权限模式"
-        }
-        if (detail.contains("denied", ignoreCase = true)) {
-            return "未授予 Root 权限，无法切换到高权限模式"
-        }
-        return if (detail.isBlank()) {
-            "未获得 Root 权限，无法切换到高权限模式"
-        } else {
-            "未获得 Root 权限，无法切换：$detail"
-        }
-    }
-
-    private fun humanBytes(v: Long): String {
-        if (v <= 0) return "0B"
-        val kb = 1024.0
-        val mb = kb * 1024
-        val gb = mb * 1024
-        return when {
-            v >= gb -> String.format(Locale.getDefault(), "%.2fGB", v / gb)
-            v >= mb -> String.format(Locale.getDefault(), "%.2fMB", v / mb)
-            v >= kb -> String.format(Locale.getDefault(), "%.1fKB", v / kb)
-            else -> "${v}B"
-        }
-    }
 
     override fun onCleared() {
         stopCacheFileObserver()
         cacheRefreshJob?.cancel()
-        stopProxySpeedTest()
+        proxyPickerController.dismiss()
         super.onCleared()
     }
 }
