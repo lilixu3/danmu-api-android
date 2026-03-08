@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.console
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
     val logMaxCount by viewModel.logMaxCount.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboard.current
@@ -70,6 +72,10 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(adminState.isAdminMode) {
+        viewModel.refreshLogs()
     }
 
     LaunchedEffect(filteredLogs.size) {

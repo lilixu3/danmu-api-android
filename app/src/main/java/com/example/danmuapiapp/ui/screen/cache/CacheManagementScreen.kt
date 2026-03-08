@@ -187,6 +187,28 @@ fun CacheManagementScreen(
         }
     }
 
+
+    if (viewModel.showAdminRequiredDialog) {
+        AppBottomSheetDialog(
+            onDismissRequest = viewModel::dismissAdminRequiredDialog,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Warning,
+            icon = { Icon(Icons.Rounded.AdminPanelSettings, null) },
+            title = { Text("需要管理员模式") },
+            text = {
+                Text(
+                    viewModel.adminRequiredMessage,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissAdminRequiredDialog) {
+                    Text("知道了")
+                }
+            }
+        )
+    }
+
     if (viewModel.showClearConfirmDialog) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissClearConfirm,
