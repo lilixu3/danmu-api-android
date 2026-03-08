@@ -14,6 +14,8 @@ import android.os.Build
 import android.os.FileObserver
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.TokenDefaults
+import com.example.danmuapiapp.data.util.CoreApiRouteMode
+import com.example.danmuapiapp.data.util.CoreApiRoutePolicy
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootRuntimeController
@@ -23,6 +25,7 @@ import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -49,7 +52,8 @@ import javax.inject.Singleton
 @Singleton
 class RuntimeRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val adminSessionRepository: AdminSessionRepository
 ) : RuntimeRepository {
 
     companion object {
@@ -987,23 +991,34 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return emptyList()
 
-        val baseUrl = state.localUrl.trimEnd('/')
-        if (baseUrl.isBlank()) return emptyList()
-        val raw = runCatching {
-            val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
-                connectTimeout = LOG_HTTP_TIMEOUT_MS
-                readTimeout = LOG_HTTP_TIMEOUT_MS
-                requestMethod = "GET"
+        val adminState = adminSessionRepository.sessionState.value
+        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
+        val tokenPaths = CoreApiRoutePolicy.tokenPaths(
+            runtimeToken = state.token,
+            adminToken = adminToken,
+            isAdminMode = adminState.isAdminMode,
+            mode = CoreApiRouteMode.PreferAdminRead
+        )
+        tokenPaths.forEach { tokenPath ->
+            val baseUrl = "http://127.0.0.1:${state.port}$tokenPath"
+            val raw = runCatching {
+                val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = LOG_HTTP_TIMEOUT_MS
+                    readTimeout = LOG_HTTP_TIMEOUT_MS
+                    requestMethod = "GET"
+                }
+                try {
+                    if (conn.responseCode !in 200..299) return@runCatching ""
+                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrElse { "" }
+            if (raw.isNotBlank()) {
+                return parseLogLines(raw)
             }
-            try {
-                if (conn.responseCode !in 200..299) return@runCatching ""
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
-            } finally {
-                conn.disconnect()
-            }
-        }.getOrElse { "" }
-        if (raw.isBlank()) return emptyList()
-        return parseLogLines(raw)
+        }
+        return emptyList()
     }
 
     private fun parseLogLines(raw: String): List<LogEntry> {

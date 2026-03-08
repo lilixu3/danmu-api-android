@@ -51,6 +51,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -962,6 +963,27 @@ fun HomeScreen(
                 }
             },
             onClearQueue = { downloadViewModel?.clearQueueTasks() }
+        )
+    }
+
+    if (viewModel.showCacheAdminRequiredDialog) {
+        AppBottomSheetDialog(
+            onDismissRequest = viewModel::dismissCacheAdminRequiredDialog,
+            style = AppBottomSheetStyle.Confirm,
+            tone = AppBottomSheetTone.Warning,
+            icon = { Icon(Icons.Rounded.AdminPanelSettings, null) },
+            title = { Text("需要管理员模式") },
+            text = {
+                Text(
+                    viewModel.cacheAdminRequiredMessage,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissCacheAdminRequiredDialog) {
+                    Text("知道了")
+                }
+            }
         )
     }
 

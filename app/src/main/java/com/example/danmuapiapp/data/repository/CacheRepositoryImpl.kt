@@ -7,6 +7,7 @@ import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +28,8 @@ import javax.inject.Singleton
 @Singleton
 class CacheRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val adminSessionRepository: AdminSessionRepository
 ) : CacheRepository {
 
     companion object {
@@ -63,9 +65,16 @@ class CacheRepositoryImpl @Inject constructor(
     override suspend fun clearAll(): Result<Unit> {
         return runCatching {
             val runtime = resolveRuntimeApiAccess()
+            val adminState = adminSessionRepository.sessionState.value
+            val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim()
+            val requestPaths = linkedSetOf<String>()
+            if (adminState.isAdminMode && adminToken.isNotBlank()) {
+                requestPaths += "/$adminToken"
+            }
+            requestPaths += runtime.tokenPaths
             var lastMessage = "HTTP 403"
 
-            runtime.tokenPaths.forEach { tokenPath ->
+            requestPaths.forEach { tokenPath ->
                 val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/cache/clear"
                 val request = Request.Builder()
                     .url(url)
@@ -97,6 +106,19 @@ class CacheRepositoryImpl @Inject constructor(
                     return@runCatching Unit
                 }
                 lastMessage = extractErrorMessage(body, code)
+            }
+
+            if (lastMessage.equals("Admin token required", ignoreCase = true) ||
+                lastMessage.contains("admin token required", ignoreCase = true)
+            ) {
+                when {
+                    !adminState.hasAdminTokenConfigured -> {
+                        throw Exception("当前核心要求 ADMIN_TOKEN，请先到 设置 > 管理员权限 配置")
+                    }
+                    !adminState.isAdminMode -> {
+                        throw Exception("请先到 设置 > 管理员权限 开启管理员模式，再清理缓存")
+                    }
+                }
             }
 
             throw Exception(lastMessage)

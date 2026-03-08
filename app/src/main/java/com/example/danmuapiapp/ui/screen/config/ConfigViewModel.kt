@@ -224,8 +224,13 @@ class ConfigViewModel @Inject constructor(
     private fun buildLocalApiUrl(path: String): String {
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
         val port = prefs.getInt("port", DEFAULT_PORT)
-        val token = TokenDefaults.resolveTokenFromPrefs(prefs, context)
-        val tokenPath = if (token.isBlank()) "" else "/$token"
+        val runtimeToken = TokenDefaults.resolveTokenFromPrefs(prefs, context).trim()
+        val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim()
+        val tokenPath = when {
+            adminSessionRepository.sessionState.value.isAdminMode && adminToken.isNotBlank() -> "/$adminToken"
+            runtimeToken.isNotBlank() -> "/$runtimeToken"
+            else -> ""
+        }
         return "http://127.0.0.1:$port$tokenPath$path"
     }
 
