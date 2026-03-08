@@ -3,9 +3,9 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
-import com.example.danmuapiapp.data.util.TokenDefaults
+import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
+import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.RequestRecord
-import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,8 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class RequestRecordRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient,
-    private val adminSessionRepository: AdminSessionRepository
+    private val httpClient: OkHttpClient
 ) : RequestRecordRepository {
 
     companion object {
@@ -53,22 +52,14 @@ class RequestRecordRepositoryImpl @Inject constructor(
     }
 
     private fun fetchRemoteRecords(): List<RequestRecord>? {
-        val port = runtimePrefs.getInt("port", DEFAULT_PORT)
-        val token = TokenDefaults.resolveTokenFromPrefs(runtimePrefs, context)
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
+        val runtime = RuntimeApiAccessResolver.resolve(context, runtimePrefs, DEFAULT_PORT)
 
-        val isAdminMode = adminSessionRepository.sessionState.value.isAdminMode
-        val tokenPaths = when {
-            isAdminMode && adminToken.isNotBlank() -> listOf("/$adminToken")
-            token.isNotBlank() -> listOf("/$token")
-            else -> listOf("")
-        }
-
-        tokenPaths.forEach { tokenPath ->
-            val url = "http://127.0.0.1:$port$tokenPath/api/reqrecords"
+        runtime.tokenPaths.forEach { tokenPath ->
+            val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/reqrecords"
             val records = runCatching {
                 val request = Request.Builder()
                     .url(url)
+                    .applyRuntimeApiAuth(runtime)
                     .get()
                     .build()
                 httpClient.newCall(request).execute().use { response ->

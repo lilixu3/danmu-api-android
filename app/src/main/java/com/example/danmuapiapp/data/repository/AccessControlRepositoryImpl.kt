@@ -3,14 +3,15 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
-import com.example.danmuapiapp.data.util.TokenDefaults
+import com.example.danmuapiapp.data.util.RuntimeApiAccess
+import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
+import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.DeviceAccessConfig
 import com.example.danmuapiapp.domain.model.DeviceAccessDevice
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.model.DeviceAccessSource
 import com.example.danmuapiapp.domain.repository.AccessControlRepository
-import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -39,8 +40,7 @@ import javax.inject.Singleton
 @Singleton
 class AccessControlRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient,
-    private val adminSessionRepository: AdminSessionRepository
+    private val httpClient: OkHttpClient
 ) : AccessControlRepository {
 
     companion object {
@@ -65,12 +65,6 @@ class AccessControlRepositoryImpl @Inject constructor(
         var lastPath: String = ""
     )
 
-    private data class RuntimeAddress(
-        val port: Int,
-        val tokenPath: String,
-        val adminToken: String,
-        val adminTokenPath: String
-    )
 
     private data class RawHttpResult(
         val code: Int,
@@ -133,7 +127,7 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private suspend fun loadSnapshot(
-        runtime: RuntimeAddress,
+        runtime: RuntimeApiAccess,
         includeLanNeighbors: Boolean,
         markLanScan: Boolean
     ): DeviceAccessSnapshot {
@@ -166,19 +160,9 @@ class AccessControlRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun resolveRuntimeAddress(): RuntimeAddress {
+    private fun resolveRuntimeAddress(): RuntimeApiAccess {
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-        val port = prefs.getInt("port", DEFAULT_PORT).coerceIn(1, 65535)
-        val token = TokenDefaults.resolveTokenFromPrefs(prefs, context)
-        val tokenPath = if (token.isBlank()) "" else "/$token"
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim()
-        val adminTokenPath = if (adminToken.isBlank()) "" else "/$adminToken"
-        return RuntimeAddress(
-            port = port,
-            tokenPath = tokenPath,
-            adminToken = adminToken,
-            adminTokenPath = adminTokenPath
-        )
+        return RuntimeApiAccessResolver.resolve(context, prefs, DEFAULT_PORT)
     }
 
     private fun controlUrl(port: Int): String = "http://127.0.0.1:$port/__access-control"
@@ -187,15 +171,12 @@ class AccessControlRepositoryImpl @Inject constructor(
         return "http://127.0.0.1:$port$tokenPath/__access-control"
     }
 
-    private fun controlUrls(runtime: RuntimeAddress): List<String> {
+    private fun controlUrls(runtime: RuntimeApiAccess): List<String> {
         val urls = linkedSetOf<String>()
         urls += controlUrl(runtime.port)
-        if (runtime.adminTokenPath.isNotBlank()) {
-            urls += controlUrlWithToken(runtime.port, runtime.adminTokenPath)
-        }
-        if (runtime.tokenPath.isNotBlank()) {
-            urls += controlUrlWithToken(runtime.port, runtime.tokenPath)
-        }
+        runtime.tokenPaths
+            .filter { it.isNotBlank() }
+            .forEach { tokenPath -> urls += controlUrlWithToken(runtime.port, tokenPath) }
         return urls.toList()
     }
 
@@ -203,15 +184,11 @@ class AccessControlRepositoryImpl @Inject constructor(
         return "http://127.0.0.1:$port$tokenPath/api/reqrecords"
     }
 
-    private fun recordTokenPaths(runtime: RuntimeAddress): List<String> {
-        val out = linkedSetOf<String>()
-        if (runtime.adminTokenPath.isNotBlank()) out += runtime.adminTokenPath
-        if (runtime.tokenPath.isNotBlank()) out += runtime.tokenPath
-        if (out.isEmpty()) out += ""
-        return out.toList()
+    private fun recordTokenPaths(runtime: RuntimeApiAccess): List<String> {
+        return runtime.tokenPaths
     }
 
-    private fun fetchControlSnapshot(runtime: RuntimeAddress): DeviceAccessSnapshot {
+    private fun fetchControlSnapshot(runtime: RuntimeApiAccess): DeviceAccessSnapshot {
         val root = executeControlJson(
             runtime = runtime,
             method = "GET",
@@ -220,13 +197,14 @@ class AccessControlRepositoryImpl @Inject constructor(
         return parseControlSnapshot(root)
     }
 
-    private fun fetchHistoryDevices(runtime: RuntimeAddress): Map<String, HistoryDevice> {
+    private fun fetchHistoryDevices(runtime: RuntimeApiAccess): Map<String, HistoryDevice> {
         var fallbackRows = 0
         var fallbackMap: Map<String, HistoryDevice> = emptyMap()
 
         recordTokenPaths(runtime).forEach { tokenPath ->
             val request = Request.Builder()
                 .url(recordsUrl(runtime.port, tokenPath))
+                .applyRuntimeApiAuth(runtime)
                 .get()
                 .build()
 
@@ -265,18 +243,14 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private fun executeControlJson(
-        runtime: RuntimeAddress,
+        runtime: RuntimeApiAccess,
         method: String,
         body: okhttp3.RequestBody?
     ): JSONObject {
         val failures = mutableListOf<Pair<Int, String>>()
         val urls = controlUrls(runtime)
         urls.forEach { url ->
-            val requestBuilder = Request.Builder().url(url)
-            if (runtime.adminToken.isNotBlank()) {
-                requestBuilder.header("x-admin-token", runtime.adminToken)
-                requestBuilder.header("Authorization", "Bearer ${runtime.adminToken}")
-            }
+            val requestBuilder = Request.Builder().url(url).applyRuntimeApiAuth(runtime)
             if (method == "GET") {
                 requestBuilder.get()
             } else {
