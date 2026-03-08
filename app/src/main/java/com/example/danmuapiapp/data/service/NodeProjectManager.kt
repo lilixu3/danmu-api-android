@@ -25,10 +25,6 @@ object NodeProjectManager {
     private val coreDirNameRegex = Regex("^danmu[-_]api$", RegexOption.IGNORE_CASE)
     private val projectDirLocks = ConcurrentHashMap<String, Any>()
     private val coreLayoutLocks = ConcurrentHashMap<String, Any>()
-    private val versionRegexList = listOf(
-        Regex("""(?m)\bVERSION\b\s*[:=]\s*['\"]([^'\"]+)['\"]"""),
-        Regex("""(?m)\bversion\b\s*[:=]\s*['\"]([^'\"]+)['\"]""", RegexOption.IGNORE_CASE)
-    )
 
     fun projectDir(context: Context): File = RuntimePaths.projectDir(context)
 
@@ -272,10 +268,8 @@ object NodeProjectManager {
         for (globals in globalsCandidates) {
             if (!globals.exists()) continue
             val text = runCatching { globals.readText() }.getOrNull().orEmpty()
-            for (regex in versionRegexList) {
-                val hit = regex.find(text)?.groupValues?.getOrNull(1)?.trim()
-                if (!hit.isNullOrBlank()) return hit.removePrefix("v")
-            }
+            val version = CoreVersionParser.extractSourceVersion(text)
+            if (!version.isNullOrBlank()) return version.removePrefix("v")
         }
 
         val pkgVersion = readVersionFromPackageJson(coreDir)

@@ -5,7 +5,8 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.FileObserver
 import android.os.Looper
-import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.remote.github.GithubRemoteService
+import com.example.danmuapiapp.data.service.CoreVersionParser
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
@@ -22,7 +23,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.*
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,7 +31,7 @@ import javax.inject.Singleton
 class CoreRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient,
-    private val githubProxyService: GithubProxyService
+    private val githubRemoteService: GithubRemoteService
 ) : CoreRepository {
 
     companion object {
@@ -40,22 +40,12 @@ class CoreRepositoryImpl @Inject constructor(
         private const val WORK_DIR_PREFS = "danmu_work_dir"
         private const val WORK_DIR_KEY_CUSTOM_BASE_PATH = "custom_path"
         private const val RUNTIME_PREFS = "runtime"
-        private val coreVersionRegexList = listOf(
-            Regex("""(?m)\bVERSION\b\s*[:=]\s*['"]([^'"]+)['"]"""),
-            Regex("""(?m)\bversion\b\s*[:=]\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
-        )
-        private val packageVersionRegex = Regex("(?m)\"version\"\\s*:\\s*\"([^\"]+)\"")
     }
 
     private val settingsPrefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
-    private val metadataHttpClient = httpClient.newBuilder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .callTimeout(10, TimeUnit.SECONDS)
-        .build()
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when {
             prefs === workDirPrefs && key == WORK_DIR_KEY_CUSTOM_BASE_PATH -> refreshCoreInfo()
@@ -183,88 +173,35 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun apiUrlCandidates(path: String): List<String> {
-        val direct = "https://api.github.com/$path"
-        return withProxyCandidates(direct)
-    }
+    private fun apiUrlCandidates(path: String): List<String> = githubRemoteService.apiUrlCandidates(path)
 
-    private fun rawUrlCandidates(repo: String, filePath: String): List<String> {
-        val direct = "https://raw.githubusercontent.com/$repo/$filePath"
-        return withProxyCandidates(direct)
-    }
+    private fun rawUrlCandidates(repo: String, filePath: String): List<String> =
+        githubRemoteService.rawUrlCandidates(repo, filePath)
 
-    private fun withProxyCandidates(url: String): List<String> {
-        return githubProxyService.buildUrlCandidates(url)
-    }
+    private fun withProxyCandidates(url: String): List<String> = githubRemoteService.withProxyCandidates(url)
 
-    private fun requestText(urls: List<String>, headers: Map<String, String>): String? {
-        return requestMapped(urls, headers) { body ->
-            body.takeIf { it.isNotBlank() }
-        }
-    }
+    private fun requestText(urls: List<String>, headers: Map<String, String>): String? =
+        githubRemoteService.requestText(urls, headers)
 
     private fun <T> requestMapped(
         urls: List<String>,
         headers: Map<String, String>,
         mapper: (String) -> T?
-    ): T? {
-        var lastException: Exception? = null
-        for (url in urls) {
-            repeat(2) { attempt ->
-                try {
-                    val reqBuilder = Request.Builder().url(url)
-                    headers.forEach { (k, v) -> reqBuilder.header(k, v) }
-                    githubProxyService.applyGithubAuth(reqBuilder, url)
-                    metadataHttpClient.newCall(reqBuilder.build()).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body.string()
-                            val mapped = mapper(body)
-                            if (mapped != null) return mapped
-                        }
-                    }
-                } catch (e: Exception) {
-                    lastException = e
-                    if (attempt == 0) {
-                        Thread.sleep(500)
-                    }
-                }
-            }
-        }
-        return null
-    }
+    ): T? = githubRemoteService.requestMapped(urls, headers, mapper)
 
     private fun fetchLatestRelease(repo: String): GithubRelease? {
-        return requestMapped(
-            urls = apiUrlCandidates("repos/$repo/releases/latest"),
-            headers = mapOf(
-                "Accept" to "application/vnd.github+json",
-                "User-Agent" to USER_AGENT
+        return githubRemoteService.fetchLatestRelease(repo)?.let { release ->
+            GithubRelease(
+                tagName = release.tagName,
+                name = release.name,
+                body = release.body,
+                publishedAt = release.publishedAt,
+                zipballUrl = release.zipballUrl
             )
-        ) { body ->
-            parseRelease(body)
         }
     }
 
-    private fun fetchVersionFromGlobals(repo: String): String? {
-        val paths = listOf(
-            "refs/heads/main/danmu_api/configs/globals.js",
-            "refs/heads/main/danmu-api/configs/globals.js"
-        )
-        val regexes = listOf(
-            """(?m)\bVERSION\b\s*[:=]\s*['"]([^'"]+)['"]""".toRegex(),
-            """(?m)\bversion\b\s*[:=]\s*['"]([^'"]+)['"]""".toRegex(RegexOption.IGNORE_CASE)
-        )
-        return paths.firstNotNullOfOrNull { path ->
-            requestMapped(
-                urls = rawUrlCandidates(repo, path),
-                headers = mapOf("User-Agent" to USER_AGENT)
-            ) { body ->
-                regexes.firstNotNullOfOrNull { regex ->
-                    regex.find(body)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
-                }
-            }
-        }
-    }
+    private fun fetchVersionFromGlobals(repo: String): String? = githubRemoteService.fetchVersionFromGlobals(repo)
 
     override suspend fun checkUpdate(variant: ApiVariant): GithubRelease? =
         withContext(Dispatchers.IO) {
@@ -821,17 +758,12 @@ class CoreRepositoryImpl @Inject constructor(
         val text = result.stdout
         if (text.isBlank()) return null
 
-        val version = parseVersionFromSource(text)
-            ?: packageVersionRegex.find(text)?.groupValues?.getOrNull(1)?.trim()
+        val version = CoreVersionParser.extractVersion(text)
         return version?.removePrefix("v")?.takeIf { it.isNotBlank() }
     }
 
     private fun parseVersionFromSource(text: String): String? {
-        for (regex in coreVersionRegexList) {
-            val version = regex.find(text)?.groupValues?.getOrNull(1)?.trim()
-            if (!version.isNullOrBlank()) return version
-        }
-        return null
+        return CoreVersionParser.extractSourceVersion(text)
     }
 
     private data class VersionParts(

@@ -19,12 +19,12 @@ import androidx.core.content.edit
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -36,11 +36,11 @@ import javax.inject.Singleton
 class AppUpdateService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient,
-    private val githubProxyService: GithubProxyService
+    private val githubProxyService: GithubProxyService,
+    private val githubRemoteService: GithubRemoteService
 ) {
     companion object {
-        private const val LATEST_RELEASE_API =
-            "https://api.github.com/repos/lilixu3/danmu-api-android/releases/latest"
+        private const val APP_REPO = "lilixu3/danmu-api-android"
         private const val FALLBACK_LATEST_PAGE =
             "https://github.com/lilixu3/danmu-api-android/releases/latest"
 
@@ -316,65 +316,22 @@ class AppUpdateService @Inject constructor(
     }
 
     private fun fetchLatestReleaseInfo(): ReleaseInfo {
-        val apiCandidates = githubProxyService.buildUrlCandidates(LATEST_RELEASE_API)
-            .plus(LATEST_RELEASE_API)
-            .distinct()
-
-        apiCandidates.forEach { apiUrl ->
-            runCatching {
-                val request = Request.Builder()
-                    .url(apiUrl)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("User-Agent", "DanmuApiApp")
-                githubProxyService.applyGithubAuth(request, apiUrl)
-
-                httpClient.newBuilder()
-                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                    .newCall(request.build())
-                    .execute()
-                    .use { response ->
-                        if (!response.isSuccessful) return@use
-                        val body = response.body.string()
-                        if (body.isBlank()) return@use
-                        val json = JSONObject(body)
-                        val tagName = json.optString("tag_name").orEmpty()
-                        if (tagName.isBlank()) return@use
-
-                        val htmlUrl = json.optString("html_url", FALLBACK_LATEST_PAGE)
-                            .ifBlank { FALLBACK_LATEST_PAGE }
-                        val releaseBody = json.optString("body").orEmpty()
-                        val assets = mutableListOf<ApkAsset>()
-                        val arr = json.optJSONArray("assets")
-                        if (arr != null) {
-                            for (i in 0 until arr.length()) {
-                                val item = arr.optJSONObject(i) ?: continue
-                                val name = item.optString("name").orEmpty()
-                                val downloadUrl = item.optString("browser_download_url").orEmpty()
-                                if (!name.lowercase(Locale.getDefault()).endsWith(".apk")) continue
-                                if (downloadUrl.isBlank()) continue
-                                assets.add(
-                                    ApkAsset(
-                                        name = name,
-                                        url = downloadUrl,
-                                        size = item.optLong("size", 0L)
-                                    )
-                                )
-                            }
-                        }
-
-                        return ReleaseInfo(
-                            tagName = tagName,
-                            htmlUrl = htmlUrl,
-                            body = releaseBody,
-                            apkAssets = assets
-                        )
-                    }
-            }
+        val release = githubRemoteService.fetchLatestRelease(APP_REPO)
+            ?: error("无法获取最新版本信息")
+        val assets = release.assets.mapNotNull { asset ->
+            if (!asset.name.lowercase(Locale.getDefault()).endsWith(".apk")) return@mapNotNull null
+            ApkAsset(
+                name = asset.name,
+                url = asset.downloadUrl,
+                size = asset.size
+            )
         }
-        error("无法获取最新版本信息")
+        return ReleaseInfo(
+            tagName = release.tagName,
+            htmlUrl = release.htmlUrl.ifBlank { FALLBACK_LATEST_PAGE },
+            body = release.body,
+            apkAssets = assets
+        )
     }
 
     private fun sanitizeReleaseNotes(raw: String): String {
