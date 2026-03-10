@@ -9,6 +9,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,27 +62,33 @@ class RuntimeWarmupCoordinator @Inject constructor(
                 detail = "更新后首次启动会进行一次依赖校验"
             )
 
-            val completed = withTimeoutOrNull(WARMUP_TIMEOUT_MS) {
-                val result = RuntimeWarmupManager.runWarmup(context) { step ->
-                    _uiState.value = when (step) {
-                        RuntimeWarmupManager.Step.Checking -> UiState.Running(
-                            title = "正在检查运行环境",
-                            detail = "正在确认目录与版本信息"
-                        )
+            val uiUpdatesEnabled = AtomicBoolean(true)
+            val warmupDeferred = scope.async {
+                RuntimeWarmupManager.runWarmup(context) { step ->
+                    if (uiUpdatesEnabled.get()) {
+                        _uiState.value = when (step) {
+                            RuntimeWarmupManager.Step.Checking -> UiState.Running(
+                                title = "正在检查运行环境",
+                                detail = "正在确认目录与版本信息"
+                            )
 
-                        RuntimeWarmupManager.Step.Extracting -> UiState.Running(
-                            title = "正在加载依赖",
-                            detail = "首次加载会稍慢，后续启动将恢复正常"
-                        )
+                            RuntimeWarmupManager.Step.Extracting -> UiState.Running(
+                                title = "正在加载依赖",
+                                detail = "首次加载会稍慢，后续启动将恢复正常"
+                            )
 
-                        RuntimeWarmupManager.Step.Syncing -> UiState.Running(
-                            title = "正在同步配置",
-                            detail = "即将进入首页"
-                        )
+                            RuntimeWarmupManager.Step.Syncing -> UiState.Running(
+                                title = "正在同步配置",
+                                detail = "即将进入首页"
+                            )
+                        }
                     }
                 }
-                result.isSuccess
             }
+            val completed = withTimeoutOrNull<Boolean>(WARMUP_TIMEOUT_MS) {
+                warmupDeferred.await().isSuccess
+            }
+            uiUpdatesEnabled.set(false)
 
             if (completed == true) {
                 _uiState.value = UiState.Ready
