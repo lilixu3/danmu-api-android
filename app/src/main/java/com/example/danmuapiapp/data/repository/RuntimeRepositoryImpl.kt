@@ -166,16 +166,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun loadInitialState(): RuntimeState {
         val mode = RuntimeModePrefs.get(context)
-        val defaultTokenEnvFile = runCatching {
-            when (mode) {
-                RunMode.Normal -> {
-                    NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
-                    File(RuntimePaths.normalProjectDir(context), "config/.env")
-                }
-                // Root 模式不再读取普通模式 .env，避免两种模式的默认配置相互污染。
-                RunMode.Root -> null
-            }
-        }.getOrNull()
+        val defaultTokenEnvFile = normalRuntimeEnvFileForBootstrap(mode)
         val envValues = readRuntimeEnvValues(defaultTokenEnvFile)
         val portFromEnv = envValues["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
         val port = if (prefs.contains("port")) {
@@ -240,6 +231,18 @@ class RuntimeRepositoryImpl @Inject constructor(
             localUrl = buildLocalUrl(port, token),
             lanUrl = buildLanUrl(getLanIp(), port, token)
         )
+    }
+
+    private fun normalRuntimeEnvFileForBootstrap(mode: RunMode): File? {
+        if (mode != RunMode.Normal) return null
+        return runCatching {
+            val projectDir = RuntimePaths.normalProjectDir(context)
+            val entryFile = File(projectDir, "main.js")
+            if (!projectDir.exists() || !projectDir.isDirectory || !entryFile.exists()) {
+                return@runCatching null
+            }
+            File(projectDir, "config/.env")
+        }.getOrNull()
     }
 
     private fun readRuntimeEnvValues(envFile: File?): Map<String, String> {
@@ -936,12 +939,27 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Starting -> {
-                if (runtimeAlive) return
+                if (portOpen) {
+                    markRunning(forceNewStart = true)
+                    return
+                }
                 val startAt = normalStartIssuedAtMs
                 if (startAt <= 0L) return
                 if (System.currentTimeMillis() - startAt >= NORMAL_START_STALE_TIMEOUT_MS) {
-                    markError("普通模式启动状态失效，请重试启动")
-                    addLog(LogLevel.Warn, "普通模式长时间未完成启动，已自动恢复为可重试状态")
+                    val message = if (serviceRunning) {
+                        "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
+                    } else {
+                        "普通模式启动状态失效，请重试启动"
+                    }
+                    markError(message)
+                    addLog(
+                        LogLevel.Warn,
+                        if (serviceRunning) {
+                            "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
+                        } else {
+                            "普通模式长时间未完成启动，已自动恢复为可重试状态"
+                        }
+                    )
                 }
             }
 
