@@ -46,8 +46,10 @@ class NodeService : Service() {
         private val runtimeGeneration = AtomicLong(0L)
         private const val STOP_SHUTDOWN_ATTEMPTS = 4
         private const val STOP_WAIT_TIMEOUT_MS = 2600L
+        private const val START_TOTAL_TIMEOUT_MS = 35_000L
         private const val START_READY_TIMEOUT_MS = 20_000L
         private const val START_READY_RECHECK_INTERVAL_MS = 2000L
+        private const val START_TIMEOUT_KILL_DELAY_MS = 350L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
 
         fun start(context: Context) {
@@ -121,6 +123,7 @@ class NodeService : Service() {
 
     private fun startNode() {
         val generation: Long
+        val startupStartedAtMs = System.currentTimeMillis()
         synchronized(stateLock) {
             val startingOrRunning = isRunning || nodeThread?.isAlive == true
             if (startingOrRunning || isStopping) return
@@ -132,8 +135,10 @@ class NodeService : Service() {
 
         scope.launch {
             try {
-                val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
-                NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                val projectDir = awaitPreparedProjectDir(
+                    generation = generation,
+                    startupStartedAtMs = startupStartedAtMs
+                ) ?: return@launch
 
                 val runtimeThread = Thread {
                     try {
@@ -173,10 +178,17 @@ class NodeService : Service() {
 
                 // 启动慢机型上端口可能晚于首轮超时才就绪，因此超时后继续低频复检。
                 scope.launch {
+                    val initialReadyTimeoutMs = remainingStartupBudgetMs(startupStartedAtMs)
+                        .coerceAtMost(START_READY_TIMEOUT_MS)
+                    if (initialReadyTimeoutMs <= 0L) {
+                        handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
+                        return@launch
+                    }
+
                     val ready = waitForRuntimeReady(
                         ports = resolveCandidatePorts(),
                         generation = generation,
-                        timeoutMs = START_READY_TIMEOUT_MS
+                        timeoutMs = initialReadyTimeoutMs
                     )
                     if (ready) {
                         publishRunningIfNeeded(generation)
@@ -191,26 +203,96 @@ class NodeService : Service() {
                             publishRunningIfNeeded(generation)
                             return@launch
                         }
-                        delay(START_READY_RECHECK_INTERVAL_MS)
+
+                        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs)
+                        if (remainingBudgetMs <= 0L) {
+                            handleStartupTimeout(generation, "普通模式启动超时：服务进程仍在但端口未就绪")
+                            return@launch
+                        }
+                        delay(minOf(START_READY_RECHECK_INTERVAL_MS, remainingBudgetMs))
                     }
                 }
             } catch (t: Throwable) {
                 if (runtimeGeneration.get() == generation) {
-                    val msg = buildErrorMessage(t)
-                    Log.e(TAG, "Failed to start node: $msg", t)
-                    synchronized(stateLock) {
-                        isRunning = false
-                        isStopping = false
-                        runningPublishedGeneration = -1L
-                        if (nodeThread?.isAlive != true) {
-                            nodeThread = null
-                        }
-                    }
-                    broadcastStatus(STATUS_ERROR, msg)
-                    stopForegroundAndSelf()
+                    handleStartupFailure(generation, buildErrorMessage(t), t)
                 }
             }
         }
+    }
+
+    private suspend fun awaitPreparedProjectDir(
+        generation: Long,
+        startupStartedAtMs: Long
+    ): java.io.File? {
+        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs)
+        if (remainingBudgetMs <= 0L) {
+            handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
+            return null
+        }
+
+        val preparedDeferred = CompletableDeferred<Result<java.io.File>>()
+        scope.launch {
+            val prepared = runCatching {
+                val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
+                NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                projectDir
+            }
+            preparedDeferred.complete(prepared)
+        }
+
+        val prepared = withTimeoutOrNull(remainingBudgetMs) {
+            preparedDeferred.await()
+        }
+        if (prepared == null) {
+            handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
+            return null
+        }
+        return prepared.getOrElse { throwable ->
+            handleStartupFailure(generation, buildErrorMessage(throwable), throwable)
+            null
+        }
+    }
+
+    private fun remainingStartupBudgetMs(startupStartedAtMs: Long): Long {
+        val elapsedMs = (System.currentTimeMillis() - startupStartedAtMs).coerceAtLeast(0L)
+        return (START_TOTAL_TIMEOUT_MS - elapsedMs).coerceAtLeast(0L)
+    }
+
+    private fun handleStartupFailure(generation: Long, message: String, throwable: Throwable? = null) {
+        if (runtimeGeneration.get() != generation) return
+        if (throwable != null) {
+            Log.e(TAG, "Failed to start node: $message", throwable)
+        } else {
+            Log.e(TAG, "Failed to start node: $message")
+        }
+        synchronized(stateLock) {
+            isRunning = false
+            isStopping = false
+            runningPublishedGeneration = -1L
+            if (nodeThread?.isAlive != true) {
+                nodeThread = null
+            }
+        }
+        NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
+        SystemHeartbeatScheduler.refresh(applicationContext)
+        broadcastStatus(STATUS_ERROR, message)
+        stopForegroundAndSelf()
+    }
+
+    private suspend fun handleStartupTimeout(generation: Long, message: String) {
+        if (runtimeGeneration.get() != generation) return
+        Log.w(TAG, message)
+        synchronized(stateLock) {
+            if (runtimeGeneration.get() != generation) return
+            isRunning = false
+            isStopping = false
+            runningPublishedGeneration = -1L
+        }
+        NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
+        SystemHeartbeatScheduler.refresh(applicationContext)
+        broadcastStatus(STATUS_ERROR, message)
+        delay(START_TIMEOUT_KILL_DELAY_MS)
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     private fun stopNode() {

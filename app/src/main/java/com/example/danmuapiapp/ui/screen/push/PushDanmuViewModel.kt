@@ -122,18 +122,10 @@ class PushDanmuViewModel @Inject constructor(
         PushClientSupport(
             id = "ok",
             name = "OK 影视",
-            note = "兼容验证：已实测支持该接口与 offset/fontSize 参数（参考 FongMi API）",
+            note = "当前推送页面仅面向 OK 影视设计，已实测支持该接口与 offset/fontSize 参数。",
             endpointExample = "/action?do=refresh&type=danmaku&path=",
             docUrl = "https://github.com/FongMi/TV?tab=readme-ov-file#api",
             level = PushClientSupportLevel.CompatibilityVerified
-        ),
-        PushClientSupport(
-            id = "fongmi",
-            name = "FongMi 影视 / TV",
-            note = "官方 README 明确提供弹幕推送接口",
-            endpointExample = "/action?do=refresh&type=danmaku&path=",
-            docUrl = "https://github.com/FongMi/TV?tab=readme-ov-file#api",
-            level = PushClientSupportLevel.OfficialDoc
         )
     )
 
