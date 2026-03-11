@@ -45,16 +45,21 @@ object SystemHeartbeatScheduler {
 
     private fun tickOnce(context: Context) {
         if (!NodeKeepAlivePrefs.shouldScheduleSystemHeartbeat(context)) return
-        if (isNodeRunning(context)) return
+        val port = context.getSharedPreferences("runtime", Context.MODE_PRIVATE).getInt("port", 9321)
+        if (port in 1..65535 && isNodeRunning(context, port)) return
 
-        val projectDir = runCatching {
-            NodeProjectManager.ensureProjectExtracted(
-                context,
-                RuntimePaths.normalProjectDir(context)
-            )
-        }.getOrNull() ?: return
-
+        val projectDir = RuntimePaths.normalProjectDir(context)
         if (!NodeProjectManager.hasSelectedCoreInstalled(context, projectDir)) return
+        runCatching {
+            NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                context = context,
+                targetProjectDir = projectDir
+            )
+        }
+        val recovered = runCatching {
+            NodeService.recoverStaleProcessIfNeeded(context, port)
+        }.getOrDefault(true)
+        if (!recovered) return
         runCatching { NodeService.start(context) }
     }
 
@@ -96,8 +101,7 @@ object SystemHeartbeatScheduler {
         return PendingIntent.getBroadcast(context, REQUEST_CODE, intent, flags)
     }
 
-    private fun isNodeRunning(context: Context): Boolean {
-        val port = context.getSharedPreferences("runtime", Context.MODE_PRIVATE).getInt("port", 9321)
+    private fun isNodeRunning(context: Context, port: Int): Boolean {
         if (port !in 1..65535) return false
         var socket: Socket? = null
         return try {

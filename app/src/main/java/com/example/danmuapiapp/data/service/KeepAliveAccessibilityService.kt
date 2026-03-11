@@ -23,6 +23,8 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     private var lastEventTickUptimeMs = 0L
     private var lastPermToastMs = 0L
     private var isEventListeningEnabled = true
+    @Volatile
+    private var restartInFlight = false
     private val activeEventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -139,21 +141,48 @@ class KeepAliveAccessibilityService : AccessibilityService() {
                 return
             }
 
-            val projectDir = runCatching {
-                NodeProjectManager.ensureProjectExtracted(
-                    this,
-                    RuntimePaths.normalProjectDir(this)
-                )
-            }.getOrNull()
-            if (projectDir == null || !NodeProjectManager.hasSelectedCoreInstalled(this, projectDir)) {
+            val projectDir = RuntimePaths.normalProjectDir(this)
+            if (!NodeProjectManager.hasSelectedCoreInstalled(this, projectDir)) {
                 return
             }
 
-            runCatching { NodeService.start(this) }
+            triggerRecoveryAwareStart(projectDir)
             refreshA11yEventListeningMode()
         } finally {
             refreshHeartbeatSchedule()
         }
+    }
+
+    private fun triggerRecoveryAwareStart(projectDir: java.io.File) {
+        if (restartInFlight) return
+        restartInFlight = true
+        val appContext = applicationContext
+        Thread {
+            try {
+                runCatching {
+                    NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                        context = appContext,
+                        targetProjectDir = projectDir
+                    )
+                }
+                val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                    .getInt("port", 9321)
+                val recovered = runCatching {
+                    NodeService.recoverStaleProcessIfNeeded(appContext, port)
+                }.getOrDefault(true)
+                if (recovered) {
+                    runCatching { NodeService.start(appContext) }
+                }
+            } finally {
+                restartInFlight = false
+                handler.post {
+                    runCatching {
+                        refreshA11yEventListeningMode()
+                        refreshHeartbeatSchedule()
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun isNodeRunning(): Boolean {

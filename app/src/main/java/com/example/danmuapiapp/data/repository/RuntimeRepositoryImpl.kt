@@ -1,6 +1,5 @@
 package com.example.danmuapiapp.data.repository
 
-import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -65,6 +64,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NORMAL_STATE_RECONCILE_INTERVAL_MS = 8_000L
         private const val NORMAL_START_STALE_TIMEOUT_MS =
             NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
+        private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
+        private const val NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS = 4000L
+        private const val NORMAL_STALE_PROCESS_RETRY_DELAY_MS = 220L
         private const val NORMAL_RESTART_STOP_TIMEOUT_MS = 12_000L
         private const val NORMAL_STOP_TIMEOUT_MS = 8_000L
         private const val NORMAL_RESTART_START_TIMEOUT_MS = 15_000L
@@ -142,6 +144,9 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     @Volatile
     private var normalStartIssuedAtMs = 0L
+
+    private var reconcileConsecutiveDeadCount = 0
+    private var reconcileConsecutiveStaleProcessCount = 0
 
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
@@ -580,6 +585,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting) return
 
+        if (state.runMode == RunMode.Normal) {
+            val recovered = recoverStaleNormalProcessIfNeeded(state.port)
+            if (!recovered) return
+        }
+
         _runtimeState.update { it.copy(status = ServiceStatus.Starting, errorMessage = null) }
         clearRuntimeStartedAt()
         addLog(LogLevel.Info, "正在启动服务...")
@@ -593,17 +603,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, reason)
                     return
                 }
-                val prepared = runCatching {
-                    // 首次安装后这里可能需要解包运行时，提前准备可避免启动超时误判。
-                    NodeProjectManager.ensureProjectExtracted(context)
-                }
-                if (prepared.isFailure) {
-                    val reason = prepared.exceptionOrNull()?.message ?: "未知错误"
-                    markError("运行时准备失败：$reason")
-                    addLog(LogLevel.Error, "普通模式启动前准备失败: $reason")
-                    return
-                }
-                val projectDir = prepared.getOrNull() ?: return
+                val projectDir = RuntimePaths.normalProjectDir(context)
                 val selectedCoreDir = File(projectDir, "danmu_api_${state.variant.key}")
                 val selectedCoreReady = runCatching {
                     NodeProjectManager.hasValidCore(selectedCoreDir)
@@ -622,8 +622,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                     return
                 }
                 val envSynced = runCatching {
-                    // 启动前由主进程写入运行配置，避免 :node 进程跨进程读取偏旧偏好导致首启错配。
-                    NodeProjectManager.writeRuntimeEnv(
+                    // 仅在现有运行目录可用时做快速配置同步，避免主进程重复走重型解压。
+                    NodeProjectManager.syncRuntimeEnvIfProjectReady(
                         context = context,
                         targetProjectDir = projectDir,
                         preferredVariantKey = state.variant.key
@@ -803,6 +803,45 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
+    private suspend fun recoverStaleNormalProcessIfNeeded(port: Int): Boolean {
+        val staleProcess = confirmStaleNormalProcess(port, NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS)
+        if (!staleProcess) return true
+
+        addLog(LogLevel.Warn, "检测到普通模式残留进程，启动前先回收旧进程")
+        val killed = NodeService.killProcessIfRunning(context)
+        if (!killed && NodeService.isProcessRunning(context)) {
+            markError("普通模式残留进程回收失败，请重试启动")
+            addLog(LogLevel.Error, "普通模式残留进程回收失败：无法结束 :node 进程")
+            return false
+        }
+
+        val stopped = waitForRuntimeStopped(
+            mode = RunMode.Normal,
+            oldPort = port,
+            timeoutMs = NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS
+        )
+        if (!stopped) {
+            markError("普通模式残留进程回收超时，请重试启动")
+            addLog(LogLevel.Error, "普通模式残留进程回收超时：:node 进程未及时退出")
+            return false
+        }
+
+        markStopped()
+        delay(NORMAL_STALE_PROCESS_RETRY_DELAY_MS)
+        return true
+    }
+
+    private suspend fun confirmStaleNormalProcess(port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
+        while (System.currentTimeMillis() < deadline) {
+            if (!NodeService.isProcessRunning(context)) return false
+            if (port in 1..65535 && isPortOpen(port)) return false
+            delay(180)
+        }
+        return NodeService.isProcessRunning(context) &&
+            (port !in 1..65535 || !isPortOpen(port))
+    }
+
     private fun markRunning(pid: Int? = null, forceNewStart: Boolean = false) {
         val mode = _runtimeState.value.runMode
         if (mode == RunMode.Normal) {
@@ -918,27 +957,57 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.runMode != RunMode.Normal) {
             normalStartIssuedAtMs = 0L
+            reconcileConsecutiveDeadCount = 0
+            reconcileConsecutiveStaleProcessCount = 0
             return
         }
         if (state.status != ServiceStatus.Running &&
             state.status != ServiceStatus.Starting &&
             state.status != ServiceStatus.Stopping
         ) {
+            reconcileConsecutiveDeadCount = 0
+            reconcileConsecutiveStaleProcessCount = 0
             return
         }
 
         val serviceRunning = isNormalServiceRunning()
         val portOpen = isPortOpen(state.port)
-        val runtimeAlive = serviceRunning || portOpen
         when (state.status) {
             ServiceStatus.Running -> {
-                if (!runtimeAlive) {
-                    addLog(LogLevel.Warn, "检测到普通模式进程已退出，状态已自动重置")
-                    markStopped()
+                when {
+                    serviceRunning && !portOpen -> {
+                        reconcileConsecutiveDeadCount = 0
+                        reconcileConsecutiveStaleProcessCount++
+                        if (reconcileConsecutiveStaleProcessCount >= 2) {
+                            markError("普通模式进程异常残留，请重试启动")
+                            addLog(
+                                LogLevel.Warn,
+                                "检测到普通模式 :node 进程仍在，但监听端口已不可用；下次启动会先回收旧进程"
+                            )
+                            reconcileConsecutiveStaleProcessCount = 0
+                        }
+                    }
+
+                    !serviceRunning && !portOpen -> {
+                        reconcileConsecutiveStaleProcessCount = 0
+                        reconcileConsecutiveDeadCount++
+                        if (reconcileConsecutiveDeadCount >= 2) {
+                            addLog(LogLevel.Warn, "检测到普通模式进程已退出，状态已自动重置")
+                            markStopped()
+                            reconcileConsecutiveDeadCount = 0
+                        }
+                    }
+
+                    else -> {
+                        reconcileConsecutiveDeadCount = 0
+                        reconcileConsecutiveStaleProcessCount = 0
+                    }
                 }
             }
 
             ServiceStatus.Starting -> {
+                reconcileConsecutiveDeadCount = 0
+                reconcileConsecutiveStaleProcessCount = 0
                 if (portOpen) {
                     markRunning(forceNewStart = true)
                     return
@@ -964,7 +1033,9 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Stopping -> {
-                if (!runtimeAlive) {
+                reconcileConsecutiveDeadCount = 0
+                reconcileConsecutiveStaleProcessCount = 0
+                if (!serviceRunning && !portOpen) {
                     markStopped()
                 }
             }
@@ -1412,6 +1483,14 @@ class RuntimeRepositoryImpl @Inject constructor(
             val rel = toRelative(target)
             if (rel == "." || rel.isBlank()) return false
             return rel == ".app_version" ||
+                rel.startsWith("config/") ||
+                rel == "config" ||
+                rel.startsWith("danmu_api_stable/") ||
+                rel == "danmu_api_stable" ||
+                rel.startsWith("danmu_api_dev/") ||
+                rel == "danmu_api_dev" ||
+                rel.startsWith("danmu_api_custom/") ||
+                rel == "danmu_api_custom" ||
                 rel.startsWith("logs/") ||
                 rel == "logs" ||
                 rel.startsWith(".cache/") ||
@@ -1460,8 +1539,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         var socket: Socket? = null
         return try {
             socket = Socket()
-            socket.soTimeout = 220
-            socket.connect(InetSocketAddress("127.0.0.1", port), 220)
+            socket.soTimeout = 450
+            socket.connect(InetSocketAddress("127.0.0.1", port), 450)
             true
         } catch (_: Exception) {
             false
@@ -1508,14 +1587,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         return !isNormalServiceRunning()
     }
 
-    @Suppress("DEPRECATION")
     private fun isNormalServiceRunning(): Boolean {
-        return runCatching {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return false
-            am.getRunningServices(Int.MAX_VALUE)
-                .any { it.service.className == NodeService::class.java.name }
-        }.getOrElse { false }
+        return NodeService.isProcessRunning(context)
     }
 
     private fun buildLocalUrl(port: Int, token: String): String {
