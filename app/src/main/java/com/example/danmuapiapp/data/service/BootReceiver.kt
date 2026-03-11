@@ -21,13 +21,20 @@ class BootReceiver : BroadcastReceiver() {
                 val runMode = RuntimeModePrefs.get(context)
                 // 高权限模式由对应模块负责触发，这里仅处理普通模式。
                 if (runMode == RunMode.Normal) {
-                    val projectDir = runCatching {
-                        NodeProjectManager.ensureProjectExtracted(
-                            context,
-                            RuntimePaths.normalProjectDir(context)
-                        )
-                    }.getOrNull()
-                    if (projectDir != null && NodeProjectManager.hasSelectedCoreInstalled(context, projectDir)) {
+                    val projectDir = RuntimePaths.normalProjectDir(context)
+                    if (NodeProjectManager.hasSelectedCoreInstalled(context, projectDir)) {
+                        runCatching {
+                            NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                                context = context,
+                                targetProjectDir = projectDir
+                            )
+                        }
+                        val port = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                            .getInt("port", 9321)
+                        val recovered = runCatching {
+                            NodeService.recoverStaleProcessIfNeeded(context, port)
+                        }.getOrDefault(true)
+                        if (!recovered) return@Thread
                         NodeService.start(context.applicationContext)
                     }
                 }
