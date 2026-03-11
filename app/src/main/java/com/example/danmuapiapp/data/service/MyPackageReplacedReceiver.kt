@@ -24,33 +24,30 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
                     NodeKeepAlivePrefs.isKeepAliveEnabled(appContext) &&
                     NodeKeepAlivePrefs.isDesiredRunning(appContext)
 
-                var preparedByAutoPath = false
                 if (shouldAutoStart) {
-                    val projectDir = runCatching {
-                        NodeProjectManager.ensureProjectExtracted(
-                            appContext,
-                            RuntimePaths.normalProjectDir(appContext)
-                        )
-                    }.getOrNull()
-
-                    if (projectDir != null) {
-                        preparedByAutoPath = true
-                        runCatching {
-                            NodeProjectManager.writeRuntimeEnv(
+                    val projectDir = RuntimePaths.normalProjectDir(appContext)
+                    if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
+                        val runtimeReady = runCatching {
+                            NodeProjectManager.syncRuntimeEnvIfProjectReady(
                                 context = appContext,
                                 targetProjectDir = projectDir
                             )
+                        }.getOrDefault(false)
+                        if (runtimeReady) {
+                            RuntimeWarmupManager.markWarmupCompleted(appContext, 0L)
                         }
-                        RuntimeWarmupManager.markWarmupCompleted(appContext, 0L)
-
-                        if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
-                            NodeService.start(appContext)
-                            return@Thread
-                        }
+                        val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                            .getInt("port", 9321)
+                        val recovered = runCatching {
+                            NodeService.recoverStaleProcessIfNeeded(appContext, port)
+                        }.getOrDefault(true)
+                        if (!recovered) return@Thread
+                        NodeService.start(appContext)
+                        return@Thread
                     }
                 }
 
-                if (!preparedByAutoPath && RuntimeWarmupManager.shouldAttemptReceiverWarmup(appContext)) {
+                if (RuntimeWarmupManager.shouldAttemptReceiverWarmup(appContext)) {
                     RuntimeWarmupManager.runWarmup(appContext)
                 }
             } finally {

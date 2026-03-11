@@ -73,6 +73,27 @@ object NodeProjectManager {
         }
     }
 
+    fun hasProjectEntry(targetProjectDir: File): Boolean {
+        return targetProjectDir.exists() &&
+            targetProjectDir.isDirectory &&
+            File(targetProjectDir, "main.js").exists()
+    }
+
+    fun syncRuntimeEnvIfProjectReady(
+        context: Context,
+        targetProjectDir: File = projectDir(context),
+        preferredVariantKey: String? = null
+    ): Boolean {
+        if (!hasProjectEntry(targetProjectDir)) return false
+        ensureRuntimeDirs(targetProjectDir)
+        writeRuntimeEnv(
+            context = context,
+            targetProjectDir = targetProjectDir,
+            preferredVariantKey = preferredVariantKey
+        )
+        return true
+    }
+
     fun writeRuntimeEnv(
         context: Context,
         targetProjectDir: File = projectDir(context),

@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.data.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -50,6 +51,8 @@ class NodeService : Service() {
         private const val START_READY_TIMEOUT_MS = 20_000L
         private const val START_READY_RECHECK_INTERVAL_MS = 2000L
         private const val START_TIMEOUT_KILL_DELAY_MS = 350L
+        private const val START_STATE_STALE_GRACE_MS = 5000L
+        private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
 
         fun start(context: Context) {
@@ -77,6 +80,84 @@ class NodeService : Service() {
             }
             context.startService(intent)
         }
+
+        fun isProcessRunning(context: Context): Boolean {
+            return findProcessPid(context) != null
+        }
+
+        fun killProcessIfRunning(context: Context): Boolean {
+            val pid = findProcessPid(context) ?: return false
+            if (pid == android.os.Process.myPid()) return false
+            return runCatching {
+                android.os.Process.killProcess(pid)
+                true
+            }.getOrElse { false }
+        }
+
+        fun recoverStaleProcessIfNeeded(
+            context: Context,
+            port: Int,
+            confirmTimeoutMs: Long = 1500L,
+            stopTimeoutMs: Long = 4000L
+        ): Boolean {
+            val appContext = context.applicationContext
+            if (!confirmStaleProcess(appContext, port, confirmTimeoutMs)) return true
+            if (!killProcessIfRunning(appContext) && isProcessRunning(appContext)) return false
+            return waitForProcessStop(appContext, port, stopTimeoutMs)
+        }
+
+        private fun findProcessPid(context: Context): Int? {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                ?: return null
+            return runCatching {
+                val nodeProcess = "${context.packageName}:node"
+                am.runningAppProcesses
+                    ?.firstOrNull { it.processName == nodeProcess }
+                    ?.pid
+                    ?.takeIf { it > 0 }
+            }.getOrNull()
+        }
+
+        private fun confirmStaleProcess(context: Context, port: Int, timeoutMs: Long): Boolean {
+            val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
+            while (System.currentTimeMillis() < deadline) {
+                if (!isProcessRunning(context)) return false
+                if (port in 1..65535 && isPortReachable(port)) return false
+                sleepQuietly(STALE_PROCESS_POLL_INTERVAL_MS)
+            }
+            return isProcessRunning(context) &&
+                (port !in 1..65535 || !isPortReachable(port))
+        }
+
+        private fun waitForProcessStop(context: Context, port: Int, timeoutMs: Long): Boolean {
+            val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
+            while (System.currentTimeMillis() < deadline) {
+                if (!isProcessRunning(context) && (port !in 1..65535 || !isPortReachable(port))) {
+                    return true
+                }
+                sleepQuietly(140L)
+            }
+            return !isProcessRunning(context) &&
+                (port !in 1..65535 || !isPortReachable(port))
+        }
+
+        private fun isPortReachable(port: Int): Boolean {
+            var socket: Socket? = null
+            return try {
+                socket = Socket()
+                socket.soTimeout = 220
+                socket.connect(InetSocketAddress("127.0.0.1", port), 220)
+                true
+            } catch (_: Exception) {
+                false
+            } finally {
+                runCatching { socket?.close() }
+            }
+        }
+
+        private fun sleepQuietly(delayMs: Long) {
+            runCatching { Thread.sleep(delayMs.coerceAtLeast(0L)) }
+        }
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -85,6 +166,7 @@ class NodeService : Service() {
     private var isRunning = false
     private var isStopping = false
     private var runningPublishedGeneration = -1L
+    private var startupStartedAtMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -111,9 +193,7 @@ class NodeService : Service() {
             else -> return START_NOT_STICKY
         }
 
-        val shouldStart = synchronized(stateLock) {
-            !(isRunning || nodeThread?.isAlive == true || isStopping)
-        }
+        val shouldStart = shouldAcceptStartRequest()
         if (shouldStart) {
             startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
             startNode()
@@ -123,12 +203,13 @@ class NodeService : Service() {
 
     private fun startNode() {
         val generation: Long
-        val startupStartedAtMs = System.currentTimeMillis()
+        val startupIssuedAtMs = System.currentTimeMillis()
         synchronized(stateLock) {
             val startingOrRunning = isRunning || nodeThread?.isAlive == true
             if (startingOrRunning || isStopping) return
             isRunning = true
             isStopping = false
+            this@NodeService.startupStartedAtMs = startupIssuedAtMs
             generation = runtimeGeneration.incrementAndGet()
             runningPublishedGeneration = -1L
         }
@@ -137,7 +218,7 @@ class NodeService : Service() {
             try {
                 val projectDir = awaitPreparedProjectDir(
                     generation = generation,
-                    startupStartedAtMs = startupStartedAtMs
+                    startupStartedAtMs = startupIssuedAtMs
                 ) ?: return@launch
 
                 val runtimeThread = Thread {
@@ -157,6 +238,7 @@ class NodeService : Service() {
                                 if (runtimeGeneration.get() == generation) {
                                     isRunning = false
                                     isStopping = false
+                                    startupStartedAtMs = 0L
                                 }
                                 if (nodeThread === Thread.currentThread()) {
                                     nodeThread = null
@@ -235,6 +317,18 @@ class NodeService : Service() {
             val prepared = runCatching {
                 val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
                 NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
+                val envVariant = runCatching {
+                    java.io.File(projectDir, "config/.env").takeIf { it.exists() }
+                        ?.readLines()
+                        ?.firstOrNull { it.startsWith("DANMU_API_VARIANT=") }
+                        ?.substringAfter("=")?.trim()
+                }.getOrNull()
+                NodeProjectManager.writeRuntimeEnv(
+                    context = this@NodeService,
+                    targetProjectDir = projectDir,
+                    preferredVariantKey = envVariant
+                )
                 projectDir
             }
             preparedDeferred.complete(prepared)
@@ -269,11 +363,11 @@ class NodeService : Service() {
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
+            startupStartedAtMs = 0L
             if (nodeThread?.isAlive != true) {
                 nodeThread = null
             }
         }
-        NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
         SystemHeartbeatScheduler.refresh(applicationContext)
         broadcastStatus(STATUS_ERROR, message)
         stopForegroundAndSelf()
@@ -287,8 +381,8 @@ class NodeService : Service() {
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
+            startupStartedAtMs = 0L
         }
-        NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
         SystemHeartbeatScheduler.refresh(applicationContext)
         broadcastStatus(STATUS_ERROR, message)
         delay(START_TIMEOUT_KILL_DELAY_MS)
@@ -425,6 +519,7 @@ class NodeService : Service() {
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
+            startupStartedAtMs = 0L
             if (nodeThread?.isAlive != true) {
                 nodeThread = null
             }
@@ -457,6 +552,27 @@ class NodeService : Service() {
             false
         } finally {
             runCatching { socket?.close() }
+        }
+    }
+
+    private fun shouldAcceptStartRequest(): Boolean {
+        synchronized(stateLock) {
+            val threadAlive = nodeThread?.isAlive == true
+            val startupTimedOut = isRunning &&
+                !threadAlive &&
+                !isStopping &&
+                startupStartedAtMs > 0L &&
+                System.currentTimeMillis() - startupStartedAtMs >=
+                START_TOTAL_TIMEOUT_MS + START_STATE_STALE_GRACE_MS
+
+            if (startupTimedOut) {
+                Log.w(TAG, "检测到普通模式启动状态残留，已重置本地启动标记")
+                isRunning = false
+                runningPublishedGeneration = -1L
+                startupStartedAtMs = 0L
+                nodeThread = null
+            }
+            return !(isRunning || nodeThread?.isAlive == true || isStopping)
         }
     }
 
