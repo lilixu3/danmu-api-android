@@ -269,26 +269,43 @@ internal fun DialogActionButton(
     icon: ImageVector,
     onClick: () -> Unit,
     enabled: Boolean = true,
-    primary: Boolean = false
+    primary: Boolean = false,
+    loading: Boolean = false
 ) {
+    val actualEnabled = enabled && !loading
     if (primary) {
         Button(
             onClick = onClick,
-            enabled = enabled,
+            enabled = actualEnabled,
             shape = RoundedCornerShape(12.dp),
             colors = appPrimaryButtonColors()
         ) {
-            Icon(icon, null, modifier = Modifier.size(16.dp))
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                Icon(icon, null, modifier = Modifier.size(16.dp))
+            }
             Spacer(modifier = Modifier.width(6.dp))
             Text(text)
         }
     } else {
         OutlinedButton(
             onClick = onClick,
-            enabled = enabled,
+            enabled = actualEnabled,
             shape = RoundedCornerShape(12.dp)
         ) {
-            Icon(icon, null, modifier = Modifier.size(16.dp))
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(icon, null, modifier = Modifier.size(16.dp))
+            }
             Spacer(modifier = Modifier.width(6.dp))
             Text(text)
         }
@@ -768,9 +785,33 @@ internal fun CoreUpdateConfirmDialog(
     variantLabel: String,
     currentVersion: String?,
     latestVersion: String?,
+    isChecking: Boolean,
+    resultMessage: String?,
+    resultIsError: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    val resultTint = if (resultIsError) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    val resultContainer = if (resultIsError) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.62f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+    }
+    val resultIcon = if (resultIsError) {
+        Icons.Rounded.ErrorOutline
+    } else {
+        Icons.Rounded.CheckCircle
+    }
+    val confirmText = when {
+        isChecking -> "正在检查"
+        !resultMessage.isNullOrBlank() -> "重新检查"
+        else -> "继续检查"
+    }
+
     HomePanelDialog(
         onDismissRequest = onDismiss,
         icon = Icons.Rounded.SystemUpdateAlt,
@@ -807,18 +848,118 @@ internal fun CoreUpdateConfirmDialog(
                     )
                 }
             }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.64f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isChecking) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (resultMessage.isNullOrBlank()) {
+                                    Icons.Rounded.HourglassBottom
+                                } else {
+                                    resultIcon
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (resultMessage.isNullOrBlank()) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    resultTint
+                                }
+                            )
+                        }
+                        Text(
+                            text = when {
+                                isChecking -> "正在连接更新源并检查版本"
+                                !resultMessage.isNullOrBlank() -> "本次检查结果"
+                                else -> "点击下方按钮开始检查"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    if (isChecking) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                        )
+                        Text(
+                            text = "弹窗会保持打开，检查完成后直接在这里显示结果。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else if (!resultMessage.isNullOrBlank()) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = resultContainer
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = resultIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = resultTint
+                                )
+                                Text(
+                                    text = resultMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (resultIsError) {
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "若检测到新版本，将自动跳转到更新确认界面。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         },
         actions = {
             DialogActionButton(
-                text = "取消",
+                text = "关闭",
                 icon = Icons.Rounded.Close,
                 onClick = onDismiss
             )
             DialogActionButton(
-                text = "继续检查",
+                text = confirmText,
                 icon = Icons.Rounded.SystemUpdate,
                 onClick = onConfirm,
-                primary = true
+                primary = true,
+                loading = isChecking
             )
         }
     )
