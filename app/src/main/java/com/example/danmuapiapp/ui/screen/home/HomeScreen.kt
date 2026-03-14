@@ -331,6 +331,12 @@ fun HomeScreen(
             downloadViewModel.dismissMessage()
         }
     }
+    LaunchedEffect(viewModel.showUpdatePromptDialog) {
+        if (viewModel.showUpdatePromptDialog && showCoreUpdateConfirmDialog) {
+            showCoreUpdateConfirmDialog = false
+            viewModel.resetCoreUpdateCheckDialogState()
+        }
+    }
     LaunchedEffect(showDownloadQueueSheet, queueDialogGroups) {
         if (!showDownloadQueueSheet) return@LaunchedEffect
         val validKeys = queueDialogGroups.map { it.key }.toSet()
@@ -475,7 +481,10 @@ fun HomeScreen(
                         quickPortError = null
                         showQuickPortDialog = true
                     },
-                    onCheckCoreUpdate = { showCoreUpdateConfirmDialog = true },
+                    onCheckCoreUpdate = {
+                        viewModel.resetCoreUpdateCheckDialogState()
+                        showCoreUpdateConfirmDialog = true
+                    },
                 )
 
                 AnimatedVisibility(
@@ -641,10 +650,19 @@ fun HomeScreen(
             variantLabel = state.variant.label,
             currentVersion = currentCoreVersion,
             latestVersion = latestVersion,
-            onDismiss = { showCoreUpdateConfirmDialog = false },
-            onConfirm = {
+            isChecking = viewModel.isCheckingCoreUpdate,
+            resultMessage = viewModel.coreUpdateCheckDialogMessage,
+            resultIsError = viewModel.coreUpdateCheckDialogIsError,
+            onDismiss = {
                 showCoreUpdateConfirmDialog = false
+                viewModel.resetCoreUpdateCheckDialogState()
+            },
+            onConfirm = {
                 viewModel.quickCheckCurrentCoreUpdate()
+                if (viewModel.showProxyPickerDialog) {
+                    showCoreUpdateConfirmDialog = false
+                    viewModel.resetCoreUpdateCheckDialogState()
+                }
             }
         )
     }
