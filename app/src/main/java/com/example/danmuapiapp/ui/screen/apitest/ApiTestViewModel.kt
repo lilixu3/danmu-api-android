@@ -8,6 +8,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.domain.model.RequestRecord
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
+import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
+import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
+import com.example.danmuapiapp.ui.screen.download.parseAnimeCandidates
+import com.example.danmuapiapp.ui.screen.download.parseEpisodeCandidates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,16 +38,7 @@ class ApiTestViewModel @Inject constructor(
     var isLoading by mutableStateOf(false)
         private set
 
-    var responseCode by mutableStateOf<Int?>(null)
-        private set
-
-    var responseBody by mutableStateOf("")
-        private set
-
-    var responseDurationMs by mutableStateOf<Long?>(null)
-        private set
-
-    var errorMessage by mutableStateOf<String?>(null)
+    var debugResponse by mutableStateOf<ApiDebugResponse?>(null)
         private set
 
     var requestUrl by mutableStateOf("")
@@ -52,11 +47,65 @@ class ApiTestViewModel @Inject constructor(
     var curlCommand by mutableStateOf("")
         private set
 
-    fun clearResult() {
-        responseCode = null
-        responseBody = ""
-        responseDurationMs = null
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
+
+    var isAutoMatching by mutableStateOf(false)
+        private set
+
+    var autoMatchResult by mutableStateOf<DanmuInsight?>(null)
+        private set
+
+    var isSearchingAnime by mutableStateOf(false)
+        private set
+
+    var isLoadingEpisodes by mutableStateOf(false)
+        private set
+
+    var isLoadingManualDanmu by mutableStateOf(false)
+        private set
+
+    var manualHasSearched by mutableStateOf(false)
+        private set
+
+    var manualAnimeCandidates by mutableStateOf<List<DownloadAnimeCandidate>>(emptyList())
+        private set
+
+    var manualCurrentAnime by mutableStateOf<DownloadAnimeCandidate?>(null)
+        private set
+
+    var manualEpisodeCandidates by mutableStateOf<List<DownloadEpisodeCandidate>>(emptyList())
+        private set
+
+    var manualResult by mutableStateOf<DanmuInsight?>(null)
+        private set
+
+    var loadingAnimeId by mutableStateOf<Long?>(null)
+        private set
+
+    fun dismissError() {
         errorMessage = null
+    }
+
+    fun clearDebugResponse() {
+        debugResponse = null
+        requestUrl = ""
+        curlCommand = ""
+    }
+
+    fun clearAutoResult() {
+        autoMatchResult = null
+    }
+
+    fun backManualStep() {
+        when {
+            manualResult != null -> manualResult = null
+            manualCurrentAnime != null -> {
+                manualCurrentAnime = null
+                manualEpisodeCandidates = emptyList()
+                loadingAnimeId = null
+            }
+        }
     }
 
     fun sendRequest(
@@ -80,60 +129,50 @@ class ApiTestViewModel @Inject constructor(
         viewModelScope.launch {
             isLoading = true
             errorMessage = null
-            responseCode = null
-            responseBody = ""
-            responseDurationMs = null
+            debugResponse = null
 
             val startedAt = System.currentTimeMillis()
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val requestBuilder = Request.Builder().url(built.url)
+            val result = executeRequest(
+                Request.Builder().url(built.url).apply {
                     if (built.method == "GET") {
-                        requestBuilder.get()
+                        get()
                     } else {
                         val mediaType = "application/json; charset=utf-8".toMediaType()
                         val payload = (built.body ?: "{}").toRequestBody(mediaType)
-                        requestBuilder.method(built.method, payload)
+                        method(built.method, payload)
                     }
-                    httpClient.newCall(requestBuilder.build()).execute().use { response ->
-                        val body = response.body.string()
-                        response.code to body
-                    }
-                }
-            }
-
+                }.build()
+            )
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
-            responseDurationMs = elapsed
 
             result.fold(
                 onSuccess = { (code, body) ->
-                    responseCode = code
-                    responseBody = body
-                    recordRepository.addRecord(
-                        RequestRecord(
-                            scene = "接口调试/${endpoint.title}",
-                            method = built.method,
-                            url = built.url,
-                            statusCode = code,
-                            durationMs = elapsed,
-                            success = code in 200..299,
-                            responseSnippet = body.take(2000)
+                    debugResponse = withContext(Dispatchers.Default) {
+                        buildDebugResponse(
+                            endpoint = endpoint,
+                            responseCode = code,
+                            responseBody = body,
+                            responseDurationMs = elapsed
                         )
+                    }
+                    recordSuccess(
+                        scene = "接口调试/${endpoint.title}",
+                        method = built.method,
+                        url = built.url,
+                        statusCode = code,
+                        durationMs = elapsed,
+                        body = body
                     )
                 },
                 onFailure = { throwable ->
-                    val msg = throwable.message ?: "请求失败"
-                    errorMessage = msg
-                    recordRepository.addRecord(
-                        RequestRecord(
-                            scene = "接口调试/${endpoint.title}",
-                            method = built.method,
-                            url = built.url,
-                            statusCode = null,
-                            durationMs = elapsed,
-                            success = false,
-                            errorMessage = msg
-                        )
+                    val message = throwable.message ?: "请求失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = "接口调试/${endpoint.title}",
+                        method = built.method,
+                        url = built.url,
+                        durationMs = elapsed,
+                        message = message
                     )
                 }
             )
@@ -142,11 +181,392 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
+    fun runAutoMatch(baseUrl: String, fileName: String) {
+        if (isAutoMatching) return
+
+        val base = normalizeBaseUrl(baseUrl)
+        if (base == null) {
+            errorMessage = "弹幕源 Base URL 无效"
+            return
+        }
+
+        val trimmedFileName = fileName.trim()
+        if (trimmedFileName.isBlank()) {
+            errorMessage = "请输入文件名"
+            return
+        }
+
+        val matchUrl = "$base/api/v2/match"
+        val matchBody = JSONObject().put("fileName", trimmedFileName).toString()
+
+        viewModelScope.launch {
+            isAutoMatching = true
+            errorMessage = null
+            autoMatchResult = null
+            val flowStartedAt = System.currentTimeMillis()
+
+            val matchResult = executeJsonPost(matchUrl, matchBody)
+            val matchElapsed = (System.currentTimeMillis() - flowStartedAt).coerceAtLeast(0L)
+
+            val selection = matchResult.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = "弹幕测试/自动匹配",
+                        method = "POST",
+                        url = matchUrl,
+                        statusCode = code,
+                        durationMs = matchElapsed,
+                        body = body
+                    )
+                    if (code !in 200..299) {
+                        errorMessage = "自动匹配失败：HTTP $code"
+                        null
+                    } else {
+                        parseMatchSelection(body)?.let { parsed ->
+                            if (parsed.episodeTitle.isBlank() && parsed.animeTitle.isBlank()) {
+                                parsed.copy(episodeTitle = trimmedFileName)
+                            } else {
+                                parsed
+                            }
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "自动匹配失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = "弹幕测试/自动匹配",
+                        method = "POST",
+                        url = matchUrl,
+                        durationMs = matchElapsed,
+                        message = message
+                    )
+                    null
+                }
+            )
+
+            if (selection == null) {
+                if (errorMessage == null) {
+                    errorMessage = "自动匹配成功，但返回结果里没有可用的弹幕 ID"
+                }
+                isAutoMatching = false
+                return@launch
+            }
+
+            val commentUrl = "$base/api/v2/comment/${selection.commentId}?format=json"
+            val commentStartedAt = System.currentTimeMillis()
+            val commentResult = executeGet(commentUrl)
+            val commentElapsed = (System.currentTimeMillis() - commentStartedAt).coerceAtLeast(0L)
+
+            commentResult.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = "弹幕测试/自动匹配弹幕",
+                        method = "GET",
+                        url = commentUrl,
+                        statusCode = code,
+                        durationMs = commentElapsed,
+                        body = body
+                    )
+                    if (code !in 200..299) {
+                        errorMessage = "获取弹幕失败：HTTP $code"
+                    } else {
+                        val totalElapsed = (System.currentTimeMillis() - flowStartedAt).coerceAtLeast(0L)
+                        autoMatchResult = withContext(Dispatchers.Default) {
+                            buildDanmuInsightOrFallback(
+                                raw = body,
+                                commentId = selection.commentId,
+                                animeTitle = selection.animeTitle,
+                                episodeTitle = selection.episodeTitle.ifBlank { trimmedFileName },
+                                source = selection.source,
+                                pathLabel = "自动匹配",
+                                requestDurationMs = totalElapsed
+                            )
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "获取弹幕失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = "弹幕测试/自动匹配弹幕",
+                        method = "GET",
+                        url = commentUrl,
+                        durationMs = commentElapsed,
+                        message = message
+                    )
+                }
+            )
+
+            isAutoMatching = false
+        }
+    }
+
+    fun searchAnime(baseUrl: String, keyword: String) {
+        if (isSearchingAnime || isLoadingEpisodes) return
+
+        val base = normalizeBaseUrl(baseUrl)
+        if (base == null) {
+            errorMessage = "弹幕源 Base URL 无效"
+            return
+        }
+
+        val query = keyword.trim()
+        if (query.isBlank()) {
+            errorMessage = "请输入搜索关键词"
+            return
+        }
+
+        val url = "$base/api/v2/search/anime?keyword=${urlEncode(query)}"
+
+        viewModelScope.launch {
+            isSearchingAnime = true
+            errorMessage = null
+            manualResult = null
+            val startedAt = System.currentTimeMillis()
+            val result = executeGet(url)
+            val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+            manualHasSearched = true
+
+            result.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = "弹幕测试/手动搜索动漫",
+                        method = "GET",
+                        url = url,
+                        statusCode = code,
+                        durationMs = elapsed,
+                        body = body
+                    )
+                    if (code in 200..299) {
+                        manualAnimeCandidates = withContext(Dispatchers.Default) {
+                            parseAnimeCandidates(body)
+                        }
+                        manualCurrentAnime = null
+                        manualEpisodeCandidates = emptyList()
+                    } else {
+                        manualAnimeCandidates = emptyList()
+                        manualCurrentAnime = null
+                        manualEpisodeCandidates = emptyList()
+                        errorMessage = "搜索失败：HTTP $code"
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "搜索失败"
+                    errorMessage = message
+                    manualAnimeCandidates = emptyList()
+                    manualCurrentAnime = null
+                    manualEpisodeCandidates = emptyList()
+                    recordFailure(
+                        scene = "弹幕测试/手动搜索动漫",
+                        method = "GET",
+                        url = url,
+                        durationMs = elapsed,
+                        message = message
+                    )
+                }
+            )
+
+            isSearchingAnime = false
+        }
+    }
+
+    fun openManualAnimeDetail(baseUrl: String, anime: DownloadAnimeCandidate) {
+        if (isSearchingAnime || isLoadingEpisodes) return
+
+        val base = normalizeBaseUrl(baseUrl)
+        if (base == null) {
+            errorMessage = "弹幕源 Base URL 无效"
+            return
+        }
+
+        val url = "$base/api/v2/bangumi/${anime.animeId}"
+
+        viewModelScope.launch {
+            isLoadingEpisodes = true
+            loadingAnimeId = anime.animeId
+            errorMessage = null
+            manualResult = null
+            val startedAt = System.currentTimeMillis()
+            val result = executeGet(url)
+            val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+
+            result.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = "弹幕测试/加载剧集",
+                        method = "GET",
+                        url = url,
+                        statusCode = code,
+                        durationMs = elapsed,
+                        body = body
+                    )
+                    if (code in 200..299) {
+                        val episodes = withContext(Dispatchers.Default) {
+                            parseEpisodeCandidates(body)
+                        }
+                        manualCurrentAnime = anime
+                        manualEpisodeCandidates = episodes
+                    } else {
+                        errorMessage = "加载剧集失败：HTTP $code"
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "加载剧集失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = "弹幕测试/加载剧集",
+                        method = "GET",
+                        url = url,
+                        durationMs = elapsed,
+                        message = message
+                    )
+                }
+            )
+
+            isLoadingEpisodes = false
+            loadingAnimeId = null
+        }
+    }
+
+    fun loadManualDanmu(
+        baseUrl: String,
+        anime: DownloadAnimeCandidate,
+        episode: DownloadEpisodeCandidate
+    ) {
+        if (isLoadingManualDanmu) return
+
+        val base = normalizeBaseUrl(baseUrl)
+        if (base == null) {
+            errorMessage = "弹幕源 Base URL 无效"
+            return
+        }
+
+        val url = "$base/api/v2/comment/${episode.episodeId}?format=json"
+
+        viewModelScope.launch {
+            isLoadingManualDanmu = true
+            errorMessage = null
+            val startedAt = System.currentTimeMillis()
+            val result = executeGet(url)
+            val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+
+            result.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = "弹幕测试/手动获取弹幕",
+                        method = "GET",
+                        url = url,
+                        statusCode = code,
+                        durationMs = elapsed,
+                        body = body
+                    )
+                    if (code !in 200..299) {
+                        errorMessage = "获取弹幕失败：HTTP $code"
+                    } else {
+                        manualResult = withContext(Dispatchers.Default) {
+                            buildDanmuInsightOrFallback(
+                                raw = body,
+                                commentId = episode.episodeId,
+                                animeTitle = anime.title,
+                                episodeTitle = episode.title,
+                                source = episode.source,
+                                pathLabel = "手动匹配",
+                                requestDurationMs = elapsed
+                            )
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "获取弹幕失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = "弹幕测试/手动获取弹幕",
+                        method = "GET",
+                        url = url,
+                        durationMs = elapsed,
+                        message = message
+                    )
+                }
+            )
+
+            isLoadingManualDanmu = false
+        }
+    }
+
     private data class BuiltRequest(
         val method: String,
         val url: String,
         val body: String?
     )
+
+    private fun buildDebugResponse(
+        endpoint: ApiEndpointConfig,
+        responseCode: Int,
+        responseBody: String,
+        responseDurationMs: Long
+    ): ApiDebugResponse {
+        val fullText = prettyPrintJson(responseBody)
+        val preview = if (shouldCollapseDebugResponse(endpoint)) {
+            buildTextPreview(raw = responseBody, limit = 4_000)
+        } else {
+            TextPreview(text = fullText, isTruncated = false)
+        }
+        return ApiDebugResponse(
+            responseCode = responseCode,
+            responseBody = responseBody,
+            responseDurationMs = responseDurationMs,
+            previewText = preview.text,
+            fullText = fullText,
+            previewTruncated = preview.isTruncated,
+            bodySizeBytes = responseBody.toByteArray(Charsets.UTF_8).size,
+            danmuInsight = null
+        )
+    }
+
+    private fun shouldCollapseDebugResponse(endpoint: ApiEndpointConfig): Boolean {
+        return endpoint.key == "getComment" || endpoint.key == "getSegmentComment"
+    }
+
+    private fun buildDanmuInsightOrFallback(
+        raw: String,
+        commentId: Long?,
+        animeTitle: String,
+        episodeTitle: String,
+        source: String,
+        pathLabel: String,
+        requestDurationMs: Long?
+    ): DanmuInsight {
+        return parseDanmuInsight(
+            raw = raw,
+            commentId = commentId,
+            animeTitle = animeTitle,
+            episodeTitle = episodeTitle,
+            source = source,
+            pathLabel = pathLabel,
+            matchedAtMillis = System.currentTimeMillis(),
+            requestDurationMs = requestDurationMs
+        ) ?: run {
+            val preview = buildTextPreview(raw, 4_000)
+            DanmuInsight(
+                commentId = commentId,
+                animeTitle = animeTitle,
+                episodeTitle = episodeTitle,
+                source = source,
+                pathLabel = pathLabel,
+                matchedAtMillis = System.currentTimeMillis(),
+                totalCount = 0,
+                durationSeconds = 0.0,
+                maxHeatCount = 0,
+                requestDurationMs = requestDurationMs,
+                rawPreview = preview.text,
+                rawPreviewTruncated = preview.isTruncated,
+                heatBuckets = emptyList(),
+                highMoments = emptyList(),
+                comments = emptyList()
+            )
+        }
+    }
 
     private fun buildRequest(
         endpoint: ApiEndpointConfig,
@@ -163,8 +583,8 @@ class ApiTestViewModel @Inject constructor(
             .filterValues { it.isNotBlank() }
             .toMutableMap()
 
-        endpoint.params.filter { it.required }.forEach { p ->
-            require(!params[p.name].isNullOrBlank()) { "参数不能为空：${p.label}" }
+        endpoint.params.filter { it.required }.forEach { param ->
+            require(!params[param.name].isNullOrBlank()) { "参数不能为空：${param.label}" }
         }
 
         var path = endpoint.pathTemplate
@@ -183,7 +603,7 @@ class ApiTestViewModel @Inject constructor(
             queryMap.putAll(params)
         } else {
             endpoint.forceQueryParams.forEach { key ->
-                params[key]?.let { queryMap[key] = it }
+                params[key]?.let { value -> queryMap[key] = value }
             }
             endpoint.forceQueryParams.forEach { key -> params.remove(key) }
         }
@@ -193,7 +613,9 @@ class ApiTestViewModel @Inject constructor(
             append(if (path.startsWith('/')) path else "/$path")
             if (queryMap.isNotEmpty()) {
                 append('?')
-                append(queryMap.entries.joinToString("&") { (k, v) -> "${urlEncode(k)}=${urlEncode(v)}" })
+                append(queryMap.entries.joinToString("&") { (key, value) ->
+                    "${urlEncode(key)}=${urlEncode(value)}"
+                })
             }
         }
 
@@ -223,6 +645,87 @@ class ApiTestViewModel @Inject constructor(
             val escapedBody = (body ?: "{}").replace("'", "'\"'\"'")
             "curl -X $method '$url' -H 'Content-Type: application/json' -d '$escapedBody'"
         }
+    }
+
+    private suspend fun executeGet(url: String): Result<Pair<Int, String>> {
+        val request = Request.Builder().url(url).get().build()
+        return executeRequest(request)
+    }
+
+    private suspend fun executeJsonPost(
+        url: String,
+        jsonBody: String
+    ): Result<Pair<Int, String>> {
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val request = Request.Builder()
+            .url(url)
+            .post(jsonBody.toRequestBody(mediaType))
+            .build()
+        return executeRequest(request)
+    }
+
+    private suspend fun executeRequest(request: Request): Result<Pair<Int, String>> {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                httpClient.newCall(request).execute().use { response ->
+                    response.code to response.body.string()
+                }
+            }
+        }
+    }
+
+    private fun normalizeBaseUrl(baseUrl: String): String? {
+        val raw = baseUrl.trim()
+        if (raw.isBlank()) return null
+        return if (
+            raw.startsWith("http://", ignoreCase = true) ||
+            raw.startsWith("https://", ignoreCase = true)
+        ) {
+            raw.trimEnd('/')
+        } else {
+            "http://$raw".trimEnd('/')
+        }
+    }
+
+    private fun recordSuccess(
+        scene: String,
+        method: String,
+        url: String,
+        statusCode: Int,
+        durationMs: Long,
+        body: String
+    ) {
+        recordRepository.addRecord(
+            RequestRecord(
+                scene = scene,
+                method = method,
+                url = url,
+                statusCode = statusCode,
+                durationMs = durationMs,
+                success = statusCode in 200..299,
+                responseSnippet = body.take(2000)
+            )
+        )
+    }
+
+    private fun recordFailure(
+        scene: String,
+        method: String,
+        url: String,
+        durationMs: Long,
+        message: String
+    ) {
+        recordRepository.addRecord(
+            RequestRecord(
+                scene = scene,
+                method = method,
+                url = url,
+                statusCode = null,
+                durationMs = durationMs,
+                success = false,
+                errorMessage = message
+            )
+        )
     }
 
     private fun urlEncode(input: String): String {

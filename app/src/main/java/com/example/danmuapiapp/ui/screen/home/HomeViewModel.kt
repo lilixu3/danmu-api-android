@@ -107,6 +107,10 @@ class HomeViewModel @Inject constructor(
         private set
     var updatePromptLatestVersion by mutableStateOf<String?>(null)
         private set
+    var coreUpdateCheckDialogMessage by mutableStateOf<String?>(null)
+        private set
+    var coreUpdateCheckDialogIsError by mutableStateOf(false)
+        private set
     var showAppUpdatePromptDialog by mutableStateOf(false)
         private set
     var appUpdatePromptCurrentVersion by mutableStateOf<String?>(null)
@@ -429,10 +433,12 @@ class HomeViewModel @Inject constructor(
     fun quickCheckCurrentCoreUpdate() {
         if (isSwitchingCore || isInstallingCore || isUpdatingCore || isCheckingCoreUpdate) return
 
+        resetCoreUpdateCheckDialogState()
         val variant = runtimeState.value.variant
         val info = coreInfoList.value.find { it.variant == variant }
         if (info?.isInstalled != true) {
-            appUpdateMessage = "${variant.label} 未安装，无法检查更新"
+            coreUpdateCheckDialogMessage = "${variant.label} 未安装，无法检查更新"
+            coreUpdateCheckDialogIsError = true
             return
         }
 
@@ -447,13 +453,16 @@ class HomeViewModel @Inject constructor(
 
     private fun doQuickCheckCurrentCoreUpdate(variant: ApiVariant) {
         isCheckingCoreUpdate = true
+        coreUpdateCheckDialogMessage = null
+        coreUpdateCheckDialogIsError = false
         viewModelScope.launch {
             val checked = runCatching {
                 settingsRepo.setIgnoredUpdateVersion(variant, null)
                 ignoredUpdateVersionMap[variant] = null
                 coreRepo.checkAndMarkUpdate(variant)
             }.onFailure {
-                appUpdateMessage = "检查更新失败：${it.message ?: "请稍后重试"}"
+                coreUpdateCheckDialogMessage = "检查更新失败：${it.message ?: "请稍后重试"}"
+                coreUpdateCheckDialogIsError = true
             }.isSuccess
             if (!checked) {
                 isCheckingCoreUpdate = false
@@ -467,7 +476,8 @@ class HomeViewModel @Inject constructor(
                 updatePromptLatestVersion = latestInfo.latestVersion
                 showUpdatePromptDialog = true
             } else if (latestInfo?.isInstalled == true) {
-                appUpdateMessage = "${variant.label} 已是最新版本"
+                coreUpdateCheckDialogMessage = "已确认 ${variant.label} 当前是最新版本"
+                coreUpdateCheckDialogIsError = false
             }
             isCheckingCoreUpdate = false
         }
@@ -576,6 +586,12 @@ class HomeViewModel @Inject constructor(
 
     fun openDownloadsApp(activity: Activity) {
         appUpdateInstaller.openDownloadsApp(activity)
+    }
+
+    fun resetCoreUpdateCheckDialogState() {
+        if (isCheckingCoreUpdate) return
+        coreUpdateCheckDialogMessage = null
+        coreUpdateCheckDialogIsError = false
     }
 
     fun dismissAppUpdateMessage() {

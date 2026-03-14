@@ -58,6 +58,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     companion object {
         private const val KEY_RUNTIME_STARTED_AT_MS = "runtime_started_at_ms"
         private const val LOG_HTTP_TIMEOUT_MS = 900
+        private const val LOG_CLEAR_HTTP_TIMEOUT_MS = 1200
         private const val NETWORK_URL_REFRESH_DEBOUNCE_MS = 300L
         private const val NORMAL_START_TIMEOUT_PRIMARY_MS = 15_000L
         private const val NORMAL_START_TIMEOUT_EXTEND_MS = 20_000L
@@ -100,6 +101,8 @@ class RuntimeRepositoryImpl @Inject constructor(
     override val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
     private val _eventLogs = MutableStateFlow<List<LogEntry>>(emptyList())
     private var serviceLogsCache: List<LogEntry> = emptyList()
+    @Volatile
+    private var clearedServiceLogCounts: Map<LogEntry, Int> = emptyMap()
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -569,9 +572,14 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun clearLogs() {
+        clearedServiceLogCounts = serviceLogsCache.groupingBy { it }.eachCount()
         serviceLogsCache = emptyList()
         _eventLogs.value = emptyList()
         _logs.value = emptyList()
+        scope.launch {
+            clearServiceLogsOnce()
+            refreshLogsOnce()
+        }
     }
 
     override fun addLog(level: LogLevel, message: String) {
@@ -1062,7 +1070,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun refreshLogsOnce() {
         if (!settingsRepository.logEnabled.value) return
         runCatching {
-            val serviceLogs = collectServiceLogsOnce()
+            val serviceLogs = filterClearedServiceLogs(collectServiceLogsOnce())
             if (serviceLogs.isNotEmpty() || serviceLogsCache.isNotEmpty()) {
                 serviceLogsCache = serviceLogs
                 publishMergedLogs()
@@ -1080,16 +1088,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return emptyList()
 
-        val adminState = adminSessionRepository.sessionState.value
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
-        val tokenPaths = CoreApiRoutePolicy.tokenPaths(
-            runtimeToken = state.token,
-            adminToken = adminToken,
-            isAdminMode = adminState.isAdminMode,
-            mode = CoreApiRouteMode.PreferAdminRead
-        )
-        tokenPaths.forEach { tokenPath ->
-            val baseUrl = "http://127.0.0.1:${state.port}$tokenPath"
+        resolveLogApiBaseUrls().forEach { baseUrl ->
             val raw = runCatching {
                 val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
                     connectTimeout = LOG_HTTP_TIMEOUT_MS
@@ -1108,6 +1107,77 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
         }
         return emptyList()
+    }
+
+    private fun resolveLogApiBaseUrls(): List<String> {
+        val state = _runtimeState.value
+        val adminState = adminSessionRepository.sessionState.value
+        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
+        val tokenPaths = CoreApiRoutePolicy.tokenPaths(
+            runtimeToken = state.token,
+            adminToken = adminToken,
+            isAdminMode = adminState.isAdminMode,
+            mode = CoreApiRouteMode.PreferAdminRead
+        )
+        return tokenPaths.map { tokenPath -> "http://127.0.0.1:${state.port}$tokenPath" }
+    }
+
+    private fun clearServiceLogsOnce(): Boolean {
+        val state = _runtimeState.value
+        if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return false
+
+        val clearRequests = listOf(
+            "DELETE" to "/api/logs",
+            "POST" to "/api/logs/clear"
+        )
+        resolveLogApiBaseUrls().forEach { baseUrl ->
+            clearRequests.forEach { (method, path) ->
+                val cleared = runCatching {
+                    val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
+                        connectTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
+                        readTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
+                        requestMethod = method
+                        if (method == "POST") {
+                            doOutput = true
+                            setFixedLengthStreamingMode(0)
+                        }
+                    }
+                    try {
+                        if (method == "POST") {
+                            conn.outputStream.use { }
+                        }
+                        conn.responseCode in 200..299
+                    } finally {
+                        conn.disconnect()
+                    }
+                }.getOrDefault(false)
+                if (cleared) {
+                    clearedServiceLogCounts = emptyMap()
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun filterClearedServiceLogs(entries: List<LogEntry>): List<LogEntry> {
+        val baseline = clearedServiceLogCounts
+        if (baseline.isEmpty() || entries.isEmpty()) return entries
+
+        val remaining = baseline.toMutableMap()
+        var visibleStartIndex = 0
+        while (visibleStartIndex < entries.size) {
+            val entry = entries[visibleStartIndex]
+            val count = remaining[entry] ?: 0
+            if (count <= 0) break
+            if (count == 1) {
+                remaining.remove(entry)
+            } else {
+                remaining[entry] = count - 1
+            }
+            visibleStartIndex++
+        }
+        return entries.drop(visibleStartIndex)
     }
 
     private fun parseLogLines(raw: String): List<LogEntry> {
