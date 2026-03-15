@@ -6,6 +6,7 @@ import com.example.danmuapiapp.data.repository.CoreRepositoryImpl
 import com.example.danmuapiapp.data.repository.EnvConfigRepositoryImpl
 import com.example.danmuapiapp.data.repository.RuntimeRepositoryImpl
 import com.example.danmuapiapp.data.repository.SettingsRepositoryImpl
+import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.domain.model.AdminSessionState
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
@@ -27,7 +28,6 @@ object CompatRuntimeGraph {
 
     private fun buildHolder(context: Context): Holder {
         val settingsRepository = SettingsRepositoryImpl(context)
-        val envConfigRepository = EnvConfigRepositoryImpl(context)
         val adminSessionRepository = NoOpAdminSessionRepository()
         val httpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -46,20 +46,32 @@ object CompatRuntimeGraph {
             httpClient = httpClient,
             githubRemoteService = githubRemoteService
         )
+        val appUpdateService = AppUpdateService(
+            context = context,
+            httpClient = httpClient,
+            githubProxyService = githubProxyService,
+            githubRemoteService = githubRemoteService
+        )
         return Holder(
+            context = context,
             settingsRepository = settingsRepository,
-            envConfigRepository = envConfigRepository,
             runtimeRepository = runtimeRepository,
-            coreRepository = coreRepository
+            coreRepository = coreRepository,
+            appUpdateService = appUpdateService
         )
     }
 
-    data class Holder(
+    class Holder(
+        private val context: Context,
         val settingsRepository: SettingsRepositoryImpl,
-        val envConfigRepository: EnvConfigRepositoryImpl,
         val runtimeRepository: RuntimeRepositoryImpl,
-        val coreRepository: CoreRepositoryImpl
-    )
+        val coreRepository: CoreRepositoryImpl,
+        val appUpdateService: AppUpdateService
+    ) {
+        val envConfigRepository: EnvConfigRepositoryImpl by lazy {
+            EnvConfigRepositoryImpl(context)
+        }
+    }
 
     private class NoOpAdminSessionRepository : AdminSessionRepository {
         private val state = MutableStateFlow(AdminSessionState())
