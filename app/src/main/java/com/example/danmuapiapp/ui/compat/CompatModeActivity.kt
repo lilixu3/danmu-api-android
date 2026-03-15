@@ -330,37 +330,13 @@ class CompatModeActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(18))
             background = ContextCompat.getDrawable(this@CompatModeActivity, R.drawable.compat_card_panel)
+            visibility = View.GONE
             layoutParams = marginLp(bottom = 14)
         }
-
-        val headerRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        headerRow.addView(TextView(this).apply {
-            text = "应用版本"
-            textSize = 18f
+        appUpdateTitle = TextView(this).apply {
+            textSize = 17f
             setTypeface(null, Typeface.BOLD)
             setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        val checkBtn = makeButton("检查更新", primary = false).apply {
-            textSize = 13f
-            minHeight = dp(38)
-            minimumHeight = dp(38)
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            setOnClickListener { checkAppUpdate() }
-        }
-        headerRow.addView(checkBtn, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        appUpdateCard.addView(headerRow)
-
-        appUpdateTitle = TextView(this).apply {
-            text = "当前版本: v${graph.appUpdateService.currentVersionName()}"
-            textSize = 14f
-            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant))
-            layoutParams = marginLp(top = 8)
         }
         appUpdateCard.addView(appUpdateTitle)
 
@@ -368,8 +344,7 @@ class CompatModeActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant))
             maxLines = 6
-            visibility = View.GONE
-            layoutParams = marginLp(top = 6)
+            layoutParams = marginLp(top = 8)
         }
         appUpdateCard.addView(appUpdateNotes)
 
@@ -390,7 +365,6 @@ class CompatModeActivity : AppCompatActivity() {
 
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            visibility = View.GONE
             layoutParams = marginLp(top = 14)
         }
         btnAppUpdate = makeButton("下载更新", primary = true).apply {
@@ -752,22 +726,17 @@ class CompatModeActivity : AppCompatActivity() {
 
     private fun renderAppUpdateCard() {
         val result = appCheckResult
-        val hasUpdate = result != null && result.hasUpdate
-        val hasApk = downloadedApk != null
-
-        if (hasUpdate) {
-            appUpdateTitle.text = "发现新版本 v${result.latestVersion}（当前 v${result.currentVersion}）"
-            appUpdateTitle.setTextColor(themeColor(androidx.appcompat.R.attr.colorPrimary))
-            val notes = result.releaseNotes.ifBlank { "（无更新说明）" }
-            appUpdateNotes.text = notes
-            appUpdateNotes.isVisible = true
-        } else {
-            val currentVer = result?.currentVersion ?: graph.appUpdateService.currentVersionName()
-            appUpdateTitle.text = "当前版本: v$currentVer"
-            appUpdateTitle.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant))
-            appUpdateNotes.isVisible = false
+        if (result == null || !result.hasUpdate) {
+            appUpdateCard.isVisible = false
+            return
         }
+        appUpdateCard.isVisible = true
+        appUpdateTitle.text = "发现新版本 v${result.latestVersion}（当前 v${result.currentVersion}）"
+        val notes = result.releaseNotes.ifBlank { "" }
+        appUpdateNotes.text = notes
+        appUpdateNotes.isVisible = notes.isNotBlank()
 
+        val hasApk = downloadedApk != null
         appUpdateProgress.isVisible = isAppDownloading
         appUpdateProgressText.isVisible = isAppDownloading
         if (isAppDownloading) {
@@ -780,10 +749,7 @@ class CompatModeActivity : AppCompatActivity() {
             appUpdateProgressText.text = appDownloadDetail
         }
 
-        // 按钮行：有更新时显示
-        val btnRow = btnAppUpdate.parent as? ViewGroup
-        btnRow?.isVisible = hasUpdate || hasApk || isAppDownloading
-        btnAppUpdate.isVisible = hasUpdate && !hasApk
+        btnAppUpdate.isVisible = !hasApk
         setButtonEnabled(btnAppUpdate, !isAppDownloading)
         btnAppInstall.isVisible = hasApk
     }
