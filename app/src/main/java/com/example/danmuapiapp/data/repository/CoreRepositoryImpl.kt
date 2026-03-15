@@ -112,8 +112,25 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                 }
                 ensureCoreDirWatcher(mode)
+                val previous = _coreInfoList.value
                 val refreshed = ApiVariant.entries.map { loadCoreInfo(it, mode) }
-                _coreInfoList.value = refreshed
+                val merged = refreshed.map { newInfo ->
+                    val prev = previous.find { it.variant == newInfo.variant }
+                    if (prev != null && prev.hasUpdate && !prev.latestVersion.isNullOrBlank()) {
+                        val localVer = newInfo.version?.removePrefix("v")?.trim().orEmpty()
+                        val remoteVer = prev.latestVersion.removePrefix("v").trim()
+                        val stillHasUpdate = localVer.isBlank() || remoteVer.isBlank() ||
+                            compareVersions(remoteVer, localVer) > 0
+                        if (stillHasUpdate) {
+                            newInfo.copy(hasUpdate = true, latestVersion = prev.latestVersion)
+                        } else {
+                            newInfo
+                        }
+                    } else {
+                        newInfo
+                    }
+                }
+                _coreInfoList.value = merged
             } finally {
                 if (refreshTicket.get() == ticket) {
                     _isCoreInfoLoading.value = false
