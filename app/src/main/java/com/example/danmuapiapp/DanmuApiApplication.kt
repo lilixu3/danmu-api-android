@@ -31,8 +31,7 @@ class DanmuApiApplication : Application() {
         }
 
         if (DeviceCompatMode.shouldUseCompatMode(this)) {
-            Log.i(TAG, "检测到兼容设备，跳过系统心跳等非必要初始化")
-            return
+            Log.i(TAG, "检测到兼容设备，继续初始化系统心跳以支持 TV 实验性保活")
         }
 
         runCatching {

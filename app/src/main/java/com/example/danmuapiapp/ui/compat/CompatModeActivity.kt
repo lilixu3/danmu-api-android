@@ -2,6 +2,7 @@ package com.example.danmuapiapp.ui.compat
 
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.text.InputType
@@ -24,11 +25,15 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
+import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
@@ -70,6 +75,11 @@ class CompatModeActivity : AppCompatActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnRestart: Button
     private lateinit var btnStop: Button
+
+    // TV keep alive
+    private lateinit var keepAliveSummaryView: TextView
+    private lateinit var keepAliveDetailView: TextView
+    private lateinit var btnKeepAliveProfile: Button
 
     // Progress
     private lateinit var progressCard: LinearLayout
@@ -120,6 +130,7 @@ class CompatModeActivity : AppCompatActivity() {
         setContentView(R.layout.activity_compat_mode)
         rootLayout = findViewById(R.id.layout_root)
         buildUi()
+        renderKeepAliveCard()
         observeState()
         syncServer.start(resolveSyncHost(runtimeState))
         graph.coreRepository.refreshCoreInfo()
@@ -129,6 +140,7 @@ class CompatModeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         graph.appUpdateService.tryResumePendingInstall(this)
+        renderKeepAliveCard()
         // 前台静默检查核心更新
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
@@ -149,6 +161,7 @@ class CompatModeActivity : AppCompatActivity() {
         rootLayout.removeAllViews()
         rootLayout.addView(buildTitleBar())
         rootLayout.addView(buildDashboardCard())
+        rootLayout.addView(buildKeepAliveCard())
         rootLayout.addView(buildProgressCard())
         rootLayout.addView(buildAppUpdateCard())
         rootLayout.addView(buildCoreSectionHeader())
@@ -265,6 +278,41 @@ class CompatModeActivity : AppCompatActivity() {
         btnRow.addView(btnStop, weightLp(1f))
         card.addView(btnRow)
 
+        return card
+    }
+
+    // ── Keep Alive Card ──
+
+    private fun buildKeepAliveCard(): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(18))
+            background = ContextCompat.getDrawable(this@CompatModeActivity, R.drawable.compat_card_panel)
+            layoutParams = marginLp(bottom = 14)
+        }
+        card.addView(TextView(this).apply {
+            text = "TV 保活（实验）"
+            textSize = 17f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface))
+        })
+        keepAliveSummaryView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface))
+            layoutParams = marginLp(top = 8)
+        }
+        card.addView(keepAliveSummaryView)
+        keepAliveDetailView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant))
+            layoutParams = marginLp(top = 8)
+        }
+        card.addView(keepAliveDetailView)
+        btnKeepAliveProfile = makeButton("启用实验保活", primary = true).apply {
+            layoutParams = marginLp(top = 14)
+            setOnClickListener { toggleKeepAliveProfile() }
+        }
+        card.addView(btnKeepAliveProfile)
         return card
     }
 
@@ -685,7 +733,10 @@ class CompatModeActivity : AppCompatActivity() {
 
         tileCoreValue.text = resolveVariantLabel(runtimeState.variant)
         tileVersionValue.text = currentCoreVersionText()
-        tileModeValue.text = "兼容模式"
+        tileModeValue.text = when (runtimeState.runMode) {
+            RunMode.Root -> "兼容 / Root"
+            RunMode.Normal -> "兼容 / 普通"
+        }
         tilePortValue.text = runtimeState.port.toString()
         tileLocalValue.text = runtimeState.localUrl.ifBlank { "--" }
         tileLanValue.text = runtimeState.lanUrl.ifBlank { "--" }
@@ -694,6 +745,86 @@ class CompatModeActivity : AppCompatActivity() {
         setButtonEnabled(btnStart, !running && !isOperating)
         setButtonEnabled(btnRestart, running && !isOperating)
         setButtonEnabled(btnStop, running && !isOperating)
+        renderKeepAliveCard()
+    }
+
+    private fun renderKeepAliveCard() {
+        if (!::keepAliveSummaryView.isInitialized) return
+
+        val autoStartEnabled = graph.settingsRepository.autoStart.value
+        val keepAliveEnabled = graph.settingsRepository.keepAlive.value
+        val heartbeatEnabled = graph.settingsRepository.keepAliveHeartbeatEnabled.value
+        val heartbeatMode = graph.settingsRepository.keepAliveHeartbeatMode.value
+        val heartbeatIntervalMinutes = if (heartbeatMode == KeepAliveHeartbeatMode.System) {
+            NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(this)
+        } else {
+            graph.settingsRepository.keepAliveHeartbeatIntervalMinutes.value
+        }
+        val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(this)
+        val hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(this)
+        val accessibilityEnabled = NodeKeepAlivePrefs.isAccessibilityServiceEnabled(this)
+        val isRootMode = runtimeState.runMode == RunMode.Root
+        val recommendedProfileEnabled = !isRootMode &&
+            autoStartEnabled &&
+            keepAliveEnabled &&
+            heartbeatEnabled &&
+            heartbeatMode == KeepAliveHeartbeatMode.System &&
+            heartbeatIntervalMinutes == NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
+        val hasPartialConfig = autoStartEnabled ||
+            keepAliveEnabled ||
+            heartbeatEnabled ||
+            heartbeatMode == KeepAliveHeartbeatMode.System
+
+        keepAliveSummaryView.text = when {
+            isRootMode -> "当前为 Root 模式，请优先使用 Root 开机自启"
+            recommendedProfileEnabled ->
+                "已启用：开机恢复 + 系统心跳（约 ${heartbeatIntervalMinutes} 分钟兜底一次）"
+            hasPartialConfig -> "当前配置不完整，可重新应用推荐方案"
+            else -> "未启用：服务被系统回收后不会自动恢复"
+        }
+
+        keepAliveDetailView.text = buildString {
+            append("该开关只做掉线后兜底恢复，不保证 TV 后台长期常驻。")
+            when {
+                isRootMode -> {
+                    append("\n当前是 Root 模式，稳定保活应使用完整设置页里的 Root 开机模块。")
+                }
+                recommendedProfileEnabled -> {
+                    append("\n已自动配置：普通模式开机恢复、系统定时心跳、${heartbeatIntervalMinutes} 分钟恢复间隔。")
+                    if (!desiredRunning) {
+                        append("\n启用后请至少手动启动一次服务，系统才会按“期望运行”继续尝试恢复。")
+                    }
+                    if (!hasNotificationPermission) {
+                        append("\n当前缺少通知权限，系统恢复拉起前台服务可能失败。")
+                    }
+                    if (Build.VERSION.SDK_INT >= 35) {
+                        append("\nAndroid 15 及以上系统限制了开机直接拉起前台服务，仍以系统心跳兜底为主。")
+                    }
+                    if (accessibilityEnabled) {
+                        append("\n检测到无障碍保活已启用，支持的设备上它也会一起参与恢复。")
+                    }
+                }
+                else -> {
+                    append("\n开启后会自动配置：普通模式开机恢复、系统定时心跳、15 分钟恢复间隔。")
+                    if (hasPartialConfig) {
+                        append(
+                            "\n当前状态：开机恢复${if (autoStartEnabled) "开" else "关"}，保活${if (keepAliveEnabled) "开" else "关"}，心跳${if (heartbeatEnabled) "开" else "关"}，模式${heartbeatMode.label}。"
+                        )
+                    }
+                    if (Build.VERSION.SDK_INT >= 35) {
+                        append("\n新系统上开机恢复可能被限制，因此不要把它当成常驻保活。")
+                    }
+                }
+            }
+        }
+
+        btnKeepAliveProfile.text = when {
+            isRootMode -> "Root 模式无需此项"
+            recommendedProfileEnabled -> "关闭实验保活"
+            hasPartialConfig -> "重新应用推荐方案"
+            else -> "启用实验保活"
+        }
+        setButtonEnabled(btnKeepAliveProfile, !isOperating && !isRootMode)
     }
 
     private fun renderProgressCard() {
@@ -820,6 +951,52 @@ class CompatModeActivity : AppCompatActivity() {
             }
             graph.runtimeRepository.startService()
         }
+    }
+
+    private fun toggleKeepAliveProfile() {
+        if (isOperating) return
+        if (runtimeState.runMode == RunMode.Root) {
+            toast("当前是 Root 模式，请使用 Root 开机自启")
+            return
+        }
+
+        val recommendedProfileEnabled = graph.settingsRepository.autoStart.value &&
+            graph.settingsRepository.keepAlive.value &&
+            graph.settingsRepository.keepAliveHeartbeatEnabled.value &&
+            graph.settingsRepository.keepAliveHeartbeatMode.value == KeepAliveHeartbeatMode.System &&
+            NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(this) ==
+            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
+
+        if (recommendedProfileEnabled) {
+            graph.settingsRepository.setAutoStart(false)
+            graph.settingsRepository.setKeepAliveHeartbeatMode(KeepAliveHeartbeatMode.Accessibility)
+            graph.settingsRepository.setKeepAliveHeartbeatEnabled(false)
+            graph.settingsRepository.setKeepAlive(false)
+            NodeKeepAlivePrefs.requestDisableAccessibilityService(this)
+            SystemHeartbeatScheduler.refresh(this)
+            renderKeepAliveCard()
+            toast("已关闭 TV 实验保活")
+            return
+        }
+
+        graph.settingsRepository.setAutoStart(true)
+        graph.settingsRepository.setKeepAlive(true)
+        graph.settingsRepository.setKeepAliveHeartbeatEnabled(true)
+        graph.settingsRepository.setKeepAliveHeartbeatMode(KeepAliveHeartbeatMode.System)
+        graph.settingsRepository.setKeepAliveHeartbeatIntervalMinutes(
+            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
+        )
+        SystemHeartbeatScheduler.refresh(this)
+        renderKeepAliveCard()
+
+        val message = if (!NodeKeepAlivePrefs.isDesiredRunning(this)) {
+            "已启用 TV 实验保活，请再手动启动一次服务"
+        } else if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(this)) {
+            "已启用 TV 实验保活，请授予通知权限"
+        } else {
+            "已启用 TV 实验保活"
+        }
+        toast(message)
     }
 
     private fun switchVariant(variant: ApiVariant) {
