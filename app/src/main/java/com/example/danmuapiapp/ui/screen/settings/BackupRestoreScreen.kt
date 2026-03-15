@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -23,7 +24,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun BackupRestoreScreen(
@@ -33,10 +38,12 @@ fun BackupRestoreScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    val scope = rememberCoroutineScope()
     var pendingExportContent by remember { mutableStateOf<String?>(null) }
     var pendingImportContent by remember { mutableStateOf<String?>(null) }
     var showImportConfirmDialog by remember { mutableStateOf(false) }
     var showWebDavRestoreConfirmDialog by remember { mutableStateOf(false) }
+    var isDecodingTvSync by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -71,6 +78,26 @@ fun BackupRestoreScreen(
         }
     }
 
+    val tvSyncLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap == null) {
+            isDecodingTvSync = false
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            isDecodingTvSync = true
+            val invite = withContext(Dispatchers.Default) {
+                TvConfigSyncCodec.decodeQrText(bitmap)
+            }
+            isDecodingTvSync = false
+            invite.onSuccess { viewModel.syncConfigToTv(it) }
+                .onFailure {
+                    viewModel.postMessage(it.message ?: "未识别到电视同步码，请靠近电视后重试")
+                }
+        }
+    }
+
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
             snackbarHostState.showSnackbar(message)
@@ -94,7 +121,7 @@ fun BackupRestoreScreen(
         ) {
             SettingsPageHeader(
                 title = "备份与恢复",
-                subtitle = ".env 导入导出与 WebDAV 云端同步",
+                subtitle = ".env 导入导出、TV 扫码同步与 WebDAV 云端同步",
                 onBack = onBack
             )
 
@@ -143,6 +170,46 @@ fun BackupRestoreScreen(
                             Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("导入 .env")
+                        }
+                    }
+                }
+            }
+
+            SettingsGroup(title = "同步到电视 / 盒子") {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        "先在 TV 兼容模式里打开“手机同步”卡片，再用系统相机拍下电视二维码，即可把当前 .env 与核心仓库配置同步过去。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            isDecodingTvSync = false
+                            tvSyncLauncher.launch(null)
+                        },
+                        enabled = !viewModel.isTvSyncOperating && !isDecodingTvSync,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = appTonalButtonColors()
+                    ) {
+                        Icon(Icons.Rounded.CloudSync, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("扫码同步到电视")
+                    }
+                    AnimatedVisibility(visible = isDecodingTvSync || viewModel.isTvSyncOperating) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                if (isDecodingTvSync) "正在识别电视同步码..." else viewModel.tvSyncOperatingText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
