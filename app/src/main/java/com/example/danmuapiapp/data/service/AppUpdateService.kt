@@ -177,21 +177,19 @@ class AppUpdateService @Inject constructor(
     fun installApk(activity: Activity, apk: DownloadedApk): InstallResult {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (!activity.packageManager.canRequestPackageInstalls()) {
-                savePendingInstall(activity, apk)
-                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                    data = "package:${activity.packageName}".toUri()
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val settingsIntent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    "package:${activity.packageName}".toUri()
+                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                val canResolve = settingsIntent.resolveActivity(activity.packageManager) != null
+                if (canResolve) {
+                    savePendingInstall(activity, apk)
+                    runCatching { activity.startActivity(settingsIntent) }
+                    Toast.makeText(activity, "请先允许安装未知应用，授权后返回将自动继续安装", Toast.LENGTH_LONG).show()
+                    return InstallResult.NeedUnknownSourcePermission
                 }
-                runCatching { activity.startActivity(intent) }
-                Toast.makeText(
-                    activity,
-                    "请先允许“安装未知应用”，授权后返回 App 将自动继续安装",
-                    Toast.LENGTH_LONG
-                ).show()
-                return InstallResult.NeedUnknownSourcePermission
             }
         }
-
         clearPendingInstall(activity)
         return launchInstaller(activity, apk.uri)
     }
