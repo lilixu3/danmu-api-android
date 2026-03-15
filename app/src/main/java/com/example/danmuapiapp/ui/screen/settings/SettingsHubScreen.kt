@@ -206,7 +206,7 @@ fun SettingsHubScreen(
                 SettingsDivider()
                 SettingsItem(
                     title = "备份与恢复",
-                    subtitle = "导入导出 .env，并可同步到 WebDAV",
+                    subtitle = "导入导出 .env，可扫码同步到 TV，也可同步到 WebDAV",
                     icon = Icons.Rounded.CloudSync,
                     onClick = onOpenBackupRestore
                 )

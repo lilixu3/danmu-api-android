@@ -21,6 +21,16 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.faketouch"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.INSTALL_PACKAGE" />
@@ -47,14 +57,24 @@
 
 
         <activity
-            android:name="com.example.danmuapiapp.MainActivity"
+            android:name="com.example.danmuapiapp.CompatEntryActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:theme="@style/Theme.DanmuApiApp.Startup">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name="com.example.danmuapiapp.MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name="com.example.danmuapiapp.ui.compat.CompatModeActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DanmuApiApp" />
 
         <service
             android:name="com.example.danmuapiapp.data.service.NodeService"

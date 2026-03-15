@@ -7,6 +7,7 @@ import android.os.UserManager
 import android.util.Log
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
@@ -27,6 +28,11 @@ class DanmuApiApplication : Application() {
             AppAppearancePrefs.applyNightMode(AppAppearancePrefs.readNightMode(prefs))
         }.onFailure {
             Log.w(TAG, "初始化夜间模式失败，已跳过：${it.message}")
+        }
+
+        if (DeviceCompatMode.shouldUseCompatMode(this)) {
+            Log.i(TAG, "检测到兼容设备，跳过系统心跳等非必要初始化")
+            return
         }
 
         runCatching {
