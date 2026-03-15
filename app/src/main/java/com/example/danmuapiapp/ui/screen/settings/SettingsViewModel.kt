@@ -20,6 +20,8 @@ import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
+import com.example.danmuapiapp.data.service.TvConfigSyncClient
+import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.WebDavService
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
@@ -60,7 +62,8 @@ class SettingsViewModel @Inject constructor(
     private val githubProxyService: GithubProxyService,
     private val githubProxySpeedTester: GithubProxySpeedTester,
     private val webDavService: WebDavService,
-    private val appUpdateService: AppUpdateService
+    private val appUpdateService: AppUpdateService,
+    private val tvConfigSyncClient: TvConfigSyncClient
 ) : ViewModel() {
 
     private val envConfigRepo: EnvConfigRepository
@@ -144,6 +147,10 @@ class SettingsViewModel @Inject constructor(
     var isWebDavOperating by mutableStateOf(false)
         private set
     var webDavOperatingText by mutableStateOf("")
+        private set
+    var isTvSyncOperating by mutableStateOf(false)
+        private set
+    var tvSyncOperatingText by mutableStateOf("")
         private set
     var showWebDavConfigDialog by mutableStateOf(false)
         private set
@@ -679,6 +686,33 @@ class SettingsViewModel @Inject constructor(
             )
             isWebDavOperating = false
             webDavOperatingText = ""
+        }
+    }
+
+    fun syncConfigToTv(inviteText: String) {
+        if (isTvSyncOperating) return
+        viewModelScope.launch {
+            val target = TvConfigSyncCodec.parseTarget(inviteText).getOrElse {
+                operationMessage = it.message ?: "未识别到电视同步码"
+                return@launch
+            }
+            isTvSyncOperating = true
+            tvSyncOperatingText = if (target.deviceName.isBlank()) {
+                "正在向电视发送当前配置..."
+            } else {
+                "正在同步到 ${target.deviceName}..."
+            }
+            tvConfigSyncClient.syncToTarget(target).fold(
+                onSuccess = {
+                    operationMessage = it
+                    runtimeRepo.addLog(LogLevel.Info, "已通过扫码同步配置到电视端")
+                },
+                onFailure = {
+                    operationMessage = "同步失败：${it.message ?: "请检查局域网与同步码"}"
+                }
+            )
+            isTvSyncOperating = false
+            tvSyncOperatingText = ""
         }
     }
 
