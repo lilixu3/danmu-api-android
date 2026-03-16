@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.component
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 
 // ── Shared (non-settings) ──────────────────────────────────────────
 
@@ -164,6 +171,69 @@ fun GradientButton(
         ) {
             Text(text, style = MaterialTheme.typography.labelLarge, color = if (enabled) Color.White else Color.White.copy(alpha = 0.6f))
         }
+    }
+}
+
+
+@Composable
+fun AnimePosterThumbnail(
+    imageUrl: String,
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val normalizedUrl = remember(imageUrl) { normalizePosterUrl(imageUrl) }
+    val shape = RoundedCornerShape(16.dp)
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        contentAlignment = Alignment.Center
+    ) {
+        if (normalizedUrl.isBlank()) {
+            PosterPlaceholder()
+            return@Box
+        }
+
+        val request = remember(context, normalizedUrl) {
+            ImageRequest.Builder(context)
+                .data(normalizedUrl)
+                .crossfade(true)
+                .build()
+        }
+        val painter = rememberAsyncImagePainter(model = request)
+        val state = painter.state
+
+        if (state !is AsyncImagePainter.State.Success) {
+            PosterPlaceholder()
+        }
+
+        Image(
+            painter = painter,
+            contentDescription = title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+@Composable
+private fun PosterPlaceholder() {
+    Icon(
+        imageVector = Icons.Rounded.Movie,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    )
+}
+
+private fun normalizePosterUrl(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isBlank()) return ""
+    return if (trimmed.startsWith("//")) {
+        "https:$trimmed"
+    } else {
+        trimmed
     }
 }
 
