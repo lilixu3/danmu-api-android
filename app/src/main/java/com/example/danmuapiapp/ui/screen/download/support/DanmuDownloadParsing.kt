@@ -8,8 +8,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun parseAnimeCandidates(raw: String): List<DownloadAnimeCandidate> {
-    val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
-    val arr = root.optJSONArray("animes") ?: root.optJSONArray("data") ?: JSONArray()
+    val trimmed = raw.trim()
+    if (trimmed.isBlank()) return emptyList()
+    val arr = when {
+        trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrElse { return emptyList() }
+        else -> {
+            val root = runCatching { JSONObject(trimmed) }.getOrElse { return emptyList() }
+            root.optJSONArray("animes") ?: root.optJSONArray("data") ?: JSONArray()
+        }
+    }
     val out = ArrayList<DownloadAnimeCandidate>(arr.length())
     for (i in 0 until arr.length()) {
         val item = arr.optJSONObject(i) ?: continue
@@ -17,10 +24,20 @@ internal fun parseAnimeCandidates(raw: String): List<DownloadAnimeCandidate> {
         val title = readString(item, "animeTitle", "title", "name")
         if (animeId <= 0L || title.isBlank()) continue
         val count = readInt(item, "episodeCount", "totalEpisodes", "count").coerceAtLeast(0)
+        val imageUrl = readString(item, "imageUrl", "cover", "thumb", "poster", "pic").ifBlank {
+            item.optJSONObject("image")?.let { image ->
+                readString(image, "thumb", "poster", "url")
+            }.orEmpty()
+        }.ifBlank {
+            item.optJSONObject("images")?.let { images ->
+                readString(images, "common", "large", "medium", "small")
+            }.orEmpty()
+        }
         out += DownloadAnimeCandidate(
             animeId = animeId,
             title = title,
-            episodeCount = count
+            episodeCount = count,
+            imageUrl = imageUrl
         )
     }
     return out.distinctBy { it.animeId }

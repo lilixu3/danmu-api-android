@@ -5,7 +5,8 @@ import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 data class DownloadAnimeCandidate(
     val animeId: Long,
     val title: String,
-    val episodeCount: Int
+    val episodeCount: Int,
+    val imageUrl: String = ""
 )
 
 data class DownloadEpisodeCandidate(

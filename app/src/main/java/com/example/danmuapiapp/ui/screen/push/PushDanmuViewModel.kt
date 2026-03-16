@@ -24,7 +24,8 @@ import javax.inject.Inject
 data class PushAnimeCandidate(
     val animeId: Long,
     val title: String,
-    val episodeCount: Int
+    val episodeCount: Int,
+    val imageUrl: String = ""
 )
 
 data class PushEpisodeCandidate(
@@ -488,10 +489,15 @@ class PushDanmuViewModel @Inject constructor(
     }
 
     private fun parseAnimeCandidates(raw: String): List<PushAnimeCandidate> {
-        val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
-        val arr = root.optJSONArray("animes")
-            ?: root.optJSONArray("data")
-            ?: JSONArray()
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return emptyList()
+        val arr = when {
+            trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrElse { return emptyList() }
+            else -> {
+                val root = runCatching { JSONObject(trimmed) }.getOrElse { return emptyList() }
+                root.optJSONArray("animes") ?: root.optJSONArray("data") ?: JSONArray()
+            }
+        }
 
         val out = ArrayList<PushAnimeCandidate>(arr.length())
         for (i in 0 until arr.length()) {
@@ -500,10 +506,20 @@ class PushDanmuViewModel @Inject constructor(
             val title = readString(item, "animeTitle", "title", "name")
             if (animeId <= 0L || title.isBlank()) continue
             val episodeCount = readInt(item, "episodeCount", "totalEpisodes", "count")
+            val imageUrl = readString(item, "imageUrl", "cover", "thumb", "poster", "pic").ifBlank {
+                item.optJSONObject("image")?.let { image ->
+                    readString(image, "thumb", "poster", "url")
+                }.orEmpty()
+            }.ifBlank {
+                item.optJSONObject("images")?.let { images ->
+                    readString(images, "common", "large", "medium", "small")
+                }.orEmpty()
+            }
             out += PushAnimeCandidate(
                 animeId = animeId,
                 title = title,
-                episodeCount = episodeCount.coerceAtLeast(0)
+                episodeCount = episodeCount.coerceAtLeast(0),
+                imageUrl = imageUrl
             )
         }
         return out.distinctBy { it.animeId }

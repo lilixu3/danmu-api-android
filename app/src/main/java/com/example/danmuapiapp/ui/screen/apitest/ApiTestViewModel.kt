@@ -65,6 +65,9 @@ class ApiTestViewModel @Inject constructor(
     var isLoadingManualDanmu by mutableStateOf(false)
         private set
 
+    var loadingEpisodeId by mutableStateOf<Long?>(null)
+        private set
+
     var manualHasSearched by mutableStateOf(false)
         private set
 
@@ -446,6 +449,7 @@ class ApiTestViewModel @Inject constructor(
 
         viewModelScope.launch {
             isLoadingManualDanmu = true
+            loadingEpisodeId = episode.episodeId
             errorMessage = null
             val startedAt = System.currentTimeMillis()
             val result = executeGet(url)
@@ -491,6 +495,7 @@ class ApiTestViewModel @Inject constructor(
             )
 
             isLoadingManualDanmu = false
+            loadingEpisodeId = null
         }
     }
 

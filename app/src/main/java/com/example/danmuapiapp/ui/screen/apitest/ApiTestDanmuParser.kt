@@ -377,7 +377,13 @@ private fun extractDurationSeconds(
     val candidates = mutableListOf<Double>()
     collectDurationCandidates(root, depth = 0, candidates = candidates)
     val fromMeta = candidates.maxOrNull()
-    val fromComments = comments.maxOfOrNull { it.timeSeconds } ?: 0.0
+    val fromComments = if (comments.size >= 2) {
+        val sorted = comments.map { it.timeSeconds }.sorted()
+        val p99Index = ((sorted.size - 1) * 0.99).toInt().coerceIn(0, sorted.lastIndex)
+        sorted[p99Index]
+    } else {
+        comments.maxOfOrNull { it.timeSeconds } ?: 0.0
+    }
     return when {
         fromMeta != null && fromMeta > 1.0 -> max(fromMeta, fromComments)
         fromComments > 1.0 -> fromComments + 5.0

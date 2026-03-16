@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.lerp
@@ -63,6 +64,7 @@ import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
 import kotlinx.coroutines.launch
@@ -257,6 +259,7 @@ fun ApiTestScreen(
                         loadingAnimeId = viewModel.loadingAnimeId,
                         isLoadingEpisodes = viewModel.isLoadingEpisodes,
                         isLoadingManualDanmu = viewModel.isLoadingManualDanmu,
+                        loadingEpisodeId = viewModel.loadingEpisodeId,
                         manualResult = viewModel.manualResult,
                         onOpenAnime = { anime -> viewModel.openManualAnimeDetail(baseUrl, anime) },
                         onPickEpisode = { anime, episode -> viewModel.loadManualDanmu(baseUrl, anime, episode) },
@@ -696,6 +699,7 @@ private fun DanmuTestPane(
     loadingAnimeId: Long?,
     isLoadingEpisodes: Boolean,
     isLoadingManualDanmu: Boolean,
+    loadingEpisodeId: Long?,
     manualResult: DanmuInsight?,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
@@ -730,6 +734,7 @@ private fun DanmuTestPane(
                     loadingAnimeId = loadingAnimeId,
                     isLoadingEpisodes = isLoadingEpisodes,
                     isLoadingManualDanmu = isLoadingManualDanmu,
+                    loadingEpisodeId = loadingEpisodeId,
                     result = manualResult,
                     onOpenAnime = onOpenAnime,
                     onPickEpisode = onPickEpisode,
@@ -875,42 +880,117 @@ private fun DanmuAutoPane(
     onClearResult: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        WorkbenchCard(
-            title = "自动匹配",
-            subtitle = "`match -> comment/json`",
-            action = {
-                if (result != null) {
-                    TextButton(onClick = onClearResult) { Text("清空") }
-                }
-            }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = Color.Transparent
         ) {
-            OutlinedTextField(
-                value = fileName,
-                onValueChange = onFileNameChange,
-                label = { Text("文件名") },
-                placeholder = { Text("例如：凡人修仙传 S01E01 1080P") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = onAutoMatch,
-                enabled = !isLoading,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+            Column(
+                modifier = Modifier
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("匹配中")
-                } else {
-                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("开始自动匹配")
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Rounded.AutoAwesome, null,
+                                Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Column {
+                            Text(
+                                "自动匹配",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "match → comment/json",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                    if (result != null) {
+                        TextButton(onClick = onClearResult) { Text("清空") }
+                    }
+                }
+
+                TextField(
+                    value = fileName,
+                    onValueChange = onFileNameChange,
+                    placeholder = { Text("输入视频文件名进行匹配") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.Search, null,
+                            Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "例如：凡人修仙传 S01E01 1080P",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+
+                Button(
+                    onClick = onAutoMatch,
+                    enabled = !isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("匹配中")
+                    } else {
+                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("开始自动匹配")
+                    }
                 }
             }
         }
@@ -937,6 +1017,7 @@ private fun DanmuManualPane(
     loadingAnimeId: Long?,
     isLoadingEpisodes: Boolean,
     isLoadingManualDanmu: Boolean,
+    loadingEpisodeId: Long?,
     result: DanmuInsight?,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
@@ -945,19 +1026,7 @@ private fun DanmuManualPane(
     when {
         result != null -> {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CompactContextBar(
-                    title = result.episodeTitle.ifBlank { result.animeTitle.ifBlank { "弹幕结果" } },
-                    meta = buildString {
-                        if (result.animeTitle.isNotBlank()) append(result.animeTitle)
-                        if (result.commentId != null) {
-                            if (isNotBlank()) append(" · ")
-                            append("commentId ${result.commentId}")
-                        }
-                    },
-                    actionLabel = "返回剧集",
-                    onAction = onBack
-                )
-                DanmuInsightPanel(insight = result)
+                DanmuInsightPanel(insight = result, backLabel = "返回剧集", onBack = onBack)
             }
         }
 
@@ -983,75 +1052,95 @@ private fun DanmuManualPane(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CompactContextBar(
-                    title = anime.title,
-                    meta = buildString {
-                        if (anime.episodeCount > 0) append("共 ${anime.episodeCount} 集")
-                        if (anime.animeId > 0L) {
-                            if (isNotBlank()) append(" · ")
-                            append("ID ${anime.animeId}")
-                        }
-                    },
-                    actionLabel = "返回搜索",
-                    onAction = onBack
-                )
-
                 when {
-                    isLoadingEpisodes -> LoadingHintCard(title = "正在加载剧集", subtitle = "加载完成后可直接搜索或跳转集数")
+                    isLoadingEpisodes -> LoadingHintCard(title = "正在加载剧集", subtitle = anime.title)
                     episodeCandidates.isEmpty() -> InfoHintCard(title = "暂无剧集", subtitle = "可以返回搜索结果重新选择")
-                    else -> WorkbenchCard(title = "剧集列表") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = episodeQuery,
-                                onValueChange = { episodeQuery = it },
-                                label = { Text("搜索 / 集数") },
-                                placeholder = { Text("输入标题筛选，输入数字跳转") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Text,
-                                    imeAction = ImeAction.Search
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onSearch = {
-                                        val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@KeyboardActions
-                                        val targetIndex = episodeCandidates.indexOfFirst { it.episodeNumber == targetEpisode }
-                                        if (targetIndex >= 0) {
-                                            scope.launch { listState.animateScrollToItem(targetIndex) }
-                                        }
+                    else -> WorkbenchCard(
+                        title = anime.title,
+                        subtitle = buildString {
+                            if (anime.episodeCount > 0) append("共 ${anime.episodeCount} 集")
+                            if (anime.animeId > 0L) {
+                                if (isNotBlank()) append(" · ")
+                                append("ID ${anime.animeId}")
+                            }
+                        },
+                        action = {
+                            TextButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("返回搜索")
+                            }
+                        }
+                    ) {
+                        TextField(
+                            value = episodeQuery,
+                            onValueChange = { episodeQuery = it },
+                            placeholder = { Text("搜索标题或输入集数跳转") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Search, null,
+                                    Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                            },
+                            trailingIcon = {
+                                val canJump = episodeQuery.trim().toIntOrNull() != null
+                                if (canJump) {
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@FilledTonalIconButton
+                                            val targetIndex = episodeCandidates.indexOfFirst { it.episodeNumber == targetEpisode }
+                                            if (targetIndex >= 0) {
+                                                scope.launch { listState.animateScrollToItem(targetIndex) }
+                                            }
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.PlayArrow, "跳转", Modifier.size(16.dp))
                                     }
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                            FilledTonalButton(
-                                onClick = {
-                                    val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@FilledTonalButton
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = TextFieldDefaults.colors(
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Text,
+                                imeAction = ImeAction.Search
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@KeyboardActions
                                     val targetIndex = episodeCandidates.indexOfFirst { it.episodeNumber == targetEpisode }
                                     if (targetIndex >= 0) {
                                         scope.launch { listState.animateScrollToItem(targetIndex) }
                                     }
-                                },
-                                enabled = episodeQuery.trim().toIntOrNull() != null,
-                                modifier = Modifier.height(56.dp)
-                            ) {
-                                Text("跳转")
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = if (episodeQuery.trim().all { it.isDigit() } || episodeQuery.isBlank()) {
-                                "共 ${episodeCandidates.size} 集"
-                            } else {
-                                "筛选结果 ${filteredEpisodes.size} / ${episodeCandidates.size}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                                }
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow
+                        ) {
+                            Text(
+                                text = if (episodeQuery.trim().all { it.isDigit() } || episodeQuery.isBlank()) {
+                                    "共 ${episodeCandidates.size} 集"
+                                } else {
+                                    "筛选结果 ${filteredEpisodes.size} / ${episodeCandidates.size}"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Spacer(modifier = Modifier.height(10.dp))
                         LazyColumn(
                             state = listState,
@@ -1066,7 +1155,7 @@ private fun DanmuManualPane(
                             ) { _, episode ->
                                 EpisodeCandidateRow(
                                     episode = episode,
-                                    loading = isLoadingManualDanmu,
+                                    loading = isLoadingManualDanmu && loadingEpisodeId == episode.episodeId,
                                     onClick = { onPickEpisode(anime, episode) }
                                 )
                             }
@@ -1078,36 +1167,112 @@ private fun DanmuManualPane(
 
         else -> {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                WorkbenchCard(title = "手动匹配", subtitle = "`search/anime -> bangumi -> comment/json`") {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        label = { Text("动漫关键词") },
-                        placeholder = { Text("例如：凡人修仙传") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = onSearch,
-                        enabled = !isSearchingAnime,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        if (isSearchingAnime) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color.Transparent
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.22f),
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    )
+                                ),
+                                shape = RoundedCornerShape(24.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("搜索中")
-                        } else {
-                            Icon(Icons.Rounded.Search, null, Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("搜索动漫")
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Search, null,
+                                    Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+                            Column {
+                                Text(
+                                    "手动匹配",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "search/anime → bangumi → comment/json",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        TextField(
+                            value = query,
+                            onValueChange = onQueryChange,
+                            placeholder = { Text("输入动漫关键词搜索") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Search, null,
+                                    Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = TextFieldDefaults.colors(
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Text(
+                            text = "例如：凡人修仙传",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+
+                        Button(
+                            onClick = onSearch,
+                            enabled = !isSearchingAnime,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            if (isSearchingAnime) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("搜索中")
+                            } else {
+                                Icon(Icons.Rounded.Search, null, Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("搜索动漫")
+                            }
                         }
                     }
                 }
@@ -1145,36 +1310,61 @@ private fun AnimeCandidateRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        onClick = onClick
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                shadowElevation = 2.dp
+            ) {
+                AnimePosterThumbnail(
+                    imageUrl = anime.imageUrl,
+                    title = anime.title,
+                    modifier = Modifier.size(width = 54.dp, height = 72.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = anime.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = if (anime.episodeCount > 0) "共 ${anime.episodeCount} 集" else "集数未知",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                ) {
+                    Text(
+                        text = if (anime.episodeCount > 0) "共 ${anime.episodeCount} 集" else "集数未知",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        maxLines = 1
+                    )
+                }
             }
             if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             } else {
-                FilledTonalButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)) {
-                    Text("进入")
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.PlayArrow, "进入",
+                        Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -1190,55 +1380,71 @@ private fun EpisodeCandidateRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        onClick = onClick
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    text = "第 ${episode.episodeNumber} 集 · ${episode.title}",
+                    text = "${episode.episodeNumber}",
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = episode.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (episode.source.isNotBlank()) {
                     Text(
                         text = episode.source,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-            FilledTonalButton(
-                onClick = onClick,
-                enabled = !loading,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-            ) {
-                if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("查看")
-                }
+            if (loading) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    Icons.Rounded.PlayArrow, "查看",
+                    Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun DanmuInsightPanel(insight: DanmuInsight) {
+private fun DanmuInsightPanel(
+    insight: DanmuInsight,
+    backLabel: String? = null,
+    onBack: (() -> Unit)? = null
+) {
     val peakMoment = remember(insight.highMoments) {
         insight.highMoments.maxByOrNull { it.count }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DanmuMetaBar(insight = insight)
+        DanmuMetaBar(insight = insight, backLabel = backLabel, onBack = onBack)
         DanmuMetricsGrid(insight = insight)
         if (peakMoment != null) {
             DanmuPeakMomentCard(moment = peakMoment)
@@ -1255,32 +1461,107 @@ private fun DanmuInsightPanel(insight: DanmuInsight) {
 }
 
 @Composable
-private fun DanmuMetaBar(insight: DanmuInsight) {
-    WorkbenchCard(
-        title = insight.episodeTitle.ifBlank {
-            insight.animeTitle.ifBlank {
-                insight.commentId?.let { "commentId $it" } ?: "弹幕结果"
-            }
-        },
-        subtitle = buildString {
-            append(insight.pathLabel)
-            if (insight.source.isNotBlank()) {
-                append(" · ${insight.source}")
-            }
-        }
+private fun DanmuMetaBar(
+    insight: DanmuInsight,
+    backLabel: String? = null,
+    onBack: (() -> Unit)? = null
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = Color.Transparent
     ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier
+                .height(IntrinsicSize.Min)
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
+                    ),
+                    shape = RoundedCornerShape(22.dp)
+                )
         ) {
-            if (insight.commentId != null) {
-                StatusBadge(text = "commentId ${insight.commentId}", color = MaterialTheme.colorScheme.primary)
-            }
-            insight.requestDurationMs?.let { duration ->
-                StatusBadge(text = "${duration}ms", color = MaterialTheme.colorScheme.tertiary)
-            }
-            if (insight.totalCount == 0) {
-                StatusBadge(text = "未解析到弹幕", color = MaterialTheme.colorScheme.error)
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(
+                        MaterialTheme.colorScheme.primary,
+                        RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = insight.episodeTitle.ifBlank {
+                            insight.animeTitle.ifBlank {
+                                insight.commentId?.let { "commentId $it" } ?: "弹幕结果"
+                            }
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (backLabel != null && onBack != null) {
+                        TextButton(
+                            onClick = onBack,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(backLabel, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                if (insight.animeTitle.isNotBlank() && insight.episodeTitle.isNotBlank()) {
+                    Text(
+                        text = buildString {
+                            append(insight.animeTitle)
+                            if (insight.source.isNotBlank()) append(" · ${insight.source}")
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (insight.pathLabel.isNotBlank()) {
+                    Text(
+                        text = insight.pathLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (insight.commentId != null) {
+                        StatusBadge(text = "ID ${insight.commentId}", color = MaterialTheme.colorScheme.primary)
+                    }
+                    insight.requestDurationMs?.let { duration ->
+                        StatusBadge(text = "${duration}ms", color = MaterialTheme.colorScheme.tertiary)
+                    }
+                    if (insight.totalCount == 0) {
+                        StatusBadge(text = "未解析到弹幕", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
     }
@@ -1288,88 +1569,152 @@ private fun DanmuMetaBar(insight: DanmuInsight) {
 
 @Composable
 private fun DanmuMetricsGrid(insight: DanmuInsight) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricTile(
-                modifier = Modifier.weight(1f),
-                label = "匹配时间",
-                value = formatMatchedAt(insight.matchedAtMillis),
-                icon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(16.dp)) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f))
+    ) {
+        Column {
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                MetricCell(
+                    modifier = Modifier.weight(1f),
+                    label = "匹配时间",
+                    value = formatMatchedAt(insight.matchedAtMillis),
+                    icon = Icons.Rounded.Schedule,
+                    iconTint = MaterialTheme.colorScheme.primary
+                )
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .padding(vertical = 10.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                )
+                MetricCell(
+                    modifier = Modifier.weight(1f),
+                    label = "弹幕总数",
+                    value = insight.totalCount.toString(),
+                    icon = Icons.Rounded.GraphicEq,
+                    iconTint = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .padding(horizontal = 14.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             )
-            MetricTile(
-                modifier = Modifier.weight(1f),
-                label = "弹幕总数",
-                value = insight.totalCount.toString(),
-                icon = { Icon(Icons.Rounded.GraphicEq, null, Modifier.size(16.dp)) }
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricTile(
-                modifier = Modifier.weight(1f),
-                label = "视频时长",
-                value = formatVideoTime(insight.durationSeconds),
-                icon = { Icon(Icons.Rounded.Movie, null, Modifier.size(16.dp)) }
-            )
-            MetricTile(
-                modifier = Modifier.weight(1f),
-                label = "高能峰值",
-                value = if (insight.maxHeatCount > 0) "${insight.maxHeatCount} 条" else "暂无",
-                icon = { Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp)) }
-            )
+            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                MetricCell(
+                    modifier = Modifier.weight(1f),
+                    label = "视频时长",
+                    value = formatVideoTime(insight.durationSeconds),
+                    icon = Icons.Rounded.Movie,
+                    iconTint = MaterialTheme.colorScheme.secondary
+                )
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .padding(vertical = 10.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                )
+                MetricCell(
+                    modifier = Modifier.weight(1f),
+                    label = "高能峰值",
+                    value = if (insight.maxHeatCount > 0) "${insight.maxHeatCount} 条" else "暂无",
+                    icon = Icons.Rounded.AutoAwesome,
+                    iconTint = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun MetricTile(
+private fun MetricCell(
     modifier: Modifier = Modifier,
     label: String,
     value: String,
-    icon: @Composable () -> Unit
+    icon: ImageVector,
+    iconTint: Color
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+    Column(
+        modifier = modifier.padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(iconTint.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                icon()
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Icon(icon, null, Modifier.size(16.dp), tint = iconTint)
         }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            maxLines = 1
+        )
     }
 }
 
 @Composable
 private fun DanmuPeakMomentCard(moment: DanmuHighMoment) {
-    WorkbenchCard(title = "高能时刻") {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.Transparent
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.AutoAwesome, null,
+                    Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+            }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
+                    text = "高能时刻",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
                     text = "${formatVideoTime(moment.startSeconds)} - ${formatVideoTime(moment.endSeconds)}",
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1377,12 +1722,22 @@ private fun DanmuPeakMomentCard(moment: DanmuHighMoment) {
                 Text(
                     text = "该时间段弹幕最密集",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
-            StatusBadge(text = "${moment.count} 条", color = MaterialTheme.colorScheme.primary)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${moment.count}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                Text(
+                    text = "条弹幕",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
         }
     }
 }
