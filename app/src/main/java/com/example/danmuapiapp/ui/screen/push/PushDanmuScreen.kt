@@ -78,6 +78,7 @@ import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import java.net.URI
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -680,21 +681,23 @@ private fun AnimeResultRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.Rounded.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
+            AnimePosterThumbnail(
+                imageUrl = anime.imageUrl,
+                title = anime.title,
+                modifier = Modifier.size(width = 60.dp, height = 84.dp)
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = anime.title,
                     style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${anime.episodeCount} 集 · Anime ID ${anime.animeId}",
+                    text = buildString {
+                        append(if (anime.episodeCount > 0) "${anime.episodeCount} 集" else "集数未知")
+                        append(" · Anime ID ${anime.animeId}")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
