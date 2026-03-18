@@ -101,8 +101,9 @@ object RootRuntimeController {
         }
 
         // Root 与普通模式目录要彻底隔离：
-        // 1) 仅在 Root 目录缺失时才从普通目录引导一次；
-        // 2) Root 目录已存在时仅同步 Root 自身环境变量，不再回灌普通目录内容。
+        // 1) 仅在 Root 目录缺失时才从普通目录做完整引导；
+        // 2) Root 目录已存在时只同步 App 托管包装层、必要依赖与 Root 自身环境变量，
+        //    不回灌 Root 独立的 config、core、cache 数据。
         val prepare = ensureRootRuntimeReady(
             context = context,
             refreshEnvWhenReady = !skipSync
@@ -297,6 +298,9 @@ object RootRuntimeController {
                 val depsSyncResult = syncRootNodeModulesIfNeeded(context, normalProject)
                 if (!depsSyncResult.ok) return depsSyncResult
 
+                val projectSyncResult = syncProjectToRoot(context, normalProject)
+                if (!projectSyncResult.ok) return projectSyncResult
+
                 val coreReady = ensureSelectedCoreReady(context, normalProject)
                 if (!coreReady.ok) return coreReady
 
@@ -441,7 +445,8 @@ object RootRuntimeController {
                 test -f "${'$'}DST/main.js"
             """.trimIndent()
         } else {
-            // 增量同步：仅同步 App 托管文件，保留 Root 工作目录中的 config、danmu_api_* 与 .cache。
+            // 增量同步：仅同步 App 托管包装层与清单文件，保留 Root 工作目录中的
+            // config、danmu_api_*、node_modules 与 .cache。
             // 注意：config/.env 会在 syncRuntimeEnvToRoot 中单独同步，确保运行时关键变量生效。
             """
                 SRC=${shellQuote(src)}
@@ -451,7 +456,7 @@ object RootRuntimeController {
                 rm -rf "${'$'}TMP" 2>/dev/null || true
                 mkdir -p "${'$'}TMP" 2>/dev/null || true
                 cp -a "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || true
-                rm -rf "${'$'}TMP/config" "${'$'}TMP/logs" "${'$'}TMP/.cache" "${'$'}TMP"/danmu_api_* 2>/dev/null || true
+                rm -rf "${'$'}TMP/config" "${'$'}TMP/logs" "${'$'}TMP/.cache" "${'$'}TMP/node_modules" "${'$'}TMP"/danmu_api_* 2>/dev/null || true
                 cp -a "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || true
                 rm -rf "${'$'}TMP" 2>/dev/null || true
                 test -f "${'$'}DST/main.js"
