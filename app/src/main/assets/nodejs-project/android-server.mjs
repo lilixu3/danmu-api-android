@@ -447,6 +447,9 @@ const CONFIG_DIR = path.join(HOME, 'config');
 
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
 const ACCESS_CONTROL_FILE = path.join(CONFIG_DIR, 'access-control.json');
+// 记录基础环境，删除 .env 键时回滚到进程初始值。
+const _baseEnvSnapshot = _getEnvSnapshot();
+let _lastLoadedDotEnvKeys = new Set();
 
 // Config reload debounce + passive reload (no polling):
 // - Prefer fs.watch (event-driven) when available.
@@ -934,6 +937,25 @@ function applyEnv(kv, { override = true } = {}) {
   }
 }
 
+function _restoreEnvKeyFromBase(key) {
+  if (Object.prototype.hasOwnProperty.call(_baseEnvSnapshot, key)) {
+    process.env[key] = _baseEnvSnapshot[key];
+  } else {
+    delete process.env[key];
+  }
+}
+
+function _replaceDotEnv(kv) {
+  const next = kv && typeof kv === 'object' ? kv : {};
+  for (const key of _lastLoadedDotEnvKeys) {
+    if (!(key in next)) {
+      _restoreEnvKeyFromBase(key);
+    }
+  }
+  applyEnv(next, { override: true });
+  _lastLoadedDotEnvKeys = new Set(Object.keys(next));
+}
+
 function loadConfigOnce() {
   ensureDirs();
 
@@ -944,12 +966,13 @@ function loadConfigOnce() {
     try {
       const t = fs.readFileSync(envFile, 'utf-8');
       const kv = parseDotEnv(t);
-      applyEnv(kv, { override: true });
+      _replaceDotEnv(kv);
       log('Loaded .env:', envFile);
     } catch (e) {
       log('Failed to load .env:', e?.message || e);
     }
   } else {
+    _replaceDotEnv({});
     log('.env not found, skipping:', envFile);
   }
   _loadAccessControlFromDisk();
