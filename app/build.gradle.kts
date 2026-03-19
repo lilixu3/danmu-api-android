@@ -308,35 +308,115 @@ tasks.register("cleanupGarbageFiles") {
     }
 }
 
-// 按 node_modules.zip 同步依赖，避免旧项目残留文件长期混入
+fun org.gradle.api.file.CopySpec.includeNodeModuleDirs(packages: Iterable<String>) {
+    packages.forEach { pkg ->
+        include("$pkg/**")
+    }
+}
+
+val baseNodeModulesPackages = listOf(
+    "https-proxy-agent",
+    "agent-base",
+    "debug",
+    "ms"
+)
+val optionalRedisNodeModulesPackages = listOf(
+    "redis",
+    "@redis",
+    "cluster-key-slot"
+)
+
+// 生成基础运行时依赖与可选 redis 依赖包，避免每次更新都预解压完整依赖树。
 tasks.register("prepareNodeModules") {
     val zipFile = rootProject.file("node_modules.zip")
-    val targetDir = file("src/main/assets/nodejs-project/node_modules")
+    val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
+    val optionalRootDir = file("src/main/assets/nodejs-optional")
+    val optionalRedisTargetDir = file("src/main/assets/nodejs-optional/redis/node_modules")
+    val tempRootDir = layout.buildDirectory.dir("prepared-node-modules").get().asFile
     if (zipFile.exists()) {
         inputs.file(zipFile)
     }
-    outputs.dir(targetDir)
+    outputs.dirs(baseTargetDir, optionalRootDir)
     dependsOn("cleanupGarbageFiles")
     doLast {
-        if (!zipFile.exists()) return@doLast
-        delete(targetDir)
-        copy {
-            from(zipTree(zipFile)) {
-                include("node_modules/**")
-                includeEmptyDirs = false
-                eachFile {
-                    val normalized = path.removePrefix("node_modules/")
-                    if (normalized == path || normalized.isBlank()) {
-                        exclude()
-                    } else {
-                        if (normalized.any { ch -> ch.code < 32 || ch.code == 127 }) {
-                            throw GradleException("node_modules.zip 含非法文件名：$path")
+        val sourceRoot = File(tempRootDir, "source")
+        val sourceNodeModules = File(sourceRoot, "node_modules")
+        val splitRedisReady = File(optionalRedisTargetDir, "redis/package.json").exists()
+        val baseStillContainsRedis =
+            File(baseTargetDir, "redis/package.json").exists() || File(baseTargetDir, "@redis").exists()
+
+        delete(tempRootDir)
+        sourceRoot.mkdirs()
+
+        when {
+            zipFile.exists() -> {
+                copy {
+                    from(zipTree(zipFile)) {
+                        include("node_modules/**")
+                        includeEmptyDirs = false
+                        eachFile {
+                            val normalized = path.removePrefix("node_modules/")
+                            if (normalized == path || normalized.isBlank()) {
+                                exclude()
+                            } else {
+                                if (normalized.any { ch -> ch.code < 32 || ch.code == 127 }) {
+                                    throw GradleException("node_modules.zip 含非法文件名：$path")
+                                }
+                                path = normalized
+                            }
                         }
-                        path = normalized
                     }
+                    into(sourceRoot)
                 }
             }
-            into(targetDir)
+            splitRedisReady -> {
+                copy {
+                    from(baseTargetDir)
+                    into(sourceNodeModules)
+                }
+                copy {
+                    from(optionalRedisTargetDir)
+                    into(sourceNodeModules)
+                }
+            }
+            baseTargetDir.exists() && baseStillContainsRedis -> {
+                copy {
+                    from(baseTargetDir)
+                    into(sourceNodeModules)
+                }
+            }
+            baseTargetDir.exists() -> {
+                copy {
+                    from(baseTargetDir)
+                    into(sourceNodeModules)
+                }
+            }
+            else -> return@doLast
+        }
+
+        delete(baseTargetDir)
+        delete(optionalRootDir)
+
+        if (!sourceNodeModules.exists()) return@doLast
+
+        copy {
+            from(sourceNodeModules) {
+                includeNodeModuleDirs(baseNodeModulesPackages)
+                includeEmptyDirs = false
+            }
+            into(baseTargetDir)
+        }
+
+        val redisSourceReady =
+            File(sourceNodeModules, "redis/package.json").exists() || File(sourceNodeModules, "@redis").exists()
+        if (redisSourceReady) {
+            copy {
+                from(sourceNodeModules) {
+                    includeNodeModuleDirs(optionalRedisNodeModulesPackages)
+                    includeEmptyDirs = false
+                }
+                into(optionalRedisTargetDir)
+            }
         }
     }
 }

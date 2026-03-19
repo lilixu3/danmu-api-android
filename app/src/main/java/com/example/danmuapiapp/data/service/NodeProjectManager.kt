@@ -10,6 +10,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.io.InputStream
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -20,6 +22,11 @@ object NodeProjectManager {
     private const val TAG = "NodeProjectManager"
     private const val APP_VERSION_FILE = ".app_version"
     private const val LEGACY_NODE_HANDLER_PATCH_MARK = "DanmuApiApp env path compatibility"
+    private const val BUNDLED_PACKAGE_LOCK_ASSET = "nodejs-project/package-lock.json"
+    private const val BUNDLED_PACKAGE_JSON_ASSET = "nodejs-project/package.json"
+    private const val OPTIONAL_REDIS_ENV_KEY = "LOCAL_REDIS_URL"
+    private const val OPTIONAL_REDIS_ASSET_BASE = "nodejs-optional/redis/node_modules"
+    private const val OPTIONAL_REDIS_ASSET_PACKAGE = "$OPTIONAL_REDIS_ASSET_BASE/redis/package.json"
 
     private val json = Json { ignoreUnknownKeys = true }
     private val coreDirNameRegex = Regex("^danmu[-_]api$", RegexOption.IGNORE_CASE)
@@ -49,19 +56,26 @@ object NodeProjectManager {
             val currentVersion = currentAppVersion(context)
             val existingVersion = if (versionFile.exists()) versionFile.readText().trim() else ""
             val projectAlreadyExists = targetDir.exists() && entryFile.exists()
+            val preserveBundledNodeModules =
+                projectAlreadyExists && shouldPreserveBundledNodeModules(context, targetDir)
 
             if (targetDir.exists() && existingVersion == currentVersion && entryFile.exists()) {
                 ensureRuntimeDirs(targetDir)
+                ensureOptionalRuntimeDependencies(context, targetDir)
                 migrateAllCoreLayouts(targetDir)
                 return targetDir
             }
 
             targetDir.mkdirs()
+            if (projectAlreadyExists && !preserveBundledNodeModules) {
+                runCatching { File(targetDir, "node_modules").deleteRecursively() }
+            }
             copyAssetFolder(
                 context = context,
                 assetPath = "nodejs-project",
                 targetDir = targetDir,
-                preserveExistingRuntimeEnv = projectAlreadyExists
+                preserveExistingRuntimeEnv = projectAlreadyExists,
+                preserveExistingNodeModules = preserveBundledNodeModules
             )
             versionFile.writeText(currentVersion)
             if (!entryFile.exists()) {
@@ -69,6 +83,7 @@ object NodeProjectManager {
             }
             migrateAllCoreLayouts(targetDir)
             ensureRuntimeDirs(targetDir)
+            ensureOptionalRuntimeDependencies(context, targetDir)
             return targetDir
         }
     }
@@ -219,6 +234,7 @@ object NodeProjectManager {
         }
 
         envFile.writeText(lines.joinToString("\n").trimEnd() + "\n")
+        ensureOptionalRuntimeDependencies(context, targetProjectDir)
         cleanupLegacyLogFiles(targetProjectDir)
     }
 
@@ -410,12 +426,120 @@ object NodeProjectManager {
 
 
 
+    private fun ensureOptionalRedisDependency(context: Context, targetProjectDir: File) {
+        if (!hasOptionalRedisConfigured(targetProjectDir)) return
+
+        val assetRedisSignature = assetSha256(context, OPTIONAL_REDIS_ASSET_PACKAGE) ?: return
+        val runtimeRedisSignature = fileSha256(File(targetProjectDir, "node_modules/redis/package.json"))
+        val runtimeRedisClient = File(targetProjectDir, "node_modules/@redis/client/package.json")
+        val runtimeClusterKeySlot = File(targetProjectDir, "node_modules/cluster-key-slot/package.json")
+
+        if (
+            runtimeRedisSignature == assetRedisSignature &&
+            runtimeRedisClient.exists() &&
+            runtimeClusterKeySlot.exists()
+        ) {
+            return
+        }
+
+        val nodeModulesDir = File(targetProjectDir, "node_modules")
+        nodeModulesDir.mkdirs()
+        runCatching { File(nodeModulesDir, "redis").deleteRecursively() }
+        runCatching { File(nodeModulesDir, "@redis").deleteRecursively() }
+        runCatching { File(nodeModulesDir, "cluster-key-slot").deleteRecursively() }
+        copyAssetFolder(
+            context = context,
+            assetPath = OPTIONAL_REDIS_ASSET_BASE,
+            targetDir = nodeModulesDir
+        )
+    }
+
+    private fun shouldPreserveBundledNodeModules(context: Context, targetDir: File): Boolean {
+        val nodeModulesDir = File(targetDir, "node_modules")
+        if (!nodeModulesDir.exists() || !nodeModulesDir.isDirectory) return false
+
+        val assetSignature = assetSha256(context, BUNDLED_PACKAGE_LOCK_ASSET)
+            ?: assetSha256(context, BUNDLED_PACKAGE_JSON_ASSET)
+            ?: return false
+        val runtimeSignature = fileSha256(File(targetDir, "package-lock.json"))
+            ?: fileSha256(File(targetDir, "package.json"))
+            ?: return false
+        return assetSignature == runtimeSignature
+    }
+
+    private fun hasOptionalRedisConfigured(targetProjectDir: File): Boolean {
+        val value = readEnvValue(File(targetProjectDir, "config/.env"), OPTIONAL_REDIS_ENV_KEY)
+        return !value.isNullOrBlank()
+    }
+
+    private fun readEnvValue(envFile: File, key: String): String? {
+        if (!envFile.exists() || !envFile.isFile) return null
+        return runCatching {
+            envFile.readLines(Charsets.UTF_8).firstNotNullOfOrNull { line ->
+                val raw = line.trim()
+                if (raw.isEmpty() || raw.startsWith("#")) return@firstNotNullOfOrNull null
+                val eq = raw.indexOf('=')
+                if (eq <= 0) return@firstNotNullOfOrNull null
+                if (raw.substring(0, eq).trim() != key) return@firstNotNullOfOrNull null
+                val value = raw.substring(eq + 1).trim()
+                when {
+                    value.length >= 2 && value.startsWith('"') && value.endsWith('"') -> {
+                        value.substring(1, value.length - 1)
+                    }
+                    value.length >= 2 && value.startsWith("'") && value.endsWith("'") -> {
+                        value.substring(1, value.length - 1)
+                    }
+                    else -> value
+                }
+            }
+        }.getOrNull()
+    }
+
+    private fun assetSha256(context: Context, assetPath: String): String? {
+        return runCatching {
+            context.assets.open(assetPath).use(::sha256Hex)
+        }.getOrNull()
+    }
+
+    private fun fileSha256(file: File): String? {
+        if (!file.exists() || !file.isFile) return null
+        return runCatching {
+            file.inputStream().use(::sha256Hex)
+        }.getOrNull()
+    }
+
+    private fun sha256Hex(input: InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (read > 0) digest.update(buffer, 0, read)
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    fun ensureOptionalRuntimeDependencies(
+        context: Context,
+        targetProjectDir: File = projectDir(context)
+    ) {
+        ensureOptionalRedisDependency(context, targetProjectDir)
+    }
+
     private fun copyAssetFolder(
         context: Context,
         assetPath: String,
         targetDir: File,
-        preserveExistingRuntimeEnv: Boolean = false
+        preserveExistingRuntimeEnv: Boolean = false,
+        preserveExistingNodeModules: Boolean = false
     ) {
+        if (
+            preserveExistingNodeModules &&
+            assetPath.replace('\\', '/').endsWith("nodejs-project/node_modules")
+        ) {
+            return
+        }
+
         val assetManager = context.assets
         val files = assetManager.list(assetPath) ?: return
 
@@ -430,7 +554,8 @@ object NodeProjectManager {
                     context = context,
                     assetPath = subAssetPath,
                     targetDir = File(targetDir, file),
-                    preserveExistingRuntimeEnv = preserveExistingRuntimeEnv
+                    preserveExistingRuntimeEnv = preserveExistingRuntimeEnv,
+                    preserveExistingNodeModules = preserveExistingNodeModules
                 )
             } else {
                 val outFile = File(targetDir, file)

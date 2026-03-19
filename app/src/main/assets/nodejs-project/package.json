@@ -4,7 +4,6 @@
   "private": true,
   "main": "main.js",
   "dependencies": {
-    "https-proxy-agent": "7.0.6",
-    "redis": "^5.11.0"
+    "https-proxy-agent": "7.0.6"
   }
 }
