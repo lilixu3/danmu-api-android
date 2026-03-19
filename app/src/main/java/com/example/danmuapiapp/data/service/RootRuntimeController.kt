@@ -575,6 +575,10 @@ object RootRuntimeController {
             DST_NM="${'$'}DST/node_modules"
             SRC_LOCK="${'$'}SRC/package-lock.json"
             DST_LOCK="${'$'}DST/package-lock.json"
+            SRC_PKG="${'$'}SRC/package.json"
+            DST_PKG="${'$'}DST/package.json"
+            SRC_REDIS="${'$'}SRC_NM/redis/package.json"
+            DST_REDIS="${'$'}DST_NM/redis/package.json"
             NEED_SYNC=0
 
             [ -d "${'$'}SRC_NM" ] || exit 0
@@ -584,18 +588,31 @@ object RootRuntimeController {
               SRC_SUM="${'$'}(cksum "${'$'}SRC_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
               DST_SUM="${'$'}(cksum "${'$'}DST_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
               [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
+            elif [ -f "${'$'}SRC_PKG" ]; then
+              SRC_SUM="${'$'}(cksum "${'$'}SRC_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_SUM="${'$'}(cksum "${'$'}DST_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
             fi
 
-            if [ -f "${'$'}SRC_NM/redis/package.json" ] && [ ! -f "${'$'}DST_NM/redis/package.json" ]; then
+            if [ -f "${'$'}SRC_REDIS" ]; then
+              SRC_REDIS_SUM="${'$'}(cksum "${'$'}SRC_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_REDIS_SUM="${'$'}(cksum "${'$'}DST_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ -n "${'$'}SRC_REDIS_SUM" ] && [ "${'$'}SRC_REDIS_SUM" != "${'$'}DST_REDIS_SUM" ] && NEED_SYNC=1
+            elif [ -f "${'$'}DST_REDIS" ]; then
               NEED_SYNC=1
             fi
 
             if [ "${'$'}NEED_SYNC" -eq 1 ]; then
+              rm -rf "${'$'}DST_NM" 2>/dev/null || true
               mkdir -p "${'$'}DST_NM" 2>/dev/null || true
               cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
             fi
 
-            if [ -f "${'$'}SRC_NM/redis/package.json" ] && [ ! -f "${'$'}DST_NM/redis/package.json" ]; then
+            if [ -f "${'$'}SRC_REDIS" ]; then
+              SRC_REDIS_SUM="${'$'}(cksum "${'$'}SRC_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              DST_REDIS_SUM="${'$'}(cksum "${'$'}DST_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
+              [ "${'$'}SRC_REDIS_SUM" = "${'$'}DST_REDIS_SUM" ] || exit 2
+            elif [ -f "${'$'}DST_REDIS" ]; then
               exit 2
             fi
             exit 0
@@ -641,6 +658,7 @@ object RootRuntimeController {
             fi
 
             if [ "${'$'}NEED_SYNC" -eq 1 ]; then
+              rm -rf "${'$'}DST_NM" 2>/dev/null || true
               mkdir -p "${'$'}DST_NM" 2>/dev/null || true
               cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
             fi
