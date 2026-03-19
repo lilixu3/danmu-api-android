@@ -841,7 +841,7 @@ function setupFileLogging() {
 
 let HOST = '0.0.0.0';
 let PORT = 9321;
-let PROXY_PORT = 9322;
+let PROXY_PORT = 5321;
 
 function _safePort(raw, def) {
   const n = Number(raw);
@@ -855,7 +855,7 @@ function _refreshListenConfigFromEnv() {
   const host = String(process.env.DANMU_API_HOST || '0.0.0.0').trim();
   HOST = host || '0.0.0.0';
   PORT = _safePort(process.env.DANMU_API_PORT, 9321);
-  PROXY_PORT = _safePort(process.env.DANMU_API_PROXY_PORT, 9322);
+  PROXY_PORT = _safePort(process.env.DANMU_API_PROXY_PORT, 5321);
 }
 
 // Will be set after servers are created (used by the Android app to stop Node gracefully)
@@ -863,6 +863,13 @@ let shutdownFn = null;
 
 function log(...args) {
   console.log('[danmu_api]', ...args);
+}
+
+function _hasForwardProxyHelperDemand() {
+  const raw = String(process.env.PROXY_URL || '').trim();
+  if (!raw) return false;
+  const configs = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  return configs.some((item) => !item.includes('@'));
 }
 
 // Lazy-load optional dependency (keeps the server running even if node_modules is missing).
@@ -2034,7 +2041,7 @@ async function main() {
   watchConfigs();
 
   const mainServer = createMainServer();
-  const proxyServer = createProxyServer();
+  let proxyServer = null;
 
   await new Promise((resolve, reject) => {
     mainServer.listen(PORT, HOST, () => {
@@ -2044,13 +2051,24 @@ async function main() {
     mainServer.on('error', reject);
   });
 
-  await new Promise((resolve, reject) => {
-    proxyServer.listen(PROXY_PORT, HOST, () => {
-      log(`Proxy server listening on http://${HOST}:${PROXY_PORT}/proxy?url=...`);
-      resolve();
-    });
-    proxyServer.on('error', reject);
-  });
+  if (_hasForwardProxyHelperDemand()) {
+    proxyServer = createProxyServer();
+    try {
+      await new Promise((resolve, reject) => {
+        proxyServer.listen(PROXY_PORT, HOST, () => {
+          log(`Proxy server listening on http://${HOST}:${PROXY_PORT}/proxy?url=...`);
+          resolve();
+        });
+        proxyServer.on('error', reject);
+      });
+    } catch (e) {
+      log(`Proxy helper unavailable on ${HOST}:${PROXY_PORT}, continue without it:`, e?.message || e);
+      try { proxyServer.close(); } catch {}
+      proxyServer = null;
+    }
+  } else {
+    log('Proxy helper disabled (no forward proxy configured in PROXY_URL).');
+  }
 
   let shuttingDown = false;
   const shutdown = () => {
@@ -2058,7 +2076,7 @@ async function main() {
     shuttingDown = true;
     log('Shutting down ...');
     try { mainServer.close(); } catch {}
-    try { proxyServer.close(); } catch {}
+    try { proxyServer?.close(); } catch {}
     // For this App we WANT Node to exit, so the Android Service can stop cleanly.
     setTimeout(() => {
       try {
