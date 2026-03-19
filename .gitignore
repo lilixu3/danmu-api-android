@@ -10,6 +10,7 @@
 local.properties
 /app/build
 /app/src/main/assets/nodejs-project/node_modules
+/app/src/main/assets/nodejs-optional
 /dist
 *.jks
 
