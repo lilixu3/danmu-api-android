@@ -45,34 +45,31 @@ import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
 import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
+import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
 
 @Composable
 fun DanmuApiApp(
     startupUiState: RuntimeWarmupCoordinator.UiState = RuntimeWarmupCoordinator.UiState.Ready
 ) {
     when (startupUiState) {
-        RuntimeWarmupCoordinator.UiState.NotStarted -> {
-            StartupWarmupScreen(
-                title = "正在进入应用",
-                detail = "正在准备启动界面"
-            )
-        }
-
-        is RuntimeWarmupCoordinator.UiState.Running -> {
-            StartupWarmupScreen(
-                title = startupUiState.title,
-                detail = startupUiState.detail
-            )
-        }
-
-        RuntimeWarmupCoordinator.UiState.Ready -> {
+        RuntimeWarmupCoordinator.UiState.Ready -> StartupPermissionGateHost {
             DanmuApiMainContent()
         }
+
+        is RuntimeWarmupCoordinator.UiState.Running -> StartupWarmupOverlay(
+            title = startupUiState.title,
+            detail = startupUiState.detail
+        )
+
+        RuntimeWarmupCoordinator.UiState.NotStarted -> StartupWarmupOverlay(
+            title = "正在准备首页",
+            detail = "请稍候，马上进入"
+        )
     }
 }
 
 @Composable
-private fun StartupWarmupScreen(title: String, detail: String) {
+private fun StartupWarmupOverlay(title: String, detail: String) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -80,44 +77,51 @@ private fun StartupWarmupScreen(title: String, detail: String) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 24.dp, vertical = 20.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = MaterialTheme.shapes.large,
                 tonalElevation = 6.dp,
                 shadowElevation = 8.dp,
-                color = MaterialTheme.colorScheme.surface
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
             ) {
-                Column(
+                Row(
                     modifier = Modifier
-                        .widthIn(min = 260.dp, max = 420.dp)
-                        .padding(horizontal = 24.dp, vertical = 28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .widthIn(min = 240.dp, max = 520.dp)
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Autorenew,
-                        contentDescription = null,
-                        modifier = Modifier.size(44.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    CircularProgressIndicator(
-                        strokeWidth = 2.8.dp,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Autorenew,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        CircularProgressIndicator(
+                            strokeWidth = 2.4.dp,
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Start
+                        )
+                        Text(
+                            text = detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Start
+                        )
+                    }
                 }
             }
         }
