@@ -65,6 +65,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -243,6 +244,7 @@ internal fun HomeTopHeader(
 @Composable
 internal fun MissionControlHero(
     status: ServiceStatus,
+    statusMessage: String?,
     isCoreInstalled: Boolean,
     isCoreInfoLoading: Boolean,
     runModeLabel: String,
@@ -277,22 +279,12 @@ internal fun MissionControlHero(
     val heroTitle = if (showMissingCore) {
         "核心未安装"
     } else {
-        statusTitle(
-            status = status,
-            isInstalling = isInstalling,
-            isSwitching = isSwitching,
-            isUpdating = isUpdating
-        )
+        statusTitle(status = status)
     }
     val heroSubtitle = if (showMissingCore) {
         "当前${variantLabel}尚未安装，请先下载核心后再启动服务"
     } else {
-        statusSubtitle(
-            status = status,
-            isInstalling = isInstalling,
-            isSwitching = isSwitching,
-            isUpdating = isUpdating
-        )
+        statusSubtitle(status = status, statusMessage = statusMessage)
     }
     val heroIcon = if (showMissingCore) {
         Icons.Rounded.DownloadForOffline
@@ -434,55 +426,147 @@ internal fun MissionControlHero(
 }
 
 @Composable
-internal fun NormalModeBatteryHintCard(
+internal fun RuntimePermissionHintCard(
+    notificationReady: Boolean,
+    batteryRequired: Boolean,
+    batteryReady: Boolean,
+    onOpenNotificationSettings: () -> Unit,
     onOpenBatterySettings: () -> Unit
 ) {
+    val showNotification = !notificationReady
+    val showBattery = batteryRequired && !batteryReady
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
         )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.PowerSettingsNew,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(6.dp)
-                        .size(16.dp)
-                )
-            }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "普通模式建议关闭电池优化",
+                    text = "运行环境提醒",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "请将本应用电池策略设为“不受限制”，减少后台被系统清理。",
+                    text = if (showNotification && showBattery) {
+                        "建议尽快补齐下面两项，启动状态会更清楚，普通模式后台也更稳定。"
+                    } else if (showNotification) {
+                        "建议把通知权限补齐，启动和运行状态会更清楚。"
+                    } else {
+                        "建议把电池优化设为不受限制，普通模式后台会更稳定。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            if (showNotification) {
+                PermissionQuickActionRow(
+                    icon = Icons.Rounded.NotificationsActive,
+                    accent = MaterialTheme.colorScheme.primary,
+                    title = "通知权限",
+                    summary = "建议开启，避免误判是否真的启动成功",
+                    ready = false,
+                    readyText = "已开启",
+                    pendingText = "去开启",
+                    onClick = onOpenNotificationSettings
+                )
+            }
+
+            if (showNotification && showBattery) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                )
+            }
+
+            if (showBattery) {
+                PermissionQuickActionRow(
+                    icon = Icons.Rounded.PowerSettingsNew,
+                    accent = MaterialTheme.colorScheme.tertiary,
+                    title = "电池优化",
+                    summary = "建议改为不受限制，减少后台被清理",
+                    ready = false,
+                    readyText = "已优化",
+                    pendingText = "去设置",
+                    onClick = onOpenBatterySettings
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionQuickActionRow(
+    icon: ImageVector,
+    accent: Color,
+    title: String,
+    summary: String,
+    ready: Boolean,
+    readyText: String,
+    pendingText: String,
+    onClick: (() -> Unit)?
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = accent.copy(alpha = 0.14f)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier
+                    .padding(6.dp)
+                    .size(16.dp)
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (ready) {
             FilledTonalButton(
-                onClick = onOpenBatterySettings,
-                shape = RoundedCornerShape(10.dp)
+                onClick = {},
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
             ) {
-                Text("去设置")
+                Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(readyText)
+            }
+        } else {
+            FilledTonalButton(
+                onClick = { onClick?.invoke() },
+                shape = RoundedCornerShape(10.dp),
+                colors = appTonalButtonColors()
+            ) {
+                Text(pendingText)
             }
         }
     }
@@ -687,6 +771,7 @@ internal fun RuntimeInfoItem(
 
 @Composable
 internal fun ActionDeck(
+    status: ServiceStatus,
     isRunning: Boolean,
     isTransitioning: Boolean,
     isStarting: Boolean,
@@ -702,9 +787,24 @@ internal fun ActionDeck(
     onOpenUpdatePrompt: () -> Unit,
     isCoreInstalled: Boolean,
     hasUpdate: Boolean,
-    latestVersion: String?
+    latestVersion: String?,
+    coreOperationMessage: String?
 ) {
+    val isStopping = status == ServiceStatus.Stopping
     val coreActionEnabled = !isTransitioning && !isCoreInfoLoading && (!isCoreInstalled || hasUpdate)
+    val serviceButtonText = when {
+        isStarting && coreOperationMessage.isNullOrBlank() -> "取消启动"
+        isStarting -> "启动中"
+        isStopping -> "停止中"
+        isRunning -> "停止服务"
+        else -> "启动服务"
+    }
+    val serviceButtonEnabled = when {
+        isStopping -> false
+        isStarting && coreOperationMessage.isNullOrBlank() -> true
+        else -> !isTransitioning
+    }
+    val serviceActionIsStop = isRunning || isStopping || (isStarting && coreOperationMessage.isNullOrBlank())
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -725,17 +825,11 @@ internal fun ActionDeck(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 GradientButton(
-                    text = when {
-                        isSwitching -> "核心切换中"
-                        isUpdating -> "核心更新中"
-                        isInstalling -> "核心下载中"
-                        isRunning -> "停止服务"
-                        else -> "启动服务"
-                    },
+                    text = serviceButtonText,
                     onClick = onToggle,
-                    enabled = !isTransitioning,
+                    enabled = serviceButtonEnabled,
                     modifier = Modifier.weight(1f),
-                    colors = if (isRunning) {
+                    colors = if (serviceActionIsStop) {
                         if (isDarkTheme) {
                             listOf(Color(0xFFDC2626), Color(0xFFEA580C))
                         } else {
@@ -791,6 +885,14 @@ internal fun ActionDeck(
                         Text("重启")
                     }
                 }
+            }
+
+            if (!coreOperationMessage.isNullOrBlank()) {
+                Text(
+                    text = coreOperationMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Row(

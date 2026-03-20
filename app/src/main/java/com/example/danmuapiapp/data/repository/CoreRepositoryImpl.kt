@@ -76,6 +76,7 @@ class CoreRepositoryImpl @Inject constructor(
     private var coreRefreshJob: Job? = null
     private var refreshAllJob: Job? = null
     private var pendingCoreRefreshReason: String? = null
+    private var hasLoadedCoreInfoOnce = false
     private val refreshTicket = AtomicLong(0L)
 
     init {
@@ -101,16 +102,13 @@ class CoreRepositoryImpl @Inject constructor(
 
     override fun refreshCoreInfo() {
         refreshAllJob?.cancel()
-        _isCoreInfoLoading.value = true
+        if (!hasLoadedCoreInfoOnce) {
+            _isCoreInfoLoading.value = true
+        }
         val ticket = refreshTicket.incrementAndGet()
         refreshAllJob = repoScope.launch {
             try {
                 val mode = currentRunMode()
-                if (mode == RunMode.Normal) {
-                    runCatching {
-                        NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
-                    }
-                }
                 ensureCoreDirWatcher(mode)
                 val previous = _coreInfoList.value
                 val refreshed = ApiVariant.entries.map { loadCoreInfo(it, mode) }
@@ -133,6 +131,7 @@ class CoreRepositoryImpl @Inject constructor(
                 _coreInfoList.value = merged
             } finally {
                 if (refreshTicket.get() == ticket) {
+                    hasLoadedCoreInfoOnce = true
                     _isCoreInfoLoading.value = false
                 }
             }

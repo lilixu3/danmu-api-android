@@ -57,6 +57,8 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
     companion object {
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
+        private const val REQUEST_RECORD_REFRESH_DELAY_MS = 900L
+        private const val CACHE_RUNTIME_REFRESH_DELAY_MS = 1200L
         private const val CACHE_FILE_OBSERVER_MASK = FileObserver.CLOSE_WRITE or
             FileObserver.MODIFY or
             FileObserver.CREATE or
@@ -165,6 +167,8 @@ class HomeViewModel @Inject constructor(
     )
     private var pendingProxyAction: PendingProxyAction? = null
     private var cacheRefreshJob: Job? = null
+    private var requestRecordRefreshJob: Job? = null
+    private var runtimeCacheRefreshJob: Job? = null
     private var cacheFileRefreshDebounceJob: Job? = null
     private var cacheFileObserver: FileObserver? = null
     private var cacheObserverRootPath: String? = null
@@ -179,21 +183,20 @@ class HomeViewModel @Inject constructor(
         private set
 
     init {
-        coreRepo.refreshCoreInfo()
         loadIgnoredUpdateVersions()
         observeUpdatePrompt()
         observeForegroundAppUpdate()
         observeRuntimeDrivenCoreRefresh()
         observeRuntimeDrivenRequestRecordRefresh()
         observeRuntimeDrivenCacheRefresh()
-        refreshRequestRecords()
     }
 
     private fun observeRuntimeDrivenCoreRefresh() {
         viewModelScope.launch {
             runtimeState
-                .map { Triple(it.runMode, it.status, it.variant) }
+                .map { it.runMode to it.variant }
                 .distinctUntilChanged()
+                .drop(1)
                 .collect {
                     coreRepo.refreshCoreInfo()
                 }
@@ -207,7 +210,10 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { status ->
                     if (status == ServiceStatus.Running) {
-                        refreshRequestRecords()
+                        scheduleRequestRecordRefresh()
+                    } else {
+                        requestRecordRefreshJob?.cancel()
+                        requestRecordRefreshJob = null
                     }
                 }
         }
@@ -224,14 +230,27 @@ class HomeViewModel @Inject constructor(
                     } else {
                         stopCacheFileObserver()
                     }
-                    // 状态切换时强制刷新，避免被上一轮请求占用导致漏刷
-                    refreshCacheInternal(force = true)
+                    if (status == ServiceStatus.Running) {
+                        scheduleRuntimeCacheRefresh()
+                    } else {
+                        runtimeCacheRefreshJob?.cancel()
+                        runtimeCacheRefreshJob = null
+                    }
                 }
+        }
+    }
+
+    private fun scheduleRequestRecordRefresh(delayMs: Long = REQUEST_RECORD_REFRESH_DELAY_MS) {
+        requestRecordRefreshJob?.cancel()
+        requestRecordRefreshJob = viewModelScope.launch {
+            delay(delayMs)
+            refreshRequestRecords()
         }
     }
 
     private fun refreshRequestRecords() {
         viewModelScope.launch(Dispatchers.IO) {
+            if (runtimeState.value.status != ServiceStatus.Running) return@launch
             runCatching {
                 requestRecordRepo.refreshFromService()
             }
@@ -242,7 +261,16 @@ class HomeViewModel @Inject constructor(
         refreshCacheInternal(force = true)
     }
 
+    private fun scheduleRuntimeCacheRefresh(delayMs: Long = CACHE_RUNTIME_REFRESH_DELAY_MS) {
+        runtimeCacheRefreshJob?.cancel()
+        runtimeCacheRefreshJob = viewModelScope.launch {
+            delay(delayMs)
+            refreshCacheInternal(force = true)
+        }
+    }
+
     private fun refreshCacheInternal(force: Boolean = false) {
+        if (runtimeState.value.status != ServiceStatus.Running) return
         if (force) {
             cacheRefreshJob?.cancel()
         } else if (cacheRefreshJob?.isActive == true) {
@@ -672,7 +700,8 @@ class HomeViewModel @Inject constructor(
     fun toggleService() {
         if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
         when (runtimeState.value.status) {
-            ServiceStatus.Running -> stopService()
+            ServiceStatus.Running,
+            ServiceStatus.Starting -> stopService()
             ServiceStatus.Stopped, ServiceStatus.Error -> tryStartService()
             else -> { }
         }

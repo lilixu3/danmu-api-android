@@ -2,6 +2,7 @@ package com.example.danmuapiapp
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,9 +24,11 @@ import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.data.service.UpdateChecker
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.DanmuApiApp
+import com.example.danmuapiapp.ui.compat.CompatModeActivity
 import com.example.danmuapiapp.ui.theme.DanmuApiTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -51,7 +54,20 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        if (DeviceCompatMode.shouldUseCompatMode(this)) {
+            super.onCreate(savedInstanceState)
+            startActivity(Intent(this, CompatModeActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            })
+            finish()
+            overridePendingTransition(0, 0)
+            return
+        }
+
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition {
+            runtimeWarmupCoordinator.uiState.value is RuntimeWarmupCoordinator.UiState.NotStarted
+        }
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
 

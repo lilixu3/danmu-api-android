@@ -4,10 +4,17 @@ import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 
+import android.Manifest
 import android.app.Activity
+import android.os.Build
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
@@ -135,6 +142,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.app.ActivityCompat
+import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
@@ -150,6 +159,7 @@ import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import com.example.danmuapiapp.ui.startup.StartupPermissionGatePrefs
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -201,6 +211,15 @@ fun HomeScreen(
     var showCacheQuickDialog by remember { mutableStateOf(false) }
     var isBatteryWhitelisted by remember {
         mutableStateOf(NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context))
+    }
+    var hasNotificationPermission by remember {
+        mutableStateOf(NodeKeepAlivePrefs.hasPostNotificationsPermission(context))
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
     }
 
     val isRunning = state.status == ServiceStatus.Running
@@ -289,6 +308,7 @@ fun HomeScreen(
     var expandedQueueGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     LaunchedEffect(state.runMode) {
+        hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
         if (state.runMode == RunMode.Normal) {
             isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
         }
@@ -310,8 +330,11 @@ fun HomeScreen(
 
     DisposableEffect(lifecycleOwner, context, state.runMode) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && state.runMode == RunMode.Normal) {
-                isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+                if (state.runMode == RunMode.Normal) {
+                    isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -365,6 +388,31 @@ fun HomeScreen(
     }
     val primaryGlowAlpha = if (isDarkTheme) 0.11f else 0.17f
     val tertiaryGlowAlpha = if (isDarkTheme) 0.08f else 0.13f
+    val shouldShowRuntimePermissionHint = state.runMode == RunMode.Normal &&
+        (!hasNotificationPermission || !isBatteryWhitelisted)
+
+    fun openNotificationPermissionQuickAction() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (hasNotificationPermission) return
+
+        val shouldShowRationale = activity?.let {
+            ActivityCompat.shouldShowRequestPermissionRationale(
+                it,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        } == true
+        val requestedBefore = StartupPermissionGatePrefs.hasRequestedNotificationPermission(context)
+
+        if (activity != null && (!requestedBefore || shouldShowRationale)) {
+            StartupPermissionGatePrefs.markNotificationPermissionRequested(context)
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+
+        if (!openHomeNotificationSettings(context)) {
+            viewModel.postMessage("无法打开通知设置，请手动进入应用详情开启通知")
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -432,6 +480,7 @@ fun HomeScreen(
 
                 MissionControlHero(
                     status = state.status,
+                    statusMessage = state.statusMessage,
                     isCoreInstalled = isCoreInstalled,
                     isCoreInfoLoading = isCoreInfoLoading,
                     runModeLabel = when (state.runMode) {
@@ -488,11 +537,15 @@ fun HomeScreen(
                 )
 
                 AnimatedVisibility(
-                    visible = state.runMode == RunMode.Normal && !isBatteryWhitelisted,
+                    visible = shouldShowRuntimePermissionHint,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
-                    NormalModeBatteryHintCard(
+                    RuntimePermissionHintCard(
+                        notificationReady = hasNotificationPermission,
+                        batteryRequired = state.runMode == RunMode.Normal,
+                        batteryReady = state.runMode != RunMode.Normal || isBatteryWhitelisted,
+                        onOpenNotificationSettings = ::openNotificationPermissionQuickAction,
                         onOpenBatterySettings = {
                             val opened = NormalModeKeepAliveGuideNavigator.requestIgnoreBatteryOptimization(context) ||
                                 NormalModeKeepAliveGuideNavigator.openAppBatterySettings(context)
@@ -504,6 +557,7 @@ fun HomeScreen(
                 }
 
                 ActionDeck(
+                    status = state.status,
                     isRunning = isRunning,
                     isTransitioning = isBusy,
                     isStarting = state.status == ServiceStatus.Starting,
@@ -519,7 +573,12 @@ fun HomeScreen(
                     onOpenUpdatePrompt = viewModel::openUpdatePromptFromCard,
                     isCoreInstalled = isCoreInstalled,
                     hasUpdate = hasUpdate,
-                    latestVersion = latestVersion
+                    latestVersion = latestVersion,
+                    coreOperationMessage = coreOperationStatus(
+                        isInstalling = viewModel.isInstallingCore,
+                        isSwitching = viewModel.isSwitchingCore,
+                        isUpdating = viewModel.isUpdatingCore
+                    )
                 )
 
                 AnimatedVisibility(
@@ -1019,5 +1078,32 @@ fun HomeScreen(
             },
             onDismiss = { showCacheQuickDialog = false }
         )
+    }
+}
+
+
+private fun openHomeNotificationSettings(context: Context): Boolean {
+    val packageUri = Uri.parse("package:${context.packageName}")
+    val candidates = listOf(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        },
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = packageUri
+        }
+    )
+    return candidates.any { intent ->
+        val finalIntent = Intent(intent).apply {
+            if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching {
+            val resolved = finalIntent.resolveActivity(context.packageManager) != null
+            if (!resolved) {
+                false
+            } else {
+                context.startActivity(finalIntent)
+                true
+            }
+        }.getOrDefault(false)
     }
 }
