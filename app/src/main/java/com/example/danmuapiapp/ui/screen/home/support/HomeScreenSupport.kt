@@ -408,42 +408,40 @@ internal fun statusIcon(status: ServiceStatus): ImageVector {
 }
 
 internal fun statusTitle(
-    status: ServiceStatus,
-    isInstalling: Boolean,
-    isSwitching: Boolean,
-    isUpdating: Boolean
+    status: ServiceStatus
 ): String {
-    return when {
-        isSwitching -> "正在切换核心"
-        isUpdating -> "正在更新核心"
-        isInstalling -> "正在下载核心"
-        else -> when (status) {
-            ServiceStatus.Running -> "服务运行中"
-            ServiceStatus.Starting -> "服务启动中"
-            ServiceStatus.Stopping -> "服务停止中"
-            ServiceStatus.Error -> "服务异常"
-            ServiceStatus.Stopped -> "服务已停止"
-        }
+    return when (status) {
+        ServiceStatus.Running -> "服务运行中"
+        ServiceStatus.Starting -> "服务启动中"
+        ServiceStatus.Stopping -> "服务停止中"
+        ServiceStatus.Error -> "服务异常"
+        ServiceStatus.Stopped -> "服务已停止"
     }
 }
 
 internal fun statusSubtitle(
     status: ServiceStatus,
+    statusMessage: String?
+): String {
+    return statusMessage?.takeIf { it.isNotBlank() } ?: when (status) {
+        ServiceStatus.Running -> "接口已就绪，可直接在局域网访问"
+        ServiceStatus.Starting -> "正在初始化运行环境，请稍候"
+        ServiceStatus.Stopping -> "正在安全停止服务进程"
+        ServiceStatus.Error -> "请查看日志或重新启动服务"
+        ServiceStatus.Stopped -> "点击启动后将拉起服务进程"
+    }
+}
+
+internal fun coreOperationStatus(
     isInstalling: Boolean,
     isSwitching: Boolean,
     isUpdating: Boolean
-): String {
+): String? {
     return when {
-        isSwitching -> "将自动重启并切换到目标核心"
-        isUpdating -> "核心包下载并替换中"
-        isInstalling -> "首次安装期间请保持网络畅通"
-        else -> when (status) {
-            ServiceStatus.Running -> "接口已就绪，可直接在局域网访问"
-            ServiceStatus.Starting -> "正在初始化运行环境，请稍候"
-            ServiceStatus.Stopping -> "正在安全停止服务进程"
-            ServiceStatus.Error -> "请查看日志或重新启动服务"
-            ServiceStatus.Stopped -> "点击启动后将拉起服务进程"
-        }
+        isSwitching -> "正在切换核心，完成后会自动重启服务"
+        isUpdating -> "核心更新完成后会自动应用到当前服务"
+        isInstalling -> "核心下载中，低性能设备首次安装会更久"
+        else -> null
     }
 }
 

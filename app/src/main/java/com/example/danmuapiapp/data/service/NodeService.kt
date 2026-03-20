@@ -40,7 +40,10 @@ class NodeService : Service() {
         val ACTION_STATUS: String
             get() = "$actionPrefix.NODE_STATUS"
         const val EXTRA_STATUS = "status"
+        const val EXTRA_MESSAGE = "status_message"
+        const val STATUS_STARTING = "starting"
         const val STATUS_RUNNING = "running"
+        const val STATUS_STOPPING = "stopping"
         const val STATUS_STOPPED = "stopped"
         const val STATUS_ERROR = "error"
         const val EXTRA_ERROR = "error_message"
@@ -196,6 +199,7 @@ class NodeService : Service() {
         val shouldStart = shouldAcceptStartRequest()
         if (shouldStart) {
             startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
+            publishStarting("正在准备运行环境…")
             startNode()
         }
         return START_STICKY
@@ -216,10 +220,18 @@ class NodeService : Service() {
 
         scope.launch {
             try {
+                publishStarting("正在准备运行环境…")
                 val projectDir = awaitPreparedProjectDir(
                     generation = generation,
                     startupStartedAtMs = startupIssuedAtMs
                 ) ?: return@launch
+                val startCanceled = synchronized(stateLock) {
+                    runtimeGeneration.get() != generation || !isRunning || isStopping
+                }
+                if (startCanceled) {
+                    Log.i(TAG, "启动流程已取消，忽略后续启动 generation=$generation")
+                    return@launch
+                }
 
                 val runtimeThread = Thread {
                     try {
@@ -230,7 +242,7 @@ class NodeService : Service() {
                         if (runtimeGeneration.get() == generation) {
                             val msg = buildErrorMessage(t)
                             Log.e(TAG, "Node crashed: $msg", t)
-                            broadcastStatus(STATUS_ERROR, msg)
+                            broadcastStatus(STATUS_ERROR, message = msg, error = msg)
                         }
                     } finally {
                         if (runtimeGeneration.get() == generation) {
@@ -244,7 +256,7 @@ class NodeService : Service() {
                                     nodeThread = null
                                 }
                             }
-                            broadcastStatus(STATUS_STOPPED)
+                            broadcastStatus(STATUS_STOPPED, message = "服务已停止")
                             stopForegroundAndSelf()
                         } else {
                             Log.i(TAG, "忽略旧实例退出广播，generation=$generation")
@@ -256,10 +268,12 @@ class NodeService : Service() {
                 synchronized(stateLock) {
                     nodeThread = runtimeThread
                 }
+                publishStarting("运行环境已准备，正在启动服务…")
                 runtimeThread.start()
 
                 // 启动慢机型上端口可能晚于首轮超时才就绪，因此超时后继续低频复检。
                 scope.launch {
+                    publishStarting("正在等待服务端口就绪…")
                     val initialReadyTimeoutMs = remainingStartupBudgetMs(startupStartedAtMs)
                         .coerceAtMost(START_READY_TIMEOUT_MS)
                     if (initialReadyTimeoutMs <= 0L) {
@@ -277,6 +291,7 @@ class NodeService : Service() {
                         return@launch
                     }
 
+                    publishStarting("启动较慢，继续等待服务就绪…")
                     while (isActive && runtimeGeneration.get() == generation) {
                         if (!isNodeThreadAlive()) return@launch
                         val ports = resolveCandidatePorts()
@@ -315,8 +330,10 @@ class NodeService : Service() {
         val preparedDeferred = CompletableDeferred<Result<java.io.File>>()
         scope.launch {
             val prepared = runCatching {
+                publishStarting("正在检查运行环境…")
                 val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
                 NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                publishStarting("正在同步启动配置…")
                 // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
                 val envVariant = runCatching {
                     java.io.File(projectDir, "config/.env").takeIf { it.exists() }
@@ -369,7 +386,8 @@ class NodeService : Service() {
             }
         }
         SystemHeartbeatScheduler.refresh(applicationContext)
-        broadcastStatus(STATUS_ERROR, message)
+        updateNotification("启动失败：$message")
+        broadcastStatus(STATUS_ERROR, message = message, error = message)
         stopForegroundAndSelf()
     }
 
@@ -384,7 +402,8 @@ class NodeService : Service() {
             startupStartedAtMs = 0L
         }
         SystemHeartbeatScheduler.refresh(applicationContext)
-        broadcastStatus(STATUS_ERROR, message)
+        updateNotification("启动失败：$message")
+        broadcastStatus(STATUS_ERROR, message = message, error = message)
         delay(START_TIMEOUT_KILL_DELAY_MS)
         android.os.Process.killProcess(android.os.Process.myPid())
     }
@@ -397,6 +416,7 @@ class NodeService : Service() {
             generation = runtimeGeneration.get()
         }
         scope.launch {
+            publishStopping("正在安全停止服务…")
             val ports = resolveCandidatePorts()
             val alreadyStopped = !isNodeThreadAlive() && ports.none { it in 1..65535 && isPortOpen(it) }
 
@@ -416,7 +436,8 @@ class NodeService : Service() {
 
             // Node/V8 停不干净时，直接终止 :node 进程，避免后续无法重启。
             Log.w(TAG, "普通模式停止超时，强制结束 :node 进程")
-            broadcastStatus(STATUS_STOPPED)
+            publishStopping("停止较慢，正在强制回收服务进程…")
+            broadcastStatus(STATUS_STOPPED, message = "服务已停止")
             delay(350)
             android.os.Process.killProcess(android.os.Process.myPid())
         }
@@ -508,8 +529,8 @@ class NodeService : Service() {
             canPublish
         }
         if (!shouldPublish) return
-        broadcastStatus(STATUS_RUNNING)
         updateNotification("服务运行中")
+        broadcastStatus(STATUS_RUNNING, message = "接口已就绪，可直接在局域网访问")
     }
 
     private fun finalizeStop(generation: Long) {
@@ -525,7 +546,7 @@ class NodeService : Service() {
             }
         }
         // 主动广播停止，避免仓库层仅靠兜底超时判断导致“已停却报错”。
-        broadcastStatus(STATUS_STOPPED)
+        broadcastStatus(STATUS_STOPPED, message = "服务已停止")
         stopForegroundAndSelf()
     }
 
@@ -609,12 +630,23 @@ class NodeService : Service() {
         return ErrorHandler.buildDetailedMessage(t)
     }
 
-    private fun broadcastStatus(status: String, error: String? = null) {
+    private fun broadcastStatus(status: String, message: String? = null, error: String? = null) {
         sendBroadcast(Intent(ACTION_STATUS).apply {
             setPackage(packageName)
             putExtra(EXTRA_STATUS, status)
+            message?.let { putExtra(EXTRA_MESSAGE, it) }
             error?.let { putExtra(EXTRA_ERROR, it) }
         })
+    }
+
+    private fun publishStarting(message: String) {
+        updateNotification(message)
+        broadcastStatus(STATUS_STARTING, message = message)
+    }
+
+    private fun publishStopping(message: String) {
+        updateNotification(message)
+        broadcastStatus(STATUS_STOPPING, message = message)
     }
 
     private fun createNotificationChannel() {

@@ -38,7 +38,8 @@ data class RuntimeState(
     val uptimeSeconds: Long = 0,
     val localUrl: String = "",
     val lanUrl: String = "",
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val statusMessage: String? = null
 )
 
 data class CoreInfo(
