@@ -14,6 +14,7 @@ import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NodeProjectManager
+import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
@@ -28,6 +29,7 @@ import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.WebDavConfig
@@ -78,6 +80,7 @@ class SettingsViewModel @Inject constructor(
     val keepAliveHeartbeatEnabled = settingsRepo.keepAliveHeartbeatEnabled
     val keepAliveHeartbeatMode = settingsRepo.keepAliveHeartbeatMode
     val keepAliveHeartbeatIntervalMinutes = settingsRepo.keepAliveHeartbeatIntervalMinutes
+    val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val nightMode = settingsRepo.nightMode
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
@@ -299,6 +302,39 @@ class SettingsViewModel @Inject constructor(
         settingsRepo.setKeepAliveHeartbeatIntervalMinutes(normalized)
         SystemHeartbeatScheduler.refresh(context)
         operationMessage = "心跳间隔已更新为 ${normalized} 分钟"
+    }
+
+    fun setNormalModeStabilityMode(mode: NormalModeStabilityMode) {
+        if (normalModeStabilityMode.value == mode) {
+            operationMessage = "普通模式稳定策略已是 ${mode.label}"
+            return
+        }
+        settingsRepo.setNormalModeStabilityMode(mode)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                        context = context,
+                        targetProjectDir = RuntimePaths.normalProjectDir(context),
+                        preferredVariantKey = runtimeState.value.variant.key
+                    )
+                }
+            }
+            val state = runtimeState.value
+            operationMessage = when {
+                state.runMode != RunMode.Normal -> {
+                    "普通模式稳定策略已改为 ${mode.label}，切回普通模式后生效"
+                }
+                state.status == ServiceStatus.Running -> {
+                    runtimeRepo.addLog(LogLevel.Info, "普通模式稳定策略已切换为 ${mode.label}，正在重启服务应用新策略")
+                    runtimeRepo.restartService()
+                    "普通模式稳定策略已改为 ${mode.label}，服务正在重启"
+                }
+                else -> {
+                    "普通模式稳定策略已改为 ${mode.label}，下次启动生效"
+                }
+            }
+        }
     }
 
     fun setNightMode(mode: NightModePreference) {
@@ -734,6 +770,11 @@ class SettingsViewModel @Inject constructor(
             if (result.ok) {
                 val previousVariant = runtimeState.value.variant
                 var resolvedVariant: ApiVariant? = null
+                val storageHint = if (NormalModeRuntimeProfiles.current(context).slowStorageWorkDir) {
+                    "共享存储目录启动会更慢，低端机建议优先使用默认目录"
+                } else {
+                    null
+                }
                 withContext(Dispatchers.IO) {
                     runCatching {
                         val projectDir = NodeProjectManager.ensureProjectExtracted(
@@ -766,6 +807,10 @@ class SettingsViewModel @Inject constructor(
                             append(variantMessage)
                         }
                         append("，服务正在重启，请稍候")
+                        if (!storageHint.isNullOrBlank()) {
+                            append("。")
+                            append(storageHint)
+                        }
                     }
                 } else {
                     if (runtimeState.value.status == ServiceStatus.Running && selectedVariant == null) {
@@ -776,6 +821,10 @@ class SettingsViewModel @Inject constructor(
                         if (!variantMessage.isNullOrBlank()) {
                             append("，")
                             append(variantMessage)
+                        }
+                        if (!storageHint.isNullOrBlank()) {
+                            append("。")
+                            append(storageHint)
                         }
                     }
                 }

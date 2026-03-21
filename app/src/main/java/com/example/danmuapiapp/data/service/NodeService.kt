@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -50,18 +51,24 @@ class NodeService : Service() {
         private val runtimeGeneration = AtomicLong(0L)
         private const val STOP_SHUTDOWN_ATTEMPTS = 4
         private const val STOP_WAIT_TIMEOUT_MS = 2600L
-        private const val START_TOTAL_TIMEOUT_MS = 35_000L
-        private const val START_READY_TIMEOUT_MS = 20_000L
-        private const val START_READY_RECHECK_INTERVAL_MS = 2000L
         private const val START_TIMEOUT_KILL_DELAY_MS = 350L
-        private const val START_STATE_STALE_GRACE_MS = 5000L
         private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
 
-        fun start(context: Context) {
+        fun start(context: Context, userInitiated: Boolean = true): Boolean {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, true)
+            if (userInitiated) {
+                NodeKeepAlivePrefs.clearRestartBackoff(appContext)
+            } else {
+                val blockedMs = NodeKeepAlivePrefs.getRestartBlockRemainingMs(appContext)
+                if (blockedMs > 0L) {
+                    Log.w(TAG, "普通模式后台恢复暂缓，剩余 ${blockedMs}ms")
+                    SystemHeartbeatScheduler.refresh(appContext)
+                    return false
+                }
+            }
             SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
@@ -71,12 +78,14 @@ class NodeService : Service() {
             } else {
                 context.startService(intent)
             }
+            return true
         }
 
         fun stop(context: Context) {
             // 在调用进程先写入期望状态，确保保活侧立即可见“用户要停止”。
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, false)
+            NodeKeepAlivePrefs.clearRestartBackoff(appContext)
             SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_STOP
@@ -198,11 +207,49 @@ class NodeService : Service() {
 
         val shouldStart = shouldAcceptStartRequest()
         if (shouldStart) {
-            startForeground(NOTIFICATION_ID, buildNotification("正在启动..."))
+            startServiceInForeground("正在启动...")
             publishStarting("正在准备运行环境…")
             startNode()
         }
         return START_STICKY
+    }
+
+    private fun runtimeProfile(): NormalModeRuntimeProfile {
+        return NormalModeRuntimeProfiles.current(applicationContext)
+    }
+
+    private fun startServiceInForeground(message: String) {
+        val notification = buildNotification(message)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    override fun onTimeout(startId: Int) {
+        Log.e(TAG, "普通模式前台服务触发系统超时，正在强制停止")
+        synchronized(stateLock) {
+            isRunning = false
+            isStopping = false
+            runningPublishedGeneration = -1L
+            startupStartedAtMs = 0L
+            nodeThread = null
+        }
+        broadcastStatus(
+            STATUS_ERROR,
+            message = "前台服务被系统超时限制，已停止",
+            error = "前台服务被系统超时限制，已停止"
+        )
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        onTimeout(startId)
     }
 
     private fun startNode() {
@@ -234,19 +281,18 @@ class NodeService : Service() {
                 }
 
                 val runtimeThread = Thread {
+                    var exitCode = 0
+                    var crashThrowable: Throwable? = null
                     try {
-                        NodeBridge.startNodeWithArguments(
+                        exitCode = NodeBridge.startNodeWithArguments(
                             arrayOf("node", "${projectDir.absolutePath}/main.js")
                         )
                     } catch (t: Throwable) {
-                        if (runtimeGeneration.get() == generation) {
-                            val msg = buildErrorMessage(t)
-                            Log.e(TAG, "Node crashed: $msg", t)
-                            broadcastStatus(STATUS_ERROR, message = msg, error = msg)
-                        }
+                        crashThrowable = t
                     } finally {
                         if (runtimeGeneration.get() == generation) {
-                            synchronized(stateLock) {
+                            val unexpectedFailure = synchronized(stateLock) {
+                                val stopping = isStopping
                                 if (runtimeGeneration.get() == generation) {
                                     isRunning = false
                                     isStopping = false
@@ -255,8 +301,22 @@ class NodeService : Service() {
                                 if (nodeThread === Thread.currentThread()) {
                                     nodeThread = null
                                 }
+                                !stopping && (crashThrowable != null || isUnexpectedExitCode(exitCode))
                             }
-                            broadcastStatus(STATUS_STOPPED, message = "服务已停止")
+                            if (unexpectedFailure) {
+                                val msg = crashThrowable?.let { buildErrorMessage(it) }
+                                    ?: "Node 进程异常退出，退出码：$exitCode"
+                                if (crashThrowable != null) {
+                                    Log.e(TAG, "Node crashed: $msg", crashThrowable)
+                                } else {
+                                    Log.e(TAG, "Node crashed: $msg")
+                                }
+                                recordRecoveryFailure()
+                                SystemHeartbeatScheduler.refresh(applicationContext)
+                                broadcastStatus(STATUS_ERROR, message = msg, error = msg)
+                            } else {
+                                broadcastStatus(STATUS_STOPPED, message = "服务已停止")
+                            }
                             stopForegroundAndSelf()
                         } else {
                             Log.i(TAG, "忽略旧实例退出广播，generation=$generation")
@@ -274,8 +334,9 @@ class NodeService : Service() {
                 // 启动慢机型上端口可能晚于首轮超时才就绪，因此超时后继续低频复检。
                 scope.launch {
                     publishStarting("正在等待服务端口就绪…")
-                    val initialReadyTimeoutMs = remainingStartupBudgetMs(startupStartedAtMs)
-                        .coerceAtMost(START_READY_TIMEOUT_MS)
+                    val profile = runtimeProfile()
+                    val initialReadyTimeoutMs = remainingStartupBudgetMs(startupStartedAtMs, profile)
+                        .coerceAtMost(profile.startupReadyTimeoutMs)
                     if (initialReadyTimeoutMs <= 0L) {
                         handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
                         return@launch
@@ -301,12 +362,12 @@ class NodeService : Service() {
                             return@launch
                         }
 
-                        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs)
+                        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs, profile)
                         if (remainingBudgetMs <= 0L) {
                             handleStartupTimeout(generation, "普通模式启动超时：服务进程仍在但端口未就绪")
                             return@launch
                         }
-                        delay(minOf(START_READY_RECHECK_INTERVAL_MS, remainingBudgetMs))
+                        delay(minOf(profile.startupRecheckIntervalMs, remainingBudgetMs))
                     }
                 }
             } catch (t: Throwable) {
@@ -321,7 +382,8 @@ class NodeService : Service() {
         generation: Long,
         startupStartedAtMs: Long
     ): java.io.File? {
-        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs)
+        val profile = runtimeProfile()
+        val remainingBudgetMs = remainingStartupBudgetMs(startupStartedAtMs, profile)
         if (remainingBudgetMs <= 0L) {
             handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
             return null
@@ -364,9 +426,20 @@ class NodeService : Service() {
         }
     }
 
-    private fun remainingStartupBudgetMs(startupStartedAtMs: Long): Long {
+    private fun remainingStartupBudgetMs(
+        startupStartedAtMs: Long,
+        profile: NormalModeRuntimeProfile = runtimeProfile()
+    ): Long {
         val elapsedMs = (System.currentTimeMillis() - startupStartedAtMs).coerceAtLeast(0L)
-        return (START_TOTAL_TIMEOUT_MS - elapsedMs).coerceAtLeast(0L)
+        return (profile.startupTotalTimeoutMs - elapsedMs).coerceAtLeast(0L)
+    }
+
+    private fun isUnexpectedExitCode(exitCode: Int): Boolean {
+        return exitCode != 0 && exitCode != 130 && exitCode != 143
+    }
+
+    private fun recordRecoveryFailure() {
+        NodeKeepAlivePrefs.recordRecoveryFailure(applicationContext)
     }
 
     private fun handleStartupFailure(generation: Long, message: String, throwable: Throwable? = null) {
@@ -385,6 +458,7 @@ class NodeService : Service() {
                 nodeThread = null
             }
         }
+        recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
         updateNotification("启动失败：$message")
         broadcastStatus(STATUS_ERROR, message = message, error = message)
@@ -394,16 +468,26 @@ class NodeService : Service() {
     private suspend fun handleStartupTimeout(generation: Long, message: String) {
         if (runtimeGeneration.get() != generation) return
         Log.w(TAG, message)
-        synchronized(stateLock) {
+        val shouldKillProcess = synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
+            val threadAlive = nodeThread?.isAlive == true
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
+            if (!threadAlive) {
+                nodeThread = null
+            }
+            threadAlive
         }
+        recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
         updateNotification("启动失败：$message")
         broadcastStatus(STATUS_ERROR, message = message, error = message)
+        if (!shouldKillProcess) {
+            stopForegroundAndSelf()
+            return
+        }
         delay(START_TIMEOUT_KILL_DELAY_MS)
         android.os.Process.killProcess(android.os.Process.myPid())
     }
@@ -529,6 +613,7 @@ class NodeService : Service() {
             canPublish
         }
         if (!shouldPublish) return
+        NodeKeepAlivePrefs.noteSuccessfulStart(applicationContext)
         updateNotification("服务运行中")
         broadcastStatus(STATUS_RUNNING, message = "接口已就绪，可直接在局域网访问")
     }
@@ -577,18 +662,30 @@ class NodeService : Service() {
     }
 
     private fun shouldAcceptStartRequest(): Boolean {
+        val staleTimeoutMs = runtimeProfile().startupStaleTimeoutMs
+        val anyPortOpen = resolveCandidatePorts().any { it in 1..65535 && isPortOpen(it) }
         synchronized(stateLock) {
             val threadAlive = nodeThread?.isAlive == true
+            val staleFlags = (isRunning || isStopping) &&
+                !threadAlive &&
+                !anyPortOpen
             val startupTimedOut = isRunning &&
                 !threadAlive &&
                 !isStopping &&
                 startupStartedAtMs > 0L &&
-                System.currentTimeMillis() - startupStartedAtMs >=
-                START_TOTAL_TIMEOUT_MS + START_STATE_STALE_GRACE_MS
+                System.currentTimeMillis() - startupStartedAtMs >= staleTimeoutMs
 
-            if (startupTimedOut) {
-                Log.w(TAG, "检测到普通模式启动状态残留，已重置本地启动标记")
+            if (staleFlags || startupTimedOut) {
+                Log.w(
+                    TAG,
+                    if (startupTimedOut) {
+                        "检测到普通模式启动状态残留，已重置本地启动标记"
+                    } else {
+                        "检测到普通模式本地运行标记残留，已重置后接受新的启动请求"
+                    }
+                )
                 isRunning = false
+                isStopping = false
                 runningPublishedGeneration = -1L
                 startupStartedAtMs = 0L
                 nodeThread = null
@@ -696,6 +793,7 @@ class NodeService : Service() {
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
+            startupStartedAtMs = 0L
         }
         super.onDestroy()
     }

@@ -22,6 +22,9 @@ let _workerEnabled = true;
 let _hotReloadEnabled = true;
 let _workerSupport = null;
 let _WorkerCtor = null;
+let _mainServer = null;
+let _proxyServer = null;
+let _shutdownPromise = null;
 
 let _coreWatchers = [];
 let _coreWatchDirs = new Set();
@@ -239,6 +242,84 @@ function _scheduleWorkerShutdown(state) {
   };
 
   setTimeout(tick, 200);
+}
+
+function _closeServer(server) {
+  if (!server) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const fallback = setTimeout(finish, 1200);
+    try {
+      server.close(() => {
+        clearTimeout(fallback);
+        finish();
+      });
+    } catch {
+      clearTimeout(fallback);
+      finish();
+    }
+  });
+}
+
+async function _terminateWorkerImmediately(state) {
+  if (!state || !state.worker) return;
+  const worker = state.worker;
+  state.worker = null;
+  state.pending.clear();
+  try {
+    await Promise.race([
+      worker.terminate(),
+      new Promise((resolve) => setTimeout(resolve, 1200)),
+    ]);
+  } catch {
+    // ignore
+  }
+}
+
+async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
+  if (_shutdownPromise) return _shutdownPromise;
+
+  _shutdownPromise = (async () => {
+    log('Shutting down ...', reason);
+    shutdownFn = null;
+
+    if (_configReloadTimer) {
+      clearTimeout(_configReloadTimer);
+      _configReloadTimer = null;
+    }
+    if (_coreReloadTimer) {
+      clearTimeout(_coreReloadTimer);
+      _coreReloadTimer = null;
+    }
+    _coreReloadPending = false;
+    _clearCoreWatchers();
+
+    const workerState = _activeWorkerState;
+    _activeWorkerState = null;
+    await _terminateWorkerImmediately(workerState);
+
+    await Promise.allSettled([
+      _closeServer(_proxyServer),
+      _closeServer(_mainServer),
+    ]);
+    _proxyServer = null;
+    _mainServer = null;
+
+    try { _logStream && _logStream.end(); } catch {}
+    _logStream = null;
+    process.exitCode = exitCode;
+  })();
+
+  try {
+    await _shutdownPromise;
+  } finally {
+    _shutdownPromise = null;
+  }
 }
 
 async function _ensureActiveWorkerForVariant(variantKey, info, forceReload = false) {
@@ -2040,64 +2121,49 @@ async function main() {
   _syncEnvToWorker();
   watchConfigs();
 
-  const mainServer = createMainServer();
-  let proxyServer = null;
+  _mainServer = createMainServer();
+  _proxyServer = null;
 
   await new Promise((resolve, reject) => {
-    mainServer.listen(PORT, HOST, () => {
+    _mainServer.listen(PORT, HOST, () => {
       log(`Main server listening on http://${HOST}:${PORT}`);
       resolve();
     });
-    mainServer.on('error', reject);
+    _mainServer.on('error', reject);
   });
 
   if (_hasForwardProxyHelperDemand()) {
-    proxyServer = createProxyServer();
+    _proxyServer = createProxyServer();
     try {
       await new Promise((resolve, reject) => {
-        proxyServer.listen(PROXY_PORT, HOST, () => {
+        _proxyServer.listen(PROXY_PORT, HOST, () => {
           log(`Proxy server listening on http://${HOST}:${PROXY_PORT}/proxy?url=...`);
           resolve();
         });
-        proxyServer.on('error', reject);
+        _proxyServer.on('error', reject);
       });
     } catch (e) {
       log(`Proxy helper unavailable on ${HOST}:${PROXY_PORT}, continue without it:`, e?.message || e);
-      try { proxyServer.close(); } catch {}
-      proxyServer = null;
+      await _closeServer(_proxyServer);
+      _proxyServer = null;
     }
   } else {
     log('Proxy helper disabled (no forward proxy configured in PROXY_URL).');
   }
 
-  let shuttingDown = false;
-  const shutdown = () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log('Shutting down ...');
-    try { mainServer.close(); } catch {}
-    try { proxyServer?.close(); } catch {}
-    // For this App we WANT Node to exit, so the Android Service can stop cleanly.
-    setTimeout(() => {
-      try {
-        process.exit(0);
-      } catch {
-        process.exitCode = 0;
-      }
-    }, 350);
+  shutdownFn = () => {
+    void _gracefulShutdown(0, 'api');
   };
 
-  // Expose to /__shutdown endpoint
-  shutdownFn = shutdown;
-
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => {
+    void _gracefulShutdown(0, 'sigterm');
+  });
+  process.on('SIGINT', () => {
+    void _gracefulShutdown(0, 'sigint');
+  });
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   log('Fatal error:', e?.stack || e);
-  // 保持进程存活一小会儿以便 Android 端能捕获到日志 (如果直接 exit(1)，App 端可能只收到 "Service stopped" 而没有日志)
-  setTimeout(() => {
-      process.exit(1);
-  }, 2000);
+  await _gracefulShutdown(1, 'fatal');
 });

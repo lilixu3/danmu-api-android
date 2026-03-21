@@ -59,7 +59,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
+import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
+import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.screen.home.NormalModeKeepAliveGuideNavigator
@@ -80,6 +82,7 @@ fun RuntimeAndDirScreen(
     val heartbeatEnabled by viewModel.keepAliveHeartbeatEnabled.collectAsStateWithLifecycle()
     val heartbeatMode by viewModel.keepAliveHeartbeatMode.collectAsStateWithLifecycle()
     val heartbeatIntervalMinutes by viewModel.keepAliveHeartbeatIntervalMinutes.collectAsStateWithLifecycle()
+    val normalModeStabilityMode by viewModel.normalModeStabilityMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -103,6 +106,14 @@ fun RuntimeAndDirScreen(
         .coerceAtLeast(NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES)
     var heartbeatInput by rememberSaveable(heartbeatIntervalMinutes) {
         mutableStateOf(heartbeatIntervalMinutes.toString())
+    }
+    val workDirInfo = viewModel.workDirInfo
+    val normalRuntimeProfile = remember(
+        normalModeStabilityMode,
+        workDirInfo.normalBaseDir.absolutePath,
+        state.runMode
+    ) {
+        NormalModeRuntimeProfiles.current(context)
     }
 
     LaunchedEffect(viewModel.operationMessage) {
@@ -307,6 +318,36 @@ fun RuntimeAndDirScreen(
                     } else {
                         SettingsDivider()
                     }
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "普通模式稳定策略",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            NormalModeStabilityMode.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = normalModeStabilityMode == mode,
+                                    onClick = { viewModel.setNormalModeStabilityMode(mode) },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index = index,
+                                        count = NormalModeStabilityMode.entries.size
+                                    )
+                                ) {
+                                    Text(mode.label)
+                                }
+                            }
+                        }
+                        Text(
+                            text = normalModeStabilitySummary(normalModeStabilityMode, normalRuntimeProfile),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    SettingsDivider()
                     SettingsItem(
                         title = "系统无障碍设置",
                         subtitle = if (viewModel.a11yEnabled) "已启用，点击可管理" else "未启用，点击前往开启",
@@ -500,5 +541,36 @@ fun RuntimeAndDirScreen(
                 TextButton(onClick = { showKeepAliveGuideDialog = false }) { Text("完成") }
             }
         )
+    }
+}
+
+
+private fun normalModeStabilitySummary(
+    mode: NormalModeStabilityMode,
+    profile: com.example.danmuapiapp.data.service.NormalModeRuntimeProfile
+): String {
+    return when (mode) {
+        NormalModeStabilityMode.Auto -> {
+            val reasons = listOfNotNull(
+                "低内存设备".takeIf { profile.lowRamDevice },
+                "共享存储目录".takeIf { profile.slowStorageWorkDir }
+            )
+            if (profile.conservativeMode) {
+                val reasonText = if (reasons.isEmpty()) {
+                    "当前环境"
+                } else {
+                    reasons.joinToString("、")
+                }
+                "自动模式下当前已启用稳定优先：关闭 worker 和热更新，并减少普通模式刷新压力。原因：$reasonText。"
+            } else {
+                "自动模式下当前保持性能优先：继续使用 worker 和热更新。"
+            }
+        }
+        NormalModeStabilityMode.PreferStability -> {
+            "已手动固定为稳定优先：普通模式会关闭 worker 和热更新，并放宽启动等待时间。"
+        }
+        NormalModeStabilityMode.PreferPerformance -> {
+            "已手动固定为性能优先：即使是低内存设备或共享存储目录，也不会主动降级。"
+        }
     }
 }

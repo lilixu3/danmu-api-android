@@ -166,6 +166,7 @@ object NodeProjectManager {
         } else {
             portFromEnv ?: 9321
         }
+        val runtimeProfile = NormalModeRuntimeProfiles.current(context)
 
         val updates = linkedMapOf<String, String>()
         updates["DANMU_API_VARIANT"] = variantValue
@@ -186,6 +187,8 @@ object NodeProjectManager {
             }
         }
         updates["LOG_LEVEL"] = prefs.safeGetString("log_level", "info").ifBlank { "info" }
+        updates["DANMU_API_WORKER"] = if (runtimeProfile.workerEnabled) "1" else "0"
+        updates["DANMU_API_HOT_RELOAD"] = if (runtimeProfile.hotReloadEnabled) "1" else "0"
         // 统一走 /api/logs 内存日志，禁用文件日志落盘。
         val logSwitch = 0
         val logMaxBytes = 1048576

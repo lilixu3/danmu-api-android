@@ -13,6 +13,7 @@ import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
+import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.*
@@ -59,6 +60,8 @@ class HomeViewModel @Inject constructor(
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
         private const val REQUEST_RECORD_REFRESH_DELAY_MS = 900L
         private const val CACHE_RUNTIME_REFRESH_DELAY_MS = 1200L
+        private const val CONSERVATIVE_REQUEST_RECORD_REFRESH_DELAY_MS = 1600L
+        private const val CONSERVATIVE_CACHE_RUNTIME_REFRESH_DELAY_MS = 2200L
         private const val CACHE_FILE_OBSERVER_MASK = FileObserver.CLOSE_WRITE or
             FileObserver.MODIFY or
             FileObserver.CREATE or
@@ -225,7 +228,10 @@ class HomeViewModel @Inject constructor(
                 .map { it.runMode to it.status }
                 .distinctUntilChanged()
                 .collect { (runMode, status) ->
-                    if (status == ServiceStatus.Running && runMode == RunMode.Normal) {
+                    if (status == ServiceStatus.Running &&
+                        runMode == RunMode.Normal &&
+                        !normalRuntimeProfile().conservativeMode
+                    ) {
                         startCacheFileObserver(runMode)
                     } else {
                         stopCacheFileObserver()
@@ -240,7 +246,27 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun scheduleRequestRecordRefresh(delayMs: Long = REQUEST_RECORD_REFRESH_DELAY_MS) {
+    private fun normalRuntimeProfile() = NormalModeRuntimeProfiles.current(appContext)
+
+    private fun requestRecordRefreshDelayMs(): Long {
+        val state = runtimeState.value
+        return if (state.runMode == RunMode.Normal && normalRuntimeProfile().conservativeMode) {
+            CONSERVATIVE_REQUEST_RECORD_REFRESH_DELAY_MS
+        } else {
+            REQUEST_RECORD_REFRESH_DELAY_MS
+        }
+    }
+
+    private fun runtimeCacheRefreshDelayMs(): Long {
+        val state = runtimeState.value
+        return if (state.runMode == RunMode.Normal && normalRuntimeProfile().conservativeMode) {
+            CONSERVATIVE_CACHE_RUNTIME_REFRESH_DELAY_MS
+        } else {
+            CACHE_RUNTIME_REFRESH_DELAY_MS
+        }
+    }
+
+    private fun scheduleRequestRecordRefresh(delayMs: Long = requestRecordRefreshDelayMs()) {
         requestRecordRefreshJob?.cancel()
         requestRecordRefreshJob = viewModelScope.launch {
             delay(delayMs)
@@ -261,7 +287,7 @@ class HomeViewModel @Inject constructor(
         refreshCacheInternal(force = true)
     }
 
-    private fun scheduleRuntimeCacheRefresh(delayMs: Long = CACHE_RUNTIME_REFRESH_DELAY_MS) {
+    private fun scheduleRuntimeCacheRefresh(delayMs: Long = runtimeCacheRefreshDelayMs()) {
         runtimeCacheRefreshJob?.cancel()
         runtimeCacheRefreshJob = viewModelScope.launch {
             delay(delayMs)
