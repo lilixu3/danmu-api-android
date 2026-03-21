@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.example.danmuapiapp.domain.model.RunMode
 
 class BootReceiver : BroadcastReceiver() {
@@ -11,32 +12,38 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_USER_UNLOCKED
         ) return
 
-        SystemHeartbeatScheduler.refresh(context.applicationContext)
+        val appContext = context.applicationContext
+        SystemHeartbeatScheduler.refresh(appContext)
 
-        if (!NormalAutoStartPrefs.isBootAutoStartEnabled(context)) return
+        if (!NormalAutoStartPrefs.isBootAutoStartEnabled(appContext)) return
 
         val pending = goAsync()
         Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
-                val runMode = RuntimeModePrefs.get(context)
-                // 高权限模式由对应模块负责触发，这里仅处理普通模式。
-                if (runMode == RunMode.Normal) {
-                    val projectDir = RuntimePaths.normalProjectDir(context)
-                    if (NodeProjectManager.hasSelectedCoreInstalled(context, projectDir)) {
-                        runCatching {
-                            NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                                context = context,
-                                targetProjectDir = projectDir
-                            )
+                runCatching {
+                    val runMode = RuntimeModePrefs.get(appContext)
+                    // 高权限模式由对应模块负责触发，这里仅处理普通模式。
+                    if (runMode == RunMode.Normal) {
+                        val projectDir = RuntimePaths.normalProjectDir(appContext)
+                        if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
+                            runCatching {
+                                NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                                    context = appContext,
+                                    targetProjectDir = projectDir
+                                )
+                            }
+                            val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                                .getInt("port", 9321)
+                            val recovered = runCatching {
+                                NodeService.recoverStaleProcessIfNeeded(appContext, port)
+                            }.getOrDefault(true)
+                            if (!recovered) return@runCatching
+                            NodeService.start(appContext, userInitiated = false)
                         }
-                        val port = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
-                            .getInt("port", 9321)
-                        val recovered = runCatching {
-                            NodeService.recoverStaleProcessIfNeeded(context, port)
-                        }.getOrDefault(true)
-                        if (!recovered) return@Thread
-                        NodeService.start(context.applicationContext)
                     }
+                }.onFailure {
+                    Log.e("BootReceiver", "普通模式开机恢复失败", it)
                 }
             } finally {
                 pending.finish()

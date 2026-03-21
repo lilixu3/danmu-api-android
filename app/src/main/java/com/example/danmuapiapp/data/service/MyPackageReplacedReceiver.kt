@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.example.danmuapiapp.domain.model.RunMode
 
 /**
@@ -20,35 +21,39 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
         Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
-                val shouldAutoStart = RuntimeModePrefs.get(appContext) == RunMode.Normal &&
-                    NodeKeepAlivePrefs.isKeepAliveEnabled(appContext) &&
-                    NodeKeepAlivePrefs.isDesiredRunning(appContext)
+                runCatching {
+                    val shouldAutoStart = RuntimeModePrefs.get(appContext) == RunMode.Normal &&
+                        NodeKeepAlivePrefs.isKeepAliveEnabled(appContext) &&
+                        NodeKeepAlivePrefs.isDesiredRunning(appContext)
 
-                if (shouldAutoStart) {
-                    val projectDir = RuntimePaths.normalProjectDir(appContext)
-                    if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
-                        val runtimeReady = runCatching {
-                            NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                                context = appContext,
-                                targetProjectDir = projectDir
-                            )
-                        }.getOrDefault(false)
-                        if (runtimeReady) {
-                            RuntimeWarmupManager.markWarmupCompleted(appContext, 0L)
+                    if (shouldAutoStart) {
+                        val projectDir = RuntimePaths.normalProjectDir(appContext)
+                        if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
+                            val runtimeReady = runCatching {
+                                NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                                    context = appContext,
+                                    targetProjectDir = projectDir
+                                )
+                            }.getOrDefault(false)
+                            if (runtimeReady) {
+                                RuntimeWarmupManager.markWarmupCompleted(appContext, 0L)
+                            }
+                            val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                                .getInt("port", 9321)
+                            val recovered = runCatching {
+                                NodeService.recoverStaleProcessIfNeeded(appContext, port)
+                            }.getOrDefault(true)
+                            if (!recovered) return@runCatching
+                            NodeService.start(appContext, userInitiated = false)
+                            return@runCatching
                         }
-                        val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
-                            .getInt("port", 9321)
-                        val recovered = runCatching {
-                            NodeService.recoverStaleProcessIfNeeded(appContext, port)
-                        }.getOrDefault(true)
-                        if (!recovered) return@Thread
-                        NodeService.start(appContext)
-                        return@Thread
                     }
-                }
 
-                if (RuntimeWarmupManager.shouldAttemptReceiverWarmup(appContext)) {
-                    RuntimeWarmupManager.runWarmup(appContext)
+                    if (RuntimeWarmupManager.shouldAttemptReceiverWarmup(appContext)) {
+                        RuntimeWarmupManager.runWarmup(appContext)
+                    }
+                }.onFailure {
+                    Log.e("PkgReplacedReceiver", "覆盖安装后的普通模式恢复失败", it)
                 }
             } finally {
                 pending.finish()

@@ -5,11 +5,13 @@ import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
+import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -54,6 +56,10 @@ class SettingsRepositoryImpl @Inject constructor(
         MutableStateFlow(NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context))
     override val keepAliveHeartbeatIntervalMinutes: StateFlow<Int> =
         _keepAliveHeartbeatIntervalMinutes.asStateFlow()
+
+    private val _normalModeStabilityMode = MutableStateFlow(NormalModeStabilityPrefs.get(context))
+    override val normalModeStabilityMode: StateFlow<NormalModeStabilityMode> =
+        _normalModeStabilityMode.asStateFlow()
 
     private val _nightMode = MutableStateFlow(AppAppearancePrefs.readNightMode(uiPrefs))
     override val nightMode: StateFlow<NightModePreference> = _nightMode.asStateFlow()
@@ -132,6 +138,11 @@ class SettingsRepositoryImpl @Inject constructor(
         val normalized = NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(minutes)
         NodeKeepAlivePrefs.setHeartbeatIntervalMinutes(context, normalized)
         _keepAliveHeartbeatIntervalMinutes.value = normalized
+    }
+
+    override fun setNormalModeStabilityMode(mode: NormalModeStabilityMode) {
+        NormalModeStabilityPrefs.set(context, mode)
+        _normalModeStabilityMode.value = mode
     }
 
     override fun setNightMode(mode: NightModePreference) {
