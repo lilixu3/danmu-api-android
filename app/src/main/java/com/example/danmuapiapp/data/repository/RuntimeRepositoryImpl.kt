@@ -915,9 +915,8 @@ class RuntimeRepositoryImpl @Inject constructor(
             return false
         }
 
-        val stopped = waitForRuntimeStopped(
-            mode = RunMode.Normal,
-            oldPort = port,
+        val stopped = waitForNormalProcessStopped(
+            port = port,
             timeoutMs = NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS
         )
         if (!stopped) {
@@ -1114,25 +1113,24 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val serviceRunning = isNormalServiceRunning()
-        val processRunning = isNormalProcessRunning()
         val portOpen = isPortOpen(state.port)
         when (state.status) {
             ServiceStatus.Running -> {
                 when {
-                    processRunning && !portOpen -> {
+                    serviceRunning && !portOpen -> {
                         reconcileConsecutiveDeadCount = 0
                         reconcileConsecutiveStaleProcessCount++
                         if (reconcileConsecutiveStaleProcessCount >= 2) {
-                            markError("普通模式进程异常残留，请重试启动")
+                            markError("普通模式服务异常，请重试启动")
                             addLog(
                                 LogLevel.Warn,
-                                "检测到普通模式 :node 进程仍在，但监听端口已不可用；下次启动会先回收旧进程"
+                                "检测到普通模式前台服务仍在，但监听端口已不可用；已恢复为可重试状态"
                             )
                             reconcileConsecutiveStaleProcessCount = 0
                         }
                     }
 
-                    !processRunning && !portOpen -> {
+                    !serviceRunning && !portOpen -> {
                         reconcileConsecutiveStaleProcessCount = 0
                         reconcileConsecutiveDeadCount++
                         if (reconcileConsecutiveDeadCount >= 2) {
@@ -1158,36 +1156,32 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
                 val startAt = normalStartIssuedAtMs
                 if (startAt <= 0L) {
-                    when {
-                        serviceRunning || processRunning -> {
-                            normalStartIssuedAtMs = System.currentTimeMillis()
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Starting,
-                                message = state.statusMessage ?: "正在初始化运行环境，请稍候"
-                            )
-                        }
-
-                        else -> {
-                            markStopped("服务未运行，可重新启动")
-                            addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
-                        }
+                    if (serviceRunning) {
+                        normalStartIssuedAtMs = System.currentTimeMillis()
+                        updateStatusMessage(
+                            expectedStatus = ServiceStatus.Starting,
+                            message = state.statusMessage ?: "正在初始化运行环境，请稍候"
+                        )
+                    } else {
+                        markStopped("服务未运行，可重新启动")
+                        addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
                     }
                     return
                 }
                 val staleTimeoutMs = normalRuntimeProfile().startupStaleTimeoutMs
                 if (System.currentTimeMillis() - startAt >= staleTimeoutMs) {
-                    val message = when {
-                        serviceRunning -> "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
-                        processRunning -> "普通模式启动卡住：旧进程未完全退出，请重试启动"
-                        else -> "普通模式启动状态失效，请重试启动"
+                    val message = if (serviceRunning) {
+                        "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
+                    } else {
+                        "普通模式启动状态失效，请重试启动"
                     }
                     markError(message)
                     addLog(
                         LogLevel.Warn,
-                        when {
-                            serviceRunning -> "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
-                            processRunning -> "普通模式旧进程长时间未退出，已恢复为可重试状态"
-                            else -> "普通模式长时间未完成启动，已自动恢复为可重试状态"
+                        if (serviceRunning) {
+                            "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
+                        } else {
+                            "普通模式长时间未完成启动，已自动恢复为可重试状态"
                         }
                     )
                 }
@@ -1196,7 +1190,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             ServiceStatus.Stopping -> {
                 reconcileConsecutiveDeadCount = 0
                 reconcileConsecutiveStaleProcessCount = 0
-                if (!processRunning && !portOpen) {
+                if (!serviceRunning && !portOpen) {
                     markStopped()
                 }
             }
@@ -1783,7 +1777,14 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalRuntimeStopped(port: Int): Boolean {
-        return !isNormalProcessRunning() && !isPortOpen(port)
+        val state = _runtimeState.value
+        if (state.runMode == RunMode.Normal &&
+            state.status == ServiceStatus.Stopped &&
+            !isPortOpen(port)
+        ) {
+            return true
+        }
+        return !isNormalServiceRunning() && !isPortOpen(port)
     }
 
     private suspend fun waitForRuntimeStopped(mode: RunMode, oldPort: Int, timeoutMs: Long): Boolean {
@@ -1800,6 +1801,19 @@ class RuntimeRepositoryImpl @Inject constructor(
             RunMode.Normal -> isNormalRuntimeStopped(oldPort)
             RunMode.Root -> !RootRuntimeController.isRunning(context, oldPort)
         }
+    }
+
+    private fun isNormalProcessStopped(port: Int): Boolean {
+        return !isNormalProcessRunning() && !isPortOpen(port)
+    }
+
+    private suspend fun waitForNormalProcessStopped(port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (isNormalProcessStopped(port)) return true
+            delay(180)
+        }
+        return isNormalProcessStopped(port)
     }
 
     @Suppress("DEPRECATION")

@@ -668,7 +668,8 @@ class NodeService : Service() {
             val threadAlive = nodeThread?.isAlive == true
             val staleFlags = (isRunning || isStopping) &&
                 !threadAlive &&
-                !anyPortOpen
+                !anyPortOpen &&
+                startupStartedAtMs <= 0L
             val startupTimedOut = isRunning &&
                 !threadAlive &&
                 !isStopping &&
