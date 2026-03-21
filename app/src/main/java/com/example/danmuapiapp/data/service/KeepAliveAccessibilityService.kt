@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
 import java.net.InetSocketAddress
@@ -18,6 +19,10 @@ import java.net.Socket
  * 无障碍保活服务：普通模式下在异常退出时自动拉起前台服务。
  */
 class KeepAliveAccessibilityService : AccessibilityService() {
+
+    companion object {
+        private const val TAG = "KeepAliveA11y"
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastEventTickUptimeMs = 0L
@@ -158,20 +163,25 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         restartInFlight = true
         val appContext = applicationContext
         Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 runCatching {
-                    NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                        context = appContext,
-                        targetProjectDir = projectDir
-                    )
-                }
-                val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
-                    .getInt("port", 9321)
-                val recovered = runCatching {
-                    NodeService.recoverStaleProcessIfNeeded(appContext, port)
-                }.getOrDefault(true)
-                if (recovered) {
-                    runCatching { NodeService.start(appContext) }
+                    runCatching {
+                        NodeProjectManager.syncRuntimeEnvIfProjectReady(
+                            context = appContext,
+                            targetProjectDir = projectDir
+                        )
+                    }
+                    val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+                        .getInt("port", 9321)
+                    val recovered = runCatching {
+                        NodeService.recoverStaleProcessIfNeeded(appContext, port)
+                    }.getOrDefault(true)
+                    if (recovered) {
+                        runCatching { NodeService.start(appContext, userInitiated = false) }
+                    }
+                }.onFailure {
+                    Log.e(TAG, "无障碍保活恢复失败", it)
                 }
             } finally {
                 restartInFlight = false

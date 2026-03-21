@@ -18,6 +18,7 @@ import com.example.danmuapiapp.data.util.CoreApiRouteMode
 import com.example.danmuapiapp.data.util.CoreApiRoutePolicy
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NodeProjectManager
+import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RootRuntimeController
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
@@ -116,6 +117,9 @@ class RuntimeRepositoryImpl @Inject constructor(
             when (status) {
                 NodeService.STATUS_STARTING -> {
                     if (_runtimeState.value.status != ServiceStatus.Stopping) {
+                        if (normalStartIssuedAtMs <= 0L) {
+                            normalStartIssuedAtMs = System.currentTimeMillis()
+                        }
                         markStarting(message)
                     }
                 }
@@ -586,6 +590,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun normalRuntimeProfile() = NormalModeRuntimeProfiles.current(context)
+
     override fun clearLogs() {
         clearedServiceLogCounts = serviceLogsCache.groupingBy { it }.eachCount()
         serviceLogsCache = emptyList()
@@ -632,6 +638,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, reason)
                     return
                 }
+                val normalProfile = normalRuntimeProfile()
                 val projectDir = RuntimePaths.normalProjectDir(context)
                 val selectedCoreDir = File(projectDir, "danmu_api_${state.variant.key}")
                 val selectedCoreReady = runCatching {
@@ -650,6 +657,27 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, reason)
                     return
                 }
+                if (normalProfile.conservativeMode) {
+                    val reasonText = when (normalProfile.strategyMode) {
+                        NormalModeStabilityMode.Auto -> {
+                            val reasons = listOfNotNull(
+                                "低内存设备".takeIf { normalProfile.lowRamDevice },
+                                "共享存储目录".takeIf { normalProfile.slowStorageWorkDir }
+                            )
+                            if (reasons.isEmpty()) {
+                                "（自动）"
+                            } else {
+                                "（自动：${reasons.joinToString("、")}）"
+                            }
+                        }
+                        NormalModeStabilityMode.PreferStability -> "（手动开启）"
+                        NormalModeStabilityMode.PreferPerformance -> ""
+                    }
+                    addLog(
+                        LogLevel.Info,
+                        "已启用普通模式稳定优先策略$reasonText：关闭 worker/热更新并延长启动等待时间"
+                    )
+                }
                 val envSynced = runCatching {
                     // 仅在现有运行目录可用时做快速配置同步，避免主进程重复走重型解压。
                     NodeProjectManager.syncRuntimeEnvIfProjectReady(
@@ -665,7 +693,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     return
                 }
                 val startResult = runCatching {
-                    NodeService.start(context)
+                    NodeService.start(context, userInitiated = true)
                 }
                 if (startResult.isFailure) {
                     val reason = ErrorHandler.buildDetailedMessage(
@@ -678,7 +706,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 normalStartIssuedAtMs = System.currentTimeMillis()
 
                 scope.launch {
-                    delay(NORMAL_START_TIMEOUT_PRIMARY_MS)
+                    delay(normalProfile.startupPrimaryNoticeMs)
                     val snapshot = _runtimeState.value
                     if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Starting) {
                         if (isPortOpen(snapshot.port)) {
@@ -689,7 +717,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                                 expectedStatus = ServiceStatus.Starting,
                                 message = "设备较慢，正在继续等待服务就绪…可点击取消启动"
                             )
-                            delay(NORMAL_START_TIMEOUT_EXTEND_MS)
+                            delay(normalProfile.startupSecondaryNoticeMs)
                             val retrySnapshot = _runtimeState.value
                             if (retrySnapshot.runMode == RunMode.Normal &&
                                 retrySnapshot.status == ServiceStatus.Starting
@@ -1129,8 +1157,25 @@ class RuntimeRepositoryImpl @Inject constructor(
                     return
                 }
                 val startAt = normalStartIssuedAtMs
-                if (startAt <= 0L) return
-                if (System.currentTimeMillis() - startAt >= NORMAL_START_STALE_TIMEOUT_MS) {
+                if (startAt <= 0L) {
+                    when {
+                        serviceRunning || processRunning -> {
+                            normalStartIssuedAtMs = System.currentTimeMillis()
+                            updateStatusMessage(
+                                expectedStatus = ServiceStatus.Starting,
+                                message = state.statusMessage ?: "正在初始化运行环境，请稍候"
+                            )
+                        }
+
+                        else -> {
+                            markStopped("服务未运行，可重新启动")
+                            addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
+                        }
+                    }
+                    return
+                }
+                val staleTimeoutMs = normalRuntimeProfile().startupStaleTimeoutMs
+                if (System.currentTimeMillis() - startAt >= staleTimeoutMs) {
                     val message = when {
                         serviceRunning -> "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
                         processRunning -> "普通模式启动卡住：旧进程未完全退出，请重试启动"

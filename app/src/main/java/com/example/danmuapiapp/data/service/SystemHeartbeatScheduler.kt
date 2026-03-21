@@ -60,7 +60,7 @@ object SystemHeartbeatScheduler {
             NodeService.recoverStaleProcessIfNeeded(context, port)
         }.getOrDefault(true)
         if (!recovered) return
-        runCatching { NodeService.start(context) }
+        runCatching { NodeService.start(context, userInitiated = false) }
     }
 
     private fun scheduleNext(context: Context, resetBeforeSchedule: Boolean) {

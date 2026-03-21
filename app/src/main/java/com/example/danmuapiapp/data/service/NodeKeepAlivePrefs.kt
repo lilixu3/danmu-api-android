@@ -24,31 +24,76 @@ object NodeKeepAlivePrefs {
     private const val KEY_HEARTBEAT_ENABLED = "heartbeat_enabled"
     private const val KEY_HEARTBEAT_MODE = "heartbeat_mode"
     private const val KEY_HEARTBEAT_INTERVAL_MINUTES = "heartbeat_interval_minutes"
+    private const val KEY_RECOVERY_FAILURE_COUNT = "recovery_failure_count"
+    private const val KEY_RECOVERY_BLOCK_UNTIL_MS = "recovery_block_until_ms"
+
+    private val RECOVERY_BACKOFF_STEPS_MS = longArrayOf(
+        15_000L,
+        60_000L,
+        3 * 60_000L,
+        5 * 60_000L,
+        10 * 60_000L
+    )
 
     const val HEARTBEAT_INTERVAL_MIN_MINUTES = 1
     const val HEARTBEAT_INTERVAL_MAX_MINUTES = 24 * 60
     const val HEARTBEAT_INTERVAL_DEFAULT_MINUTES = 30
     const val HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES = 15
 
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+
     fun isKeepAliveEnabled(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_KEEP_ALIVE_ENABLED, false)
+        return prefs(context).getBoolean(KEY_KEEP_ALIVE_ENABLED, false)
     }
 
     fun setKeepAliveEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putBoolean(KEY_KEEP_ALIVE_ENABLED, enabled)
         }
     }
 
     fun isDesiredRunning(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_DESIRED_RUNNING, false)
+        return prefs(context).getBoolean(KEY_DESIRED_RUNNING, false)
     }
 
     fun setDesiredRunning(context: Context, desired: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putBoolean(KEY_DESIRED_RUNNING, desired)
+        }
+    }
+
+    fun getRestartBlockRemainingMs(context: Context): Long {
+        val blockUntilMs = prefs(context).getLong(KEY_RECOVERY_BLOCK_UNTIL_MS, 0L)
+        return (blockUntilMs - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun isRestartBlocked(context: Context): Boolean {
+        return getRestartBlockRemainingMs(context) > 0L
+    }
+
+    fun clearRestartBackoff(context: Context) {
+        prefs(context).edit {
+            putInt(KEY_RECOVERY_FAILURE_COUNT, 0)
+            putLong(KEY_RECOVERY_BLOCK_UNTIL_MS, 0L)
+        }
+    }
+
+    fun noteSuccessfulStart(context: Context) {
+        clearRestartBackoff(context)
+    }
+
+    fun recordRecoveryFailure(context: Context) {
+        val sharedPrefs = prefs(context)
+        if (!sharedPrefs.getBoolean(KEY_DESIRED_RUNNING, false)) return
+
+        val currentCount = sharedPrefs.getInt(KEY_RECOVERY_FAILURE_COUNT, 0).coerceAtLeast(0)
+        val nextCount = (currentCount + 1).coerceAtMost(RECOVERY_BACKOFF_STEPS_MS.size)
+        val blockDelayMs = RECOVERY_BACKOFF_STEPS_MS[nextCount - 1]
+        val blockUntilMs = System.currentTimeMillis() + blockDelayMs
+        sharedPrefs.edit {
+            putInt(KEY_RECOVERY_FAILURE_COUNT, nextCount)
+            putLong(KEY_RECOVERY_BLOCK_UNTIL_MS, blockUntilMs)
         }
     }
 
@@ -65,36 +110,35 @@ object NodeKeepAlivePrefs {
     }
 
     fun isHeartbeatEnabled(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_HEARTBEAT_ENABLED, false)
+        return prefs(context).getBoolean(KEY_HEARTBEAT_ENABLED, false)
     }
 
     fun setHeartbeatEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putBoolean(KEY_HEARTBEAT_ENABLED, enabled)
         }
     }
 
     fun getHeartbeatMode(context: Context): KeepAliveHeartbeatMode {
-        val raw = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+        val raw = prefs(context)
             .getString(KEY_HEARTBEAT_MODE, KeepAliveHeartbeatMode.Accessibility.key)
         return KeepAliveHeartbeatMode.fromKey(raw)
     }
 
     fun setHeartbeatMode(context: Context, mode: KeepAliveHeartbeatMode) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putString(KEY_HEARTBEAT_MODE, mode.key)
         }
     }
 
     fun getHeartbeatIntervalMinutes(context: Context): Int {
-        val raw = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+        val raw = prefs(context)
             .getInt(KEY_HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_INTERVAL_DEFAULT_MINUTES)
         return normalizeHeartbeatIntervalMinutes(raw)
     }
 
     fun setHeartbeatIntervalMinutes(context: Context, minutes: Int) {
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putInt(KEY_HEARTBEAT_INTERVAL_MINUTES, normalizeHeartbeatIntervalMinutes(minutes))
         }
     }
@@ -197,6 +241,6 @@ object NodeKeepAlivePrefs {
 
     private fun normalizeClassName(rawClassName: String, pkg: String): String {
         val cls = rawClassName.trim()
-        return if (cls.startsWith(".")) pkg + cls else cls
+        return if (cls.startsWith('.')) pkg + cls else cls
     }
 }
