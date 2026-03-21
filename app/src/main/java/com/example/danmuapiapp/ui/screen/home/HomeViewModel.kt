@@ -804,15 +804,10 @@ class HomeViewModel @Inject constructor(
 
                 if (wasRunning) {
                     runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用核心切换...")
-                    val baseline = runtimeState.value.status
                     runtimeRepo.restartService()
-                    val started = waitForStatusAfterChange(
-                        baseline = baseline,
-                        statuses = setOf(ServiceStatus.Running, ServiceStatus.Error, ServiceStatus.Stopped),
-                        timeoutMs = 45_000
-                    )
-                    if (started != ServiceStatus.Running) {
-                        val reason = when (started) {
+                    val restarted = waitForRestartAfterCoreSwitch(timeoutMs = 45_000)
+                    if (restarted != ServiceStatus.Running) {
+                        val reason = when (restarted) {
                             ServiceStatus.Error -> "切换后服务启动失败，请查看日志"
                             ServiceStatus.Stopped -> "切换后服务未运行，请重试启动"
                             null -> "切换后服务启动超时，请查看日志"
@@ -841,16 +836,26 @@ class HomeViewModel @Inject constructor(
         else String.format(Locale.getDefault(), "%02d:%02d", m, s)
     }
 
-    private suspend fun waitForStatusAfterChange(
-        baseline: ServiceStatus,
-        statuses: Set<ServiceStatus>,
-        timeoutMs: Long
-    ): ServiceStatus? {
-        return withTimeoutOrNull(timeoutMs) {
+    private suspend fun waitForRestartAfterCoreSwitch(timeoutMs: Long): ServiceStatus? {
+        var sawRestartProgress = false
+        val result = withTimeoutOrNull(timeoutMs) {
             runtimeState
                 .map { it.status }
-                .dropWhile { it == baseline }
-                .first { it in statuses }
+                .first { status ->
+                    when (status) {
+                        ServiceStatus.Starting,
+                        ServiceStatus.Stopped -> {
+                            sawRestartProgress = true
+                            false
+                        }
+                        ServiceStatus.Error -> true
+                        ServiceStatus.Running -> sawRestartProgress
+                        else -> false
+                    }
+                }
+        }
+        return result ?: runtimeState.value.status.takeIf {
+            it == ServiceStatus.Stopped || it == ServiceStatus.Error
         }
     }
 

@@ -244,6 +244,10 @@ function _scheduleWorkerShutdown(state) {
   setTimeout(tick, 200);
 }
 
+const _SERVER_CLOSE_TIMEOUT_MS = 350;
+const _WORKER_TERMINATE_TIMEOUT_MS = 350;
+const _LOG_STREAM_CLOSE_TIMEOUT_MS = 120;
+
 function _closeServer(server) {
   if (!server) return Promise.resolve();
   return new Promise((resolve) => {
@@ -253,9 +257,33 @@ function _closeServer(server) {
       settled = true;
       resolve();
     };
-    const fallback = setTimeout(finish, 1200);
+    const fallback = setTimeout(finish, _SERVER_CLOSE_TIMEOUT_MS);
     try {
       server.close(() => {
+        clearTimeout(fallback);
+        finish();
+      });
+      try { server.closeIdleConnections?.(); } catch {}
+      try { server.closeAllConnections?.(); } catch {}
+    } catch {
+      clearTimeout(fallback);
+      finish();
+    }
+  });
+}
+
+function _closeLogStreamAsync(stream) {
+  if (!stream) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const fallback = setTimeout(finish, _LOG_STREAM_CLOSE_TIMEOUT_MS);
+    try {
+      stream.end(() => {
         clearTimeout(fallback);
         finish();
       });
@@ -274,10 +302,18 @@ async function _terminateWorkerImmediately(state) {
   try {
     await Promise.race([
       worker.terminate(),
-      new Promise((resolve) => setTimeout(resolve, 1200)),
+      new Promise((resolve) => setTimeout(resolve, _WORKER_TERMINATE_TIMEOUT_MS)),
     ]);
   } catch {
     // ignore
+  }
+}
+
+function _exitProcess(exitCode) {
+  try {
+    process.exit(exitCode);
+  } catch {
+    process.exitCode = exitCode;
   }
 }
 
@@ -300,19 +336,22 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
     _clearCoreWatchers();
 
     const workerState = _activeWorkerState;
+    const mainServer = _mainServer;
+    const proxyServer = _proxyServer;
+    const logStream = _logStream;
     _activeWorkerState = null;
-    await _terminateWorkerImmediately(workerState);
+    _mainServer = null;
+    _proxyServer = null;
+    _logStream = null;
 
     await Promise.allSettled([
-      _closeServer(_proxyServer),
-      _closeServer(_mainServer),
+      _terminateWorkerImmediately(workerState),
+      _closeServer(proxyServer),
+      _closeServer(mainServer),
+      _closeLogStreamAsync(logStream),
     ]);
-    _proxyServer = null;
-    _mainServer = null;
 
-    try { _logStream && _logStream.end(); } catch {}
-    _logStream = null;
-    process.exitCode = exitCode;
+    _exitProcess(exitCode);
   })();
 
   try {
