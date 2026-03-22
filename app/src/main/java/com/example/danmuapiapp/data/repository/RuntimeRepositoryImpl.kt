@@ -217,7 +217,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val portOpen = isPortOpen(port)
-        val normalRuntimeAlive = portOpen && isNormalServiceRunning()
+        val normalRuntimeAlive = portOpen && isNormalProcessRunning()
         val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
         val running = if (mode == RunMode.Root) {
             portOpen || rootPid != null
@@ -1066,7 +1066,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         when (state.runMode) {
             RunMode.Normal -> {
-                if (isPortOpen(state.port) && isNormalServiceRunning()) {
+                if (isPortOpen(state.port) && isNormalProcessRunning()) {
                     markRunning(forceNewStart = false)
                 }
             }
@@ -1113,24 +1113,25 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val serviceRunning = isNormalServiceRunning()
+        val processRunning = isNormalProcessRunning()
         val portOpen = isPortOpen(state.port)
         when (state.status) {
             ServiceStatus.Running -> {
                 when {
-                    serviceRunning && !portOpen -> {
+                    processRunning && !portOpen -> {
                         reconcileConsecutiveDeadCount = 0
                         reconcileConsecutiveStaleProcessCount++
                         if (reconcileConsecutiveStaleProcessCount >= 2) {
-                            markError("普通模式服务异常，请重试启动")
+                            markError("普通模式进程异常残留，请重试启动")
                             addLog(
                                 LogLevel.Warn,
-                                "检测到普通模式前台服务仍在，但监听端口已不可用；已恢复为可重试状态"
+                                "检测到普通模式 :node 进程仍在，但监听端口已不可用；下次启动会先回收旧进程"
                             )
                             reconcileConsecutiveStaleProcessCount = 0
                         }
                     }
 
-                    !serviceRunning && !portOpen -> {
+                    !processRunning && !portOpen -> {
                         reconcileConsecutiveStaleProcessCount = 0
                         reconcileConsecutiveDeadCount++
                         if (reconcileConsecutiveDeadCount >= 2) {
@@ -1156,32 +1157,36 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
                 val startAt = normalStartIssuedAtMs
                 if (startAt <= 0L) {
-                    if (serviceRunning) {
-                        normalStartIssuedAtMs = System.currentTimeMillis()
-                        updateStatusMessage(
-                            expectedStatus = ServiceStatus.Starting,
-                            message = state.statusMessage ?: "正在初始化运行环境，请稍候"
-                        )
-                    } else {
-                        markStopped("服务未运行，可重新启动")
-                        addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
+                    when {
+                        serviceRunning || processRunning -> {
+                            normalStartIssuedAtMs = System.currentTimeMillis()
+                            updateStatusMessage(
+                                expectedStatus = ServiceStatus.Starting,
+                                message = state.statusMessage ?: "正在初始化运行环境，请稍候"
+                            )
+                        }
+
+                        else -> {
+                            markStopped("服务未运行，可重新启动")
+                            addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
+                        }
                     }
                     return
                 }
                 val staleTimeoutMs = normalRuntimeProfile().startupStaleTimeoutMs
                 if (System.currentTimeMillis() - startAt >= staleTimeoutMs) {
-                    val message = if (serviceRunning) {
-                        "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
-                    } else {
-                        "普通模式启动状态失效，请重试启动"
+                    val message = when {
+                        serviceRunning -> "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
+                        processRunning -> "普通模式启动卡住：旧进程未完全退出，请重试启动"
+                        else -> "普通模式启动状态失效，请重试启动"
                     }
                     markError(message)
                     addLog(
                         LogLevel.Warn,
-                        if (serviceRunning) {
-                            "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
-                        } else {
-                            "普通模式长时间未完成启动，已自动恢复为可重试状态"
+                        when {
+                            serviceRunning -> "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
+                            processRunning -> "普通模式旧进程长时间未退出，已恢复为可重试状态"
+                            else -> "普通模式长时间未完成启动，已自动恢复为可重试状态"
                         }
                     )
                 }
@@ -1190,7 +1195,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             ServiceStatus.Stopping -> {
                 reconcileConsecutiveDeadCount = 0
                 reconcileConsecutiveStaleProcessCount = 0
-                if (!serviceRunning && !portOpen) {
+                if (!processRunning && !portOpen) {
                     markStopped()
                 }
             }
@@ -1382,6 +1387,15 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         when (state.runMode) {
             RunMode.Normal -> {
+                if (!normalRuntimeProfile().hotReloadEnabled) {
+                    stopNormalWorkDirWatcher()
+                    hotReloadJob?.cancel()
+                    hotReloadJob = null
+                    pendingHotReloadReason = null
+                    rootWorkDirFingerprint = null
+                    lastRootFingerprintCheckAtMs = 0L
+                    return
+                }
                 ensureNormalWorkDirWatcher()
                 rootWorkDirFingerprint = null
                 lastRootFingerprintCheckAtMs = 0L
@@ -1465,6 +1479,10 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         currentWatcher?.stop()
         hotReloadWatcher = null
+
+        if (!normalRuntimeProfile().hotReloadEnabled) {
+            return
+        }
 
         if (!projectDir.exists() || !projectDir.isDirectory) {
             return
@@ -1560,7 +1578,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         if (now < hotReloadSuppressUntilMs) return
         if (now - lastHotReloadAtMs < HOT_RELOAD_MIN_INTERVAL_MS) return
-        if (_runtimeState.value.status != ServiceStatus.Running) return
+        val snapshot = _runtimeState.value
+        if (snapshot.status != ServiceStatus.Running) return
+        if (snapshot.runMode == RunMode.Normal && !normalRuntimeProfile().hotReloadEnabled) return
 
         pendingHotReloadReason = reason
         hotReloadJob?.cancel()
@@ -1777,14 +1797,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalRuntimeStopped(port: Int): Boolean {
-        val state = _runtimeState.value
-        if (state.runMode == RunMode.Normal &&
-            state.status == ServiceStatus.Stopped &&
-            !isPortOpen(port)
-        ) {
-            return true
-        }
-        return !isNormalServiceRunning() && !isPortOpen(port)
+        return !isNormalProcessRunning() && !isPortOpen(port)
     }
 
     private suspend fun waitForRuntimeStopped(mode: RunMode, oldPort: Int, timeoutMs: Long): Boolean {
