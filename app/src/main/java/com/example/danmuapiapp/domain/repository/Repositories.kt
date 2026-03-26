@@ -37,6 +37,7 @@ interface CoreRepository {
 
 interface SettingsRepository {
     val githubProxy: StateFlow<String>
+    val announcementBaseUrl: StateFlow<String>
     val githubToken: StateFlow<String>
     val autoStart: StateFlow<Boolean>
     val keepAlive: StateFlow<Boolean>
@@ -55,6 +56,7 @@ interface SettingsRepository {
     val logPreviewEnabled: StateFlow<Boolean>
     val logMaxCount: StateFlow<Int>
     fun setGithubProxy(proxy: String)
+    fun setAnnouncementBaseUrl(url: String)
     fun setGithubToken(token: String)
     fun setAutoStart(enabled: Boolean)
     fun setKeepAlive(enabled: Boolean)

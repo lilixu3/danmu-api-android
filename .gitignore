@@ -3,6 +3,7 @@
 /local.properties
 /.idea
 .DS_Store
+.kotlin/
 /build
 /captures
 .externalNativeBuild
@@ -20,6 +21,9 @@ local.properties
 /重开项目提示词.md
 /OPEN_SOURCE_CHECKLIST.md
 /node_modules.zip
+/announcement-center/node_modules/
+/announcement-center/.env
+/.tmp-announcement-center-*
 
 # JNI 预编译库（体积大，需自行准备）
 /app/libnode/
