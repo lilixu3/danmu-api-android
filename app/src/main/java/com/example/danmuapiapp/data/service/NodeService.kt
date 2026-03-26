@@ -42,6 +42,7 @@ class NodeService : Service() {
             get() = "$actionPrefix.NODE_STATUS"
         const val EXTRA_STATUS = "status"
         const val EXTRA_MESSAGE = "status_message"
+        const val EXTRA_EXPLICIT_START = "explicit_start"
         const val STATUS_STARTING = "starting"
         const val STATUS_RUNNING = "running"
         const val STATUS_STOPPING = "stopping"
@@ -72,6 +73,7 @@ class NodeService : Service() {
             SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
+                putExtra(EXTRA_EXPLICIT_START, userInitiated)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -179,6 +181,7 @@ class NodeService : Service() {
     private var isStopping = false
     private var runningPublishedGeneration = -1L
     private var startupStartedAtMs = 0L
+    private var currentStartExplicit = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -189,6 +192,7 @@ class NodeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        val explicitStart = intent?.getBooleanExtra(EXTRA_EXPLICIT_START, false) == true
         when (action) {
             ACTION_STOP -> {
                 stopNode()
@@ -207,8 +211,11 @@ class NodeService : Service() {
 
         val shouldStart = shouldAcceptStartRequest()
         if (shouldStart) {
+            synchronized(stateLock) {
+                currentStartExplicit = explicitStart
+            }
             startServiceInForeground("正在启动...")
-            publishStarting("正在准备运行环境…")
+            publishStarting("正在准备运行环境…", explicitStart = explicitStart)
             startNode()
         }
         return START_STICKY
@@ -238,6 +245,7 @@ class NodeService : Service() {
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
+            currentStartExplicit = false
             nodeThread = null
         }
         broadcastStatus(
@@ -255,6 +263,7 @@ class NodeService : Service() {
     private fun startNode() {
         val generation: Long
         val startupIssuedAtMs = System.currentTimeMillis()
+        val explicitStart: Boolean
         synchronized(stateLock) {
             val startingOrRunning = isRunning || nodeThread?.isAlive == true
             if (startingOrRunning || isStopping) return
@@ -263,11 +272,12 @@ class NodeService : Service() {
             this@NodeService.startupStartedAtMs = startupIssuedAtMs
             generation = runtimeGeneration.incrementAndGet()
             runningPublishedGeneration = -1L
+            explicitStart = currentStartExplicit
         }
 
         scope.launch {
             try {
-                publishStarting("正在准备运行环境…")
+                publishStarting("正在准备运行环境…", explicitStart = explicitStart)
                 val projectDir = awaitPreparedProjectDir(
                     generation = generation,
                     startupStartedAtMs = startupIssuedAtMs
@@ -328,12 +338,12 @@ class NodeService : Service() {
                 synchronized(stateLock) {
                     nodeThread = runtimeThread
                 }
-                publishStarting("运行环境已准备，正在启动服务…")
+                publishStarting("运行环境已准备，正在启动服务…", explicitStart = explicitStart)
                 runtimeThread.start()
 
                 // 启动慢机型上端口可能晚于首轮超时才就绪，因此超时后继续低频复检。
                 scope.launch {
-                    publishStarting("正在等待服务端口就绪…")
+                    publishStarting("正在等待服务端口就绪…", explicitStart = explicitStart)
                     val profile = runtimeProfile()
                     val initialReadyTimeoutMs = remainingStartupBudgetMs(startupStartedAtMs, profile)
                         .coerceAtMost(profile.startupReadyTimeoutMs)
@@ -352,7 +362,7 @@ class NodeService : Service() {
                         return@launch
                     }
 
-                    publishStarting("启动较慢，继续等待服务就绪…")
+                    publishStarting("启动较慢，继续等待服务就绪…", explicitStart = explicitStart)
                     while (isActive && runtimeGeneration.get() == generation) {
                         if (!isNodeThreadAlive()) return@launch
                         val ports = resolveCandidatePorts()
@@ -475,6 +485,7 @@ class NodeService : Service() {
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
+            currentStartExplicit = false
             if (!threadAlive) {
                 nodeThread = null
             }
@@ -600,22 +611,28 @@ class NodeService : Service() {
     }
 
     private fun publishRunningIfNeeded(generation: Long) {
-        val shouldPublish = synchronized(stateLock) {
+        val publishExplicitStart = synchronized(stateLock) {
             val sameGeneration = runtimeGeneration.get() == generation
-            if (!sameGeneration) return@synchronized false
+            if (!sameGeneration) return@synchronized null
             val canPublish = isRunning &&
                 !isStopping &&
                 nodeThread?.isAlive == true &&
                 runningPublishedGeneration != generation
             if (canPublish) {
                 runningPublishedGeneration = generation
+                currentStartExplicit
+            } else {
+                null
             }
-            canPublish
         }
-        if (!shouldPublish) return
+        if (publishExplicitStart == null) return
         NodeKeepAlivePrefs.noteSuccessfulStart(applicationContext)
         updateNotification("服务运行中")
-        broadcastStatus(STATUS_RUNNING, message = "接口已就绪，可直接在局域网访问")
+        broadcastStatus(
+            STATUS_RUNNING,
+            message = "接口已就绪，可直接在局域网访问",
+            explicitStart = publishExplicitStart
+        )
     }
 
     private fun finalizeStop(generation: Long) {
@@ -626,6 +643,7 @@ class NodeService : Service() {
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
+            currentStartExplicit = false
             if (nodeThread?.isAlive != true) {
                 nodeThread = null
             }
@@ -689,6 +707,7 @@ class NodeService : Service() {
                 isStopping = false
                 runningPublishedGeneration = -1L
                 startupStartedAtMs = 0L
+                currentStartExplicit = false
                 nodeThread = null
             }
             return !(isRunning || nodeThread?.isAlive == true || isStopping)
@@ -728,18 +747,28 @@ class NodeService : Service() {
         return ErrorHandler.buildDetailedMessage(t)
     }
 
-    private fun broadcastStatus(status: String, message: String? = null, error: String? = null) {
+    private fun currentExplicitStart(): Boolean {
+        return synchronized(stateLock) { currentStartExplicit }
+    }
+
+    private fun broadcastStatus(
+        status: String,
+        message: String? = null,
+        error: String? = null,
+        explicitStart: Boolean? = null
+    ) {
         sendBroadcast(Intent(ACTION_STATUS).apply {
             setPackage(packageName)
             putExtra(EXTRA_STATUS, status)
             message?.let { putExtra(EXTRA_MESSAGE, it) }
             error?.let { putExtra(EXTRA_ERROR, it) }
+            explicitStart?.let { putExtra(EXTRA_EXPLICIT_START, it) }
         })
     }
 
-    private fun publishStarting(message: String) {
+    private fun publishStarting(message: String, explicitStart: Boolean = currentExplicitStart()) {
         updateNotification(message)
-        broadcastStatus(STATUS_STARTING, message = message)
+        broadcastStatus(STATUS_STARTING, message = message, explicitStart = explicitStart)
     }
 
     private fun publishStopping(message: String) {
@@ -795,6 +824,7 @@ class NodeService : Service() {
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
+            currentStartExplicit = false
         }
         super.onDestroy()
     }

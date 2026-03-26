@@ -113,6 +113,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             val status = intent.getStringExtra(NodeService.EXTRA_STATUS) ?: return
             val message = intent.getStringExtra(NodeService.EXTRA_MESSAGE)
+            val explicitStart = intent.getBooleanExtra(NodeService.EXTRA_EXPLICIT_START, false)
 
             when (status) {
                 NodeService.STATUS_STARTING -> {
@@ -120,6 +121,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                         if (normalStartIssuedAtMs <= 0L) {
                             normalStartIssuedAtMs = System.currentTimeMillis()
                         }
+                        normalPendingExplicitStart = explicitStart
                         markStarting(message)
                     }
                 }
@@ -129,19 +131,21 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
 
                 NodeService.STATUS_RUNNING -> {
-                    // 仅用户主动启动(Starting)时重置计时；进程重建后重连不重置。
-                    val explicit = _runtimeState.value.status == ServiceStatus.Starting
+                    val explicit = explicitStart || normalPendingExplicitStart
                     markRunning(forceNewStart = explicit, statusMessage = message)
+                    normalPendingExplicitStart = false
                     addLog(LogLevel.Info, "服务已启动")
                 }
 
                 NodeService.STATUS_STOPPED -> {
+                    normalPendingExplicitStart = false
                     markStopped(message)
                     addLog(LogLevel.Info, "服务已停止")
                 }
 
                 NodeService.STATUS_ERROR -> {
                     val error = intent.getStringExtra(NodeService.EXTRA_ERROR) ?: "未知错误"
+                    normalPendingExplicitStart = false
                     markError(error, statusMessage = message ?: error)
                     addLog(LogLevel.Error, "服务错误: $error")
                 }
@@ -165,6 +169,9 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     @Volatile
     private var normalStartIssuedAtMs = 0L
+
+    @Volatile
+    private var normalPendingExplicitStart = false
 
     private var reconcileConsecutiveDeadCount = 0
     private var reconcileConsecutiveStaleProcessCount = 0
@@ -626,6 +633,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 statusMessage = "正在准备启动服务…"
             )
         }
+        normalPendingExplicitStart = state.runMode == RunMode.Normal
         clearRuntimeStartedAt()
         addLog(LogLevel.Info, "正在启动服务...")
         persistSelectedVariant(state.variant, commit = true)
@@ -710,7 +718,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     val snapshot = _runtimeState.value
                     if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Starting) {
                         if (isPortOpen(snapshot.port)) {
-                            markRunning(forceNewStart = true)
+                            markRunning(forceNewStart = normalPendingExplicitStart)
                         } else {
                             addLog(LogLevel.Warn, "普通模式首次启动较慢，继续等待...")
                             updateStatusMessage(
@@ -723,7 +731,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                                 retrySnapshot.status == ServiceStatus.Starting
                             ) {
                                 if (isPortOpen(retrySnapshot.port)) {
-                                    markRunning(forceNewStart = true)
+                                    markRunning(forceNewStart = normalPendingExplicitStart)
                                 } else {
                                     addLog(LogLevel.Warn, "普通模式启动耗时较长，继续等待服务自行就绪...")
                                     updateStatusMessage(
@@ -980,6 +988,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         val mode = _runtimeState.value.runMode
         if (mode == RunMode.Normal) {
             normalStartIssuedAtMs = 0L
+            normalPendingExplicitStart = false
         }
         val startedAt = ensureRuntimeStartedAt(mode, forceNew = forceNewStart)
         val uptime = uptimeSecondsFrom(startedAt)
@@ -1004,6 +1013,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun markStopped(statusMessage: String? = null) {
         if (_runtimeState.value.runMode == RunMode.Normal) {
             normalStartIssuedAtMs = 0L
+            normalPendingExplicitStart = false
         }
         clearRuntimeStartedAt()
         _runtimeState.update {
@@ -1027,6 +1037,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
         if (state.runMode == RunMode.Normal && !stillRunning) {
             normalStartIssuedAtMs = 0L
+            normalPendingExplicitStart = false
         }
 
         _runtimeState.update {
@@ -1152,7 +1163,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 reconcileConsecutiveDeadCount = 0
                 reconcileConsecutiveStaleProcessCount = 0
                 if (portOpen) {
-                    markRunning(forceNewStart = true)
+                    markRunning(forceNewStart = normalPendingExplicitStart)
                     return
                 }
                 val startAt = normalStartIssuedAtMs
