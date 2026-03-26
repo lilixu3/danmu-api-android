@@ -77,8 +77,9 @@ data class AppAnnouncement(
 }
 
 @Serializable
-data class ActiveAnnouncementEnvelope(
-    val announcement: ActiveAnnouncementPayload? = null
+data class ActiveAnnouncementsEnvelope(
+    val announcement: ActiveAnnouncementPayload? = null,
+    val announcements: List<ActiveAnnouncementPayload> = emptyList()
 )
 
 @Serializable

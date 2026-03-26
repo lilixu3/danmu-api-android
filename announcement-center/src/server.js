@@ -69,18 +69,6 @@ function setFlash(req, type, message) {
   req.session.flash = { type, message };
 }
 
-async function offlineOtherPublishedAnnouncements(currentId) {
-  if (currentId == null) {
-    await pool.query('UPDATE announcements SET status = ? WHERE status = ?', ['offline', 'published']);
-    return;
-  }
-  await pool.query('UPDATE announcements SET status = ? WHERE status = ? AND id <> ?', [
-    'offline',
-    'published',
-    currentId,
-  ]);
-}
-
 async function ensureAdminAccount() {
   const [rows] = await pool.query('SELECT id, username FROM admins WHERE username = ? LIMIT 1', [
     ADMIN_USERNAME,
@@ -458,9 +446,6 @@ app.post('/admin/announcements', requireAdmin, async (req, res) => {
         payload.status,
       ]
     );
-    if (payload.status === 'published') {
-      await offlineOtherPublishedAnnouncements(result.insertId);
-    }
     setFlash(req, 'success', '公告已创建');
     res.redirect('/admin');
   } catch (error) {
@@ -539,9 +524,6 @@ app.post('/admin/announcements/:id', requireAdmin, async (req, res) => {
         req.params.id,
       ]
     );
-    if (payload.status === 'published') {
-      await offlineOtherPublishedAnnouncements(Number(req.params.id));
-    }
     setFlash(req, 'success', '公告已更新');
     res.redirect('/admin');
   } catch (error) {
@@ -593,7 +575,6 @@ app.post('/admin/announcements/:id/publish', requireAdmin, async (req, res) => {
     'UPDATE announcements SET status = ?, published_at = COALESCE(published_at, NOW()) WHERE id = ?',
     ['published', req.params.id]
   );
-  await offlineOtherPublishedAnnouncements(Number(req.params.id));
   setFlash(req, 'success', '公告已发布');
   res.redirect('/admin');
 });
@@ -616,7 +597,6 @@ app.get('/api/app/announcements/active', async (req, res) => {
         AND (start_at IS NULL OR start_at <= NOW())
         AND (end_at IS NULL OR end_at >= NOW())
       ORDER BY
-        force_popup DESC,
         GREATEST(
           COALESCE(updated_at, '1970-01-01 00:00:00'),
           COALESCE(published_at, '1970-01-01 00:00:00')
@@ -626,12 +606,13 @@ app.get('/api/app/announcements/active', async (req, res) => {
     `
   );
 
-  const active = rows.find((row) => matchesVariant(row, variant) && matchesVersion(row, version));
-  if (!active) {
-    return res.json({ announcement: null });
-  }
+  const activeAnnouncements = rows
+    .filter((row) => matchesVariant(row, variant) && matchesVersion(row, version))
+    .map((row) => serializeAnnouncement(row));
+
   return res.json({
-    announcement: serializeAnnouncement(active),
+    announcement: activeAnnouncements[0] || null,
+    announcements: activeAnnouncements,
   });
 });
 
