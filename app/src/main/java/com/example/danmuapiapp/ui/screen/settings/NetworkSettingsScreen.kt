@@ -8,11 +8,16 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.ui.component.*
 
 @Composable
@@ -21,6 +26,10 @@ fun NetworkSettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val announcementBaseUrl by viewModel.announcementBaseUrl.collectAsStateWithLifecycle()
+    var editableAnnouncementUrl by remember(announcementBaseUrl) {
+        mutableStateOf(announcementBaseUrl)
+    }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
@@ -62,6 +71,35 @@ fun NetworkSettingsScreen(
                     icon = Icons.Rounded.Speed,
                     onClick = viewModel::openProxyPicker
                 )
+            }
+
+            SettingsGroup(title = "公告服务") {
+                OutlinedTextField(
+                    value = editableAnnouncementUrl,
+                    onValueChange = { editableAnnouncementUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("公告服务地址") },
+                    placeholder = { Text("http://117.72.165.47:18086") }
+                )
+                Text(
+                    "用于拉取公告弹窗内容，默认已指向当前 VPS。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
+                ) {
+                    OutlinedButton(onClick = { editableAnnouncementUrl = announcementBaseUrl }) {
+                        Text("重置")
+                    }
+                    FilledTonalButton(
+                        onClick = { viewModel.saveAnnouncementBaseUrl(editableAnnouncementUrl) }
+                    ) {
+                        Text("保存地址")
+                    }
+                }
             }
         }
     }

@@ -20,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
+import com.example.danmuapiapp.data.service.AppForegroundAnnouncementChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.data.service.UpdateChecker
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var updateChecker: UpdateChecker
     @Inject lateinit var appForegroundUpdateChecker: AppForegroundUpdateChecker
+    @Inject lateinit var appForegroundAnnouncementChecker: AppForegroundAnnouncementChecker
     @Inject lateinit var appUpdateService: AppUpdateService
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var runtimeWarmupCoordinator: RuntimeWarmupCoordinator
@@ -110,6 +112,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         updateChecker.onAppResume()
         appForegroundUpdateChecker.onAppResume()
+        appForegroundAnnouncementChecker.onAppResume()
         appUpdateService.tryResumePendingInstall(this)
     }
 

@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
+import com.example.danmuapiapp.data.service.AppForegroundAnnouncementChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
@@ -52,6 +53,7 @@ class HomeViewModel @Inject constructor(
     private val githubProxyService: GithubProxyService,
     private val githubProxySpeedTester: GithubProxySpeedTester,
     private val appForegroundUpdateChecker: AppForegroundUpdateChecker,
+    private val appForegroundAnnouncementChecker: AppForegroundAnnouncementChecker,
     private val appUpdateService: AppUpdateService,
     private val cacheRepo: CacheRepository,
     private val adminSessionRepository: AdminSessionRepository
@@ -118,6 +120,8 @@ class HomeViewModel @Inject constructor(
         private set
     var showAppUpdatePromptDialog by mutableStateOf(false)
         private set
+    var showForegroundAnnouncementDialog by mutableStateOf(false)
+        private set
     var appUpdatePromptCurrentVersion by mutableStateOf<String?>(null)
         private set
     var appUpdatePromptLatestVersion by mutableStateOf<String?>(null)
@@ -129,6 +133,8 @@ class HomeViewModel @Inject constructor(
     var appUpdatePromptDownloadUrls by mutableStateOf<List<String>>(emptyList())
         private set
     var appUpdateMessage by mutableStateOf<String?>(null)
+        private set
+    var foregroundAnnouncementPrompt by mutableStateOf<AppAnnouncement?>(null)
         private set
     var showCacheAdminRequiredDialog by mutableStateOf(false)
         private set
@@ -189,6 +195,7 @@ class HomeViewModel @Inject constructor(
         loadIgnoredUpdateVersions()
         observeUpdatePrompt()
         observeForegroundAppUpdate()
+        observeForegroundAnnouncement()
         observeRuntimeDrivenCoreRefresh()
         observeRuntimeDrivenRequestRecordRefresh()
         observeRuntimeDrivenCacheRefresh()
@@ -613,6 +620,37 @@ class HomeViewModel @Inject constructor(
         appUpdateInstaller.dismissMethodDialog()
     }
 
+    fun acknowledgeForegroundAnnouncementPrompt() {
+        val announcement = foregroundAnnouncementPrompt ?: return
+        showForegroundAnnouncementDialog = false
+        appForegroundAnnouncementChecker.acknowledgeAnnouncement(announcement.id)
+    }
+
+    fun closeForegroundAnnouncementPrompt() {
+        val announcement = foregroundAnnouncementPrompt ?: return
+        showForegroundAnnouncementDialog = false
+        appForegroundAnnouncementChecker.consumeLatestPrompt(announcement.id)
+    }
+
+    fun snoozeForegroundAnnouncementPrompt() {
+        val announcement = foregroundAnnouncementPrompt ?: return
+        showForegroundAnnouncementDialog = false
+        appForegroundAnnouncementChecker.snoozeForToday(announcement.id)
+        appUpdateMessage = "该公告已设置今日不提醒，24 小时内不会再次弹出"
+    }
+
+    fun openForegroundAnnouncementPrimaryAction(activity: Activity) {
+        val action = foregroundAnnouncementPrompt?.primaryAction ?: return
+        appUpdateService.openUrl(activity, action.url)
+        acknowledgeForegroundAnnouncementPrompt()
+    }
+
+    fun openForegroundAnnouncementSecondaryAction(activity: Activity) {
+        val action = foregroundAnnouncementPrompt?.secondaryAction ?: return
+        appUpdateService.openUrl(activity, action.url)
+        acknowledgeForegroundAnnouncementPrompt()
+    }
+
     fun startInAppUpdateDownload() {
         appUpdateInstaller.startDownload(
             urls = appUpdatePromptDownloadUrls,
@@ -909,6 +947,27 @@ class HomeViewModel @Inject constructor(
 
                 if (!showAppUpdateMethodDialog && !isDownloadingAppUpdate && !showInstallAppUpdateDialog) {
                     showAppUpdatePromptDialog = true
+                }
+            }
+        }
+    }
+
+    private fun observeForegroundAnnouncement() {
+        viewModelScope.launch {
+            appForegroundAnnouncementChecker.latestAnnouncement.collect { announcement ->
+                foregroundAnnouncementPrompt = announcement
+                if (announcement == null) {
+                    showForegroundAnnouncementDialog = false
+                    return@collect
+                }
+
+                if (
+                    !showUpdatePromptDialog &&
+                    !showAppUpdatePromptDialog &&
+                    !showAppUpdateMethodDialog &&
+                    !showInstallAppUpdateDialog
+                ) {
+                    showForegroundAnnouncementDialog = true
                 }
             }
         }
