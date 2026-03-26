@@ -79,6 +79,7 @@ class HomeViewModel @Inject constructor(
     val cacheEntries = cacheRepo.cacheEntries
     val isCacheLoading = cacheRepo.isLoading
     val adminSessionState = adminSessionRepository.sessionState
+    val unreadAnnouncements = appForegroundAnnouncementChecker.unreadAnnouncements
     val requestTotalCount: StateFlow<Int> = requestRecordRepo.records
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -626,6 +627,16 @@ class HomeViewModel @Inject constructor(
         appForegroundAnnouncementChecker.acknowledgeAnnouncement(announcement.id)
     }
 
+    fun acknowledgeAllUnreadAnnouncements() {
+        val announcementIds = unreadAnnouncements.value.map { it.id }
+        if (announcementIds.isEmpty()) return
+        showForegroundAnnouncementDialog = false
+        appForegroundAnnouncementChecker.acknowledgeAnnouncements(announcementIds)
+        if (announcementIds.size > 1) {
+            appUpdateMessage = "未读公告已全部标记为已读"
+        }
+    }
+
     fun closeForegroundAnnouncementPrompt() {
         val announcement = foregroundAnnouncementPrompt ?: return
         showForegroundAnnouncementDialog = false
@@ -649,6 +660,11 @@ class HomeViewModel @Inject constructor(
         val action = foregroundAnnouncementPrompt?.secondaryAction ?: return
         appUpdateService.openUrl(activity, action.url)
         acknowledgeForegroundAnnouncementPrompt()
+    }
+
+    fun openAnnouncementDetails(announcement: AppAnnouncement) {
+        foregroundAnnouncementPrompt = announcement
+        showForegroundAnnouncementDialog = true
     }
 
     fun startInAppUpdateDownload() {
@@ -955,9 +971,7 @@ class HomeViewModel @Inject constructor(
     private fun observeForegroundAnnouncement() {
         viewModelScope.launch {
             appForegroundAnnouncementChecker.latestAnnouncement.collect { announcement ->
-                foregroundAnnouncementPrompt = announcement
                 if (announcement == null) {
-                    showForegroundAnnouncementDialog = false
                     return@collect
                 }
 
@@ -967,6 +981,7 @@ class HomeViewModel @Inject constructor(
                     !showAppUpdateMethodDialog &&
                     !showInstallAppUpdateDialog
                 ) {
+                    foregroundAnnouncementPrompt = announcement
                     showForegroundAnnouncementDialog = true
                 }
             }
