@@ -426,7 +426,7 @@ app.post('/admin/announcements', requireAdmin, async (req, res) => {
           primary_button_text, primary_button_url, primary_button_mode,
           secondary_button_text, secondary_button_url, secondary_button_mode,
           published_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           CASE WHEN ? = 'published' THEN NOW() ELSE NULL END
         )
       `,
