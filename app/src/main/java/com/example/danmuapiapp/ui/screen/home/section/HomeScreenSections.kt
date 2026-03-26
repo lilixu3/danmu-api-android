@@ -161,22 +161,29 @@ internal fun HomeTopHeader(
     status: ServiceStatus,
     isRunning: Boolean,
     uptime: String,
+    unreadAnnouncementCount: Int = 0,
     hasQueueTasks: Boolean = false,
     isQueueDownloading: Boolean = false,
     isQueuePaused: Boolean = false,
     queueSummary: DownloadQueueSummary = DownloadQueueSummary(),
-    onOpenDownloadSheet: () -> Unit = {}
+    onOpenDownloadSheet: () -> Unit = {},
+    onOpenUnreadAnnouncements: () -> Unit = {}
 ) {
     val downloadText = when {
         isQueueDownloading -> "正在下载 · 待 ${queueSummary.pending} 运行 ${queueSummary.running.coerceAtLeast(1)}"
         isQueuePaused -> "下载已暂停 · 待 ${queueSummary.pending}"
         else -> "队列 ${queueSummary.total} 个任务 · 完成 ${queueSummary.success}"
     }
+    val announcementText = when (unreadAnnouncementCount) {
+        1 -> "有 1 条未读公告"
+        else -> "有 $unreadAnnouncementCount 条未读公告"
+    }
     val downloadAccent = when {
         isQueueDownloading -> Color(0xFF4CAF50)
         isQueuePaused -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val announcementAccent = MaterialTheme.colorScheme.tertiary
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -218,7 +225,32 @@ internal fun HomeTopHeader(
                 }
             }
         }
-        if (hasQueueTasks) {
+        if (unreadAnnouncementCount > 0) {
+            Row(
+                modifier = Modifier
+                    .clickable(onClick = onOpenUnreadAnnouncements)
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.NotificationsActive,
+                    contentDescription = null,
+                    tint = announcementAccent,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = announcementText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = announcementAccent,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee(
+                        iterations = Int.MAX_VALUE,
+                        velocity = 30.dp
+                    )
+                )
+            }
+        } else if (hasQueueTasks) {
             Text(
                 text = downloadText,
                 style = MaterialTheme.typography.bodySmall,
@@ -1280,4 +1312,3 @@ internal fun InfoChip(
         }
     }
 }
-

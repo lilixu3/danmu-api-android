@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
@@ -75,6 +76,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -187,6 +189,7 @@ fun HomeScreen(
     val tokenVisible by viewModel.tokenVisible.collectAsStateWithLifecycle()
     val cacheStats by viewModel.cacheStats.collectAsStateWithLifecycle()
     val isCacheLoading by viewModel.isCacheLoading.collectAsStateWithLifecycle()
+    val unreadAnnouncements by viewModel.unreadAnnouncements.collectAsStateWithLifecycle()
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     val clipboardManager = LocalClipboard.current
@@ -217,6 +220,7 @@ fun HomeScreen(
     var quickTokenError by remember { mutableStateOf<String?>(null) }
     var showCoreUpdateConfirmDialog by remember { mutableStateOf(false) }
     var showDownloadQueueSheet by remember { mutableStateOf(false) }
+    var showUnreadAnnouncementListDialog by remember { mutableStateOf(false) }
     var showCacheQuickDialog by remember { mutableStateOf(false) }
     var isBatteryWhitelisted by remember {
         mutableStateOf(NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context))
@@ -296,6 +300,7 @@ fun HomeScreen(
     val queueProgressSummary = downloadViewModel?.progressSummary ?: "当前没有待处理任务"
     val queueThrottleHint = downloadViewModel?.throttleHint
     val hasQueueTasks = queueSummary.total > 0
+    val unreadAnnouncementCount = unreadAnnouncements.size
     val cacheTileValue = when {
         !isRunning -> "服务未运行"
         cacheStats.reqRecordsCount > 0 -> "${cacheStats.reqRecordsCount} 条记录"
@@ -423,6 +428,14 @@ fun HomeScreen(
         }
     }
 
+    fun openUnreadAnnouncementsEntry() {
+        when (unreadAnnouncementCount) {
+            0 -> Unit
+            1 -> viewModel.openAnnouncementDetails(unreadAnnouncements.first())
+            else -> showUnreadAnnouncementListDialog = true
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -480,11 +493,13 @@ fun HomeScreen(
                     status = state.status,
                     isRunning = isRunning,
                     uptime = uptimeText,
+                    unreadAnnouncementCount = unreadAnnouncementCount,
                     hasQueueTasks = hasQueueTasks,
                     isQueueDownloading = isQueueDownloading,
                     isQueuePaused = isQueuePaused,
                     queueSummary = queueSummary,
-                    onOpenDownloadSheet = { showDownloadQueueSheet = true }
+                    onOpenDownloadSheet = { showDownloadQueueSheet = true },
+                    onOpenUnreadAnnouncements = ::openUnreadAnnouncementsEntry
                 )
 
                 MissionControlHero(
@@ -896,6 +911,21 @@ fun HomeScreen(
         )
     }
 
+    if (showUnreadAnnouncementListDialog && unreadAnnouncementCount > 1) {
+        UnreadAnnouncementListDialog(
+            announcements = unreadAnnouncements,
+            onDismissRequest = { showUnreadAnnouncementListDialog = false },
+            onOpenAnnouncement = { announcement ->
+                showUnreadAnnouncementListDialog = false
+                viewModel.openAnnouncementDetails(announcement)
+            },
+            onAcknowledgeAll = {
+                showUnreadAnnouncementListDialog = false
+                viewModel.acknowledgeAllUnreadAnnouncements()
+            }
+        )
+    }
+
     val foregroundAnnouncement = viewModel.foregroundAnnouncementPrompt
     if (viewModel.showForegroundAnnouncementDialog && foregroundAnnouncement != null) {
         AnnouncementCenterDialog(
@@ -927,7 +957,7 @@ fun HomeScreen(
                     viewModel.openForegroundAnnouncementSecondaryAction(alive)
                 }
             },
-            onAcknowledge = viewModel::acknowledgeForegroundAnnouncementPrompt,
+            onMarkRead = viewModel::acknowledgeForegroundAnnouncementPrompt,
             onClose = viewModel::closeForegroundAnnouncementPrompt,
             onSnooze = viewModel::snoozeForegroundAnnouncementPrompt
         )
@@ -1239,7 +1269,7 @@ private fun AnnouncementCenterDialog(
     onDismissRequest: () -> Unit,
     onPrimaryAction: () -> Unit,
     onSecondaryAction: () -> Unit,
-    onAcknowledge: () -> Unit,
+    onMarkRead: () -> Unit,
     onClose: () -> Unit,
     onSnooze: () -> Unit,
 ) {
@@ -1249,11 +1279,7 @@ private fun AnnouncementCenterDialog(
     val summaryText = announcement.summaryText(previewText)
     val primaryAction = announcement.primaryAction
     val secondaryAction = announcement.secondaryAction
-    val acknowledgeLabel = when {
-        announcement.isShortTerm() -> "不再提示"
-        announcement.forcePopup -> "我知道了"
-        else -> "知道了"
-    }
+    val hasBusinessActions = primaryAction != null || secondaryAction != null
     val showSnoozeAction = !announcement.forcePopup &&
         !announcement.isShortTerm() &&
         announcement.allowSnoozeToday
@@ -1294,59 +1320,104 @@ private fun AnnouncementCenterDialog(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = tonePalette.iconContainer
-                ) {
-                    Box(
-                        modifier = Modifier.size(40.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            announcement.sheetIcon(),
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = tonePalette.iconTint
-                        )
-                    }
-                }
-                Column(
+                Row(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = announcement.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = tonePalette.iconContainer
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = tonePalette.accent.copy(alpha = 0.12f)
+                        Box(
+                            modifier = Modifier.size(40.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = announcement.severityLabel(),
-                                modifier = Modifier.padding(
-                                    horizontal = 8.dp,
-                                    vertical = 2.dp
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = tonePalette.accent
+                            Icon(
+                                announcement.sheetIcon(),
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = tonePalette.iconTint
                             )
                         }
-                        announcement.publishedAt?.let { date ->
-                            Text(
-                                text = date,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = announcement.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = tonePalette.accent.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = announcement.severityLabel(),
+                                    modifier = Modifier.padding(
+                                        horizontal = 8.dp,
+                                        vertical = 2.dp
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = tonePalette.accent
+                                )
+                            }
+                            announcement.publishedAt?.let { date ->
+                                Text(
+                                    text = date,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (showSnoozeAction) {
+                        FilledTonalIconButton(
+                            onClick = onSnooze,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
+                                contentColor = tonePalette.accent
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.NotificationsOff,
+                                contentDescription = "今日不提醒"
+                            )
+                        }
+                    }
+                    FilledTonalIconButton(
+                        onClick = onMarkRead,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
+                            contentColor = tonePalette.accent
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = "标记已读"
+                        )
+                    }
+                    if (!announcement.forcePopup) {
+                        IconButton(onClick = onClose) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "关闭"
                             )
                         }
                     }
@@ -1445,101 +1516,165 @@ private fun AnnouncementCenterDialog(
                 }
             }
 
-            // ── Divider ──
-            HorizontalDivider(
-                color = colorScheme.outlineVariant.copy(alpha = 0.32f)
-            )
+            if (hasBusinessActions) {
+                HorizontalDivider(
+                    color = colorScheme.outlineVariant.copy(alpha = 0.32f)
+                )
 
-            // ── Action buttons ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Snooze
-                if (showSnoozeAction) {
-                    TextButton(
-                        onClick = onSnooze,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.NotificationsOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("今日不提醒")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    secondaryAction?.let { action ->
+                        OutlinedButton(
+                            onClick = onSecondaryAction,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(action.text)
+                        }
                     }
-                }
 
-                // Secondary action
-                secondaryAction?.let { action ->
-                    OutlinedButton(
-                        onClick = onSecondaryAction,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(action.text)
-                    }
-                }
-
-                // Acknowledge
-                if (primaryAction != null) {
-                    OutlinedButton(
-                        onClick = onAcknowledge,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(acknowledgeLabel)
-                    }
-                } else {
-                    Button(
-                        onClick = onAcknowledge,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = appPrimaryButtonColors()
-                    ) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(acknowledgeLabel)
-                    }
-                }
-
-                // Primary action
-                primaryAction?.let { action ->
-                    Button(
-                        onClick = onPrimaryAction,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = appPrimaryButtonColors()
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.OpenInNew,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(action.text)
+                    primaryAction?.let { action ->
+                        Button(
+                            onClick = onPrimaryAction,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = appPrimaryButtonColors()
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(action.text)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun UnreadAnnouncementListDialog(
+    announcements: List<AppAnnouncement>,
+    onDismissRequest: () -> Unit,
+    onOpenAnnouncement: (AppAnnouncement) -> Unit,
+    onAcknowledgeAll: () -> Unit,
+) {
+    AppBottomSheetDialog(
+        onDismissRequest = onDismissRequest,
+        style = AppBottomSheetStyle.Selection,
+        tone = AppBottomSheetTone.Info,
+        icon = { Icon(Icons.Rounded.NotificationsActive, null) },
+        title = { Text("未读公告") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "当前有 ${announcements.size} 条未读公告，默认按最新发布时间排序。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                announcements.forEachIndexed { index, announcement ->
+                    OutlinedCard(
+                        onClick = { onOpenAnnouncement(announcement) },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(
+                            1.dp,
+                            if (index == 0) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)
+                            else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        colors = CardDefaults.outlinedCardColors(
+                            containerColor = if (index == 0) {
+                                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            }
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = announcement.title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (index == 0) {
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+                                    ) {
+                                        Text(
+                                            text = "最新",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
+                                }
+                            }
+                            val summaryText = announcement.summaryText(announcement.previewText())
+                                ?: announcement.previewText()
+                            if (summaryText.isNotBlank()) {
+                                Text(
+                                    text = summaryText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            announcement.publishedAt?.let { date ->
+                                Text(
+                                    text = date,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onAcknowledgeAll) {
+                Icon(
+                    imageVector = Icons.Rounded.DoneAll,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("全部已读")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text("稍后查看")
+            }
+        }
+    )
 }
 
 private fun AppAnnouncement.severityLabel(): String {
