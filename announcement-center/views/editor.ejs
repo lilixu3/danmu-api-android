@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/public/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <div class="brand-eyebrow">DanmuApiApp</div>
+        <h1><%= mode === 'create' ? '新建公告' : '编辑公告' %></h1>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin" class="btn btn-ghost">返回列表</a>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
+        <div class="flash error"><%= errorMessage %></div>
+      <% } %>
+
+      <form
+        method="post"
+        action="<%= mode === 'create' ? '/admin/announcements' : `/admin/announcements/${announcement.id}` %>"
+        class="editor-grid"
+      >
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>基础内容</h2>
+              <p class="muted">先把公告本身写清楚，App 会优先展示标题、简介和正文摘要。</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>公告标题</span>
+              <input type="text" name="title" maxlength="160" value="<%= form.title %>" required />
+              <small class="field-hint">建议一句话说清楚重点。</small>
+            </label>
+
+            <label class="field">
+              <span>简介</span>
+              <input type="text" name="summary" maxlength="320" value="<%= form.summary %>" />
+              <small class="field-hint">可选，不填时 App 会自动截取正文摘要。</small>
+            </label>
+
+            <label class="field field-full">
+              <span>正文</span>
+              <textarea name="content_markdown" rows="14" id="content_markdown" required><%= form.content_markdown %></textarea>
+              <small class="field-hint">支持 Markdown，适合写更新说明、活动规则或提示信息。</small>
+            </label>
+
+            <label class="field field-full">
+              <span>封面图地址</span>
+              <input type="text" name="cover_image_url" maxlength="500" value="<%= form.cover_image_url %>" placeholder="可选，不填也可以正常发布" />
+              <small class="field-hint">当前主要用于兼容后续扩展，不影响本次弹窗发布。</small>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>展示方式</h2>
+              <p class="muted">这里决定这条公告属于短期还是长期，以及在 App 里用什么方式提醒用户。</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>公告类型</span>
+              <select name="announcement_type" id="announcement_type">
+                <option value="long" <%= form.announcement_type === 'long' ? 'selected' : '' %>>长期公告</option>
+                <option value="short" <%= form.announcement_type === 'short' ? 'selected' : '' %>>短期公告</option>
+              </select>
+              <small class="field-hint" id="announcement_type_hint"></small>
+            </label>
+
+            <label class="field">
+              <span>提醒强度</span>
+              <select name="popup_mode">
+                <option value="normal" <%= form.popup_mode === 'normal' ? 'selected' : '' %>>普通弹窗</option>
+                <option value="force" <%= form.popup_mode === 'force' ? 'selected' : '' %>>强提醒弹窗</option>
+              </select>
+              <small class="field-hint">强提醒更适合停服、强制升级或重要通知。</small>
+            </label>
+
+            <label class="field">
+              <span>公告等级</span>
+              <select name="severity">
+                <option value="info" <%= form.severity === 'info' ? 'selected' : '' %>>普通</option>
+                <option value="success" <%= form.severity === 'success' ? 'selected' : '' %>>成功</option>
+                <option value="warning" <%= form.severity === 'warning' ? 'selected' : '' %>>提醒</option>
+                <option value="danger" <%= form.severity === 'danger' ? 'selected' : '' %>>重要</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>投放对象</span>
+              <select name="target_variants">
+                <option value="all" <%= form.target_variants === 'all' ? 'selected' : '' %>>全部版本</option>
+                <option value="stable" <%= form.target_variants === 'stable' ? 'selected' : '' %>>正式版</option>
+                <option value="dev" <%= form.target_variants === 'dev' ? 'selected' : '' %>>开发版</option>
+                <option value="custom" <%= form.target_variants === 'custom' ? 'selected' : '' %>>自定义版</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>最低 App 版本</span>
+              <input type="text" name="min_app_version" maxlength="32" value="<%= form.min_app_version %>" placeholder="如 1.0.5.18，不限制可留空" />
+            </label>
+
+            <label class="field">
+              <span>最高 App 版本</span>
+              <input type="text" name="max_app_version" maxlength="32" value="<%= form.max_app_version %>" placeholder="不限制可留空" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>发布时间</h2>
+              <p class="muted">控制什么时候开始展示，以及这次保存后要处于什么状态。</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>保存方式</span>
+              <select name="status">
+                <option value="draft" <%= form.status === 'draft' ? 'selected' : '' %>>存为草稿</option>
+                <option value="published" <%= form.status === 'published' ? 'selected' : '' %>>立即发布</option>
+                <option value="offline" <%= form.status === 'offline' ? 'selected' : '' %>>下线</option>
+              </select>
+              <small class="field-hint">立即发布后，会自动替换掉当前已发布公告。</small>
+            </label>
+
+            <div class="field field-callout">
+              <span>App 上的关闭方式</span>
+              <div class="callout-box" id="dismiss_behavior_hint"></div>
+            </div>
+
+            <label class="field">
+              <span>开始时间</span>
+              <input type="datetime-local" name="start_at" id="start_at" value="<%= form.start_at %>" />
+              <small class="field-hint">留空表示保存后立即生效。</small>
+            </label>
+
+            <label class="field">
+              <span>结束时间</span>
+              <input type="datetime-local" name="end_at" id="end_at" value="<%= form.end_at %>" />
+              <small class="field-hint" id="end_at_hint"></small>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>跳转按钮</h2>
+              <p class="muted">每个按钮都可以选择跳到 App 指定页面，或者跳转到你自定义的网页链接。</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field field-full action-config-card">
+              <span>主按钮</span>
+              <div class="form-grid action-config-grid">
+                <label class="field">
+                  <span>按钮类型</span>
+                  <select name="primary_button_mode" id="primary_button_mode">
+                    <option value="none" <%= form.primary_button_mode === 'none' ? 'selected' : '' %>>不启用</option>
+                    <option value="app_route" <%= form.primary_button_mode === 'app_route' ? 'selected' : '' %>>App内跳转</option>
+                    <option value="link" <%= form.primary_button_mode === 'link' ? 'selected' : '' %>>自定义链接</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>按钮文案</span>
+                  <input type="text" name="primary_button_text" maxlength="80" value="<%= form.primary_button_text %>" placeholder="如：立即前往" />
+                </label>
+
+                <label class="field field-full action-route-field" id="primary_button_route_field">
+                  <span>App 跳转页面</span>
+                  <select name="primary_button_route">
+                    <option value="">请选择页面</option>
+                    <% actionRouteOptions.forEach(function(group) { %>
+                      <optgroup label="<%= group.group %>">
+                        <% group.items.forEach(function(item) { %>
+                          <option value="<%= item.value %>" <%= form.primary_button_route === item.value ? 'selected' : '' %>><%= item.label %></option>
+                        <% }) %>
+                      </optgroup>
+                    <% }) %>
+                  </select>
+                </label>
+
+                <label class="field field-full action-link-field" id="primary_button_url_field">
+                  <span>自定义链接</span>
+                  <input type="text" name="primary_button_url" maxlength="500" value="<%= form.primary_button_url %>" placeholder="必须是 http 或 https 链接" />
+                </label>
+              </div>
+            </div>
+
+            <div class="field field-full action-config-card">
+              <span>次按钮</span>
+              <div class="form-grid action-config-grid">
+                <label class="field">
+                  <span>按钮类型</span>
+                  <select name="secondary_button_mode" id="secondary_button_mode">
+                    <option value="none" <%= form.secondary_button_mode === 'none' ? 'selected' : '' %>>不启用</option>
+                    <option value="app_route" <%= form.secondary_button_mode === 'app_route' ? 'selected' : '' %>>App内跳转</option>
+                    <option value="link" <%= form.secondary_button_mode === 'link' ? 'selected' : '' %>>自定义链接</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>按钮文案</span>
+                  <input type="text" name="secondary_button_text" maxlength="80" value="<%= form.secondary_button_text %>" placeholder="如：查看详情" />
+                </label>
+
+                <label class="field field-full action-route-field" id="secondary_button_route_field">
+                  <span>App 跳转页面</span>
+                  <select name="secondary_button_route">
+                    <option value="">请选择页面</option>
+                    <% actionRouteOptions.forEach(function(group) { %>
+                      <optgroup label="<%= group.group %>">
+                        <% group.items.forEach(function(item) { %>
+                          <option value="<%= item.value %>" <%= form.secondary_button_route === item.value ? 'selected' : '' %>><%= item.label %></option>
+                        <% }) %>
+                      </optgroup>
+                    <% }) %>
+                  </select>
+                </label>
+
+                <label class="field field-full action-link-field" id="secondary_button_url_field">
+                  <span>自定义链接</span>
+                  <input type="text" name="secondary_button_url" maxlength="500" value="<%= form.secondary_button_url %>" placeholder="必须是 http 或 https 链接" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>内容预览</h2>
+              <p class="muted">正文修改后可刷新预览，确认摘要是否清晰。</p>
+            </div>
+            <button type="button" id="preview-trigger" class="btn btn-ghost">刷新预览</button>
+          </div>
+          <div class="preview-shell">
+            <div class="preview-card">
+              <h3>App 摘要预览</h3>
+              <pre id="preview-text"><%= form.summary || '' %></pre>
+            </div>
+            <div class="preview-card">
+              <h3>Markdown 渲染预览</h3>
+              <div id="preview-html" class="markdown-body"><%- previewHtml %></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="sticky-actions">
+          <button type="submit" class="btn btn-primary">保存公告</button>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      const textarea = document.getElementById('content_markdown');
+      const previewTrigger = document.getElementById('preview-trigger');
+      const previewHtml = document.getElementById('preview-html');
+      const previewText = document.getElementById('preview-text');
+      const announcementTypeSelect = document.getElementById('announcement_type');
+      const announcementTypeHint = document.getElementById('announcement_type_hint');
+      const dismissBehaviorHint = document.getElementById('dismiss_behavior_hint');
+      const endAtInput = document.getElementById('end_at');
+      const endAtHint = document.getElementById('end_at_hint');
+      const primaryButtonMode = document.getElementById('primary_button_mode');
+      const secondaryButtonMode = document.getElementById('secondary_button_mode');
+      const primaryButtonRouteField = document.getElementById('primary_button_route_field');
+      const primaryButtonUrlField = document.getElementById('primary_button_url_field');
+      const secondaryButtonRouteField = document.getElementById('secondary_button_route_field');
+      const secondaryButtonUrlField = document.getElementById('secondary_button_url_field');
+
+      async function refreshPreview() {
+        const response = await fetch('/admin/api/preview-markdown', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ content: textarea.value })
+        });
+        const data = await response.json();
+        previewHtml.innerHTML = data.html || '';
+        previewText.textContent = data.preview || '';
+      }
+
+      function syncAnnouncementTypeHint() {
+        const type = announcementTypeSelect.value;
+        if (type === 'short') {
+          announcementTypeHint.textContent = '短期公告适合活动、限时维护、短期通知。必须填写结束时间。';
+          dismissBehaviorHint.textContent = '短期公告在 App 中不会显示“今日不提醒”，关闭按钮会按“不再提示”处理。';
+          endAtHint.textContent = '短期公告必须填写结束时间，过期后会自动不再展示。';
+          endAtInput.required = true;
+        } else {
+          announcementTypeHint.textContent = '长期公告适合常驻说明、持续提醒、长期活动入口。';
+          dismissBehaviorHint.textContent = '长期公告在普通弹窗下会显示“今日不提醒”，方便用户当天不再重复看到。';
+          endAtHint.textContent = '长期公告可不填结束时间，留空表示长期有效。';
+          endAtInput.required = false;
+        }
+      }
+
+      function syncActionFields(modeSelector, routeField, urlField) {
+        const mode = modeSelector.value;
+        routeField.style.display = mode === 'app_route' ? '' : 'none';
+        urlField.style.display = mode === 'link' ? '' : 'none';
+      }
+
+      previewTrigger.addEventListener('click', refreshPreview);
+      announcementTypeSelect.addEventListener('change', syncAnnouncementTypeHint);
+      primaryButtonMode.addEventListener('change', () => {
+        syncActionFields(primaryButtonMode, primaryButtonRouteField, primaryButtonUrlField);
+      });
+      secondaryButtonMode.addEventListener('change', () => {
+        syncActionFields(secondaryButtonMode, secondaryButtonRouteField, secondaryButtonUrlField);
+      });
+      textarea.addEventListener('input', () => {
+        clearTimeout(window.__previewTimer);
+        window.__previewTimer = setTimeout(refreshPreview, 300);
+      });
+
+      syncAnnouncementTypeHint();
+      syncActionFields(primaryButtonMode, primaryButtonRouteField, primaryButtonUrlField);
+      syncActionFields(secondaryButtonMode, secondaryButtonRouteField, secondaryButtonUrlField);
+    </script>
+  </body>
+</html>

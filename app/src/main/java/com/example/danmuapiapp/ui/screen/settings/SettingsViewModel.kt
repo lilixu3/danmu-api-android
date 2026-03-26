@@ -73,6 +73,7 @@ class SettingsViewModel @Inject constructor(
 
     val runtimeState = runtimeRepo.runtimeState
     val githubProxy = settingsRepo.githubProxy
+    val announcementBaseUrl = settingsRepo.announcementBaseUrl
     val githubToken = settingsRepo.githubToken
     val customRepo = settingsRepo.customRepo
     val tokenVisible = settingsRepo.tokenVisible
@@ -254,6 +255,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setAutoStart(enabled: Boolean) = setNormalBootAutoStart(enabled)
+
+    fun saveAnnouncementBaseUrl(url: String) {
+        settingsRepo.setAnnouncementBaseUrl(url)
+        operationMessage = "公告服务地址已保存"
+    }
 
     fun setNormalBootAutoStart(enabled: Boolean) {
         NormalAutoStartPrefs.setBootAutoStartEnabled(context, enabled)

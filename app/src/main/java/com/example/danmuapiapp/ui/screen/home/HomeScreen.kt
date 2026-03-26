@@ -28,7 +28,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -73,6 +75,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -128,6 +131,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -149,6 +153,8 @@ import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
+import com.example.danmuapiapp.domain.model.AppAnnouncement
+import com.example.danmuapiapp.domain.model.AnnouncementSeverity
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
@@ -158,8 +164,10 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
-import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 import com.example.danmuapiapp.ui.startup.StartupPermissionGatePrefs
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -170,6 +178,7 @@ import kotlin.math.max
 fun HomeScreen(
     onOpenDanmuDownload: () -> Unit = {},
     onOpenCacheManagement: () -> Unit = {},
+    onOpenAnnouncementRoute: (String) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -887,6 +896,43 @@ fun HomeScreen(
         )
     }
 
+    val foregroundAnnouncement = viewModel.foregroundAnnouncementPrompt
+    if (viewModel.showForegroundAnnouncementDialog && foregroundAnnouncement != null) {
+        AnnouncementCenterDialog(
+            announcement = foregroundAnnouncement,
+            onDismissRequest = {
+                if (!foregroundAnnouncement.forcePopup) {
+                    viewModel.closeForegroundAnnouncementPrompt()
+                }
+            },
+            onPrimaryAction = {
+                val action = foregroundAnnouncement.primaryAction ?: return@AnnouncementCenterDialog
+                val route = action.routeOrNull()
+                if (route != null) {
+                    onOpenAnnouncementRoute(route)
+                    viewModel.acknowledgeForegroundAnnouncementPrompt()
+                } else {
+                    val alive = activity ?: return@AnnouncementCenterDialog
+                    viewModel.openForegroundAnnouncementPrimaryAction(alive)
+                }
+            },
+            onSecondaryAction = {
+                val action = foregroundAnnouncement.secondaryAction ?: return@AnnouncementCenterDialog
+                val route = action.routeOrNull()
+                if (route != null) {
+                    onOpenAnnouncementRoute(route)
+                    viewModel.acknowledgeForegroundAnnouncementPrompt()
+                } else {
+                    val alive = activity ?: return@AnnouncementCenterDialog
+                    viewModel.openForegroundAnnouncementSecondaryAction(alive)
+                }
+            },
+            onAcknowledge = viewModel::acknowledgeForegroundAnnouncementPrompt,
+            onClose = viewModel::closeForegroundAnnouncementPrompt,
+            onSnooze = viewModel::snoozeForegroundAnnouncementPrompt
+        )
+    }
+
     if (viewModel.showAppUpdateMethodDialog) {
         AppBottomSheetDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdateMethodDialog,
@@ -1106,4 +1152,408 @@ private fun openHomeNotificationSettings(context: Context): Boolean {
             }
         }.getOrDefault(false)
     }
+}
+
+private fun AppAnnouncement.sheetTone(): AppBottomSheetTone {
+    return when (severity) {
+        AnnouncementSeverity.Info -> AppBottomSheetTone.Info
+        AnnouncementSeverity.Success -> AppBottomSheetTone.Success
+        AnnouncementSeverity.Warning -> AppBottomSheetTone.Warning
+        AnnouncementSeverity.Danger -> AppBottomSheetTone.Danger
+    }
+}
+
+private fun AppAnnouncement.sheetIcon(): ImageVector {
+    return when (severity) {
+        AnnouncementSeverity.Info -> Icons.Rounded.SystemUpdate
+        AnnouncementSeverity.Success -> Icons.Rounded.CheckCircle
+        AnnouncementSeverity.Warning -> Icons.Rounded.ErrorOutline
+        AnnouncementSeverity.Danger -> Icons.Rounded.ErrorOutline
+    }
+}
+
+private fun AppAnnouncement.previewText(): String {
+    val raw = if (contentPreview.isNotBlank()) contentPreview else contentMarkdown
+    return raw
+        .replace(Regex("[`#>*_\\[\\]]"), "")
+        .replace(Regex("\\((https?://[^)]+)\\)"), "")
+        .replace(Regex("\\n{3,}"), "\n\n")
+        .trim()
+        .take(320)
+}
+
+private data class AnnouncementTonePalette(
+    val iconContainer: Color,
+    val iconTint: Color,
+    val accent: Color,
+    val statusTint: Color
+)
+
+@Composable
+private fun rememberAnnouncementTonePalette(tone: AppBottomSheetTone): AnnouncementTonePalette {
+    val c = MaterialTheme.colorScheme
+    return when (tone) {
+        AppBottomSheetTone.Neutral -> AnnouncementTonePalette(
+            iconContainer = c.surfaceContainerHighest,
+            iconTint = c.onSurfaceVariant,
+            accent = c.onSurfaceVariant,
+            statusTint = c.surfaceContainerHigh
+        )
+        AppBottomSheetTone.Brand -> AnnouncementTonePalette(
+            iconContainer = c.primaryContainer,
+            iconTint = c.primary,
+            accent = c.primary,
+            statusTint = c.primaryContainer
+        )
+        AppBottomSheetTone.Success -> AnnouncementTonePalette(
+            iconContainer = c.tertiaryContainer,
+            iconTint = c.tertiary,
+            accent = c.tertiary,
+            statusTint = c.tertiaryContainer
+        )
+        AppBottomSheetTone.Warning -> AnnouncementTonePalette(
+            iconContainer = c.secondaryContainer,
+            iconTint = c.onSecondaryContainer,
+            accent = c.secondary,
+            statusTint = c.secondaryContainer
+        )
+        AppBottomSheetTone.Danger -> AnnouncementTonePalette(
+            iconContainer = c.errorContainer,
+            iconTint = c.error,
+            accent = c.error,
+            statusTint = c.errorContainer
+        )
+        AppBottomSheetTone.Info -> AnnouncementTonePalette(
+            iconContainer = c.secondaryContainer,
+            iconTint = c.secondary,
+            accent = c.secondary,
+            statusTint = c.secondaryContainer
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AnnouncementCenterDialog(
+    announcement: AppAnnouncement,
+    onDismissRequest: () -> Unit,
+    onPrimaryAction: () -> Unit,
+    onSecondaryAction: () -> Unit,
+    onAcknowledge: () -> Unit,
+    onClose: () -> Unit,
+    onSnooze: () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val tonePalette = rememberAnnouncementTonePalette(announcement.sheetTone())
+    val previewText = announcement.previewText()
+    val summaryText = announcement.summaryText(previewText)
+    val primaryAction = announcement.primaryAction
+    val secondaryAction = announcement.secondaryAction
+    val acknowledgeLabel = when {
+        announcement.isShortTerm() -> "不再提示"
+        announcement.forcePopup -> "我知道了"
+        else -> "知道了"
+    }
+    val showSnoozeAction = !announcement.forcePopup &&
+        !announcement.isShortTerm() &&
+        announcement.allowSnoozeToday
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (!announcement.forcePopup) onDismissRequest()
+        },
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = colorScheme.surfaceContainerLow,
+        contentColor = colorScheme.onSurface,
+        tonalElevation = 1.dp,
+        dragHandle = if (!announcement.forcePopup) {
+            {
+                BottomSheetDefaults.DragHandle(
+                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+                )
+            }
+        } else null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = screenHeight * 0.85f)
+                .navigationBarsPadding()
+                .padding(horizontal = 18.dp)
+                .padding(
+                    top = if (announcement.forcePopup) 16.dp else 4.dp,
+                    bottom = 10.dp
+                ),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // ── Header: icon + title + meta ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = tonePalette.iconContainer
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            announcement.sheetIcon(),
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = tonePalette.iconTint
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = tonePalette.accent.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = announcement.severityLabel(),
+                                modifier = Modifier.padding(
+                                    horizontal = 8.dp,
+                                    vertical = 2.dp
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = tonePalette.accent
+                            )
+                        }
+                        announcement.publishedAt?.let { date ->
+                            Text(
+                                text = date,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Accent line ──
+            Box(
+                modifier = Modifier
+                    .height(2.dp)
+                    .widthIn(max = 120.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(tonePalette.accent.copy(alpha = 0.22f))
+            )
+
+            // ── Scrollable content ──
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Cover image
+                announcement.coverImageUrl?.let { url ->
+                    val context = LocalContext.current
+                    val normalizedUrl = remember(url) {
+                        url.trim().let { u ->
+                            if (u.startsWith("//")) "https:$u" else u
+                        }
+                    }
+                    if (normalizedUrl.isNotBlank()) {
+                        val request = remember(context, normalizedUrl) {
+                            ImageRequest.Builder(context)
+                                .data(normalizedUrl)
+                                .crossfade(true)
+                                .build()
+                        }
+                        val painter = rememberAsyncImagePainter(model = request)
+                        val imageState = painter.state
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(colorScheme.surfaceContainerHighest),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (imageState is AsyncImagePainter.State.Loading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = tonePalette.accent
+                                )
+                            }
+                            Image(
+                                painter = painter,
+                                contentDescription = announcement.title,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 180.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+
+                // Summary
+                if (summaryText != null) {
+                    Text(
+                        text = summaryText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Preview text card
+                if (previewText.isNotBlank()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = tonePalette.statusTint.copy(alpha = 0.36f),
+                        border = BorderStroke(
+                            1.dp,
+                            tonePalette.accent.copy(alpha = 0.16f)
+                        )
+                    ) {
+                        Text(
+                            text = previewText,
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colorScheme.onSurface.copy(alpha = 0.88f)
+                        )
+                    }
+                }
+            }
+
+            // ── Divider ──
+            HorizontalDivider(
+                color = colorScheme.outlineVariant.copy(alpha = 0.32f)
+            )
+
+            // ── Action buttons ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Snooze
+                if (showSnoozeAction) {
+                    TextButton(
+                        onClick = onSnooze,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.NotificationsOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("今日不提醒")
+                    }
+                }
+
+                // Secondary action
+                secondaryAction?.let { action ->
+                    OutlinedButton(
+                        onClick = onSecondaryAction,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.text)
+                    }
+                }
+
+                // Acknowledge
+                if (primaryAction != null) {
+                    OutlinedButton(
+                        onClick = onAcknowledge,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(acknowledgeLabel)
+                    }
+                } else {
+                    Button(
+                        onClick = onAcknowledge,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = appPrimaryButtonColors()
+                    ) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(acknowledgeLabel)
+                    }
+                }
+
+                // Primary action
+                primaryAction?.let { action ->
+                    Button(
+                        onClick = onPrimaryAction,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = appPrimaryButtonColors()
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.text)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun AppAnnouncement.severityLabel(): String {
+    return when (severity) {
+        AnnouncementSeverity.Info -> "公告"
+        AnnouncementSeverity.Success -> "更新"
+        AnnouncementSeverity.Warning -> "提醒"
+        AnnouncementSeverity.Danger -> "重要"
+    }
+}
+
+private fun AppAnnouncement.summaryText(previewText: String): String? {
+    val normalizedSummary = summary.trim()
+    if (normalizedSummary.isBlank()) return null
+    if (normalizedSummary == previewText.trim()) return null
+    return normalizedSummary
 }

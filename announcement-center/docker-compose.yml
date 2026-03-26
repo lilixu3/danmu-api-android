@@ -1,0 +1,8 @@
+services:
+  announcement-center:
+    build: .
+    container_name: danmu-announcement-center
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env

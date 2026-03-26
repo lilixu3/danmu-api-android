@@ -22,6 +22,9 @@ import javax.inject.Singleton
 class SettingsRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : SettingsRepository {
+    companion object {
+        private const val DEFAULT_ANNOUNCEMENT_BASE_URL = "http://117.72.165.47:18086"
+    }
 
     private val settingsPrefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val uiPrefs = context.getSharedPreferences(AppAppearancePrefs.PREFS_UI_LEGACY, Context.MODE_PRIVATE)
@@ -34,6 +37,13 @@ class SettingsRepositoryImpl @Inject constructor(
         githubProxyPrefs.safeGetString("selected_proxy", "original").ifBlank { "original" }
     )
     override val githubProxy: StateFlow<String> = _githubProxy.asStateFlow()
+
+    private val _announcementBaseUrl = MutableStateFlow(
+        normalizeAnnouncementBaseUrl(
+            settingsPrefs.safeGetString("announcement_base_url", DEFAULT_ANNOUNCEMENT_BASE_URL)
+        )
+    )
+    override val announcementBaseUrl: StateFlow<String> = _announcementBaseUrl.asStateFlow()
 
     private val _githubToken = MutableStateFlow(githubAuthPrefs.safeGetString("github_token"))
     override val githubToken: StateFlow<String> = _githubToken.asStateFlow()
@@ -106,6 +116,12 @@ class SettingsRepositoryImpl @Inject constructor(
             putBoolean("has_user_selected_proxy", normalized != "original")
         }
         _githubProxy.value = normalized
+    }
+
+    override fun setAnnouncementBaseUrl(url: String) {
+        val normalized = normalizeAnnouncementBaseUrl(url)
+        settingsPrefs.edit { putString("announcement_base_url", normalized) }
+        _announcementBaseUrl.value = normalized
     }
 
     override fun setGithubToken(token: String) {
@@ -214,6 +230,16 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private fun resolveCustomRepoDisplayName(): String {
         return settingsPrefs.safeGetString("custom_repo_display_name").trim()
+    }
+
+    private fun normalizeAnnouncementBaseUrl(raw: String): String {
+        val trimmed = raw.trim().trimEnd('/')
+        if (trimmed.isBlank()) return DEFAULT_ANNOUNCEMENT_BASE_URL
+        return when {
+            trimmed.startsWith("http://", ignoreCase = true) -> trimmed
+            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+            else -> "http://$trimmed"
+        }
     }
 
     private fun resolveCustomRepo(): String {

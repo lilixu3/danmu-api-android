@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/public/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <div class="brand-eyebrow">DanmuApiApp</div>
+        <h1>公告中心</h1>
+      </div>
+      <div class="topbar-actions">
+        <a href="/admin/announcements/new" class="btn btn-primary">新建公告</a>
+        <form method="post" action="/admin/logout">
+          <button type="submit" class="btn btn-ghost">退出登录</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <% if (flash) { %>
+        <div class="flash <%= flash.type %>"><%= flash.message %></div>
+      <% } %>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>公告列表</h2>
+            <p class="muted">管理草稿、已发布和已下线公告。</p>
+          </div>
+          <div class="filter-row">
+            <a class="chip <%= filter === 'all' ? 'active' : '' %>" href="/admin?status=all">全部</a>
+            <a class="chip <%= filter === 'draft' ? 'active' : '' %>" href="/admin?status=draft">草稿</a>
+            <a class="chip <%= filter === 'published' ? 'active' : '' %>" href="/admin?status=published">已发布</a>
+            <a class="chip <%= filter === 'offline' ? 'active' : '' %>" href="/admin?status=offline">已下线</a>
+            <a class="chip <%= filter === '待生效' ? 'active' : '' %>" href="/admin?status=%E5%BE%85%E7%94%9F%E6%95%88">待生效</a>
+          </div>
+        </div>
+
+        <div class="announcement-grid">
+          <% items.forEach(function(item) { %>
+            <article class="announcement-card">
+              <div class="card-topline">
+                <span class="badge severity-<%= item.severity %>"><%= item.severityLabel %></span>
+                <span class="badge state"><%= item.displayState %></span>
+              </div>
+              <h3><%= item.title %></h3>
+              <p class="muted text-clamp-3"><%= item.summary || item.content_preview %></p>
+
+              <dl class="meta-grid">
+                <div>
+                  <dt>公告类型</dt>
+                  <dd><%= item.announcementTypeLabel %></dd>
+                </div>
+                <div>
+                  <dt>目标变体</dt>
+                  <dd><%= item.targetVariantLabel %></dd>
+                </div>
+                <div>
+                  <dt>推送版本</dt>
+                  <dd>第 <%= item.pushVersion %> 次</dd>
+                </div>
+                <div>
+                  <dt>版本范围</dt>
+                  <dd><%= item.min_app_version || '*' %> ~ <%= item.max_app_version || '*' %></dd>
+                </div>
+                <div>
+                  <dt>生效时间</dt>
+                  <dd><%= item.start_at ? item.start_at.toISOString().slice(0, 16).replace('T', ' ') : '立即' %></dd>
+                </div>
+                <div>
+                  <dt>失效时间</dt>
+                  <dd><%= item.end_at ? item.end_at.toISOString().slice(0, 16).replace('T', ' ') : '不限' %></dd>
+                </div>
+              </dl>
+
+              <div class="card-actions">
+                <a href="/admin/announcements/<%= item.id %>/edit" class="btn btn-ghost">编辑</a>
+                <% if (item.status === 'published') { %>
+                  <form method="post" action="/admin/announcements/<%= item.id %>/repush" onsubmit="return confirm('确认再次推送这条公告吗？已点过不再提示或今日不提醒的用户也会再次收到。');">
+                    <button type="submit" class="btn btn-primary">再次推送</button>
+                  </form>
+                <% } %>
+                <% if (item.status !== 'published') { %>
+                  <form method="post" action="/admin/announcements/<%= item.id %>/publish">
+                    <button type="submit" class="btn btn-primary">发布</button>
+                  </form>
+                <% } %>
+                <% if (item.status === 'published') { %>
+                  <form method="post" action="/admin/announcements/<%= item.id %>/offline">
+                    <button type="submit" class="btn btn-danger">下线</button>
+                  </form>
+                <% } %>
+                <form method="post" action="/admin/announcements/<%= item.id %>/delete" onsubmit="return confirm('确认删除这条公告吗？删除后不可恢复。');">
+                  <button type="submit" class="btn btn-ghost">删除</button>
+                </form>
+              </div>
+            </article>
+          <% }) %>
+          <% if (items.length === 0) { %>
+            <div class="empty-state">当前筛选下还没有公告。</div>
+          <% } %>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

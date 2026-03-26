@@ -1,0 +1,17 @@
+{
+  "name": "danmu-announcement-center",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "markdown-it": "^14.1.0",
+    "mysql2": "^3.15.3"
+  }
+}

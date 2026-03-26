@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -46,6 +47,16 @@ import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
+
+private fun NavController.navigateToTopLevelRoute(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
 
 @Composable
 fun DanmuApiApp(
@@ -177,13 +188,7 @@ private fun DanmuApiMainContent() {
                         label = { Text(screen.label) },
                         selected = selected,
                         onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
+                            navController.navigateToTopLevelRoute(screen.route)
                         },
                         colors = navItemColors
                     )
@@ -213,7 +218,17 @@ private fun DanmuApiMainContent() {
             composable(Screen.Home.route) {
                 HomeScreen(
                     onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
-                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) }
+                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
+                    onOpenAnnouncementRoute = { route ->
+                        val isTopLevelRoute = Screen.entries.any { screen -> screen.route == route }
+                        if (isTopLevelRoute) {
+                            navController.navigateToTopLevelRoute(route)
+                        } else {
+                            navController.navigate(route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    }
                 )
             }
             composable(Screen.Core.route) { CoreScreen() }
