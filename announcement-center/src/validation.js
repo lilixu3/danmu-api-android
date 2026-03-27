@@ -225,12 +225,16 @@ function normalizeDateTimeLocal(input) {
 
 function buildContentPreview(markdown) {
   return String(markdown || '')
+    .replace(/\r\n?/g, '\n')
     .replace(/[`#>*_\[\]]/g, '')
     .replace(/\((https?:\/\/[^)]+)\)/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 380);
+    .slice(0, 380)
+    .trim();
 }
 
 function buildAnnouncementPayload(body) {
