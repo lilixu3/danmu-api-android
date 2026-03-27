@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.text.Html
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -314,8 +315,16 @@ class AppUpdateService @Inject constructor(
     }
 
     private fun fetchLatestReleaseInfo(): ReleaseInfo {
-        val release = githubRemoteService.fetchLatestRelease(APP_REPO)
+        githubRemoteService.fetchLatestRelease(APP_REPO)?.let { release ->
+            return releaseInfoFromPayload(release)
+        }
+        return fetchLatestReleaseInfoFromHtml()
             ?: error("无法获取最新版本信息")
+    }
+
+    private fun releaseInfoFromPayload(
+        release: GithubRemoteService.ReleasePayload
+    ): ReleaseInfo {
         val assets = release.assets.mapNotNull { asset ->
             if (!asset.name.lowercase(Locale.getDefault()).endsWith(".apk")) return@mapNotNull null
             ApkAsset(
@@ -330,6 +339,132 @@ class AppUpdateService @Inject constructor(
             body = release.body,
             apkAssets = assets
         )
+    }
+
+    private fun fetchLatestReleaseInfoFromHtml(): ReleaseInfo? {
+        val page = githubRemoteService.requestTextResponse(
+            urls = githubProxyService.buildUrlCandidates(FALLBACK_LATEST_PAGE)
+                .plus(FALLBACK_LATEST_PAGE)
+                .distinct(),
+            headers = mapOf(
+                "User-Agent" to GithubRemoteService.UserAgent,
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            )
+        ) ?: return null
+
+        val tagName = extractReleaseTag(page.finalUrl, page.body) ?: return null
+        val releasePage = "https://github.com/$APP_REPO/releases/tag/$tagName"
+        val releaseNotes = extractReleaseNotesFromHtml(page.body)
+        val assets = fetchAssetsFromHtml(tagName)
+
+        return ReleaseInfo(
+            tagName = tagName,
+            htmlUrl = releasePage,
+            body = releaseNotes,
+            apkAssets = assets
+        )
+    }
+
+    private fun fetchAssetsFromHtml(tagName: String): List<ApkAsset> {
+        val expandedAssetsUrl = "https://github.com/$APP_REPO/releases/expanded_assets/$tagName"
+        val payload = githubRemoteService.requestTextResponse(
+            urls = githubProxyService.buildUrlCandidates(expandedAssetsUrl)
+                .plus(expandedAssetsUrl)
+                .distinct(),
+            headers = mapOf(
+                "User-Agent" to GithubRemoteService.UserAgent,
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            )
+        ) ?: return emptyList()
+
+        val itemRegex = Regex("""<li\b.*?</li>""", setOf(RegexOption.DOT_MATCHES_ALL))
+        val hrefRegex = Regex("href=\"([^\"]+\\.apk)\"")
+        val nameRegex = Regex("""Truncate-text text-bold">([^<]+\.apk)""")
+        val sizeRegex = Regex(
+            """class="color-fg-muted text-right flex-shrink-0 flex-grow-0 ml-2 ml-sm-3 ml-md-4">([^<]+)</span>"""
+        )
+
+        return itemRegex.findAll(payload.body).mapNotNull { match ->
+            val itemHtml = match.value
+            val href = hrefRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            val name = nameRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            if (href.isBlank() || name.isBlank()) return@mapNotNull null
+
+            val sizeText = sizeRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            ApkAsset(
+                name = name,
+                url = normalizeGithubPath(href),
+                size = parseAssetSizeBytes(sizeText)
+            )
+        }.toList()
+    }
+
+    private fun extractReleaseTag(finalUrl: String, html: String): String? {
+        val tagRegex = Regex("""releases/tag/([^/?#"'&<>]+)""")
+        return sequenceOf(finalUrl, html)
+            .flatMap { source ->
+                tagRegex.findAll(source).mapNotNull { match ->
+                    match.groupValues.getOrNull(1)?.trim()
+                }
+            }
+            .map { htmlToPlainText(it) }
+            .map { it.trim() }
+            .firstOrNull { candidate ->
+                candidate.isNotBlank() &&
+                    candidate != "latest" &&
+                    !candidate.contains('*')
+            }
+    }
+
+    private fun extractReleaseNotesFromHtml(html: String): String {
+        val metaRegex = Regex(
+            "(?:property|name)=\\\"(?:og:description|twitter:description)\\\"\\s+content=\\\"(.*?)\\\"",
+            setOf(RegexOption.DOT_MATCHES_ALL)
+        )
+        val bodyRegex = Regex(
+            """data-test-selector="body-content"[^>]*>(.*?)</div>\s*</div>\s*<details""",
+            setOf(RegexOption.DOT_MATCHES_ALL)
+        )
+
+        val raw = metaRegex.find(html)?.groupValues?.getOrNull(1)
+            ?: bodyRegex.find(html)?.groupValues?.getOrNull(1)
+            ?: ""
+        return htmlToPlainText(raw)
+    }
+
+    private fun htmlToPlainText(raw: String): String {
+        if (raw.isBlank()) return ""
+        val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Html.fromHtml(raw, Html.FROM_HTML_MODE_LEGACY)
+        } else {
+            @Suppress("DEPRECATION")
+            Html.fromHtml(raw)
+        }
+        return decoded.toString().trim()
+    }
+
+    private fun normalizeGithubPath(rawPath: String): String {
+        val trimmed = rawPath.trim()
+        return when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("/") -> "https://github.com$trimmed"
+            else -> "https://github.com/$trimmed"
+        }
+    }
+
+    private fun parseAssetSizeBytes(sizeText: String): Long {
+        val match = Regex("""([0-9]+(?:\.[0-9]+)?)\s*([KMG]?B)""", RegexOption.IGNORE_CASE)
+            .find(sizeText.trim())
+            ?: return 0L
+        val value = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return 0L
+        val unit = match.groupValues.getOrNull(2)?.uppercase(Locale.US).orEmpty()
+        val multiplier = when (unit) {
+            "KB" -> 1024.0
+            "MB" -> 1024.0 * 1024.0
+            "GB" -> 1024.0 * 1024.0 * 1024.0
+            else -> 1.0
+        }
+        return (value * multiplier).toLong()
     }
 
     private fun sanitizeReleaseNotes(raw: String): String {

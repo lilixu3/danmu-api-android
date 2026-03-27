@@ -39,6 +39,11 @@ class GithubRemoteService @Inject constructor(
         val assets: List<ReleaseAsset> = emptyList()
     )
 
+    data class TextResponsePayload(
+        val finalUrl: String,
+        val body: String
+    )
+
     private val json = Json { ignoreUnknownKeys = true }
     private val metadataHttpClient = httpClient.newBuilder()
         .connectTimeout(4, TimeUnit.SECONDS)
@@ -55,11 +60,36 @@ class GithubRemoteService @Inject constructor(
     }
 
     fun withProxyCandidates(url: String): List<String> {
-        return githubProxyService.buildUrlCandidates(url)
+        return githubProxyService.buildUrlCandidates(url).plus(url).distinct()
     }
 
     fun requestText(urls: List<String>, headers: Map<String, String>): String? {
         return requestMapped(urls, headers) { body -> body.takeIf { it.isNotBlank() } }
+    }
+
+    fun requestTextResponse(urls: List<String>, headers: Map<String, String>): TextResponsePayload? {
+        for (url in urls) {
+            repeat(2) { attempt ->
+                try {
+                    val request = Request.Builder().url(url).apply {
+                        headers.forEach { (key, value) -> header(key, value) }
+                        githubProxyService.applyGithubAuth(this, url)
+                    }.build()
+                    metadataHttpClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@use
+                        val body = response.body.string()
+                        if (body.isBlank()) return@use
+                        return TextResponsePayload(
+                            finalUrl = response.request.url.toString(),
+                            body = body
+                        )
+                    }
+                } catch (_: Exception) {
+                    if (attempt == 0) Thread.sleep(500)
+                }
+            }
+        }
+        return null
     }
 
     fun <T> requestMapped(
@@ -142,10 +172,12 @@ class GithubRemoteService @Inject constructor(
         val assets = (obj["assets"] as? JsonArray).orEmpty().mapNotNull { element ->
             val asset = element as? JsonObject ?: return@mapNotNull null
             val name = (asset["name"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-            val downloadUrl = (asset["browser_download_url"] as? JsonPrimitive)
+            val downloadUrl = normalizeGithubUrl(
+                (asset["browser_download_url"] as? JsonPrimitive)
                 ?.contentOrNull
                 ?.trim()
                 .orEmpty()
+            )
             if (name.isBlank() || downloadUrl.isBlank()) return@mapNotNull null
             ReleaseAsset(
                 name = name,
@@ -158,9 +190,37 @@ class GithubRemoteService @Inject constructor(
             name = (obj["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             body = (obj["body"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             publishedAt = (obj["published_at"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
-            htmlUrl = (obj["html_url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
-            zipballUrl = (obj["zipball_url"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+            htmlUrl = normalizeGithubUrl((obj["html_url"] as? JsonPrimitive)?.contentOrNull.orEmpty()),
+            zipballUrl = normalizeGithubUrl((obj["zipball_url"] as? JsonPrimitive)?.contentOrNull.orEmpty()),
             assets = assets
         )
+    }
+
+    private fun normalizeGithubUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+
+        val directPrefixes = listOf(
+            "https://github.com/",
+            "https://api.github.com/",
+            "https://raw.githubusercontent.com/",
+            "https://uploads.github.com/"
+        )
+        directPrefixes.firstOrNull { trimmed.startsWith(it) }?.let { return trimmed }
+        directPrefixes.firstOrNull { trimmed.contains(it) }?.let { prefix ->
+            return trimmed.substring(trimmed.indexOf(prefix))
+        }
+
+        val barePrefixes = listOf(
+            "github.com/",
+            "api.github.com/",
+            "raw.githubusercontent.com/",
+            "uploads.github.com/"
+        )
+        barePrefixes.firstOrNull { trimmed.contains(it) }?.let { prefix ->
+            return "https://${trimmed.substring(trimmed.indexOf(prefix))}"
+        }
+
+        return trimmed
     }
 }
