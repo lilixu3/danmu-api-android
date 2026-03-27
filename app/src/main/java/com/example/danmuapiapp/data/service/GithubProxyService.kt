@@ -112,38 +112,46 @@ class GithubProxyService @Inject constructor(
     }
 
     suspend fun testLatency(option: GithubProxyOption): Long = withContext(Dispatchers.IO) {
-        val targetPath = "https://raw.githubusercontent.com/lilixu3/danmu-api-android/main/README.md"
-        val targetUrl = if (option.isOriginal) {
-            targetPath
-        } else {
-            buildProxyCandidates(option.baseUrl, targetPath).firstOrNull() ?: "${
-                option.baseUrl.trimEnd('/')
-            }/$targetPath"
-        }
-
         val client = httpClient.newBuilder()
             .connectTimeout(2500, TimeUnit.MILLISECONDS)
             .readTimeout(2500, TimeUnit.MILLISECONDS)
             .callTimeout(3500, TimeUnit.MILLISECONDS)
             .build()
 
-        val start = System.currentTimeMillis()
-        val request = Request.Builder()
-            .url(targetUrl)
-            .header("User-Agent", "DanmuApiApp")
-            .header("Range", "bytes=0-0")
-            .build()
+        val targets = listOf(
+            "https://github.com/lilixu3/danmu-api-android/releases/latest",
+            "https://raw.githubusercontent.com/lilixu3/danmu_api/refs/heads/main/danmu_api/configs/globals.js"
+        )
+        val latencies = targets.map { targetUrl ->
+            val candidates = if (option.isOriginal) {
+                listOf(targetUrl)
+            } else {
+                buildProxyCandidates(option.baseUrl, targetUrl)
+            }
+            probeLatency(client, candidates)
+        }
+        if (latencies.any { it < 0L }) return@withContext -1L
+        latencies.maxOrNull() ?: -1L
+    }
 
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (response.code in 200..399) {
+    private fun probeLatency(client: OkHttpClient, candidates: List<String>): Long {
+        candidates.distinct().forEach { targetUrl ->
+            val start = System.currentTimeMillis()
+            val request = Request.Builder()
+                .url(targetUrl)
+                .header("User-Agent", "DanmuApiApp")
+                .build()
+
+            val latency = runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (response.code !in 200..399) return@use -1L
                     runCatching { response.body.byteStream().use { it.read() } }
                     (System.currentTimeMillis() - start).coerceAtLeast(1L)
-                } else {
-                    -1L
                 }
-            }
-        }.getOrDefault(-1L)
+            }.getOrDefault(-1L)
+            if (latency >= 0L) return latency
+        }
+        return -1L
     }
 
     private fun resolveInitialSelectedId(): String {
