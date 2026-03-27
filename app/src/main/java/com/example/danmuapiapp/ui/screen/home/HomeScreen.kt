@@ -1202,14 +1202,28 @@ private fun AppAnnouncement.sheetIcon(): ImageVector {
     }
 }
 
-private fun AppAnnouncement.previewText(): String {
-    val raw = if (contentPreview.isNotBlank()) contentPreview else contentMarkdown
-    return raw
+private fun String.toAnnouncementPlainText(): String {
+    return replace("\r\n", "\n")
+        .replace('\r', '\n')
         .replace(Regex("[`#>*_\\[\\]]"), "")
         .replace(Regex("\\((https?://[^)]+)\\)"), "")
+        .lines()
+        .joinToString("\n") { line ->
+            line.replace(Regex("[^\\S\\n]+"), " ").trim()
+        }
         .replace(Regex("\\n{3,}"), "\n\n")
         .trim()
-        .take(320)
+}
+
+private fun AppAnnouncement.previewText(): String {
+    val raw = if (contentPreview.isNotBlank()) contentPreview else contentMarkdown
+    return raw.toAnnouncementPlainText().take(320)
+}
+
+private fun AppAnnouncement.dialogBodyText(): String {
+    val markdownBody = contentMarkdown.toAnnouncementPlainText()
+    if (markdownBody.isNotBlank()) return markdownBody
+    return contentPreview.toAnnouncementPlainText()
 }
 
 private data class AnnouncementTonePalette(
@@ -1276,6 +1290,7 @@ private fun AnnouncementCenterDialog(
     val colorScheme = MaterialTheme.colorScheme
     val tonePalette = rememberAnnouncementTonePalette(announcement.sheetTone())
     val previewText = announcement.previewText()
+    val dialogBodyText = announcement.dialogBodyText()
     val summaryText = announcement.summaryText(previewText)
     val primaryAction = announcement.primaryAction
     val secondaryAction = announcement.secondaryAction
@@ -1496,7 +1511,7 @@ private fun AnnouncementCenterDialog(
                 }
 
                 // Preview text card
-                if (previewText.isNotBlank()) {
+                if (dialogBodyText.isNotBlank()) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
@@ -1507,7 +1522,7 @@ private fun AnnouncementCenterDialog(
                         )
                     ) {
                         Text(
-                            text = previewText,
+                            text = dialogBodyText,
                             modifier = Modifier.padding(14.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colorScheme.onSurface.copy(alpha = 0.88f)
