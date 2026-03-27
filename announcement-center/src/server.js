@@ -261,12 +261,13 @@ function serializeAnnouncement(row) {
       type: normalizeActionMode(mode),
     };
   };
+  const contentPreview = buildContentPreview(row.content_markdown || row.content_preview || '');
 
   return {
     id: `${row.announcement_key}:${Number(row.push_version) || 1}`,
     title: row.title,
     summary: row.summary,
-    content_preview: row.content_preview,
+    content_preview: contentPreview,
     content_markdown: row.content_markdown,
     cover_image_url: row.cover_image_url,
     announcement_type: normalizeAnnouncementType(row.announcement_type),
