@@ -58,6 +58,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -75,6 +76,7 @@ import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 @Composable
 fun RuntimeAndDirScreen(
     onBack: () -> Unit,
+    onOpenHarmonyGuide: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -529,6 +531,16 @@ fun RuntimeAndDirScreen(
                         border = guideButtonBorder
                     ) {
                         Text("查看厂商后台教程")
+                    }
+                    if (HarmonyCompatDetector.isLikelyHarmonyCompat()) {
+                        OutlinedButton(
+                            onClick = onOpenHarmonyGuide,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = guideButtonColors,
+                            border = guideButtonBorder
+                        ) {
+                            Text("鸿蒙后台权限引导")
+                        }
                     }
                     Text(
                         autoStartHint,

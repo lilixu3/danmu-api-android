@@ -39,6 +39,7 @@ import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
 import com.example.danmuapiapp.ui.screen.settings.DownloadSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
+import com.example.danmuapiapp.ui.screen.settings.HarmonyGuideScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
@@ -256,12 +257,16 @@ private fun DanmuApiMainContent() {
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
                     onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
-                    onOpenAbout = { navController.navigate(SettingsRoute.About) }
+                    onOpenAbout = { navController.navigate(SettingsRoute.About) },
+                    onOpenHarmonyGuide = { navController.navigate(SettingsRoute.HarmonyGuide) }
                 )
             }
 
             composable(SettingsRoute.RuntimeAndDir) {
-                RuntimeAndDirScreen(onBack = { navController.popBackStack() })
+                RuntimeAndDirScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenHarmonyGuide = { navController.navigate(SettingsRoute.HarmonyGuide) }
+                )
             }
             composable(SettingsRoute.ThemeDisplay) {
                 ThemeDisplayScreen(onBack = { navController.popBackStack() })
@@ -289,6 +294,9 @@ private fun DanmuApiMainContent() {
             }
             composable(SettingsRoute.About) {
                 AboutScreen(onBack = { navController.popBackStack() })
+            }
+            composable(SettingsRoute.HarmonyGuide) {
+                HarmonyGuideScreen(onBack = { navController.popBackStack() })
             }
 
             composable(ToolRoute.Console) {

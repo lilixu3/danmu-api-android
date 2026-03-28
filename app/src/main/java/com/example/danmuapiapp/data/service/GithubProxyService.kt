@@ -118,20 +118,16 @@ class GithubProxyService @Inject constructor(
             .callTimeout(3500, TimeUnit.MILLISECONDS)
             .build()
 
-        val targets = listOf(
-            "https://github.com/lilixu3/danmu-api-android/releases/latest",
+        // 仅使用 raw 资源测速，避免代理站对 github.com/release 页面返回 403
+        // 时把仍可用于下载配置/核心资源的线路整体误判为不可用。
+        val targetUrl =
             "https://raw.githubusercontent.com/lilixu3/danmu_api/refs/heads/main/danmu_api/configs/globals.js"
-        )
-        val latencies = targets.map { targetUrl ->
-            val candidates = if (option.isOriginal) {
-                listOf(targetUrl)
-            } else {
-                buildProxyCandidates(option.baseUrl, targetUrl)
-            }
-            probeLatency(client, candidates)
+        val candidates = if (option.isOriginal) {
+            listOf(targetUrl)
+        } else {
+            buildProxyCandidates(option.baseUrl, targetUrl)
         }
-        if (latencies.any { it < 0L }) return@withContext -1L
-        latencies.maxOrNull() ?: -1L
+        probeLatency(client, candidates)
     }
 
     private fun probeLatency(client: OkHttpClient, candidates: List<String>): Long {
