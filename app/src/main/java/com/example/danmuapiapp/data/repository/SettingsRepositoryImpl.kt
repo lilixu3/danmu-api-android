@@ -38,11 +38,7 @@ class SettingsRepositoryImpl @Inject constructor(
     )
     override val githubProxy: StateFlow<String> = _githubProxy.asStateFlow()
 
-    private val _announcementBaseUrl = MutableStateFlow(
-        normalizeAnnouncementBaseUrl(
-            settingsPrefs.safeGetString("announcement_base_url", DEFAULT_ANNOUNCEMENT_BASE_URL)
-        )
-    )
+    private val _announcementBaseUrl = MutableStateFlow(DEFAULT_ANNOUNCEMENT_BASE_URL)
     override val announcementBaseUrl: StateFlow<String> = _announcementBaseUrl.asStateFlow()
 
     private val _githubToken = MutableStateFlow(githubAuthPrefs.safeGetString("github_token"))
@@ -106,6 +102,10 @@ class SettingsRepositoryImpl @Inject constructor(
         if (settingsPrefs.safeGetBoolean("file_log_enabled", false)) {
             settingsPrefs.edit { putBoolean("file_log_enabled", false) }
         }
+        // 公告服务改为内置固定地址，忽略历史用户配置。
+        if (settingsPrefs.contains("announcement_base_url")) {
+            settingsPrefs.edit { remove("announcement_base_url") }
+        }
         AppAppearancePrefs.applyNightMode(_nightMode.value)
     }
 
@@ -116,12 +116,6 @@ class SettingsRepositoryImpl @Inject constructor(
             putBoolean("has_user_selected_proxy", normalized != "original")
         }
         _githubProxy.value = normalized
-    }
-
-    override fun setAnnouncementBaseUrl(url: String) {
-        val normalized = normalizeAnnouncementBaseUrl(url)
-        settingsPrefs.edit { putString("announcement_base_url", normalized) }
-        _announcementBaseUrl.value = normalized
     }
 
     override fun setGithubToken(token: String) {
@@ -230,16 +224,6 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private fun resolveCustomRepoDisplayName(): String {
         return settingsPrefs.safeGetString("custom_repo_display_name").trim()
-    }
-
-    private fun normalizeAnnouncementBaseUrl(raw: String): String {
-        val trimmed = raw.trim().trimEnd('/')
-        if (trimmed.isBlank()) return DEFAULT_ANNOUNCEMENT_BASE_URL
-        return when {
-            trimmed.startsWith("http://", ignoreCase = true) -> trimmed
-            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
-            else -> "http://$trimmed"
-        }
     }
 
     private fun resolveCustomRepo(): String {

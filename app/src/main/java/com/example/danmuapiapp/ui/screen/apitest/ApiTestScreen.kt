@@ -752,15 +752,15 @@ private fun DanmuModeSwitcher(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             DanmuModeTab(
                 modifier = Modifier.weight(1f),
@@ -789,82 +789,45 @@ private fun DanmuModeTab(
     onClick: () -> Unit
 ) {
     val containerColor = if (selected) {
-        lerp(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            0.26f
-        )
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     } else {
         Color.Transparent
-    }
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)
     }
     val iconTint = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
-    }
-    val iconContainerColor = if (selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
     val textColor = if (selected) {
         MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val accentColor = if (selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-    } else {
-        Color.Transparent
-    }
 
     Surface(
-        modifier = modifier.height(38.dp),
+        modifier = modifier.height(36.dp),
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor)
+        shape = RoundedCornerShape(12.dp),
+        color = containerColor
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp),
+            modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(iconContainerColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(13.dp),
-                    tint = iconTint
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = iconTint
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 color = textColor,
                 maxLines = 1
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Box(
-                modifier = Modifier
-                    .size(5.dp)
-                    .clip(CircleShape)
-                    .background(accentColor)
             )
         }
     }
@@ -880,117 +843,56 @@ private fun DanmuAutoPane(
     onClearResult: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            color = Color.Transparent
-        ) {
-            Column(
-                modifier = Modifier
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                        ),
-                        shape = RoundedCornerShape(24.dp)
+        WorkbenchCard(title = "自动匹配", subtitle = "match → comment/json") {
+            TextField(
+                value = fileName,
+                onValueChange = onFileNameChange,
+                placeholder = { Text("输入视频文件名进行匹配") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Rounded.Search, null,
+                        Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = TextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "例如：凡人修仙传 S01E01 1080P",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Button(
+                onClick = onAutoMatch,
+                enabled = !isLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Rounded.AutoAwesome, null,
-                                Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Column {
-                            Text(
-                                "自动匹配",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                "match → comment/json",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                    if (result != null) {
-                        TextButton(onClick = onClearResult) { Text("清空") }
-                    }
-                }
-
-                TextField(
-                    value = fileName,
-                    onValueChange = onFileNameChange,
-                    placeholder = { Text("输入视频文件名进行匹配") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Rounded.Search, null,
-                            Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = TextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text = "例如：凡人修仙传 S01E01 1080P",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(start = 4.dp)
-                )
-
-                Button(
-                    onClick = onAutoMatch,
-                    enabled = !isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("匹配中")
-                    } else {
-                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("开始自动匹配")
-                    }
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("匹配中")
+                } else {
+                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("开始自动匹配")
                 }
             }
         }
@@ -1167,112 +1069,58 @@ private fun DanmuManualPane(
 
         else -> {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    color = Color.Transparent
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .background(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.22f),
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    )
-                                ),
-                                shape = RoundedCornerShape(24.dp)
+                WorkbenchCard(title = "手动匹配", subtitle = "search/anime → bangumi → comment/json") {
+                    TextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        placeholder = { Text("输入动漫关键词搜索") },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Search, null,
+                                Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = TextFieldDefaults.colors(
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "例如：凡人修仙传",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        onClick = onSearch,
+                        enabled = !isSearchingAnime,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Search, null,
-                                    Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                            Column {
-                                Text(
-                                    "手动匹配",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    "search/anime → bangumi → comment/json",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = FontFamily.Monospace
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        TextField(
-                            value = query,
-                            onValueChange = onQueryChange,
-                            placeholder = { Text("输入动漫关键词搜索") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Rounded.Search, null,
-                                    Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                )
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            colors = TextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent
-                            ),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Text(
-                            text = "例如：凡人修仙传",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-
-                        Button(
-                            onClick = onSearch,
-                            enabled = !isSearchingAnime,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            if (isSearchingAnime) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("搜索中")
-                            } else {
-                                Icon(Icons.Rounded.Search, null, Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("搜索动漫")
-                            }
+                        if (isSearchingAnime) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("搜索中")
+                        } else {
+                            Icon(Icons.Rounded.Search, null, Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("搜索动漫")
                         }
                     }
                 }
@@ -1468,99 +1316,93 @@ private fun DanmuMetaBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = Color.Transparent
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
     ) {
-        Row(
-            modifier = Modifier
-                .height(IntrinsicSize.Min)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        )
-                    ),
-                    shape = RoundedCornerShape(22.dp)
-                )
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(
-                        MaterialTheme.colorScheme.primary,
-                        RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)
-                    )
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Movie, null,
+                            Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Text(
                         text = insight.episodeTitle.ifBlank {
                             insight.animeTitle.ifBlank {
                                 insight.commentId?.let { "commentId $it" } ?: "弹幕结果"
                             }
                         },
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (backLabel != null && onBack != null) {
-                        TextButton(
-                            onClick = onBack,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(backLabel, style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-                if (insight.animeTitle.isNotBlank() && insight.episodeTitle.isNotBlank()) {
-                    Text(
-                        text = buildString {
-                            append(insight.animeTitle)
-                            if (insight.source.isNotBlank()) append(" · ${insight.source}")
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (insight.pathLabel.isNotBlank()) {
-                    Text(
-                        text = insight.pathLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                if (backLabel != null && onBack != null) {
+                    TextButton(
+                        onClick = onBack,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(backLabel, style = MaterialTheme.typography.labelMedium)
+                    }
                 }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (insight.commentId != null) {
-                        StatusBadge(text = "ID ${insight.commentId}", color = MaterialTheme.colorScheme.primary)
-                    }
-                    insight.requestDurationMs?.let { duration ->
-                        StatusBadge(text = "${duration}ms", color = MaterialTheme.colorScheme.tertiary)
-                    }
-                    if (insight.totalCount == 0) {
-                        StatusBadge(text = "未解析到弹幕", color = MaterialTheme.colorScheme.error)
-                    }
+            }
+            if (insight.animeTitle.isNotBlank() && insight.episodeTitle.isNotBlank()) {
+                Text(
+                    text = buildString {
+                        append(insight.animeTitle)
+                        if (insight.source.isNotBlank()) append(" · ${insight.source}")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (insight.pathLabel.isNotBlank()) {
+                Text(
+                    text = insight.pathLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (insight.commentId != null) {
+                    StatusBadge(text = "ID ${insight.commentId}", color = MaterialTheme.colorScheme.primary)
+                }
+                insight.requestDurationMs?.let { duration ->
+                    StatusBadge(text = "${duration}ms", color = MaterialTheme.colorScheme.tertiary)
+                }
+                if (insight.totalCount == 0) {
+                    StatusBadge(text = "未解析到弹幕", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -1569,104 +1411,74 @@ private fun DanmuMetaBar(
 
 @Composable
 private fun DanmuMetricsGrid(insight: DanmuInsight) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f))
-    ) {
-        Column {
-            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-                MetricCell(
-                    modifier = Modifier.weight(1f),
-                    label = "匹配时间",
-                    value = formatMatchedAt(insight.matchedAtMillis),
-                    icon = Icons.Rounded.Schedule,
-                    iconTint = MaterialTheme.colorScheme.primary
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .padding(vertical = 10.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                )
-                MetricCell(
-                    modifier = Modifier.weight(1f),
-                    label = "弹幕总数",
-                    value = insight.totalCount.toString(),
-                    icon = Icons.Rounded.GraphicEq,
-                    iconTint = MaterialTheme.colorScheme.tertiary
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .padding(horizontal = 14.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    WorkbenchCard(title = "弹幕概览") {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CompactMetricItem(
+                modifier = Modifier.weight(1f),
+                label = "匹配时间",
+                value = formatMatchedAt(insight.matchedAtMillis),
+                icon = Icons.Rounded.Schedule,
+                iconTint = MaterialTheme.colorScheme.primary
             )
-            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-                MetricCell(
-                    modifier = Modifier.weight(1f),
-                    label = "视频时长",
-                    value = formatVideoTime(insight.durationSeconds),
-                    icon = Icons.Rounded.Movie,
-                    iconTint = MaterialTheme.colorScheme.secondary
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .padding(vertical = 10.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                )
-                MetricCell(
-                    modifier = Modifier.weight(1f),
-                    label = "高能峰值",
-                    value = if (insight.maxHeatCount > 0) "${insight.maxHeatCount} 条" else "暂无",
-                    icon = Icons.Rounded.AutoAwesome,
-                    iconTint = MaterialTheme.colorScheme.error
-                )
-            }
+            CompactMetricItem(
+                modifier = Modifier.weight(1f),
+                label = "弹幕总数",
+                value = insight.totalCount.toString(),
+                icon = Icons.Rounded.GraphicEq,
+                iconTint = MaterialTheme.colorScheme.tertiary
+            )
+            CompactMetricItem(
+                modifier = Modifier.weight(1f),
+                label = "视频时长",
+                value = formatVideoTime(insight.durationSeconds),
+                icon = Icons.Rounded.Movie,
+                iconTint = MaterialTheme.colorScheme.secondary
+            )
         }
     }
 }
 
 @Composable
-private fun MetricCell(
+private fun CompactMetricItem(
     modifier: Modifier = Modifier,
     label: String,
     value: String,
     icon: ImageVector,
     iconTint: Color
 ) {
-    Column(
-        modifier = modifier.padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
+                .size(28.dp)
+                .clip(RoundedCornerShape(8.dp))
                 .background(iconTint.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, Modifier.size(16.dp), tint = iconTint)
+            Icon(icon, null, Modifier.size(14.dp), tint = iconTint)
         }
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            maxLines = 1
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1
+            )
+        }
     }
 }
 
