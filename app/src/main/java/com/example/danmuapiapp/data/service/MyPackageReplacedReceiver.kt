@@ -3,7 +3,6 @@ package com.example.danmuapiapp.data.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import com.example.danmuapiapp.domain.model.RunMode
 
 /**
@@ -53,7 +52,7 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
                         RuntimeWarmupManager.runWarmup(appContext)
                     }
                 }.onFailure {
-                    Log.e("PkgReplacedReceiver", "覆盖安装后的普通模式恢复失败", it)
+                    AppDiagnosticLogger.e(appContext, "PkgReplacedReceiver", "覆盖安装后的普通模式恢复失败", it)
                 }
             } finally {
                 pending.finish()

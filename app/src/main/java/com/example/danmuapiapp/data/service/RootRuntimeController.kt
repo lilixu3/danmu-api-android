@@ -96,7 +96,11 @@ object RootRuntimeController {
             return OpResult(true, "Root 模式已在运行")
         }
 
+        AppDiagnosticLogger.i(context, "RootRuntimeController", "请求启动 Root 模式，端口=$port")
+        val bootLogFile = AppDiagnosticLogger.prepareRootBootstrapLog(context)
+
         if (!RootShell.hasRoot(3000L)) {
+            AppDiagnosticLogger.e(context, "RootRuntimeController", "Root 授权失败")
             return OpResult(false, "Root 授权失败", "请确认设备已 Root，并允许本应用获取 Root 权限")
         }
 
@@ -109,6 +113,11 @@ object RootRuntimeController {
             refreshEnvWhenReady = !skipSync
         )
         if (!prepare.ok) {
+            AppDiagnosticLogger.e(
+                context,
+                "RootRuntimeController",
+                "Root 运行时准备失败：${prepare.detail.ifBlank { prepare.message }}"
+            )
             return OpResult(false, "Root 模式启动失败", prepare.detail.ifBlank { prepare.message })
         }
 
@@ -118,6 +127,7 @@ object RootRuntimeController {
         val pkgName = context.packageName
         val apkPathHint = context.applicationInfo.sourceDir
         val libDirHint = context.applicationInfo.nativeLibraryDir
+        val bootLogPath = bootLogFile.absolutePath
 
         val startScript = """
             PKG=${shellQuote(pkgName)}
@@ -125,8 +135,14 @@ object RootRuntimeController {
             LIB_DIR_HINT=${shellQuote(libDirHint)}
             ENTRY=${shellQuote(entryPath)}
             PID_FILE=${shellQuote(pidPath)}
+            BOOT_LOG=${shellQuote(bootLogPath)}
             MAIN_CLASS=${shellQuote(mainClassName)}
             NICE_NAME=${shellQuote(PROCESS_NAME)}
+
+            ts() { date '+%Y-%m-%d %H:%M:%S'; }
+            mkdir -p "${'$'}(dirname "${'$'}BOOT_LOG")" >/dev/null 2>&1 || true
+            printf '%s [INFO] Root 启动脚本开始\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
+            printf '%s [INFO] 目标入口：%s\n' "${'$'}(ts)" "${'$'}ENTRY" >> "${'$'}BOOT_LOG" 2>/dev/null || true
 
             APP_APK="${'$'}APP_APK_HINT"
             if [ -z "${'$'}APP_APK" ] || [ ! -f "${'$'}APP_APK" ]; then
@@ -169,32 +185,48 @@ object RootRuntimeController {
             mkdir -p "${'$'}(dirname "${'$'}PID_FILE")" >/dev/null 2>&1 || true
             export DANMU_API_HOME="${'$'}(dirname "${'$'}ENTRY")"
             cd "${'$'}DANMU_API_HOME" >/dev/null 2>&1 || true
+            printf '%s [INFO] DANMU_API_HOME=%s\n' "${'$'}(ts)" "${'$'}DANMU_API_HOME" >> "${'$'}BOOT_LOG" 2>/dev/null || true
 
             if command -v setsid >/dev/null 2>&1; then
-              setsid "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >/dev/null 2>&1 < /dev/null &
+              printf '%s [INFO] 使用 setsid 拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
+              setsid "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             elif command -v nohup >/dev/null 2>&1; then
-              nohup "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >/dev/null 2>&1 < /dev/null &
+              printf '%s [INFO] 使用 nohup 拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
+              nohup "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             else
-              "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >/dev/null 2>&1 < /dev/null &
+              printf '%s [INFO] 直接拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
+              "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             fi
             sleep 0.25
+            printf '%s [INFO] Root 启动命令已发出\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
         """.trimIndent()
 
         val startResult = RootShell.exec(startScript, timeoutMs = 15000L)
         if (!startResult.ok) {
             val err = (startResult.stderr.ifBlank { startResult.stdout }).trim().take(400)
-            return OpResult(false, "Root 模式启动失败", if (err.isBlank()) "未知错误" else err)
+            val detail = mergeRootBootstrapDetail(
+                primary = if (err.isBlank()) "未知错误" else err,
+                tail = AppDiagnosticLogger.readRootBootstrapTail(context)
+            )
+            AppDiagnosticLogger.e(context, "RootRuntimeController", "Root 模式启动失败：$detail")
+            return OpResult(false, "Root 模式启动失败", detail)
         }
 
         if (quickMode) {
+            AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已触发启动")
             return OpResult(true, "Root 模式已触发启动")
         }
 
         val ready = waitForPort("127.0.0.1", port, wantOpen = true, timeoutMs = 12000L)
         return if (ready) {
+            AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已启动，端口=$port")
             OpResult(true, "Root 模式已启动")
         } else {
-            val detail = "端口 $port 未就绪，请在应用控制台查看 /api/logs 日志后重试"
+            val detail = mergeRootBootstrapDetail(
+                primary = "端口 $port 未就绪，请在应用控制台查看 Root 启动日志与 /api/logs 后重试",
+                tail = AppDiagnosticLogger.readRootBootstrapTail(context)
+            )
+            AppDiagnosticLogger.e(context, "RootRuntimeController", "Root 模式启动超时：$detail")
             OpResult(false, "Root 模式启动超时", detail)
         }
     }
@@ -696,6 +728,13 @@ object RootRuntimeController {
             runCatching { Thread.sleep(180) }
         }
         return !isPidAlive(pid)
+    }
+
+    private fun mergeRootBootstrapDetail(primary: String, tail: String): String {
+        val normalizedPrimary = primary.trim().ifBlank { "未知错误" }
+        val normalizedTail = tail.trim()
+        if (normalizedTail.isBlank()) return normalizedPrimary
+        return "$normalizedPrimary\n最近 Root 引导日志：\n$normalizedTail"
     }
 
     private fun requestShutdown(port: Int) {

@@ -3,7 +3,6 @@ package com.example.danmuapiapp.data.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import com.example.danmuapiapp.domain.model.RunMode
 
 class BootReceiver : BroadcastReceiver() {
@@ -43,7 +42,7 @@ class BootReceiver : BroadcastReceiver() {
                         }
                     }
                 }.onFailure {
-                    Log.e("BootReceiver", "普通模式开机恢复失败", it)
+                    AppDiagnosticLogger.e(appContext, "BootReceiver", "普通模式开机恢复失败", it)
                 }
             } finally {
                 pending.finish()
