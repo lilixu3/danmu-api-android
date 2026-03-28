@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.danmuapiapp.MainActivity
@@ -65,7 +64,7 @@ class NodeService : Service() {
             } else {
                 val blockedMs = NodeKeepAlivePrefs.getRestartBlockRemainingMs(appContext)
                 if (blockedMs > 0L) {
-                    Log.w(TAG, "普通模式后台恢复暂缓，剩余 ${blockedMs}ms")
+                    AppDiagnosticLogger.w(appContext, TAG, "普通模式后台恢复暂缓，剩余 ${blockedMs}ms")
                     SystemHeartbeatScheduler.refresh(appContext)
                     return false
                 }
@@ -239,7 +238,7 @@ class NodeService : Service() {
     }
 
     override fun onTimeout(startId: Int) {
-        Log.e(TAG, "普通模式前台服务触发系统超时，正在强制停止")
+        AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，正在强制停止")
         synchronized(stateLock) {
             isRunning = false
             isStopping = false
@@ -286,7 +285,7 @@ class NodeService : Service() {
                     runtimeGeneration.get() != generation || !isRunning || isStopping
                 }
                 if (startCanceled) {
-                    Log.i(TAG, "启动流程已取消，忽略后续启动 generation=$generation")
+                    AppDiagnosticLogger.i(this@NodeService, TAG, "启动流程已取消，忽略后续启动 generation=$generation")
                     return@launch
                 }
 
@@ -317,9 +316,9 @@ class NodeService : Service() {
                                 val msg = crashThrowable?.let { buildErrorMessage(it) }
                                     ?: "Node 进程异常退出，退出码：$exitCode"
                                 if (crashThrowable != null) {
-                                    Log.e(TAG, "Node crashed: $msg", crashThrowable)
+                                    AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg", crashThrowable)
                                 } else {
-                                    Log.e(TAG, "Node crashed: $msg")
+                                    AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg")
                                 }
                                 recordRecoveryFailure()
                                 SystemHeartbeatScheduler.refresh(applicationContext)
@@ -329,7 +328,7 @@ class NodeService : Service() {
                             }
                             stopForegroundAndSelf()
                         } else {
-                            Log.i(TAG, "忽略旧实例退出广播，generation=$generation")
+                            AppDiagnosticLogger.i(this@NodeService, TAG, "忽略旧实例退出广播，generation=$generation")
                         }
                     }
                 }.apply {
@@ -454,11 +453,7 @@ class NodeService : Service() {
 
     private fun handleStartupFailure(generation: Long, message: String, throwable: Throwable? = null) {
         if (runtimeGeneration.get() != generation) return
-        if (throwable != null) {
-            Log.e(TAG, "Failed to start node: $message", throwable)
-        } else {
-            Log.e(TAG, "Failed to start node: $message")
-        }
+        AppDiagnosticLogger.e(this, TAG, "Failed to start node: $message", throwable)
         synchronized(stateLock) {
             isRunning = false
             isStopping = false
@@ -477,7 +472,7 @@ class NodeService : Service() {
 
     private suspend fun handleStartupTimeout(generation: Long, message: String) {
         if (runtimeGeneration.get() != generation) return
-        Log.w(TAG, message)
+        AppDiagnosticLogger.w(this, TAG, message)
         val shouldKillProcess = synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
             val threadAlive = nodeThread?.isAlive == true
@@ -530,7 +525,7 @@ class NodeService : Service() {
             }
 
             // Node/V8 停不干净时，直接终止 :node 进程，避免后续无法重启。
-            Log.w(TAG, "普通模式停止超时，强制结束 :node 进程")
+            AppDiagnosticLogger.w(this@NodeService, TAG, "普通模式停止超时，强制结束 :node 进程")
             publishStopping("停止较慢，正在强制回收服务进程…")
             broadcastStatus(STATUS_STOPPED, message = "服务已停止")
             delay(350)
@@ -695,7 +690,8 @@ class NodeService : Service() {
                 System.currentTimeMillis() - startupStartedAtMs >= staleTimeoutMs
 
             if (staleFlags || startupTimedOut) {
-                Log.w(
+                AppDiagnosticLogger.w(
+                    this,
                     TAG,
                     if (startupTimedOut) {
                         "检测到普通模式启动状态残留，已重置本地启动标记"

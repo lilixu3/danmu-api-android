@@ -3,7 +3,9 @@ package com.example.danmuapiapp.ui.screen.console
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -27,6 +29,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import java.text.SimpleDateFormat
@@ -46,6 +49,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboard.current
     var filterLevel by remember { mutableStateOf<LogLevel?>(null) }
+    var filterSource by remember { mutableStateOf<AppLogSource?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
@@ -55,9 +59,12 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
 
     val filteredLogs = logs
         .let { list -> if (filterLevel != null) list.filter { it.level == filterLevel } else list }
+        .let { list -> if (filterSource != null) list.filter { it.source == filterSource } else list }
         .let { list ->
             if (searchQuery.isNotBlank()) list.filter {
-                it.message.contains(searchQuery, ignoreCase = true)
+                it.message.contains(searchQuery, ignoreCase = true) ||
+                    it.tag.contains(searchQuery, ignoreCase = true) ||
+                    it.source.label.contains(searchQuery, ignoreCase = true)
             } else list
         }
 
@@ -220,7 +227,22 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 FilledTonalIconButton(
                     onClick = {
                         val text = logs.joinToString("\n") {
-                            "[${it.level.name}] ${it.message}"
+                            buildString {
+                                append('[')
+                                append(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(it.timestamp)))
+                                append("][")
+                                append(it.source.label)
+                                append(']')
+                                if (it.tag.isNotBlank()) {
+                                    append('[')
+                                    append(it.tag)
+                                    append(']')
+                                }
+                                append('[')
+                                append(it.level.name)
+                                append("] ")
+                                append(it.message)
+                            }
                         }
                         clipboardManager.nativeClipboard.setPrimaryClip(
                             android.content.ClipData.newPlainText("日志", text)
@@ -269,7 +291,10 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
 
         // Filter chips
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             FilterChip(
@@ -303,6 +328,54 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     selectedContainerColor = chipWarnColor.copy(alpha = 0.15f)
                 ),
                 leadingIcon = if (filterLevel == LogLevel.Warn) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = filterSource == null,
+                onClick = { filterSource = null },
+                label = { Text("全部来源") },
+                leadingIcon = if (filterSource == null) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
+            FilterChip(
+                selected = filterSource == AppLogSource.Core,
+                onClick = {
+                    filterSource = if (filterSource == AppLogSource.Core) null else AppLogSource.Core
+                },
+                label = { Text(AppLogSource.Core.label) },
+                leadingIcon = if (filterSource == AppLogSource.Core) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
+            FilterChip(
+                selected = filterSource == AppLogSource.App,
+                onClick = {
+                    filterSource = if (filterSource == AppLogSource.App) null else AppLogSource.App
+                },
+                label = { Text(AppLogSource.App.label) },
+                leadingIcon = if (filterSource == AppLogSource.App) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
+            FilterChip(
+                selected = filterSource == AppLogSource.RootBootstrap,
+                onClick = {
+                    filterSource =
+                        if (filterSource == AppLogSource.RootBootstrap) null else AppLogSource.RootBootstrap
+                },
+                label = { Text(AppLogSource.RootBootstrap.label) },
+                leadingIcon = if (filterSource == AppLogSource.RootBootstrap) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
@@ -371,7 +444,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                             Text(
                                 when {
                                     searchQuery.isNotBlank() -> "没有匹配的日志"
-                                    filterLevel != null -> "没有匹配的日志"
+                                    filterLevel != null || filterSource != null -> "没有匹配的日志"
                                     else -> "暂无日志"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
@@ -425,23 +498,49 @@ private fun LogEntryRow(entry: LogEntry) {
                     else -> Color.Transparent
                 }
             )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = timeFormat.format(Date(entry.timestamp)),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontFamily = FontFamily.Monospace, fontSize = 10.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-        )
-        Text(
-            text = entry.message,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontFamily = FontFamily.Monospace, fontSize = 11.sp
-            ),
-            color = color,
-            modifier = Modifier.weight(1f)
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = timeFormat.format(Date(entry.timestamp)),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+                Text(
+                    text = entry.source.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (entry.tag.isNotBlank()) {
+                    Text(
+                        text = entry.tag,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(
+                text = entry.message,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                ),
+                color = color
+            )
+        }
     }
 }

@@ -1,7 +1,6 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -109,7 +108,7 @@ class RuntimeWarmupCoordinator @Inject constructor(
             } else {
                 "预热失败，已跳过"
             }
-            Log.w(TAG, reason)
+            AppDiagnosticLogger.w(context, TAG, reason)
             RuntimeWarmupManager.skipPendingForCurrentVersion(context, reason)
             _uiState.value = UiState.Ready
         }

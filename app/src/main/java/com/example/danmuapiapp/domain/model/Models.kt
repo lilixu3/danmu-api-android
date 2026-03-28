@@ -64,10 +64,18 @@ data class CoreDownloadProgress(
 data class LogEntry(
     val timestamp: Long = System.currentTimeMillis(),
     val level: LogLevel = LogLevel.Info,
-    val message: String = ""
+    val message: String = "",
+    val source: AppLogSource = AppLogSource.App,
+    val tag: String = ""
 )
 
 enum class LogLevel { Info, Warn, Error }
+
+enum class AppLogSource(val label: String) {
+    Core("核心"),
+    App("App"),
+    RootBootstrap("Root启动")
+}
 
 data class GithubRelease(
     val tagName: String,

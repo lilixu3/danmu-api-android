@@ -3,7 +3,6 @@ package com.example.danmuapiapp.data.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 
 class SystemHeartbeatReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -16,7 +15,7 @@ class SystemHeartbeatReceiver : BroadcastReceiver() {
                 runCatching {
                     SystemHeartbeatScheduler.handleAlarm(context.applicationContext)
                 }.onFailure {
-                    Log.e("HeartbeatReceiver", "系统心跳恢复执行失败", it)
+                    AppDiagnosticLogger.e(context.applicationContext, "HeartbeatReceiver", "系统心跳恢复执行失败", it)
                 }
             } finally {
                 pending.finish()
