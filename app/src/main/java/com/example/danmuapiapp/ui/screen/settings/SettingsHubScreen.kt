@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.BuildConfig
+import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
@@ -59,6 +61,7 @@ fun SettingsHubScreen(
     onOpenGithubToken: () -> Unit,
     onOpenAdminMode: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenHarmonyGuide: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -260,6 +263,17 @@ fun SettingsHubScreen(
                     icon = Icons.Rounded.VisibilityOff,
                     checked = hideFromRecents,
                     onCheckedChange = viewModel::setHideFromRecents
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "鸿蒙后台权限引导",
+                    subtitle = if (HarmonyCompatDetector.isLikelyHarmonyCompat()) {
+                        "检测到疑似鸿蒙兼容环境，建议查看权限放行指引"
+                    } else {
+                        "手动查看鸿蒙/卓易通后台权限设置指引"
+                    },
+                    icon = Icons.Rounded.PhoneAndroid,
+                    onClick = onOpenHarmonyGuide
                 )
                 SettingsDivider()
                 SettingsItem(

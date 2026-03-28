@@ -40,4 +40,5 @@ object SettingsRoute {
     const val BackupRestore = "settings_backup_restore"
     const val AdminMode = "settings_admin_mode"
     const val About = "settings_about"
+    const val HarmonyGuide = "settings_harmony_guide"
 }
