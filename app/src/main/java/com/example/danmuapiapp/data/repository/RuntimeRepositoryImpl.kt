@@ -16,6 +16,7 @@ import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.util.CoreApiRouteMode
 import com.example.danmuapiapp.data.util.CoreApiRoutePolicy
+import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
@@ -87,6 +88,20 @@ class RuntimeRepositoryImpl @Inject constructor(
             "danmu_api_dev/",
             "danmu_api_custom/"
         )
+        private val ISO_BRACKET_LOG_REGEX =
+            Regex("""^\[?(\d{4}-\d{2}-\d{2}T[^\]]+)\]?\s+\[([A-Z]+)\]\s*(.*)$""")
+        private val LOCAL_BRACKET_LOG_REGEX =
+            Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s+\[([A-Z]+)\]\s*(.*)$""")
+        private val ISO_COLON_LOG_REGEX =
+            Regex("""^\[?(\d{4}-\d{2}-\d{2}T[^\]]+)\]?\s+([A-Za-z]+):\s*(.*)$""")
+        private val LOCAL_COLON_LOG_REGEX =
+            Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s+([A-Za-z]+):\s*(.*)$""")
+        private val SERVICE_LOG_REGEX =
+            Regex("""^\[([^\]]+)]\s+([A-Za-z]+):\s*(.*)$""")
+        private val STACK_TRACE_LINE_REGEX =
+            Regex("""^(?:at\s+\S+|\.\.\. \d+ more|Caused by:|Suppressed:).*$""")
+        private val TIMESTAMP_TAG_REGEX =
+            Regex("""^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}.*)?$""")
     }
 
     private val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
@@ -103,6 +118,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     override val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
     private val _eventLogs = MutableStateFlow<List<LogEntry>>(emptyList())
     private var serviceLogsCache: List<LogEntry> = emptyList()
+    private var appFileLogsCache: List<LogEntry> = emptyList()
     @Volatile
     private var clearedServiceLogCounts: Map<LogEntry, Int> = emptyMap()
 
@@ -602,8 +618,10 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun clearLogs() {
         clearedServiceLogCounts = serviceLogsCache.groupingBy { it }.eachCount()
         serviceLogsCache = emptyList()
+        appFileLogsCache = emptyList()
         _eventLogs.value = emptyList()
         _logs.value = emptyList()
+        AppDiagnosticLogger.clearAll(context)
         scope.launch {
             clearServiceLogsOnce()
             refreshLogsOnce()
@@ -612,7 +630,12 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     override fun addLog(level: LogLevel, message: String) {
         _eventLogs.update { current ->
-            (current + LogEntry(level = level, message = message)).takeLast(settingsRepository.logMaxCount.value)
+            (current + LogEntry(
+                level = level,
+                message = message,
+                source = AppLogSource.App,
+                tag = "Runtime"
+            )).takeLast(settingsRepository.logMaxCount.value)
         }
         publishMergedLogs()
     }
@@ -1224,7 +1247,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun publishMergedLogs() {
-        val merged = (serviceLogsCache + _eventLogs.value)
+        val merged = (serviceLogsCache + appFileLogsCache + _eventLogs.value)
             .sortedBy { it.timestamp }
             .takeLast(settingsRepository.logMaxCount.value)
         _logs.value = merged
@@ -1234,10 +1257,15 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (!settingsRepository.logEnabled.value) return
         runCatching {
             val serviceLogs = filterClearedServiceLogs(collectServiceLogsOnce())
-            if (serviceLogs.isNotEmpty() || serviceLogsCache.isNotEmpty()) {
-                serviceLogsCache = serviceLogs
-                publishMergedLogs()
-            } else if (_eventLogs.value.isNotEmpty() && _logs.value != _eventLogs.value) {
+            val appLogs = collectAppLogsOnce()
+            val shouldPublish =
+                serviceLogs != serviceLogsCache ||
+                    appLogs != appFileLogsCache ||
+                    _eventLogs.value.isNotEmpty() ||
+                    _logs.value.isNotEmpty()
+            serviceLogsCache = serviceLogs
+            appFileLogsCache = appLogs
+            if (shouldPublish) {
                 publishMergedLogs()
             }
         }.onFailure {
@@ -1245,6 +1273,14 @@ class RuntimeRepositoryImpl @Inject constructor(
                 publishMergedLogs()
             }
         }
+    }
+
+    private fun collectAppLogsOnce(): List<LogEntry> {
+        val limit = settingsRepository.logMaxCount.value.coerceAtLeast(100)
+        return (AppDiagnosticLogger.readAppEntries(context, limit) +
+            AppDiagnosticLogger.readRootBootstrapEntries(context, limit))
+            .sortedBy { it.timestamp }
+            .takeLast(limit)
     }
 
     private fun collectServiceLogsOnce(): List<LogEntry> {
@@ -1344,51 +1380,188 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun parseLogLines(raw: String): List<LogEntry> {
-        val lines = raw.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
-        if (lines.isEmpty()) return emptyList()
+        val blocks = splitLogBlocks(raw)
+        if (blocks.isEmpty()) return emptyList()
 
-        return lines.map { line ->
-            val entry = parseStructuredLogLine(line)
+        return blocks.map { block ->
+            val entry = parseStructuredLogLine(block)
             entry ?: LogEntry(
                 timestamp = System.currentTimeMillis(),
                 level = LogLevel.Info,
-                message = line
+                message = normalizeCoreMessage(block),
+                source = AppLogSource.Core,
+                tag = "Core"
             )
         }.takeLast(settingsRepository.logMaxCount.value)
     }
 
-    private fun parseStructuredLogLine(line: String): LogEntry? {
-        val isoRegex = Regex("""^\[?(\d{4}-\d{2}-\d{2}T[^ \]]+)\]?\s+\[([A-Z]+)\]\s*(.*)$""")
-        val localRegex = Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s+\[([A-Z]+)\]\s*(.*)$""")
-        val serviceRegex = Regex("""^\[([^\]]+)]\s+([A-Za-z]+):\s*(.*)$""")
+    private fun splitLogBlocks(raw: String): List<String> {
+        val blocks = mutableListOf<String>()
+        val current = StringBuilder()
 
-        val m = isoRegex.find(line) ?: localRegex.find(line) ?: serviceRegex.find(line) ?: return null
-        val ts = m.groupValues.getOrNull(1).orEmpty()
-        val levelRaw = m.groupValues.getOrNull(2).orEmpty()
-        val msg = m.groupValues.getOrNull(3).orEmpty()
+        raw.lineSequence().forEach { rawLine ->
+            val trimmed = rawLine.trim()
+            if (trimmed.isBlank()) return@forEach
 
-        val timestamp = runCatching { Instant.parse(ts).toEpochMilli() }.getOrElse {
-            runCatching {
-                val localDt = LocalDateTime.parse(
-                    ts,
-                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                )
-                localDt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            }.getOrElse { System.currentTimeMillis() }
+            if (isStructuredLogHeader(trimmed)) {
+                if (current.isNotEmpty()) {
+                    blocks += current.toString().trim()
+                    current.setLength(0)
+                }
+                current.append(trimmed)
+            } else {
+                if (current.isNotEmpty()) current.append('\n')
+                current.append(trimmed)
+            }
         }
 
-        val level = when (levelRaw.trim().uppercase()) {
+        if (current.isNotEmpty()) {
+            blocks += current.toString().trim()
+        }
+
+        return blocks
+    }
+
+    private fun isStructuredLogHeader(line: String): Boolean {
+        if (
+            ISO_BRACKET_LOG_REGEX.matches(line) ||
+            LOCAL_BRACKET_LOG_REGEX.matches(line) ||
+            ISO_COLON_LOG_REGEX.matches(line) ||
+            LOCAL_COLON_LOG_REGEX.matches(line)
+        ) {
+            return true
+        }
+
+        val serviceMatch = SERVICE_LOG_REGEX.find(line) ?: return false
+        return !looksLikeTimestampTag(serviceMatch.groupValues[1].trim())
+    }
+
+    private fun parseStructuredLogLine(block: String): LogEntry? {
+        val lines = block.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
+        if (lines.isEmpty()) return null
+
+        val header = parseStructuredLogHeader(lines.first()) ?: return null
+        val message = buildString {
+            if (header.message.isNotBlank()) {
+                append(header.message.trim())
+            }
+            if (lines.size > 1) {
+                if (isNotBlank()) append('\n')
+                append(lines.drop(1).joinToString("\n"))
+            }
+        }.ifBlank { lines.first() }
+
+        return LogEntry(
+            timestamp = header.timestamp,
+            level = header.level,
+            message = normalizeCoreMessage(message),
+            source = AppLogSource.Core,
+            tag = header.tag
+        )
+    }
+
+    private fun parseStructuredLogHeader(line: String): ParsedLogHeader? {
+        ISO_BRACKET_LOG_REGEX.find(line)?.let { match ->
+            return ParsedLogHeader(
+                timestamp = parseIsoTimestamp(match.groupValues[1]),
+                level = parseLogLevel(match.groupValues[2]),
+                message = match.groupValues[3],
+                tag = "Core"
+            )
+        }
+
+        LOCAL_BRACKET_LOG_REGEX.find(line)?.let { match ->
+            return ParsedLogHeader(
+                timestamp = parseLocalTimestamp(match.groupValues[1]),
+                level = parseLogLevel(match.groupValues[2]),
+                message = match.groupValues[3],
+                tag = "Core"
+            )
+        }
+
+        ISO_COLON_LOG_REGEX.find(line)?.let { match ->
+            return ParsedLogHeader(
+                timestamp = parseIsoTimestamp(match.groupValues[1]),
+                level = parseLogLevel(match.groupValues[2]),
+                message = match.groupValues[3],
+                tag = "Core"
+            )
+        }
+
+        LOCAL_COLON_LOG_REGEX.find(line)?.let { match ->
+            return ParsedLogHeader(
+                timestamp = parseLocalTimestamp(match.groupValues[1]),
+                level = parseLogLevel(match.groupValues[2]),
+                message = match.groupValues[3],
+                tag = "Core"
+            )
+        }
+
+        SERVICE_LOG_REGEX.find(line)?.let { match ->
+            val tag = match.groupValues[1].trim()
+            if (looksLikeTimestampTag(tag)) return null
+
+            return ParsedLogHeader(
+                timestamp = System.currentTimeMillis(),
+                level = parseLogLevel(match.groupValues[2]),
+                message = match.groupValues[3],
+                tag = tag
+            )
+        }
+
+        return null
+    }
+
+    private fun parseIsoTimestamp(raw: String): Long {
+        return runCatching { Instant.parse(raw).toEpochMilli() }
+            .getOrElse { System.currentTimeMillis() }
+    }
+
+    private fun parseLocalTimestamp(raw: String): Long {
+        return runCatching {
+            val localDt = LocalDateTime.parse(
+                raw,
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            )
+            localDt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        }.getOrElse { System.currentTimeMillis() }
+    }
+
+    private fun parseLogLevel(raw: String): LogLevel {
+        return when (raw.trim().uppercase()) {
             "ERROR" -> LogLevel.Error
             "WARN", "WARNING" -> LogLevel.Warn
             else -> LogLevel.Info
         }
-
-        return LogEntry(
-            timestamp = timestamp,
-            level = level,
-            message = msg
-        )
     }
+
+    private fun looksLikeTimestampTag(raw: String): Boolean {
+        return TIMESTAMP_TAG_REGEX.matches(raw)
+    }
+
+    private fun normalizeCoreMessage(message: String): String {
+        val lines = message.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+        if (lines.isEmpty()) return message.trim()
+        if (lines.size == 1) return lines.first()
+        if (lines.drop(1).any { STACK_TRACE_LINE_REGEX.matches(it) }) {
+            return lines.joinToString("\n")
+        }
+        return lines.joinToString(" ")
+            .replace(Regex("""\s+([,;:)\]}])"""), "$1")
+            .replace(Regex("""([\[{(])\s+"""), "$1")
+            .replace(Regex("""\s{2,}"""), " ")
+            .trim()
+    }
+
+    private data class ParsedLogHeader(
+        val timestamp: Long,
+        val level: LogLevel,
+        val message: String,
+        val tag: String
+    )
 
     private fun handleWorkDirHotReload(state: RuntimeState) {
         if (state.status != ServiceStatus.Running) {

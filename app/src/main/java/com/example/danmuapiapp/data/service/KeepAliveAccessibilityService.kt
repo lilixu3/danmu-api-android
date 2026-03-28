@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
 import java.net.InetSocketAddress
@@ -181,7 +180,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
                         runCatching { NodeService.start(appContext, userInitiated = false) }
                     }
                 }.onFailure {
-                    Log.e(TAG, "无障碍保活恢复失败", it)
+                    AppDiagnosticLogger.e(appContext, TAG, "无障碍保活恢复失败", it)
                 }
             } finally {
                 restartInFlight = false
