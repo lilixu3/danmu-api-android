@@ -56,7 +56,6 @@ interface SettingsRepository {
     val logPreviewEnabled: StateFlow<Boolean>
     val logMaxCount: StateFlow<Int>
     fun setGithubProxy(proxy: String)
-    fun setAnnouncementBaseUrl(url: String)
     fun setGithubToken(token: String)
     fun setAutoStart(enabled: Boolean)
     fun setKeepAlive(enabled: Boolean)
