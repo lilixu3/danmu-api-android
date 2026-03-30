@@ -240,7 +240,10 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val portOpen = isPortOpen(port)
-        val normalRuntimeAlive = portOpen && isNormalProcessRunning()
+        // 普通模式的真值源以本地端口是否可达为准。
+        // 主进程被系统回收后，ActivityManager 对远程 :node 进程的枚举并不稳定，
+        // 继续把“端口可达 && 能枚举到进程”当成运行条件，会导致服务实际还活着但 UI 误判为已停。
+        val normalRuntimeAlive = isNormalRuntimeReachable(port)
         val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
         val running = if (mode == RunMode.Root) {
             portOpen || rootPid != null
@@ -1100,7 +1103,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         when (state.runMode) {
             RunMode.Normal -> {
-                if (isPortOpen(state.port) && isNormalProcessRunning()) {
+                if (isNormalRuntimeReachable(state.port)) {
                     markRunning(forceNewStart = false)
                 }
             }
@@ -1152,7 +1155,12 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.status) {
             ServiceStatus.Running -> {
                 when {
-                    processRunning && !portOpen -> {
+                    portOpen -> {
+                        reconcileConsecutiveDeadCount = 0
+                        reconcileConsecutiveStaleProcessCount = 0
+                    }
+
+                    processRunning -> {
                         reconcileConsecutiveDeadCount = 0
                         reconcileConsecutiveStaleProcessCount++
                         if (reconcileConsecutiveStaleProcessCount >= 2) {
@@ -2025,6 +2033,10 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun isNormalProcessRunning(): Boolean {
         return NodeService.isProcessRunning(context)
+    }
+
+    private fun isNormalRuntimeReachable(port: Int): Boolean {
+        return isPortOpen(port)
     }
 
     private fun buildLocalUrl(port: Int, token: String): String {
