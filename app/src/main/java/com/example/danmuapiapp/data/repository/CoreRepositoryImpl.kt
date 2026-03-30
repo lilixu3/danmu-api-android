@@ -1071,6 +1071,14 @@ class CoreRepositoryImpl @Inject constructor(
             val rel = toRelative(target)
             if (rel == "." || rel.isBlank()) return false
             return rel == ".app_version" ||
+                // 核心目录允许用户手工替换；这里不能在覆盖过程中递归介入，
+                // 否则 refreshCoreInfo() -> normalizeCoreLayout() 会对半写入目录做结构整理。
+                rel.startsWith("danmu_api_stable/") ||
+                rel == "danmu_api_stable" ||
+                rel.startsWith("danmu_api_dev/") ||
+                rel == "danmu_api_dev" ||
+                rel.startsWith("danmu_api_custom/") ||
+                rel == "danmu_api_custom" ||
                 rel.startsWith("logs/") ||
                 rel == "logs" ||
                 rel.startsWith(".cache/") ||
