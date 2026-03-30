@@ -422,25 +422,46 @@ class AppUpdateService @Inject constructor(
             setOf(RegexOption.DOT_MATCHES_ALL)
         )
         val bodyRegex = Regex(
-            """data-test-selector="body-content"[^>]*>(.*?)</div>\s*</div>\s*<details""",
+            """data-test-selector="body-content"[^>]*>(.*?)</div>\s*</div>""",
             setOf(RegexOption.DOT_MATCHES_ALL)
         )
 
-        val raw = metaRegex.find(html)?.groupValues?.getOrNull(1)
-            ?: bodyRegex.find(html)?.groupValues?.getOrNull(1)
+        val raw = bodyRegex.find(html)?.groupValues?.getOrNull(1)
+            ?: metaRegex.find(html)?.groupValues?.getOrNull(1)
             ?: ""
-        return htmlToPlainText(raw)
+        return htmlToPlainText(raw, preserveStructure = bodyRegex.containsMatchIn(html))
     }
 
-    private fun htmlToPlainText(raw: String): String {
+    private fun htmlToPlainText(raw: String, preserveStructure: Boolean = false): String {
         if (raw.isBlank()) return ""
+        val normalizedRaw = if (preserveStructure) {
+            raw
+                .replace(Regex("(?i)<br\\s*/?>"), "\n")
+                .replace(Regex("(?i)</(p|div|h1|h2|h3|h4|h5|h6|li|ul|ol|pre|blockquote)>"), "$0\n")
+                .replace(Regex("(?i)<li[^>]*>"), "\n- ")
+                .replace(Regex("(?i)<h1[^>]*>"), "\n# ")
+                .replace(Regex("(?i)<h2[^>]*>"), "\n## ")
+                .replace(Regex("(?i)<h3[^>]*>"), "\n### ")
+                .replace(Regex("(?i)<h4[^>]*>"), "\n#### ")
+                .replace(Regex("(?i)<pre[^>]*><code[^>]*>"), "\n```text\n")
+                .replace(Regex("(?i)</code></pre>"), "\n```\n")
+                .replace(Regex("(?i)<code[^>]*>"), "`")
+                .replace(Regex("(?i)</code>"), "`")
+        } else {
+            raw
+        }
         val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            Html.fromHtml(raw, Html.FROM_HTML_MODE_LEGACY)
+            Html.fromHtml(normalizedRaw, Html.FROM_HTML_MODE_LEGACY)
         } else {
             @Suppress("DEPRECATION")
-            Html.fromHtml(raw)
+            Html.fromHtml(normalizedRaw)
         }
-        return decoded.toString().trim()
+        return decoded.toString()
+            .replace("\u00A0", " ")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .lines()
+            .joinToString("\n") { it.trimEnd() }
+            .trim()
     }
 
     private fun normalizeGithubPath(rawPath: String): String {
@@ -468,37 +489,13 @@ class AppUpdateService @Inject constructor(
     }
 
     private fun sanitizeReleaseNotes(raw: String): String {
-        if (raw.isBlank()) return "（无更新说明）"
-        val marker = Regex("(?i)(sha256|checksum|校验|sha256sums)")
-        val lines = raw.lines()
-        val out = StringBuilder()
-        var skipping = false
-        var inCodeBlock = false
-
-        for (line in lines) {
-            val trimmed = line.trim()
-            if (skipping) {
-                if (trimmed.startsWith("```")) {
-                    inCodeBlock = !inCodeBlock
-                    if (!inCodeBlock) skipping = false
-                    continue
-                }
-                if (!inCodeBlock && trimmed.startsWith("#")) {
-                    skipping = false
-                } else {
-                    continue
-                }
-            }
-            if (marker.containsMatchIn(line)) {
-                skipping = true
-                continue
-            }
-            out.append(line).append('\n')
-        }
-
-        val clean = out.toString().replace(Regex("\n{3,}"), "\n\n").trim()
+        val clean = raw
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
         if (clean.isBlank()) return "（无更新说明）"
-        return if (clean.length <= 900) clean else clean.take(900) + "\n…"
+        return clean
     }
 
     private fun selectBestApk(assets: List<ApkAsset>): ApkAsset? {
