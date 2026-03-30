@@ -215,6 +215,11 @@ private fun parseCommentItem(
         ?: readColorValue(obj)
     val sentAtSeconds = pMetadata.sentAtSeconds
         ?: readPositiveLong(obj, listOf("timestamp", "ctime", "createdAt", "date"))
+    val sourceLabel = pMetadata.sourceLabel.ifBlank {
+        normalizeSourceLabel(
+            readFirstString(obj, listOf("source", "type", "provider", "platform", "from"))
+        )
+    }
     val sourceId = pMetadata.sourceId.ifBlank {
         readFirstString(obj, listOf("id", "cid", "commentId", "danmuId"))
     }
@@ -237,6 +242,7 @@ private fun parseCommentItem(
         colorHex = toColorHex(colorValue),
         fontSize = fontSize,
         sentAtSeconds = sentAtSeconds,
+        sourceLabel = sourceLabel,
         sourceId = sourceId
     )
 }
@@ -262,7 +268,11 @@ private fun parseCommentPMetadata(parts: List<String>): CommentPMetadata {
             timeSeconds = timeSeconds,
             mode = mode,
             colorValue = parseColorValue(parts.getOrNull(2).orEmpty()),
-            fontSize = parts.getOrNull(3)?.toIntOrNull()?.takeIf { it in 8..72 }
+            fontSize = parts.getOrNull(3)?.toIntOrNull()?.takeIf { it in 8..72 },
+            sourceLabel = parts.getOrNull(3)
+                ?.takeIf { it.toIntOrNull()?.let { num -> num in 8..72 } != true }
+                ?.let(::normalizeSourceLabel)
+                .orEmpty()
         )
 
         else -> CommentPMetadata(
@@ -627,5 +637,20 @@ private data class CommentPMetadata(
     val fontSize: Int? = null,
     val colorValue: Long? = null,
     val sentAtSeconds: Long? = null,
+    val sourceLabel: String = "",
     val sourceId: String = ""
 )
+
+private fun normalizeSourceLabel(raw: String): String {
+    val text = raw.trim()
+    if (text.isBlank()) return ""
+    val unwrapped = text
+        .removePrefix("【")
+        .removeSuffix("】")
+        .removePrefix("[")
+        .removeSuffix("]")
+        .trim()
+    if (unwrapped.isBlank()) return ""
+    if (unwrapped.all { it.isDigit() }) return ""
+    return unwrapped
+}
