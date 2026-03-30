@@ -4,6 +4,9 @@ import android.content.ClipData
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -49,7 +52,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -166,8 +173,8 @@ fun ApiTestScreen(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+            color = apiTestPanelColor(),
+            border = BorderStroke(1.dp, apiTestOutlineColor())
         ) {
             SecondaryTabRow(
                 selectedTabIndex = primaryTab,
@@ -753,8 +760,8 @@ private fun DanmuModeSwitcher(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+        color = apiTestPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Row(
             modifier = Modifier
@@ -858,8 +865,8 @@ private fun DanmuAutoPane(
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 colors = TextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    unfocusedContainerColor = apiTestFieldColor(),
+                    focusedContainerColor = apiTestFieldColor(),
                     unfocusedIndicatorColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent
                 ),
@@ -1005,8 +1012,8 @@ private fun DanmuManualPane(
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
                             colors = TextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                unfocusedContainerColor = apiTestFieldColor(),
+                                focusedContainerColor = apiTestFieldColor(),
                                 unfocusedIndicatorColor = Color.Transparent,
                                 focusedIndicatorColor = Color.Transparent
                             ),
@@ -1028,7 +1035,7 @@ private fun DanmuManualPane(
                         Spacer(modifier = Modifier.height(8.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow
+                            color = apiTestSubPanelColor()
                         ) {
                             Text(
                                 text = if (episodeQuery.trim().all { it.isDigit() } || episodeQuery.isBlank()) {
@@ -1084,8 +1091,8 @@ private fun DanmuManualPane(
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         colors = TextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            unfocusedContainerColor = apiTestFieldColor(),
+                            focusedContainerColor = apiTestFieldColor(),
                             unfocusedIndicatorColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent
                         ),
@@ -1159,7 +1166,7 @@ private fun AnimeCandidateRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = apiTestSubPanelColor(),
         onClick = onClick
     ) {
         Row(
@@ -1228,7 +1235,7 @@ private fun EpisodeCandidateRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = apiTestSubPanelColor(),
         onClick = onClick
     ) {
         Row(
@@ -1292,8 +1299,7 @@ private fun DanmuInsightPanel(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DanmuMetaBar(insight = insight, backLabel = backLabel, onBack = onBack)
-        DanmuMetricsGrid(insight = insight)
+        DanmuMetricsGrid(insight = insight, backLabel = backLabel, onBack = onBack)
         if (peakMoment != null) {
             DanmuPeakMomentCard(moment = peakMoment)
         }
@@ -1317,8 +1323,8 @@ private fun DanmuMetaBar(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
+        color = apiTestPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -1410,34 +1416,118 @@ private fun DanmuMetaBar(
 }
 
 @Composable
-private fun DanmuMetricsGrid(insight: DanmuInsight) {
+private fun DanmuMetricsGrid(
+    insight: DanmuInsight,
+    backLabel: String? = null,
+    onBack: (() -> Unit)? = null
+) {
+    val matchLine = remember(insight.animeTitle, insight.episodeTitle) {
+        buildPlayerMatchLine(insight)
+    }
+    val averageDensity = remember(insight.totalCount, insight.durationSeconds) {
+        formatAverageDensity(insight.totalCount, insight.durationSeconds)
+    }
+
     WorkbenchCard(title = "弹幕概览") {
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            CompactMetricItem(
-                modifier = Modifier.weight(1f),
-                label = "匹配时间",
-                value = formatMatchedAt(insight.matchedAtMillis),
-                icon = Icons.Rounded.Schedule,
-                iconTint = MaterialTheme.colorScheme.primary
-            )
-            CompactMetricItem(
-                modifier = Modifier.weight(1f),
-                label = "弹幕总数",
-                value = insight.totalCount.toString(),
-                icon = Icons.Rounded.GraphicEq,
-                iconTint = MaterialTheme.colorScheme.tertiary
-            )
-            CompactMetricItem(
-                modifier = Modifier.weight(1f),
-                label = "视频时长",
-                value = formatVideoTime(insight.durationSeconds),
-                icon = Icons.Rounded.Movie,
-                iconTint = MaterialTheme.colorScheme.secondary
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = matchLine,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (insight.commentId != null) {
+                            StatusBadge(
+                                text = "ID ${insight.commentId}",
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (insight.pathLabel.isNotBlank()) {
+                            StatusBadge(
+                                text = insight.pathLabel,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        insight.requestDurationMs?.let { duration ->
+                            StatusBadge(
+                                text = "${duration}ms",
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                        if (insight.totalCount == 0) {
+                            StatusBadge(
+                                text = "未解析到弹幕",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+                if (backLabel != null && onBack != null) {
+                    TextButton(
+                        onClick = onBack,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(backLabel, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CompactMetricItem(
+                        modifier = Modifier.weight(1f),
+                        label = "匹配时间",
+                        value = formatMatchedAt(insight.matchedAtMillis),
+                        icon = Icons.Rounded.Schedule,
+                        iconTint = MaterialTheme.colorScheme.primary
+                    )
+                    CompactMetricItem(
+                        modifier = Modifier.weight(1f),
+                        label = "弹幕总数",
+                        value = insight.totalCount.toString(),
+                        icon = Icons.Rounded.GraphicEq,
+                        iconTint = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CompactMetricItem(
+                        modifier = Modifier.weight(1f),
+                        label = "视频时长",
+                        value = formatVideoTime(insight.durationSeconds),
+                        icon = Icons.Rounded.Movie,
+                        iconTint = MaterialTheme.colorScheme.secondary
+                    )
+                    CompactMetricItem(
+                        modifier = Modifier.weight(1f),
+                        label = "平均密度",
+                        value = averageDensity,
+                        icon = Icons.Rounded.AutoAwesome,
+                        iconTint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }
@@ -1450,34 +1540,43 @@ private fun CompactMetricItem(
     icon: ImageVector,
     iconTint: Color
 ) {
-    Row(
+    Surface(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        shape = RoundedCornerShape(16.dp),
+        color = apiTestSubPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor(alpha = 0.75f))
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(iconTint.copy(alpha = 0.1f)),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, Modifier.size(14.dp), tint = iconTint)
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1
-            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(iconTint.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, Modifier.size(16.dp), tint = iconTint)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
+                    maxLines = 1
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -1495,7 +1594,7 @@ private fun DanmuPeakMomentCard(moment: DanmuHighMoment) {
                     brush = Brush.horizontalGradient(
                         colors = listOf(
                             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh
+                            apiTestPanelColor()
                         )
                     ),
                     shape = RoundedCornerShape(20.dp)
@@ -1556,6 +1655,14 @@ private fun DanmuPeakMomentCard(moment: DanmuHighMoment) {
 
 @Composable
 private fun DanmuHeatmapCard(insight: DanmuInsight) {
+    var selectedBucketIndex by remember(insight.commentId, insight.matchedAtMillis) {
+        mutableIntStateOf(-1)
+    }
+    var chartWidthPx by remember(insight.commentId, insight.matchedAtMillis) {
+        mutableIntStateOf(0)
+    }
+    val selectedBucket = insight.heatBuckets.getOrNull(selectedBucketIndex)
+
     WorkbenchCard(title = "弹幕热力图") {
         if (insight.heatBuckets.isEmpty()) {
             Text(
@@ -1571,37 +1678,147 @@ private fun DanmuHeatmapCard(insight: DanmuInsight) {
         val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
         val startColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
         val endColor = MaterialTheme.colorScheme.tertiary
-        Canvas(
+        val activeGlowColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        val activeStrokeColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(150.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(chartBackground)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            repeat(3) { lineIndex ->
-                val y = size.height * (lineIndex + 1) / 4f
-                drawLine(
-                    color = gridColor,
-                    start = androidx.compose.ui.geometry.Offset(0f, y),
-                    end = androidx.compose.ui.geometry.Offset(size.width, y),
-                    strokeWidth = 1.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                    .onSizeChanged { chartWidthPx = it.width }
+                    .pointerInput(insight.commentId, insight.matchedAtMillis, insight.heatBuckets.size) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            selectedBucketIndex = resolveHeatBucketIndex(
+                                positionX = down.position.x,
+                                widthPx = chartWidthPx,
+                                bucketCount = insight.heatBuckets.size
+                            )
+                            drag(down.id) { change ->
+                                selectedBucketIndex = resolveHeatBucketIndex(
+                                    positionX = change.position.x,
+                                    widthPx = chartWidthPx,
+                                    bucketCount = insight.heatBuckets.size
+                                )
+                                change.consume()
+                            }
+                            selectedBucketIndex = -1
+                        }
+                    }
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    repeat(3) { lineIndex ->
+                        val y = size.height * (lineIndex + 1) / 4f
+                        drawLine(
+                            color = gridColor,
+                            start = androidx.compose.ui.geometry.Offset(0f, y),
+                            end = androidx.compose.ui.geometry.Offset(size.width, y),
+                            strokeWidth = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
+                        )
+                    }
+                    val barWidth = size.width / insight.heatBuckets.size.toFloat()
+                    insight.heatBuckets.forEachIndexed { index, bucket ->
+                        val intensity = bucket.count / maxCount.toFloat()
+                        val isSelected = index == selectedBucketIndex
+                        val drawHeight = size.height * (0.14f + intensity * 0.86f)
+                        val slotLeft = index * barWidth
+                        val left = slotLeft + barWidth * if (isSelected) 0.09f else 0.12f
+                        val top = size.height - drawHeight
+                        val barColor = lerp(startColor, endColor, intensity.coerceIn(0f, 1f))
+
+                        if (isSelected) {
+                            drawRoundRect(
+                                color = activeGlowColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(slotLeft + barWidth * 0.02f, 0f),
+                                size = androidx.compose.ui.geometry.Size(barWidth * 0.96f, size.height),
+                                cornerRadius = CornerRadius(barWidth * 0.28f, barWidth * 0.28f)
+                            )
+                        }
+
+                        drawRoundRect(
+                            color = if (isSelected) barColor.copy(alpha = 1f) else barColor,
+                            topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                            size = androidx.compose.ui.geometry.Size(
+                                width = barWidth * if (isSelected) 0.82f else 0.76f,
+                                height = drawHeight
+                            ),
+                            cornerRadius = CornerRadius(barWidth * 0.3f, barWidth * 0.3f)
+                        )
+
+                        if (isSelected) {
+                            drawRoundRect(
+                                color = activeStrokeColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(barWidth * 0.82f, drawHeight),
+                                cornerRadius = CornerRadius(barWidth * 0.3f, barWidth * 0.3f),
+                                style = Stroke(width = 1.2.dp.toPx())
+                            )
+                        }
+                    }
+                }
             }
-            val barWidth = size.width / insight.heatBuckets.size.toFloat()
-            insight.heatBuckets.forEachIndexed { index, bucket ->
-                val intensity = bucket.count / maxCount.toFloat()
-                val drawHeight = size.height * (0.14f + intensity * 0.86f)
-                val left = index * barWidth + barWidth * 0.12f
-                val top = size.height - drawHeight
-                val barColor = lerp(startColor, endColor, intensity.coerceIn(0f, 1f))
-                drawRoundRect(
-                    color = barColor,
-                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
-                    size = androidx.compose.ui.geometry.Size(barWidth * 0.76f, drawHeight),
-                    cornerRadius = CornerRadius(barWidth * 0.3f, barWidth * 0.3f)
-                )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = apiTestSubPanelColor(),
+            border = BorderStroke(1.dp, apiTestOutlineColor(alpha = 0.7f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = if (selectedBucket == null) "交互提示" else "当前区间",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = selectedBucket?.let(::formatHeatBucketRange)
+                            ?: "按住热力图滑动，查看区间弹幕数",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = if (selectedBucket == null) FontFamily.Default else FontFamily.Monospace
+                        ),
+                        fontWeight = if (selectedBucket == null) FontWeight.Normal else FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selectedBucket == null) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                    } else {
+                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
+                    }
+                ) {
+                    Text(
+                        text = selectedBucket?.let { "${it.count} 条弹幕" } ?: "拖动预览",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selectedBucket == null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.tertiary
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -1626,11 +1843,15 @@ private fun DanmuHeatmapCard(insight: DanmuInsight) {
 
 @Composable
 private fun DanmuCommentListCard(insight: DanmuInsight) {
+    val pageSize = 200
+    val sourceSummary = remember(insight.comments, insight.source) {
+        buildDanmuSourceSummary(insight)
+    }
     var selectedFilter by remember(insight.commentId, insight.matchedAtMillis) {
         mutableStateOf(DanmuCommentFilter.All)
     }
     var visibleCount by remember(insight.commentId, insight.matchedAtMillis, selectedFilter) {
-        mutableIntStateOf(100)
+        mutableIntStateOf(pageSize)
     }
     val listState = rememberLazyListState()
     val filterCounts = remember(insight.comments) {
@@ -1667,7 +1888,7 @@ private fun DanmuCommentListCard(insight: DanmuInsight) {
 
     WorkbenchCard(
         title = "弹幕列表",
-        subtitle = "已显示 ${displayedComments.size} / ${filteredComments.size}"
+        subtitle = sourceSummary
     ) {
         DanmuCommentFilterBar(
             selectedFilter = selectedFilter,
@@ -1701,15 +1922,49 @@ private fun DanmuCommentListCard(insight: DanmuInsight) {
             if (canLoadMore && loadMoreVisible) {
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = { visibleCount += 100 },
+                    onClick = { visibleCount += pageSize },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("加载更多 100 条")
+                    Text("加载更多 200 条")
                 }
             }
         }
     }
+}
+
+private fun buildDanmuSourceSummary(insight: DanmuInsight): String {
+    if (insight.comments.isEmpty()) {
+        return if (insight.source.isNotBlank()) "来源分布：${insight.source}" else "来源分布：暂无"
+    }
+
+    val fallbackSource = insight.source.trim()
+    val counts = linkedMapOf<String, Int>()
+    insight.comments.forEach { item ->
+        val rawLabel = item.sourceLabel.ifBlank { fallbackSource }.trim()
+        if (rawLabel.isBlank()) return@forEach
+        splitDanmuSources(rawLabel).forEach { label ->
+            counts[label] = (counts[label] ?: 0) + 1
+        }
+    }
+
+    if (counts.isEmpty()) return "来源分布：暂无"
+
+    return counts.entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .joinToString(
+            prefix = "来源分布：",
+            separator = " · "
+        ) { (label, count) ->
+            "$label ${formatCompactCount(count)}"
+        }
+}
+
+private fun splitDanmuSources(raw: String): List<String> {
+    return raw.split('&', '＆')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
 }
 
 @Composable
@@ -1793,8 +2048,8 @@ private fun DanmuCommentRow(item: DanmuCommentItem) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+        color = apiTestCommentRowColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor(alpha = 0.72f))
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
@@ -1810,6 +2065,12 @@ private fun DanmuCommentRow(item: DanmuCommentItem) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (item.sourceLabel.isNotBlank()) {
+                        StatusBadge(
+                            text = item.sourceLabel,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                     StatusBadge(text = formatVideoTime(item.timeSeconds), color = MaterialTheme.colorScheme.primary)
                     StatusBadge(text = item.filter.label, color = MaterialTheme.colorScheme.tertiary)
                     ColorSwatch(color = color)
@@ -1832,6 +2093,28 @@ private fun DanmuCommentRow(item: DanmuCommentItem) {
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+private fun buildPlayerMatchLine(insight: DanmuInsight): String {
+    val animeTitle = insight.animeTitle.trim()
+    val episodeTitle = insight.episodeTitle.trim()
+    return when {
+        animeTitle.isNotBlank() && episodeTitle.isNotBlank() -> "$animeTitle - $episodeTitle"
+        episodeTitle.isNotBlank() -> episodeTitle
+        animeTitle.isNotBlank() -> animeTitle
+        insight.commentId != null -> "commentId ${insight.commentId}"
+        else -> "弹幕结果"
+    }
+}
+
+private fun formatAverageDensity(totalCount: Int, durationSeconds: Double): String {
+    if (totalCount <= 0 || durationSeconds <= 0.0) return "--"
+    val perMinute = totalCount / (durationSeconds / 60.0)
+    return if (perMinute >= 100) {
+        "${perMinute.toInt()}/分"
+    } else {
+        "${String.format(Locale.US, "%.1f", perMinute)}/分"
     }
 }
 
@@ -1862,8 +2145,8 @@ private fun CompactContextBar(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+        color = apiTestPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1908,8 +2191,8 @@ private fun WorkbenchCard(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
+        color = apiTestPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -1977,8 +2260,8 @@ private fun InfoHintCard(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+        color = apiTestSubPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -2010,8 +2293,8 @@ private fun LoadingHintCard(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+        color = apiTestSubPanelColor(),
+        border = BorderStroke(1.dp, apiTestOutlineColor())
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -2068,6 +2351,56 @@ private fun statusColor(code: Int): Color {
     }
 }
 
+@Composable
+private fun apiTestPanelColor(): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) {
+        lerp(c.surfaceContainerHigh, c.surfaceContainerHighest, 0.32f)
+    } else {
+        c.surfaceContainerHigh
+    }
+}
+
+@Composable
+private fun apiTestSubPanelColor(): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) {
+        lerp(c.surfaceContainer, c.surfaceContainerHigh, 0.42f)
+    } else {
+        c.surfaceContainerLow
+    }
+}
+
+@Composable
+private fun apiTestFieldColor(): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) {
+        lerp(c.surfaceContainerLow, c.surfaceContainer, 0.68f)
+    } else {
+        c.surfaceContainerLowest
+    }
+}
+
+@Composable
+private fun apiTestCommentRowColor(): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) {
+        lerp(c.surface, c.surfaceContainerLow, 0.58f)
+    } else {
+        c.surface.copy(alpha = 0.42f)
+    }
+}
+
+@Composable
+private fun apiTestOutlineColor(alpha: Float = 1f): Color {
+    val c = MaterialTheme.colorScheme
+    return if (c.background.luminance() < 0.5f) {
+        c.outlineVariant.copy(alpha = 0.42f * alpha)
+    } else {
+        c.outlineVariant.copy(alpha = 0.24f * alpha)
+    }
+}
+
 private fun formatBytes(bytes: Int): String {
     val value = bytes.toLong().coerceAtLeast(0L)
     return when {
@@ -2080,6 +2413,22 @@ private fun formatBytes(bytes: Int): String {
 private fun formatMatchedAt(timestamp: Long): String {
     val formatter = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
     return formatter.format(Date(timestamp))
+}
+
+private fun resolveHeatBucketIndex(
+    positionX: Float,
+    widthPx: Int,
+    bucketCount: Int
+): Int {
+    if (widthPx <= 0 || bucketCount <= 0) return -1
+    val clampedX = positionX.coerceIn(0f, widthPx.toFloat() - 1f)
+    return ((clampedX / widthPx.toFloat()) * bucketCount)
+        .toInt()
+        .coerceIn(0, bucketCount - 1)
+}
+
+private fun formatHeatBucketRange(bucket: DanmuHeatBucket): String {
+    return "${formatVideoTime(bucket.startSeconds)} - ${formatVideoTime(bucket.endSeconds)}"
 }
 
 private fun formatVideoTime(rawSeconds: Double): String {

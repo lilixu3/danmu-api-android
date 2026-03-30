@@ -17,6 +17,7 @@ data class DanmuCommentItem(
     val colorHex: String,
     val fontSize: Int? = null,
     val sentAtSeconds: Long? = null,
+    val sourceLabel: String = "",
     val sourceId: String = ""
 )
 
