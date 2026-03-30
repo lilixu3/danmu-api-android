@@ -161,6 +161,7 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
+import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
@@ -888,12 +889,10 @@ fun HomeScreen(
                         "当前版本：v${viewModel.appUpdatePromptCurrentVersion}\n最新版本：v${viewModel.appUpdatePromptLatestVersion}",
                         style = MaterialTheme.typography.bodySmall
                     )
-                    val preview = viewModel.appUpdatePromptReleaseNotes.trim().take(260)
+                    val preview = viewModel.appUpdatePromptReleaseNotes.trim()
                     if (preview.isNotBlank()) {
-                        Text(
-                            preview,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        SimpleMarkdownText(
+                            markdown = preview
                         )
                     }
                 }
