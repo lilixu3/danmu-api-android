@@ -21,6 +21,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
 import javax.inject.Inject
@@ -120,7 +121,7 @@ class ApiTestViewModel @Inject constructor(
         if (isLoading) return
 
         val built = runCatching {
-            buildRequest(endpoint, baseUrl, paramValues, rawBody)
+            buildRequest(endpoint, resolveApiBaseUrl(baseUrl), paramValues, rawBody)
         }.getOrElse {
             errorMessage = it.message ?: "请求参数错误"
             return
@@ -187,7 +188,7 @@ class ApiTestViewModel @Inject constructor(
     fun runAutoMatch(baseUrl: String, fileName: String) {
         if (isAutoMatching) return
 
-        val base = normalizeBaseUrl(baseUrl)
+        val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
             errorMessage = "弹幕源 Base URL 无效"
             return
@@ -308,7 +309,7 @@ class ApiTestViewModel @Inject constructor(
     fun searchAnime(baseUrl: String, keyword: String) {
         if (isSearchingAnime || isLoadingEpisodes) return
 
-        val base = normalizeBaseUrl(baseUrl)
+        val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
             errorMessage = "弹幕源 Base URL 无效"
             return
@@ -377,7 +378,7 @@ class ApiTestViewModel @Inject constructor(
     fun openManualAnimeDetail(baseUrl: String, anime: DownloadAnimeCandidate) {
         if (isSearchingAnime || isLoadingEpisodes) return
 
-        val base = normalizeBaseUrl(baseUrl)
+        val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
             errorMessage = "弹幕源 Base URL 无效"
             return
@@ -439,7 +440,7 @@ class ApiTestViewModel @Inject constructor(
     ) {
         if (isLoadingManualDanmu) return
 
-        val base = normalizeBaseUrl(baseUrl)
+        val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
             errorMessage = "弹幕源 Base URL 无效"
             return
@@ -575,11 +576,11 @@ class ApiTestViewModel @Inject constructor(
 
     private fun buildRequest(
         endpoint: ApiEndpointConfig,
-        baseUrl: String,
+        resolvedBaseUrl: String?,
         rawParams: Map<String, String>,
         rawBody: String
     ): BuiltRequest {
-        val base = baseUrl.trim().trimEnd('/')
+        val base = resolvedBaseUrl?.trimEnd('/').orEmpty()
         require(base.isNotBlank()) { "Base URL 不能为空" }
 
         val method = endpoint.method.uppercase(Locale.ROOT)
@@ -679,10 +680,10 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
-    private fun normalizeBaseUrl(baseUrl: String): String? {
+    private fun resolveApiBaseUrl(baseUrl: String): String? {
         val raw = baseUrl.trim()
         if (raw.isBlank()) return null
-        return if (
+        val normalized = if (
             raw.startsWith("http://", ignoreCase = true) ||
             raw.startsWith("https://", ignoreCase = true)
         ) {
@@ -690,6 +691,19 @@ class ApiTestViewModel @Inject constructor(
         } else {
             "http://$raw".trimEnd('/')
         }
+
+        val token = runtimeState.value.token.trim().trim('/')
+        if (token.isBlank()) return normalized
+
+        val uri = runCatching { URI(normalized) }.getOrNull() ?: return normalized
+        val segments = uri.path
+            ?.split('/')
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        if (segments.firstOrNull() == token) {
+            return normalized
+        }
+        return "$normalized/$token"
     }
 
     private fun recordSuccess(
