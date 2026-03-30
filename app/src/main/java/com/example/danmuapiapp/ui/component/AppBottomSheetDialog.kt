@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.component
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -233,6 +234,7 @@ fun AppBottomSheetDialog(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -254,6 +256,7 @@ fun AppBottomSheetDialog(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {

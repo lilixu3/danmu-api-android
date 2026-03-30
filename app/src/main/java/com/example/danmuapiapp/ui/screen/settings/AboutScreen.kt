@@ -124,11 +124,9 @@ fun AboutScreen(
                         if (viewModel.appUpdateReleaseNotes.isNotBlank() &&
                             viewModel.appUpdateReleaseNotes != "点击下方按钮检查更新"
                         ) {
-                            Text(
-                                viewModel.appUpdateReleaseNotes,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 6,
+                            SimpleMarkdownText(
+                                markdown = viewModel.appUpdateReleaseNotes,
+                                maxLinesPerParagraph = 6,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
