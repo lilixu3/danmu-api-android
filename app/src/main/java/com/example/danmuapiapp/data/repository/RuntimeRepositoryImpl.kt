@@ -190,8 +190,6 @@ class RuntimeRepositoryImpl @Inject constructor(
     private var normalPendingExplicitStart = false
 
     private var reconcileConsecutiveDeadCount = 0
-    private var reconcileConsecutiveStaleProcessCount = 0
-
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -356,6 +354,26 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun restartService() {
         launchSerializedUserOperation("重启服务") {
             restartServiceLocked()
+        }
+    }
+
+    override fun refreshRuntimeState() {
+        scope.launch {
+            runCatching {
+                operationMutex.withLock {
+                    reconcileInitialState()
+                    if (_runtimeState.value.runMode == RunMode.Normal) {
+                        reconcileNormalStateLocked()
+                    }
+                }
+            }.onFailure {
+                AppDiagnosticLogger.w(
+                    context,
+                    "RuntimeRepo",
+                    "主动刷新运行状态失败：${it.message ?: "未知错误"}",
+                    it
+                )
+            }
         }
     }
 
@@ -1099,12 +1117,21 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private suspend fun reconcileInitialState() {
         val state = _runtimeState.value
-        if (state.status == ServiceStatus.Running) return
+        if (
+            state.status == ServiceStatus.Running ||
+            state.status == ServiceStatus.Starting ||
+            state.status == ServiceStatus.Stopping
+        ) {
+            return
+        }
 
         when (state.runMode) {
             RunMode.Normal -> {
                 if (isNormalRuntimeReachable(state.port)) {
                     markRunning(forceNewStart = false)
+                    if (state.status == ServiceStatus.Error || state.status == ServiceStatus.Stopped) {
+                        addLog(LogLevel.Info, "检测到普通模式服务仍可访问，已自动纠正为运行中")
+                    }
                 }
             }
 
@@ -1114,6 +1141,9 @@ class RuntimeRepositoryImpl @Inject constructor(
                         pid = RootRuntimeController.getPid(context),
                         forceNewStart = false
                     )
+                    if (state.status == ServiceStatus.Error || state.status == ServiceStatus.Stopped) {
+                        addLog(LogLevel.Info, "检测到 Root 模式服务仍在运行，已自动纠正为运行中")
+                    }
                 }
             }
         }
@@ -1125,6 +1155,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 delay(NORMAL_STATE_RECONCILE_INTERVAL_MS)
                 runCatching {
                     operationMutex.withLock {
+                        reconcileInitialState()
                         reconcileNormalStateLocked()
                     }
                 }
@@ -1132,12 +1163,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun reconcileNormalStateLocked() {
+    private suspend fun reconcileNormalStateLocked() {
         val state = _runtimeState.value
         if (state.runMode != RunMode.Normal) {
             normalStartIssuedAtMs = 0L
             reconcileConsecutiveDeadCount = 0
-            reconcileConsecutiveStaleProcessCount = 0
             return
         }
         if (state.status != ServiceStatus.Running &&
@@ -1145,7 +1175,6 @@ class RuntimeRepositoryImpl @Inject constructor(
             state.status != ServiceStatus.Stopping
         ) {
             reconcileConsecutiveDeadCount = 0
-            reconcileConsecutiveStaleProcessCount = 0
             return
         }
 
@@ -1157,42 +1186,32 @@ class RuntimeRepositoryImpl @Inject constructor(
                 when {
                     portOpen -> {
                         reconcileConsecutiveDeadCount = 0
-                        reconcileConsecutiveStaleProcessCount = 0
                     }
 
-                    processRunning -> {
-                        reconcileConsecutiveDeadCount = 0
-                        reconcileConsecutiveStaleProcessCount++
-                        if (reconcileConsecutiveStaleProcessCount >= 2) {
-                            markError("普通模式进程异常残留，请重试启动")
-                            addLog(
-                                LogLevel.Warn,
-                                "检测到普通模式 :node 进程仍在，但监听端口已不可用；下次启动会先回收旧进程"
-                            )
-                            reconcileConsecutiveStaleProcessCount = 0
-                        }
-                    }
-
-                    !processRunning && !portOpen -> {
-                        reconcileConsecutiveStaleProcessCount = 0
+                    !portOpen -> {
                         reconcileConsecutiveDeadCount++
                         if (reconcileConsecutiveDeadCount >= 2) {
-                            addLog(LogLevel.Warn, "检测到普通模式进程已退出，状态已自动重置")
-                            markStopped()
+                            addLog(
+                                LogLevel.Warn,
+                                if (processRunning) {
+                                    "检测到普通模式监听端口不可用，状态已自动重置；下次启动会先回收残留进程"
+                                } else {
+                                    "检测到普通模式进程已退出，状态已自动重置"
+                                }
+                            )
+                            markStopped("服务未运行，可重新启动")
                             reconcileConsecutiveDeadCount = 0
                         }
                     }
 
                     else -> {
                         reconcileConsecutiveDeadCount = 0
-                        reconcileConsecutiveStaleProcessCount = 0
                     }
                 }
             }
 
             ServiceStatus.Starting -> {
                 reconcileConsecutiveDeadCount = 0
-                reconcileConsecutiveStaleProcessCount = 0
                 if (portOpen) {
                     markRunning(forceNewStart = normalPendingExplicitStart)
                     return
@@ -1236,7 +1255,6 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             ServiceStatus.Stopping -> {
                 reconcileConsecutiveDeadCount = 0
-                reconcileConsecutiveStaleProcessCount = 0
                 if (!processRunning && !portOpen) {
                     markStopped()
                 }
