@@ -346,6 +346,7 @@ fun HomeScreen(
     DisposableEffect(lifecycleOwner, context, state.runMode) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshRuntimeState()
                 hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
                 if (state.runMode == RunMode.Normal) {
                     isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
