@@ -712,6 +712,7 @@ class HomeViewModel @Inject constructor(
 
     fun stopService() = runtimeRepo.stopService()
     fun restartService() = runtimeRepo.restartService()
+    fun refreshRuntimeState() = runtimeRepo.refreshRuntimeState()
 
     fun applyPortQuick(port: Int) {
         val state = runtimeState.value
