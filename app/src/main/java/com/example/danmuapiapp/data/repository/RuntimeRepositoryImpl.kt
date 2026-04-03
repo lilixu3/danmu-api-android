@@ -14,8 +14,6 @@ import android.os.Build
 import android.os.FileObserver
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.TokenDefaults
-import com.example.danmuapiapp.data.util.CoreApiRouteMode
-import com.example.danmuapiapp.data.util.CoreApiRoutePolicy
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NodeProjectManager
@@ -1313,74 +1311,52 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return emptyList()
 
-        resolveLogApiBaseUrls().forEach { baseUrl ->
-            val raw = runCatching {
-                val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = LOG_HTTP_TIMEOUT_MS
-                    readTimeout = LOG_HTTP_TIMEOUT_MS
-                    requestMethod = "GET"
-                }
-                try {
-                    if (conn.responseCode !in 200..299) return@runCatching ""
-                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
-                } finally {
-                    conn.disconnect()
-                }
-            }.getOrElse { "" }
-            if (raw.isNotBlank()) {
-                return parseLogLines(raw)
+        val baseUrl = resolveRuntimeTokenApiBaseUrl() ?: return emptyList()
+        val raw = runCatching {
+            val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
+                connectTimeout = LOG_HTTP_TIMEOUT_MS
+                readTimeout = LOG_HTTP_TIMEOUT_MS
+                requestMethod = "GET"
             }
-        }
-        return emptyList()
+            try {
+                if (conn.responseCode !in 200..299) return@runCatching ""
+                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrElse { "" }
+        return if (raw.isNotBlank()) parseLogLines(raw) else emptyList()
     }
 
-    private fun resolveLogApiBaseUrls(): List<String> {
+    private fun resolveRuntimeTokenApiBaseUrl(): String? {
         val state = _runtimeState.value
-        val adminState = adminSessionRepository.sessionState.value
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
-        val tokenPaths = CoreApiRoutePolicy.tokenPaths(
-            runtimeToken = state.token,
-            adminToken = adminToken,
-            isAdminMode = adminState.isAdminMode,
-            mode = CoreApiRouteMode.PreferAdminRead
-        )
-        return tokenPaths.map { tokenPath -> "http://127.0.0.1:${state.port}$tokenPath" }
+        val tokenPath = state.token.trim().trim('/').takeIf { it.isNotBlank() } ?: return null
+        return "http://127.0.0.1:${state.port}/$tokenPath"
     }
 
     private fun clearServiceLogsOnce(): Boolean {
         val state = _runtimeState.value
         if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return false
 
-        val clearRequests = listOf(
-            "DELETE" to "/api/logs",
-            "POST" to "/api/logs/clear"
-        )
-        resolveLogApiBaseUrls().forEach { baseUrl ->
-            clearRequests.forEach { (method, path) ->
-                val cleared = runCatching {
-                    val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
-                        connectTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
-                        readTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
-                        requestMethod = method
-                        if (method == "POST") {
-                            doOutput = true
-                            setFixedLengthStreamingMode(0)
-                        }
-                    }
-                    try {
-                        if (method == "POST") {
-                            conn.outputStream.use { }
-                        }
-                        conn.responseCode in 200..299
-                    } finally {
-                        conn.disconnect()
-                    }
-                }.getOrDefault(false)
-                if (cleared) {
-                    clearedServiceLogCounts = emptyMap()
-                    return true
-                }
+        val baseUrl = resolveRuntimeTokenApiBaseUrl() ?: return false
+        val cleared = runCatching {
+            val conn = (URL("$baseUrl/api/logs/clear").openConnection() as HttpURLConnection).apply {
+                connectTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
+                readTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
+                requestMethod = "POST"
+                doOutput = true
+                setFixedLengthStreamingMode(0)
             }
+            try {
+                conn.outputStream.use { }
+                conn.responseCode in 200..299
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrDefault(false)
+        if (cleared) {
+            clearedServiceLogCounts = emptyMap()
+            return true
         }
         return false
     }

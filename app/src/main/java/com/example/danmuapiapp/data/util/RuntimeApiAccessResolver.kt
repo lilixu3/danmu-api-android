@@ -22,7 +22,6 @@ internal object RuntimeApiAccessResolver {
         if (runtimeToken.isNotBlank()) {
             tokenPaths += "/$runtimeToken"
         }
-        tokenPaths += ""
         return RuntimeApiAccess(
             port = port,
             runtimeToken = runtimeToken,
