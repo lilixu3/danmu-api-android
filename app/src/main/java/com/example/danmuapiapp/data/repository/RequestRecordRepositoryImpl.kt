@@ -3,12 +3,9 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
-import com.example.danmuapiapp.data.util.CoreApiRouteMode
-import com.example.danmuapiapp.data.util.CoreApiRoutePolicy
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.RequestRecord
-import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,8 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class RequestRecordRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient,
-    private val adminSessionRepository: AdminSessionRepository
+    private val httpClient: OkHttpClient
 ) : RequestRecordRepository {
 
     companion object {
@@ -57,16 +53,7 @@ class RequestRecordRepositoryImpl @Inject constructor(
 
     private fun fetchRemoteRecords(): List<RequestRecord>? {
         val runtime = RuntimeApiAccessResolver.resolve(context, runtimePrefs, DEFAULT_PORT)
-        val adminState = adminSessionRepository.sessionState.value
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull()
-        val tokenPaths = CoreApiRoutePolicy.tokenPaths(
-            runtimeToken = runtime.runtimeToken,
-            adminToken = adminToken,
-            isAdminMode = adminState.isAdminMode,
-            mode = CoreApiRouteMode.PreferAdminRead
-        )
-
-        tokenPaths.forEach { tokenPath ->
+        runtime.tokenPaths.forEach { tokenPath ->
             val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/reqrecords"
             val records = runCatching {
                 val request = Request.Builder()

@@ -58,6 +58,12 @@ class HomeViewModel @Inject constructor(
     private val cacheRepo: CacheRepository,
     private val adminSessionRepository: AdminSessionRepository
 ) : ViewModel() {
+    private data class RestartSnapshot(
+        val runMode: RunMode,
+        val pid: Int?,
+        val uptimeSeconds: Long
+    )
+
     companion object {
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
         private const val REQUEST_RECORD_REFRESH_DELAY_MS = 900L
@@ -858,9 +864,13 @@ class HomeViewModel @Inject constructor(
                 runtimeRepo.updateVariant(variant)
 
                 if (wasRunning) {
+                    val restartSnapshot = current.toRestartSnapshot()
                     runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用核心切换...")
                     runtimeRepo.restartService()
-                    val restarted = waitForRestartAfterCoreSwitch(timeoutMs = 45_000)
+                    val restarted = waitForRestartAfterCoreSwitch(
+                        beforeRestart = restartSnapshot,
+                        timeoutMs = 45_000
+                    )
                     if (restarted != ServiceStatus.Running) {
                         val reason = when (restarted) {
                             ServiceStatus.Error -> "切换后服务启动失败，请查看日志"
@@ -891,26 +901,52 @@ class HomeViewModel @Inject constructor(
         else String.format(Locale.getDefault(), "%02d:%02d", m, s)
     }
 
-    private suspend fun waitForRestartAfterCoreSwitch(timeoutMs: Long): ServiceStatus? {
+    private suspend fun waitForRestartAfterCoreSwitch(
+        beforeRestart: RestartSnapshot,
+        timeoutMs: Long
+    ): ServiceStatus? {
         var sawRestartProgress = false
         val result = withTimeoutOrNull(timeoutMs) {
-            runtimeState
-                .map { it.status }
-                .first { status ->
-                    when (status) {
-                        ServiceStatus.Starting,
-                        ServiceStatus.Stopped -> {
-                            sawRestartProgress = true
-                            false
-                        }
-                        ServiceStatus.Error -> true
-                        ServiceStatus.Running -> sawRestartProgress
-                        else -> false
+            runtimeState.first { state ->
+                when (state.status) {
+                    ServiceStatus.Starting,
+                    ServiceStatus.Stopping,
+                    ServiceStatus.Stopped -> {
+                        sawRestartProgress = true
+                        false
+                    }
+
+                    ServiceStatus.Error -> true
+
+                    ServiceStatus.Running -> {
+                        sawRestartProgress || state.isRunningAfterRestart(beforeRestart)
                     }
                 }
+            }.status
         }
         return result ?: runtimeState.value.status.takeIf {
             it == ServiceStatus.Stopped || it == ServiceStatus.Error
+        }
+    }
+
+    private fun RuntimeState.toRestartSnapshot(): RestartSnapshot {
+        return RestartSnapshot(
+            runMode = runMode,
+            pid = pid,
+            uptimeSeconds = uptimeSeconds
+        )
+    }
+
+    private fun RuntimeState.isRunningAfterRestart(snapshot: RestartSnapshot): Boolean {
+        if (status != ServiceStatus.Running) return false
+        return when (runMode) {
+            RunMode.Root -> {
+                val pidChanged = pid != null && snapshot.pid != null && pid != snapshot.pid
+                val uptimeReset = uptimeSeconds < snapshot.uptimeSeconds
+                pidChanged || uptimeReset
+            }
+
+            RunMode.Normal -> uptimeSeconds < snapshot.uptimeSeconds
         }
     }
 
