@@ -623,6 +623,7 @@ class CoreRepositoryImpl @Inject constructor(
             _downloadProgress.value = CoreDownloadProgress()
         }
     }
+
     private fun updateDownloadProgress(
         variant: ApiVariant,
         actionLabel: String,

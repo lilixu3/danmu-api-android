@@ -67,61 +67,50 @@ class CacheRepositoryImpl @Inject constructor(
             val runtime = resolveRuntimeApiAccess()
             val adminState = adminSessionRepository.sessionState.value
             val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim()
-            val requestPaths = linkedSetOf<String>()
-            if (adminState.isAdminMode && adminToken.isNotBlank()) {
-                requestPaths += "/$adminToken"
-            }
-            requestPaths += runtime.tokenPaths
-            var lastMessage = "HTTP 403"
-
-            requestPaths.forEach { tokenPath ->
-                val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/cache/clear"
-                val request = Request.Builder()
-                    .url(url)
-                    .applyRuntimeApiAuth(runtime)
-                    .post("".toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val result = httpClient.newCall(request).execute().use { response ->
-                    val body = runCatching { response.body.string() }.getOrDefault("")
-                    response.code to body
+            when {
+                !adminState.hasAdminTokenConfigured -> {
+                    throw Exception("当前核心要求 ADMIN_TOKEN，请先到 设置 > 管理员权限 配置")
                 }
-                val code = result.first
-                val body = result.second
-                if (code in 200..299) {
-                    runCatching {
-                        val root = JSONObject(body)
-                        val items = root.optJSONObject("clearedItems")
-                        val reqRecords = items?.optInt("reqRecords", 0) ?: 0
-                        val todayReqNum = items?.optInt("todayReqNum", 0) ?: 0
-                        _cacheStats.value = CacheStats(
-                            reqRecordsCount = reqRecords,
-                            todayReqNum = todayReqNum,
-                            lastClearedAt = System.currentTimeMillis(),
-                            isAvailable = true,
-                            recentEntries = emptyList()
-                        )
-                        _cacheEntries.value = emptyList()
-                    }
-                    return@runCatching Unit
+                !adminState.isAdminMode -> {
+                    throw Exception("请先到 设置 > 管理员权限 开启管理员模式，再清理缓存")
                 }
-                lastMessage = extractErrorMessage(body, code)
-            }
-
-            if (lastMessage.equals("Admin token required", ignoreCase = true) ||
-                lastMessage.contains("admin token required", ignoreCase = true)
-            ) {
-                when {
-                    !adminState.hasAdminTokenConfigured -> {
-                        throw Exception("当前核心要求 ADMIN_TOKEN，请先到 设置 > 管理员权限 配置")
-                    }
-                    !adminState.isAdminMode -> {
-                        throw Exception("请先到 设置 > 管理员权限 开启管理员模式，再清理缓存")
-                    }
+                adminToken.isBlank() -> {
+                    throw Exception("管理员令牌为空，请重新进入管理员模式后重试")
                 }
             }
 
-            throw Exception(lastMessage)
+            val url = "http://127.0.0.1:${runtime.port}/$adminToken/api/cache/clear"
+            val request = Request.Builder()
+                .url(url)
+                .applyRuntimeApiAuth(runtime)
+                .post("".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val result = httpClient.newCall(request).execute().use { response ->
+                val body = runCatching { response.body.string() }.getOrDefault("")
+                response.code to body
+            }
+            val code = result.first
+            val body = result.second
+            if (code in 200..299) {
+                runCatching {
+                    val root = JSONObject(body)
+                    val items = root.optJSONObject("clearedItems")
+                    val reqRecords = items?.optInt("reqRecords", 0) ?: 0
+                    val todayReqNum = items?.optInt("todayReqNum", 0) ?: 0
+                    _cacheStats.value = CacheStats(
+                        reqRecordsCount = reqRecords,
+                        todayReqNum = todayReqNum,
+                        lastClearedAt = System.currentTimeMillis(),
+                        isAvailable = true,
+                        recentEntries = emptyList()
+                    )
+                    _cacheEntries.value = emptyList()
+                }
+                return@runCatching Unit
+            }
+
+            throw Exception(extractErrorMessage(body, code))
         }
     }
 
