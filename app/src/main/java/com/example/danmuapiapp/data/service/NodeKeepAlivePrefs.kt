@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
@@ -58,7 +59,11 @@ object NodeKeepAlivePrefs {
     }
 
     fun setDesiredRunning(context: Context, desired: Boolean) {
-        prefs(context).edit {
+        setDesiredRunning(prefs(context), desired)
+    }
+
+    internal fun setDesiredRunning(sharedPrefs: SharedPreferences, desired: Boolean) {
+        sharedPrefs.edit(commit = true) {
             putBoolean(KEY_DESIRED_RUNNING, desired)
         }
     }
@@ -73,7 +78,11 @@ object NodeKeepAlivePrefs {
     }
 
     fun clearRestartBackoff(context: Context) {
-        prefs(context).edit {
+        clearRestartBackoff(prefs(context))
+    }
+
+    internal fun clearRestartBackoff(sharedPrefs: SharedPreferences) {
+        sharedPrefs.edit(commit = true) {
             putInt(KEY_RECOVERY_FAILURE_COUNT, 0)
             putLong(KEY_RECOVERY_BLOCK_UNTIL_MS, 0L)
         }
@@ -84,14 +93,17 @@ object NodeKeepAlivePrefs {
     }
 
     fun recordRecoveryFailure(context: Context) {
-        val sharedPrefs = prefs(context)
+        recordRecoveryFailure(prefs(context))
+    }
+
+    internal fun recordRecoveryFailure(sharedPrefs: SharedPreferences) {
         if (!sharedPrefs.getBoolean(KEY_DESIRED_RUNNING, false)) return
 
         val currentCount = sharedPrefs.getInt(KEY_RECOVERY_FAILURE_COUNT, 0).coerceAtLeast(0)
         val nextCount = (currentCount + 1).coerceAtMost(RECOVERY_BACKOFF_STEPS_MS.size)
         val blockDelayMs = RECOVERY_BACKOFF_STEPS_MS[nextCount - 1]
         val blockUntilMs = System.currentTimeMillis() + blockDelayMs
-        sharedPrefs.edit {
+        sharedPrefs.edit(commit = true) {
             putInt(KEY_RECOVERY_FAILURE_COUNT, nextCount)
             putLong(KEY_RECOVERY_BLOCK_UNTIL_MS, blockUntilMs)
         }

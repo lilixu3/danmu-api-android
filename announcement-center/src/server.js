@@ -10,6 +10,7 @@ const { hashPassword, verifyPassword, requireAdmin } = require('./auth');
 const {
   buildAnnouncementPayload,
   buildContentPreview,
+  isValidVersionText,
   normalizeActionMode,
   normalizeAnnouncementType,
   normalizeBoolean,
@@ -17,18 +18,32 @@ const {
   normalizeSeverity,
   normalizeStatus,
   normalizeVariants,
+  versionCompare,
 } = require('./validation');
 
 const PORT = Number(process.env.PORT || 18086);
-const SESSION_SECRET = process.env.SESSION_SECRET || 'danmu-announcement-center';
+const SESSION_SECRET = String(process.env.SESSION_SECRET || '').trim();
 const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '').trim();
+const MIN_SESSION_SECRET_LENGTH = 16;
+const ANNOUNCEMENT_NOT_FOUND_CODE = 'ANNOUNCEMENT_NOT_FOUND';
+const INVALID_PUBLISH_STATE_CODE = 'INVALID_PUBLISH_STATE';
+const PUBLISH_LOCK_NAME = 'announcement-center:publish';
+const PUBLISH_LOCK_TIMEOUT_SECONDS = 10;
 
 if (!process.env.MYSQL_DATABASE || !process.env.MYSQL_USER || !process.env.MYSQL_PASSWORD) {
   throw new Error('缺少 MySQL 环境变量，请检查 .env');
 }
 if (!ADMIN_PASSWORD) {
   throw new Error('缺少 ADMIN_PASSWORD，请检查 .env');
+}
+if (
+  !SESSION_SECRET ||
+  SESSION_SECRET === 'danmu-announcement-center' ||
+  SESSION_SECRET === 'change-me-session-secret' ||
+  SESSION_SECRET.length < MIN_SESSION_SECRET_LENGTH
+) {
+  throw new Error('缺少安全的 SESSION_SECRET，请检查 .env，并使用至少 16 位随机字符串');
 }
 
 const app = express();
@@ -70,21 +85,113 @@ function setFlash(req, type, message) {
 }
 
 async function ensureAdminAccount() {
-  const [rows] = await pool.query('SELECT id, username FROM admins WHERE username = ? LIMIT 1', [
-    ADMIN_USERNAME,
-  ]);
-  const passwordHash = await hashPassword(ADMIN_PASSWORD);
+  const [rows] = await pool.query('SELECT id, username FROM admins WHERE username = ? LIMIT 1', [ADMIN_USERNAME]);
   if (rows.length === 0) {
+    const passwordHash = await hashPassword(ADMIN_PASSWORD);
     await pool.query(
       'INSERT INTO admins (username, password_hash) VALUES (?, ?)',
       [ADMIN_USERNAME, passwordHash]
     );
-    return;
   }
-  await pool.query('UPDATE admins SET password_hash = ? WHERE username = ?', [
-    passwordHash,
-    ADMIN_USERNAME,
-  ]);
+}
+
+async function acquireNamedLock(connection, lockName, timeoutSeconds = PUBLISH_LOCK_TIMEOUT_SECONDS) {
+  const [rows] = await connection.query('SELECT GET_LOCK(?, ?) AS acquired', [lockName, timeoutSeconds]);
+  if (!rows[0] || rows[0].acquired !== 1) {
+    throw new Error('当前有其他发布操作正在进行，请稍后重试');
+  }
+}
+
+async function releaseNamedLock(connection, lockName) {
+  try {
+    await connection.query('SELECT RELEASE_LOCK(?)', [lockName]);
+  } catch (_error) {
+    // ignore release errors to preserve the original failure
+  }
+}
+
+async function withTransaction(task, { lockName = null } = {}) {
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
+  try {
+    if (lockName) {
+      await acquireNamedLock(connection, lockName);
+    }
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const result = await task(connection);
+    await connection.commit();
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      await connection.rollback();
+    }
+    throw error;
+  } finally {
+    if (lockName) {
+      await releaseNamedLock(connection, lockName);
+    }
+    connection.release();
+  }
+}
+
+function createAnnouncementNotFoundError() {
+  const error = new Error('公告不存在');
+  error.code = ANNOUNCEMENT_NOT_FOUND_CODE;
+  return error;
+}
+
+function isAnnouncementNotFoundError(error) {
+  return error?.code === ANNOUNCEMENT_NOT_FOUND_CODE;
+}
+
+function createInvalidPublishStateError(message) {
+  const error = new Error(message);
+  error.code = INVALID_PUBLISH_STATE_CODE;
+  return error;
+}
+
+function isInvalidPublishStateError(error) {
+  return error?.code === INVALID_PUBLISH_STATE_CODE;
+}
+
+function normalizePushVersion(value) {
+  const pushVersion = Number(value) || 1;
+  return pushVersion >= 1 ? pushVersion : 1;
+}
+
+function nextPushVersionForPublish(status, pushVersion) {
+  const currentPushVersion = normalizePushVersion(pushVersion);
+  return String(status) === 'offline' ? currentPushVersion + 1 : currentPushVersion;
+}
+
+async function findAnnouncementById(executor, id, { lockForUpdate = false } = {}) {
+  const sql = `SELECT * FROM announcements WHERE id = ? LIMIT 1${lockForUpdate ? ' FOR UPDATE' : ''}`;
+  const [rows] = await executor.query(sql, [id]);
+  return rows[0] || null;
+}
+
+async function replacePublishedAnnouncement(executor, keepId = null) {
+  let sql = 'UPDATE announcements SET status = ? WHERE status = ?';
+  const params = ['offline', 'published'];
+  if (keepId != null) {
+    sql += ' AND id <> ?';
+    params.push(keepId);
+  }
+  await executor.query(sql, params);
+}
+
+async function regenerateSession(req) {
+  await new Promise((resolve, reject) => {
+    req.session.regenerate((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 function renderEditor(res, payload) {
@@ -178,26 +285,89 @@ function safeJsonArray(raw, fallback = []) {
   }
 }
 
-function versionCompare(a, b) {
-  const left = String(a || '')
-    .split('.')
-    .map((item) => Number.parseInt(item, 10) || 0);
-  const right = String(b || '')
-    .split('.')
-    .map((item) => Number.parseInt(item, 10) || 0);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const l = left[index] || 0;
-    const r = right[index] || 0;
-    if (l > r) return 1;
-    if (l < r) return -1;
+function toDbDateTime(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (num) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function hasFutureStartAt(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return !Number.isNaN(date.getTime()) && date.getTime() > Date.now();
+}
+
+function assertPublishableNow(row) {
+  if (hasFutureStartAt(row?.start_at)) {
+    throw createInvalidPublishStateError('立即发布时，开始时间不能晚于当前时间');
   }
-  return 0;
+}
+
+function normalizeStoredVariants(value) {
+  return JSON.stringify(normalizeVariants(safeJsonArray(value, ['all'])));
+}
+
+function hasClientVisibleChanges(current, payload) {
+  const currentComparable = {
+    title: String(current.title || ''),
+    summary: String(current.summary || ''),
+    content_markdown: String(current.content_markdown || ''),
+    content_preview: String(current.content_preview || ''),
+    cover_image_url: current.cover_image_url || null,
+    announcement_type: normalizeAnnouncementType(current.announcement_type),
+    severity: normalizeSeverity(current.severity),
+    popup_enabled: Boolean(current.popup_enabled),
+    force_popup: Boolean(current.force_popup),
+    allow_snooze_today: Boolean(current.allow_snooze_today),
+    target_variants_json: normalizeStoredVariants(current.target_variants_json),
+    min_app_version: current.min_app_version || null,
+    max_app_version: current.max_app_version || null,
+    start_at: toDbDateTime(current.start_at),
+    end_at: toDbDateTime(current.end_at),
+    primary_button_text: current.primary_button_text || null,
+    primary_button_url: current.primary_button_url || null,
+    primary_button_mode: normalizeActionMode(current.primary_button_mode),
+    secondary_button_text: current.secondary_button_text || null,
+    secondary_button_url: current.secondary_button_url || null,
+    secondary_button_mode: normalizeActionMode(current.secondary_button_mode),
+  };
+
+  const nextComparable = {
+    title: payload.title,
+    summary: payload.summary,
+    content_markdown: payload.content_markdown,
+    content_preview: payload.content_preview,
+    cover_image_url: payload.cover_image_url,
+    announcement_type: normalizeAnnouncementType(payload.announcement_type),
+    severity: normalizeSeverity(payload.severity),
+    popup_enabled: Boolean(payload.popup_enabled),
+    force_popup: Boolean(payload.force_popup),
+    allow_snooze_today: Boolean(payload.allow_snooze_today),
+    target_variants_json: JSON.stringify(normalizeVariants(JSON.parse(payload.target_variants_json || '[]'))),
+    min_app_version: payload.min_app_version,
+    max_app_version: payload.max_app_version,
+    start_at: payload.start_at,
+    end_at: payload.end_at,
+    primary_button_text: payload.primary_button_text,
+    primary_button_url: payload.primary_button_url,
+    primary_button_mode: normalizeActionMode(payload.primary_button_mode),
+    secondary_button_text: payload.secondary_button_text,
+    secondary_button_url: payload.secondary_button_url,
+    secondary_button_mode: normalizeActionMode(payload.secondary_button_mode),
+  };
+
+  return Object.keys(nextComparable).some((key) => currentComparable[key] !== nextComparable[key]);
 }
 
 function matchesVersion(row, version) {
   const current = String(version || '').trim();
   if (!current) return true;
+  if (!isValidVersionText(current)) return false;
+  if (row.min_app_version && !isValidVersionText(row.min_app_version)) return false;
+  if (row.max_app_version && !isValidVersionText(row.max_app_version)) return false;
   if (row.min_app_version && versionCompare(current, row.min_app_version) < 0) return false;
   if (row.max_app_version && versionCompare(current, row.max_app_version) > 0) return false;
   return true;
@@ -318,6 +488,7 @@ app.post('/admin/login', async (req, res) => {
     setFlash(req, 'error', '账号或密码错误');
     return res.redirect('/admin/login');
   }
+  await regenerateSession(req);
   req.session.adminId = admin.id;
   req.session.username = admin.username;
   await pool.query('UPDATE admins SET last_login_at = NOW() WHERE id = ?', [admin.id]);
@@ -405,48 +576,53 @@ app.post('/admin/announcements', requireAdmin, async (req, res) => {
   try {
     const payload = buildAnnouncementPayload(req.body);
     const announcementKey = crypto.randomUUID().slice(0, 16);
-    const [result] = await pool.query(
-      `
-        INSERT INTO announcements (
-          announcement_key, title, summary, content_markdown, content_preview, cover_image_url,
-          announcement_type, push_version,
-          severity, status, popup_enabled, force_popup, allow_snooze_today, target_variants_json,
-          min_app_version, max_app_version, start_at, end_at,
-          primary_button_text, primary_button_url, primary_button_mode,
-          secondary_button_text, secondary_button_url, secondary_button_mode,
-          published_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          CASE WHEN ? = 'published' THEN NOW() ELSE NULL END
-        )
-      `,
-      [
-        announcementKey,
-        payload.title,
-        payload.summary,
-        payload.content_markdown,
-        payload.content_preview,
-        payload.cover_image_url,
-        payload.announcement_type,
-        1,
-        payload.severity,
-        payload.status,
-        payload.popup_enabled ? 1 : 0,
-        payload.force_popup ? 1 : 0,
-        payload.allow_snooze_today ? 1 : 0,
-        payload.target_variants_json,
-        payload.min_app_version,
-        payload.max_app_version,
-        payload.start_at,
-        payload.end_at,
-        payload.primary_button_text,
-        payload.primary_button_url,
-        payload.primary_button_mode,
-        payload.secondary_button_text,
-        payload.secondary_button_url,
-        payload.secondary_button_mode,
-        payload.status,
-      ]
-    );
+    await withTransaction(async (connection) => {
+      if (payload.status === 'published') {
+        await replacePublishedAnnouncement(connection);
+      }
+      await connection.query(
+        `
+          INSERT INTO announcements (
+            announcement_key, title, summary, content_markdown, content_preview, cover_image_url,
+            announcement_type, push_version,
+            severity, status, popup_enabled, force_popup, allow_snooze_today, target_variants_json,
+            min_app_version, max_app_version, start_at, end_at,
+            primary_button_text, primary_button_url, primary_button_mode,
+            secondary_button_text, secondary_button_url, secondary_button_mode,
+            published_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            CASE WHEN ? = 'published' THEN NOW() ELSE NULL END
+          )
+        `,
+        [
+          announcementKey,
+          payload.title,
+          payload.summary,
+          payload.content_markdown,
+          payload.content_preview,
+          payload.cover_image_url,
+          payload.announcement_type,
+          1,
+          payload.severity,
+          payload.status,
+          payload.popup_enabled ? 1 : 0,
+          payload.force_popup ? 1 : 0,
+          payload.allow_snooze_today ? 1 : 0,
+          payload.target_variants_json,
+          payload.min_app_version,
+          payload.max_app_version,
+          payload.start_at,
+          payload.end_at,
+          payload.primary_button_text,
+          payload.primary_button_url,
+          payload.primary_button_mode,
+          payload.secondary_button_text,
+          payload.secondary_button_url,
+          payload.secondary_button_mode,
+          payload.status,
+        ]
+      );
+    }, payload.status === 'published' ? { lockName: PUBLISH_LOCK_NAME } : undefined);
     setFlash(req, 'success', '公告已创建');
     res.redirect('/admin');
   } catch (error) {
@@ -464,70 +640,97 @@ app.post('/admin/announcements', requireAdmin, async (req, res) => {
 app.post('/admin/announcements/:id', requireAdmin, async (req, res) => {
   try {
     const payload = buildAnnouncementPayload(req.body);
-    await pool.query(
-      `
-        UPDATE announcements
-        SET
-          title = ?,
-          summary = ?,
-          content_markdown = ?,
-          content_preview = ?,
-          cover_image_url = ?,
-          announcement_type = ?,
-          severity = ?,
-          status = ?,
-          popup_enabled = ?,
-          force_popup = ?,
-          allow_snooze_today = ?,
-          target_variants_json = ?,
-          min_app_version = ?,
-          max_app_version = ?,
-          start_at = ?,
-          end_at = ?,
-          primary_button_text = ?,
-          primary_button_url = ?,
-          primary_button_mode = ?,
-          secondary_button_text = ?,
-          secondary_button_url = ?,
-          secondary_button_mode = ?,
-          published_at = CASE
-            WHEN ? = 'published' AND published_at IS NULL THEN NOW()
-            WHEN ? <> 'published' THEN NULL
-            ELSE published_at
-          END
-        WHERE id = ?
-      `,
-      [
-        payload.title,
-        payload.summary,
-        payload.content_markdown,
-        payload.content_preview,
-        payload.cover_image_url,
-        payload.announcement_type,
-        payload.severity,
-        payload.status,
-        payload.popup_enabled ? 1 : 0,
-        payload.force_popup ? 1 : 0,
-        payload.allow_snooze_today ? 1 : 0,
-        payload.target_variants_json,
-        payload.min_app_version,
-        payload.max_app_version,
-        payload.start_at,
-        payload.end_at,
-        payload.primary_button_text,
-        payload.primary_button_url,
-        payload.primary_button_mode,
-        payload.secondary_button_text,
-        payload.secondary_button_url,
-        payload.secondary_button_mode,
-        payload.status,
-        payload.status,
-        req.params.id,
-      ]
-    );
+    await withTransaction(async (connection) => {
+      const current = await findAnnouncementById(connection, req.params.id, { lockForUpdate: true });
+      if (!current) {
+        throw createAnnouncementNotFoundError();
+      }
+      if (payload.status === 'published') {
+        await replacePublishedAnnouncement(connection, current.id);
+      }
+      let nextPushVersion = normalizePushVersion(current.push_version);
+      if (payload.status === 'published') {
+        if (current.status === 'offline') {
+          nextPushVersion = nextPushVersionForPublish(current.status, current.push_version);
+        } else if (current.status === 'published' && hasClientVisibleChanges(current, payload)) {
+          nextPushVersion += 1;
+        }
+      }
+      const [result] = await connection.query(
+        `
+          UPDATE announcements
+          SET
+            title = ?,
+            summary = ?,
+            content_markdown = ?,
+            content_preview = ?,
+            cover_image_url = ?,
+            announcement_type = ?,
+            severity = ?,
+            status = ?,
+            popup_enabled = ?,
+            force_popup = ?,
+            allow_snooze_today = ?,
+            target_variants_json = ?,
+            min_app_version = ?,
+            max_app_version = ?,
+            start_at = ?,
+            end_at = ?,
+            primary_button_text = ?,
+            primary_button_url = ?,
+            primary_button_mode = ?,
+            secondary_button_text = ?,
+            secondary_button_url = ?,
+            secondary_button_mode = ?,
+            push_version = ?,
+            published_at = CASE
+              WHEN ? = 'published' AND ? <> 'published' THEN NOW()
+              WHEN ? <> 'published' THEN NULL
+              ELSE published_at
+            END
+          WHERE id = ?
+        `,
+        [
+          payload.title,
+          payload.summary,
+          payload.content_markdown,
+          payload.content_preview,
+          payload.cover_image_url,
+          payload.announcement_type,
+          payload.severity,
+          payload.status,
+          payload.popup_enabled ? 1 : 0,
+          payload.force_popup ? 1 : 0,
+          payload.allow_snooze_today ? 1 : 0,
+          payload.target_variants_json,
+          payload.min_app_version,
+          payload.max_app_version,
+          payload.start_at,
+          payload.end_at,
+          payload.primary_button_text,
+          payload.primary_button_url,
+          payload.primary_button_mode,
+          payload.secondary_button_text,
+          payload.secondary_button_url,
+          payload.secondary_button_mode,
+          nextPushVersion,
+          payload.status,
+          current.status,
+          payload.status,
+          current.id,
+        ]
+      );
+      if (result.affectedRows === 0) {
+        throw createAnnouncementNotFoundError();
+      }
+    }, payload.status === 'published' ? { lockName: PUBLISH_LOCK_NAME } : undefined);
     setFlash(req, 'success', '公告已更新');
     res.redirect('/admin');
   } catch (error) {
+    if (isAnnouncementNotFoundError(error)) {
+      setFlash(req, 'error', error.message);
+      return res.redirect('/admin');
+    }
     renderEditor(res.status(422), {
       title: `编辑公告 #${req.params.id}`,
       mode: 'edit',
@@ -540,7 +743,11 @@ app.post('/admin/announcements/:id', requireAdmin, async (req, res) => {
 });
 
 app.post('/admin/announcements/:id/delete', requireAdmin, async (req, res) => {
-  await pool.query('DELETE FROM announcements WHERE id = ? LIMIT 1', [req.params.id]);
+  const [result] = await pool.query('DELETE FROM announcements WHERE id = ? LIMIT 1', [req.params.id]);
+  if (result.affectedRows === 0) {
+    setFlash(req, 'error', '公告不存在');
+    return res.redirect('/admin');
+  }
   setFlash(req, 'success', '公告已删除');
   res.redirect('/admin');
 });
@@ -572,16 +779,55 @@ app.post('/admin/announcements/:id/repush', requireAdmin, async (req, res) => {
 });
 
 app.post('/admin/announcements/:id/publish', requireAdmin, async (req, res) => {
-  await pool.query(
-    'UPDATE announcements SET status = ?, published_at = COALESCE(published_at, NOW()) WHERE id = ?',
-    ['published', req.params.id]
-  );
-  setFlash(req, 'success', '公告已发布');
-  res.redirect('/admin');
+  try {
+    const result = await withTransaction(async (connection) => {
+      const announcement = await findAnnouncementById(connection, req.params.id, { lockForUpdate: true });
+      if (!announcement) {
+        throw createAnnouncementNotFoundError();
+      }
+      assertPublishableNow(announcement);
+      await replacePublishedAnnouncement(connection, announcement.id);
+      const nextPushVersion = nextPushVersionForPublish(announcement.status, announcement.push_version);
+      const [updateResult] = await connection.query(
+        `
+          UPDATE announcements
+          SET status = ?, push_version = ?,
+              published_at = CASE WHEN ? <> 'published' THEN NOW() ELSE published_at END
+          WHERE id = ?
+        `,
+        ['published', nextPushVersion, announcement.status, announcement.id]
+      );
+      if (updateResult.affectedRows === 0) {
+        throw createAnnouncementNotFoundError();
+      }
+      return {
+        previousStatus: announcement.status,
+        pushVersion: nextPushVersion,
+      };
+    }, { lockName: PUBLISH_LOCK_NAME });
+    setFlash(
+      req,
+      'success',
+      result.previousStatus === 'offline'
+        ? `公告已重新发布，当前推送版本 ${result.pushVersion}`
+        : '公告已发布'
+    );
+    res.redirect('/admin');
+  } catch (error) {
+    if (isAnnouncementNotFoundError(error) || isInvalidPublishStateError(error)) {
+      setFlash(req, 'error', error.message);
+      return res.redirect('/admin');
+    }
+    throw error;
+  }
 });
 
 app.post('/admin/announcements/:id/offline', requireAdmin, async (req, res) => {
-  await pool.query('UPDATE announcements SET status = ? WHERE id = ?', ['offline', req.params.id]);
+  const [result] = await pool.query('UPDATE announcements SET status = ? WHERE id = ?', ['offline', req.params.id]);
+  if (result.affectedRows === 0) {
+    setFlash(req, 'error', '公告不存在');
+    return res.redirect('/admin');
+  }
   setFlash(req, 'success', '公告已下线');
   res.redirect('/admin');
 });

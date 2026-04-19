@@ -4,6 +4,7 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 import { URL, fileURLToPath } from 'url';
+import { clearStartupFailure, recordStartupFailure } from './startup-failure.mjs';
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -311,9 +312,22 @@ async function _terminateWorkerImmediately(state) {
 
 function _exitProcess(exitCode) {
   try {
-    process.exit(exitCode);
-  } catch {
+    // 这里不能再用 process.exit(exitCode)：
+    // 当前 android-server.mjs 运行在嵌入式 Node（node::Start）里，
+    // 硬退出会直接杀掉宿主 :node / app_process 进程，
+    // Java/Kotlin 侧拿不到 startNodeWithArguments() 的返回，
+    // 也就无法把“真正启动失败”上报成 STATUS_ERROR，只会继续卡在“等待端口就绪”。
+    //
+    // 正确做法是：
+    // 1. 先把 server / worker / watcher / log stream 全部关闭；
+    // 2. 只设置 exitCode；
+    // 3. 让事件循环自然排空，最终由 node::Start() 正常返回到宿主。
+    //
+    // 这样 NodeService / RootNodeEntry 才能走到自己的 finally / 错误上报路径，
+    // App 看到的是“服务已停止 -> 启动失败”，而不是一直卡在启动中。
     process.exitCode = exitCode;
+  } catch {
+    // ignore
   }
 }
 
@@ -2147,6 +2161,7 @@ function createProxyServer() {
 }
 
 async function main() {
+  clearStartupFailure();
   ensureDirs();
   loadConfigOnce();
   // .env 读取后再解析监听地址，确保 App 设置端口生效。
@@ -2203,6 +2218,7 @@ async function main() {
 }
 
 main().catch(async (e) => {
-  log('Fatal error:', e?.stack || e);
+  const startupFailure = recordStartupFailure(e, { stage: 'main.startup', exitCode: 1 });
+  log('Fatal error:', startupFailure.detail || e?.stack || e);
   await _gracefulShutdown(1, 'fatal');
 });
