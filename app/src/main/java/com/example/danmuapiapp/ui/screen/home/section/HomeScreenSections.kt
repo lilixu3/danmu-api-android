@@ -147,6 +147,7 @@ import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
+import com.example.danmuapiapp.ui.screen.home.support.resolveCoreActionButtonText
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
@@ -824,6 +825,14 @@ internal fun ActionDeck(
 ) {
     val isStopping = status == ServiceStatus.Stopping
     val coreActionEnabled = !isTransitioning && !isCoreInfoLoading && (!isCoreInstalled || hasUpdate)
+    val coreActionText = resolveCoreActionButtonText(
+        isCoreInfoLoading = isCoreInfoLoading,
+        isCoreInstalled = isCoreInstalled,
+        hasUpdate = hasUpdate,
+        latestVersion = latestVersion,
+        isInstalling = isInstalling,
+        isUpdating = isUpdating
+    )
     val serviceButtonText = when {
         isStarting && coreOperationMessage.isNullOrBlank() -> "取消启动"
         isStarting -> "启动中"
@@ -958,24 +967,24 @@ internal fun ActionDeck(
                         appTonalButtonColors()
                     }
                 ) {
-                    Icon(
-                        imageVector = when {
-                            isCoreInfoLoading -> Icons.Rounded.HourglassTop
-                            !isCoreInstalled -> Icons.Rounded.Download
-                            else -> Icons.Rounded.SystemUpdateAlt
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    if (isInstalling || isUpdating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = when {
+                                isCoreInfoLoading -> Icons.Rounded.HourglassTop
+                                !isCoreInstalled -> Icons.Rounded.Download
+                                else -> Icons.Rounded.SystemUpdateAlt
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        when {
-                            isCoreInfoLoading -> "检测中"
-                            !isCoreInstalled -> "点击下载"
-                            hasUpdate -> "更新 ${latestVersion?.let { "v$it" } ?: "核心"}"
-                            else -> "暂无更新"
-                        }
-                    )
+                    Text(coreActionText)
                 }
             }
         }
