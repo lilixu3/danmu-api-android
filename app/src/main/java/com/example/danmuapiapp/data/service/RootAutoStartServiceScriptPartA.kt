@@ -189,10 +189,16 @@ object RootAutoStartServiceScriptPartA {
               ENTRY="${'$'}PROJ/main.js"
               PIDFILE="${'$'}RUNTIME/root_node.pid"
               STAMPFILE="${'$'}RUNTIME/apk_stamp"
-              DANMU_CHECK="${'$'}RUNTIME/danmu_api_checked"
 
               ensure_runtime() {
                 mkdir -p "${'$'}RUNTIME" "${'$'}PROJ"
+
+                wrapper_ready() {
+                  [ -f "${'$'}PROJ/main.js" ] &&
+                  [ -f "${'$'}PROJ/android-server.mjs" ] &&
+                  [ -f "${'$'}PROJ/worker-proxy.mjs" ] &&
+                  [ -f "${'$'}PROJ/package.json" ]
+                }
 
                 get_apk_stamp() {
                   [ -n "${'$'}APK" ] || { echo ""; return 0; }
@@ -212,13 +218,8 @@ object RootAutoStartServiceScriptPartA {
                 CUR_STAMP=$(get_apk_stamp | tr -d '\r' | tr -d '\n')
                 LAST_STAMP=$(cat "${'$'}STAMPFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
 
-                NEED_DANMU_FIX=0
-                if [ ! -f "${'$'}PROJ/danmu_api_stable/worker.js" ] && [ ! -f "${'$'}DANMU_CHECK" ]; then
-                  NEED_DANMU_FIX=1
-                fi
-
                 NEED_UPDATE=0
-                if [ ! -f "${'$'}ENTRY" ] || [ "${'$'}NEED_DANMU_FIX" = "1" ]; then
+                if ! wrapper_ready; then
                   NEED_UPDATE=1
                 fi
                 if [ -n "${'$'}CUR_STAMP" ] && [ "${'$'}CUR_STAMP" != "${'$'}LAST_STAMP" ]; then
@@ -264,21 +265,6 @@ object RootAutoStartServiceScriptPartA {
                     cp -f "${'$'}SRC/config/.env" "${'$'}PROJ/config/.env" 2>/dev/null || true
                   fi
 
-                  copy_dir_safe() {
-                    SD="${'$'}1"; DD="${'$'}2"
-                    rm -rf "${'$'}DD" 2>/dev/null || true
-                    mkdir -p "${'$'}DD" 2>/dev/null || true
-                    cp -a "${'$'}SD/." "${'$'}DD/" 2>/dev/null || cp -r "${'$'}SD/." "${'$'}DD/" 2>/dev/null || true
-                  }
-                  for D in danmu_api_stable danmu_api_dev danmu_api_custom; do
-                    if [ -d "${'$'}SRC/${'$'}D" ]; then
-                      if [ ! -f "${'$'}PROJ/${'$'}D/worker.js" ]; then
-                        copy_dir_safe "${'$'}SRC/${'$'}D" "${'$'}PROJ/${'$'}D"
-                      fi
-                    fi
-                  done
-
-                  touch "${'$'}DANMU_CHECK" 2>/dev/null || true
                   if [ -n "${'$'}CUR_STAMP" ]; then
                     echo "${'$'}CUR_STAMP" > "${'$'}STAMPFILE" 2>/dev/null || true
                   fi
@@ -286,21 +272,90 @@ object RootAutoStartServiceScriptPartA {
                 fi
               }
 
+              normalize_variant() {
+                RAW=$(echo "${'$'}1" | tr '[:upper:]' '[:lower:]' | tr -d '\r' | tr -d '\n')
+                case "${'$'}RAW" in
+                  dev|develop|development) echo "dev" ;;
+                  custom) echo "custom" ;;
+                  stable) echo "stable" ;;
+                  *) echo "stable" ;;
+                esac
+              }
+
+              read_selected_variant() {
+                ENV_FILE="${'$'}PROJ/config/.env"
+                if [ -f "${'$'}ENV_FILE" ]; then
+                  RAW=$(awk -F= '/^[[:space:]]*DANMU_API_VARIANT[[:space:]]*=/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}' "${'$'}ENV_FILE" 2>/dev/null)
+                  if [ -n "${'$'}RAW" ]; then
+                    normalize_variant "${'$'}RAW"
+                    return 0
+                  fi
+                fi
+                echo "stable"
+              }
+
+              read_runtime_port() {
+                ENV_FILE="${'$'}PROJ/config/.env"
+                [ -f "${'$'}ENV_FILE" ] || { echo ""; return 0; }
+                awk -F= '/^[[:space:]]*DANMU_API_PORT[[:space:]]*=/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}' "${'$'}ENV_FILE" 2>/dev/null
+              }
+
+              is_runtime_port_ready() {
+                PORT_RAW="${'$'}1"
+                case "${'$'}PORT_RAW" in
+                  ''|*[!0-9]*) return 1 ;;
+                esac
+                [ "${'$'}PORT_RAW" -ge 1 ] 2>/dev/null || return 1
+                [ "${'$'}PORT_RAW" -le 65535 ] 2>/dev/null || return 1
+                PORT_HEX=$(printf '%04X' "${'$'}PORT_RAW" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+                [ -n "${'$'}PORT_HEX" ] || return 1
+                awk -v p="${'$'}PORT_HEX" '
+                  NR > 1 {
+                    split($2, a, ":")
+                    if (toupper(a[2]) == p && $4 == "0A") {
+                      found = 1
+                      exit 0
+                    }
+                  }
+                  END { exit(found ? 0 : 1) }
+                ' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+              }
+
+              core_has_worker() {
+                DIR="${'$'}1"
+                [ -f "${'$'}DIR/worker.js" ] || [ -f "${'$'}DIR/danmu_api/worker.js" ] || [ -f "${'$'}DIR/danmu-api/worker.js" ]
+              }
+
               ensure_runtime
 
               [ -f "${'$'}ENTRY" ] || { log "entry missing: ${'$'}ENTRY"; return 1; }
+              [ -f "${'$'}PROJ/android-server.mjs" ] || { log "wrapper missing: android-server.mjs"; return 1; }
+              [ -f "${'$'}PROJ/worker-proxy.mjs" ] || { log "wrapper missing: worker-proxy.mjs"; return 1; }
+              [ -f "${'$'}PROJ/package.json" ] || { log "wrapper missing: package.json"; return 1; }
+              SELECTED_VARIANT=$(read_selected_variant)
+              CORE_DIR="${'$'}PROJ/danmu_api_${'$'}SELECTED_VARIANT"
+              core_has_worker "${'$'}CORE_DIR" || {
+                log "selected core missing or incomplete: variant=${'$'}SELECTED_VARIANT dir=${'$'}CORE_DIR"
+                return 1
+              }
               logd "entry=${'$'}ENTRY"
+              logd "selected_variant=${'$'}SELECTED_VARIANT"
 
               export DANMU_API_HOME="${'$'}PROJ"
               cd "${'$'}DANMU_API_HOME" >/dev/null 2>&1 || true
+              RUNTIME_PORT=$(read_runtime_port | tr -d '\r' | tr -d '\n')
 
               if [ -f "${'$'}PIDFILE" ]; then
                 OLD=$(cat "${'$'}PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
                 if [ -n "${'$'}OLD" ] && [ -d "/proc/${'$'}OLD" ]; then
                   CMDLINE=$(tr '\0' ' ' < "/proc/${'$'}OLD/cmdline" 2>/dev/null)
                   if echo "${'$'}CMDLINE" | grep -q "${'$'}MAIN_CLASS"; then
-                    log "skip: already running pid=${'$'}OLD"
-                    return 0
+                    if is_runtime_port_ready "${'$'}RUNTIME_PORT"; then
+                      log "skip: already running pid=${'$'}OLD port=${'$'}RUNTIME_PORT"
+                      return 0
+                    fi
+                    log "existing process alive but port not ready pid=${'$'}OLD port=${'$'}RUNTIME_PORT"
+                    return 1
                   fi
                 fi
               fi
@@ -319,8 +374,13 @@ object RootAutoStartServiceScriptPartA {
               if [ -f "${'$'}PIDFILE" ]; then
                 NEW=$(cat "${'$'}PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
                 if [ -n "${'$'}NEW" ] && [ -d "/proc/${'$'}NEW" ]; then
-                  logd "start ok pid=${'$'}NEW"
-                  return 0
+                  CMDLINE=$(tr '\0' ' ' < "/proc/${'$'}NEW/cmdline" 2>/dev/null)
+                  if echo "${'$'}CMDLINE" | grep -q "${'$'}MAIN_CLASS" && is_runtime_port_ready "${'$'}RUNTIME_PORT"; then
+                    logd "start ok pid=${'$'}NEW port=${'$'}RUNTIME_PORT"
+                    return 0
+                  fi
+                  log "process alive but port not ready pid=${'$'}NEW port=${'$'}RUNTIME_PORT"
+                  return 1
                 fi
               fi
               log "start failed"

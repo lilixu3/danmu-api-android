@@ -129,6 +129,8 @@ object RootRuntimeController {
         val libDirHint = context.applicationInfo.nativeLibraryDir
         val bootLogPath = bootLogFile.absolutePath
 
+        StartupFailureStore.clearRoot(context)
+
         val startScript = """
             PKG=${shellQuote(pkgName)}
             APP_APK_HINT=${shellQuote(apkPathHint)}
@@ -217,13 +219,14 @@ object RootRuntimeController {
             return OpResult(true, "Root 模式已触发启动")
         }
 
-        val ready = waitForPort("127.0.0.1", port, wantOpen = true, timeoutMs = 12000L)
-        return if (ready) {
+        val startupWait = waitForReadyOrFailure(context, port, timeoutMs = 12_000L)
+        return if (startupWait.ready) {
             AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已启动，端口=$port")
             OpResult(true, "Root 模式已启动")
         } else {
             val detail = mergeRootBootstrapDetail(
-                primary = "端口 $port 未就绪，请在应用控制台查看 Root 启动日志与 /api/logs 后重试",
+                primary = startupWait.failureDetail
+                    ?: "端口 $port 未就绪，请在应用控制台查看 Root 启动日志与 /api/logs 后重试",
                 tail = AppDiagnosticLogger.readRootBootstrapTail(context)
             )
             AppDiagnosticLogger.e(context, "RootRuntimeController", "Root 模式启动超时：$detail")
@@ -771,5 +774,36 @@ object RootRuntimeController {
             runCatching { Thread.sleep(180) }
         }
         return false
+    }
+
+    private data class StartupWaitResult(
+        val ready: Boolean,
+        val failureDetail: String? = null
+    )
+
+    private fun waitForReadyOrFailure(context: Context, port: Int, timeoutMs: Long): StartupWaitResult {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (isRunningFast(port)) {
+                return StartupWaitResult(ready = true)
+            }
+            val startupFailure = StartupFailureStore.readRoot(context)
+            if (startupFailure != null) {
+                return StartupWaitResult(
+                    ready = false,
+                    failureDetail = startupFailure.userMessage()
+                )
+            }
+            val pid = readPid(context)
+            if (pid != null && !isPidAlive(pid)) {
+                return StartupWaitResult(ready = false)
+            }
+            runCatching { Thread.sleep(180) }
+        }
+        val startupFailure = StartupFailureStore.readRoot(context)
+        return StartupWaitResult(
+            ready = false,
+            failureDetail = startupFailure?.userMessage()
+        )
     }
 }

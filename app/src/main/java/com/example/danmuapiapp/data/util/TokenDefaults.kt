@@ -21,8 +21,10 @@ object TokenDefaults {
         envFile: File? = null,
         key: String = TOKEN_KEY
     ): String {
-        val prefToken = if (prefs.contains(key)) prefs.safeGetString(key).trim() else ""
-        if (prefToken.isNotBlank()) return prefToken
+        if (prefs.contains(key)) {
+            // prefs 中显式存在空字符串表示“用户主动清空 token”，不能再回灌旧 .env 或默认值。
+            return prefs.safeGetString(key).trim()
+        }
 
         val envToken = resolveTokenFromEnvFile(envFile).orEmpty().trim()
         if (envToken.isNotBlank()) return envToken

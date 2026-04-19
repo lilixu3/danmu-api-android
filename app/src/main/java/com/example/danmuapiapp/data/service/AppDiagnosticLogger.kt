@@ -24,8 +24,8 @@ object AppDiagnosticLogger {
 
     private const val LOG_DIR_NAME = "app-logs"
     private const val APP_THROWABLE_MAX_CHARS = 12_000
-    private const val ROOT_TAIL_MAX_CHARS = 600
-    private const val ROOT_TAIL_MAX_LINES = 12
+    private const val BOOTSTRAP_TAIL_MAX_CHARS = 600
+    private const val BOOTSTRAP_TAIL_MAX_LINES = 12
 
     private val appLogSpec = FileSpec(
         fileName = "app.log",
@@ -78,68 +78,97 @@ object AppDiagnosticLogger {
         return readStructuredEntries(context, appLogSpec, maxEntries)
     }
 
+    fun readNormalBootstrapEntries(context: Context, maxEntries: Int): List<LogEntry> {
+        val file = normalBootstrapFile(context)
+        if (!file.exists() || !file.isFile) return emptyList()
+        val fileTimestamp = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+        return runCatching { file.readLines(Charsets.UTF_8) }
+            .getOrDefault(emptyList())
+            .mapIndexedNotNull { index, raw ->
+                val trimmed = raw.trim()
+                if (trimmed.isBlank()) return@mapIndexedNotNull null
+                parseBootstrapLine(
+                    line = trimmed,
+                    fallbackTimestamp = fileTimestamp + index,
+                    source = AppLogSource.NormalBootstrap,
+                    tag = "NormalBootstrap"
+                )
+            }
+            .takeLast(maxEntries.coerceAtLeast(1))
+    }
+
     fun readRootBootstrapEntries(context: Context, maxEntries: Int): List<LogEntry> {
-        val files = rollingFilesInReadOrder(context, rootBootstrapSpec)
-        if (files.isEmpty()) return emptyList()
-        val out = ArrayList<LogEntry>()
-        files.forEach { file ->
-            val fileTimestamp = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
-            runCatching { file.readLines(Charsets.UTF_8) }
-                .getOrDefault(emptyList())
-                .forEachIndexed { index, raw ->
-                    val trimmed = raw.trim()
-                    if (trimmed.isBlank()) return@forEachIndexed
-                    out += parseRootBootstrapLine(trimmed, fileTimestamp + index)
-                }
-        }
-        return out.takeLast(maxEntries.coerceAtLeast(1))
+        return readBootstrapEntries(
+            context = context,
+            spec = rootBootstrapSpec,
+            source = AppLogSource.RootBootstrap,
+            tag = "RootBootstrap",
+            maxEntries = maxEntries
+        )
+    }
+
+    fun prepareNormalBootstrapLog(context: Context): File {
+        val file = normalBootstrapFile(context)
+        runCatching { file.parentFile?.mkdirs() }
+        runCatching { file.writeText("", Charsets.UTF_8) }
+        val now = formatLocalTimestamp(System.currentTimeMillis())
+        appendNormalBootstrapLine(context, "$now [INFO] 准备捕获普通模式启动日志")
+        return file
     }
 
     fun prepareRootBootstrapLog(context: Context): File {
-        synchronized(writeLock) {
-            val baseFile = logFile(context, rootBootstrapSpec)
-            val parent = baseFile.parentFile
-            runCatching { parent?.mkdirs() }
-            resetRollingFile(baseFile, rootBootstrapSpec)
-            runCatching {
-                baseFile.writeText("", Charsets.UTF_8)
+        return prepareBootstrapLog(
+            context = context,
+            spec = rootBootstrapSpec,
+            banner = "准备捕获 Root 启动日志"
+        )
+    }
+
+    fun appendNormalBootstrapLine(context: Context, line: String) {
+        val normalized = line.trimEnd()
+        if (normalized.isBlank()) return
+        val file = normalBootstrapFile(context)
+        runCatching { file.parentFile?.mkdirs() }
+        runCatching {
+            FileOutputStream(file, true).use { stream ->
+                stream.write((normalized + "\n").toByteArray(Charsets.UTF_8))
+                stream.flush()
             }
-            val now = formatLocalTimestamp(System.currentTimeMillis())
-            appendRootBootstrapLine(
-                context,
-                "$now [INFO] 准备捕获 Root 启动日志"
-            )
-            return baseFile
         }
     }
 
     fun appendRootBootstrapLine(context: Context, line: String) {
-        val normalized = line.trimEnd()
-        if (normalized.isBlank()) return
-        appendRawLine(context, rootBootstrapSpec, normalized + "\n")
+        appendBootstrapLine(context, rootBootstrapSpec, line)
+    }
+
+    fun readNormalBootstrapTail(
+        context: Context,
+        maxLines: Int = BOOTSTRAP_TAIL_MAX_LINES,
+        maxChars: Int = BOOTSTRAP_TAIL_MAX_CHARS
+    ): String {
+        return readBootstrapTail(
+            entries = readNormalBootstrapEntries(context, maxLines.coerceAtLeast(1)),
+            maxChars = maxChars
+        )
     }
 
     fun readRootBootstrapTail(
         context: Context,
-        maxLines: Int = ROOT_TAIL_MAX_LINES,
-        maxChars: Int = ROOT_TAIL_MAX_CHARS
+        maxLines: Int = BOOTSTRAP_TAIL_MAX_LINES,
+        maxChars: Int = BOOTSTRAP_TAIL_MAX_CHARS
     ): String {
-        val entries = readRootBootstrapEntries(context, maxLines.coerceAtLeast(1))
-        if (entries.isEmpty()) return ""
-        return entries.joinToString("\n") { entry ->
-            buildString {
-                append(entry.message)
-                if (entry.tag.isNotBlank()) {
-                    append(" [")
-                    append(entry.tag)
-                    append("]")
-                }
-            }
-        }.takeLast(maxChars.coerceAtLeast(80))
+        return readBootstrapTail(
+            entries = readRootBootstrapEntries(context, maxLines.coerceAtLeast(1)),
+            maxChars = maxChars
+        )
     }
 
     fun clearAppLogs(context: Context) {
         clearRollingFiles(context, appLogSpec)
+    }
+
+    fun clearNormalBootstrapLogs(context: Context) {
+        runCatching { normalBootstrapFile(context).delete() }
     }
 
     fun clearRootBootstrapLogs(context: Context) {
@@ -148,6 +177,7 @@ object AppDiagnosticLogger {
 
     fun clearAll(context: Context) {
         clearAppLogs(context)
+        clearNormalBootstrapLogs(context)
         clearRootBootstrapLogs(context)
     }
 
@@ -264,20 +294,91 @@ object AppDiagnosticLogger {
         )
     }
 
-    private fun parseRootBootstrapLine(line: String, fallbackTimestamp: Long): LogEntry {
+    private fun prepareBootstrapLog(
+        context: Context,
+        spec: FileSpec,
+        banner: String
+    ): File {
+        synchronized(writeLock) {
+            val baseFile = logFile(context, spec)
+            val parent = baseFile.parentFile
+            runCatching { parent?.mkdirs() }
+            resetRollingFile(baseFile, spec)
+            runCatching {
+                baseFile.writeText("", Charsets.UTF_8)
+            }
+            val now = formatLocalTimestamp(System.currentTimeMillis())
+            appendBootstrapLine(context, spec, "$now [INFO] $banner")
+            return baseFile
+        }
+    }
+
+    private fun appendBootstrapLine(context: Context, spec: FileSpec, line: String) {
+        val normalized = line.trimEnd()
+        if (normalized.isBlank()) return
+        appendRawLine(context, spec, normalized + "\n")
+    }
+
+    private fun normalBootstrapFile(context: Context): File {
+        return File(RuntimePaths.normalProjectDir(context), "logs/normal-bootstrap.log")
+    }
+
+    private fun readBootstrapEntries(
+        context: Context,
+        spec: FileSpec,
+        source: AppLogSource,
+        tag: String,
+        maxEntries: Int
+    ): List<LogEntry> {
+        val files = rollingFilesInReadOrder(context, spec)
+        if (files.isEmpty()) return emptyList()
+        val out = ArrayList<LogEntry>()
+        files.forEach { file ->
+            val fileTimestamp = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+            runCatching { file.readLines(Charsets.UTF_8) }
+                .getOrDefault(emptyList())
+                .forEachIndexed { index, raw ->
+                    val trimmed = raw.trim()
+                    if (trimmed.isBlank()) return@forEachIndexed
+                    out += parseBootstrapLine(trimmed, fileTimestamp + index, source, tag)
+                }
+        }
+        return out.takeLast(maxEntries.coerceAtLeast(1))
+    }
+
+    private fun readBootstrapTail(entries: List<LogEntry>, maxChars: Int): String {
+        if (entries.isEmpty()) return ""
+        return entries.joinToString("\n") { entry ->
+            buildString {
+                append(entry.message)
+                if (entry.tag.isNotBlank()) {
+                    append(" [")
+                    append(entry.tag)
+                    append("]")
+                }
+            }
+        }.takeLast(maxChars.coerceAtLeast(80))
+    }
+
+    private fun parseBootstrapLine(
+        line: String,
+        fallbackTimestamp: Long,
+        source: AppLogSource,
+        tag: String
+    ): LogEntry {
         val structuredRegex =
-            Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})]?\s+\[([A-Z]+)]\s*(.*)$""")
+            Regex("""^\[?(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?)?)]?\s+\[([A-Z]+)]\s*(.*)$""")
         val match = structuredRegex.find(line)
         if (match != null) {
-            val timestamp = parseLocalTimestamp(match.groupValues[1]).takeIf { it > 0L }
+            val timestamp = parseBootstrapTimestamp(match.groupValues[1]).takeIf { it > 0L }
                 ?: fallbackTimestamp
             val level = parseLevel(match.groupValues[2])
             return LogEntry(
                 timestamp = timestamp,
                 level = level,
                 message = match.groupValues[3].ifBlank { line },
-                source = AppLogSource.RootBootstrap,
-                tag = "RootBootstrap"
+                source = source,
+                tag = tag
             )
         }
 
@@ -291,9 +392,24 @@ object AppDiagnosticLogger {
             timestamp = fallbackTimestamp,
             level = level,
             message = line,
-            source = AppLogSource.RootBootstrap,
-            tag = "RootBootstrap"
+            source = source,
+            tag = tag
         )
+    }
+
+    private fun parseBootstrapTimestamp(raw: String): Long {
+        val normalized = raw.trim()
+        if (normalized.isBlank()) return 0L
+        return runCatching {
+            if (normalized.contains('T')) {
+                Instant.parse(normalized).toEpochMilli()
+            } else {
+                LocalDateTime.parse(normalized, localTimeFormatter)
+                    .atZone(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+            }
+        }.getOrDefault(0L)
     }
 
     private fun parseLocalTimestamp(raw: String): Long {

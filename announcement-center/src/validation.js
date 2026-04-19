@@ -223,6 +223,39 @@ function normalizeDateTimeLocal(input) {
   return iso.length === 16 ? `${iso}:00` : iso;
 }
 
+const VERSION_PATTERN = /^\d+(?:\.\d+){0,7}$/;
+
+function isValidVersionText(input) {
+  const value = normalizeText(input, 32);
+  return Boolean(value) && VERSION_PATTERN.test(value);
+}
+
+function normalizeVersionValue(input, fieldLabel) {
+  const value = normalizeText(input, 32);
+  if (!value) return null;
+  if (!isValidVersionText(value)) {
+    throw new Error(`${fieldLabel}格式无效，版本号只能包含数字和点，例如 1.0.5.18`);
+  }
+  return value;
+}
+
+function versionCompare(a, b) {
+  const left = String(a || '')
+    .split('.')
+    .map((item) => Number.parseInt(item, 10) || 0);
+  const right = String(b || '')
+    .split('.')
+    .map((item) => Number.parseInt(item, 10) || 0);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const l = left[index] || 0;
+    const r = right[index] || 0;
+    if (l > r) return 1;
+    if (l < r) return -1;
+  }
+  return 0;
+}
+
 function buildContentPreview(markdown) {
   return String(markdown || '')
     .replace(/\r\n?/g, '\n')
@@ -235,6 +268,21 @@ function buildContentPreview(markdown) {
     .trim()
     .slice(0, 380)
     .trim();
+}
+
+function normalizeVersionRange(body) {
+  const { min_app_version, max_app_version } = {
+    min_app_version: normalizeVersionValue(body.min_app_version, '最低 App 版本'),
+    max_app_version: normalizeVersionValue(body.max_app_version, '最高 App 版本'),
+  };
+  if (
+    min_app_version &&
+    max_app_version &&
+    versionCompare(min_app_version, max_app_version) > 0
+  ) {
+    throw new Error('最低 App 版本不能高于最高 App 版本');
+  }
+  return { min_app_version, max_app_version };
 }
 
 function buildAnnouncementPayload(body) {
@@ -266,6 +314,12 @@ function buildAnnouncementPayload(body) {
         : 'normal';
   const primaryAction = buildActionPayload(body, 'primary');
   const secondaryAction = buildActionPayload(body, 'secondary');
+  const { min_app_version, max_app_version } = normalizeVersionRange(body);
+  const status = normalizeStatus(body.status);
+
+  if (status === 'published' && startAt && new Date(startAt).getTime() > Date.now()) {
+    throw new Error('立即发布时，开始时间不能晚于当前时间');
+  }
 
   return {
     title,
@@ -275,13 +329,13 @@ function buildAnnouncementPayload(body) {
     cover_image_url: normalizeOptionalUrl(body.cover_image_url),
     announcement_type: announcementType,
     severity: normalizeSeverity(body.severity),
-    status: normalizeStatus(body.status),
+    status,
     popup_enabled: true,
     force_popup: popupMode === 'force',
-    allow_snooze_today: announcementType === 'long',
+    allow_snooze_today: announcementType === 'long' && popupMode !== 'force',
     target_variants_json: JSON.stringify(normalizeVariants(body.target_variants)),
-    min_app_version: normalizeText(body.min_app_version, 32) || null,
-    max_app_version: normalizeText(body.max_app_version, 32) || null,
+    min_app_version,
+    max_app_version,
     start_at: startAt,
     end_at: endAt,
     primary_button_text: primaryAction.text,
@@ -300,8 +354,10 @@ module.exports = {
   normalizeActionMode,
   normalizeAnnouncementType,
   normalizeBoolean,
+  isValidVersionText,
   normalizePopupMode,
   normalizeSeverity,
   normalizeStatus,
   normalizeVariants,
+  versionCompare,
 };
