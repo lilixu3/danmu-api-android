@@ -439,7 +439,7 @@ internal fun coreOperationStatus(
 ): String? {
     return when {
         isSwitching -> "正在切换核心，完成后会自动重启服务"
-        isUpdating -> "核心更新完成后会自动应用到当前服务"
+        isUpdating -> "正在更新核心，服务会自动停止并在完成后恢复"
         isInstalling -> "核心下载中，低性能设备首次安装会更久"
         else -> null
     }

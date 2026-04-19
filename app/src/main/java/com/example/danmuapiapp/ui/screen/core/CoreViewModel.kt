@@ -14,8 +14,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @HiltViewModel
@@ -107,16 +109,15 @@ class CoreViewModel @Inject constructor(
 
     private fun doInstallCore(variant: ApiVariant) {
         viewModelScope.launch {
-            isOperating = true
-            operationMessage = "正在安装 ${variant.label}..."
-            coreRepo.installCore(variant).fold(
-                onSuccess = { operationMessage = "${variant.label} 安装成功" },
-                onFailure = {
-                    operationMessage = "安装失败: ${it.message}"
-                    promptProxyReselectIfNeeded(PendingProxyAction.Install(variant))
-                }
+            performCoreMutation(
+                variant = variant,
+                actionMessage = "正在安装 ${variant.label}...",
+                successMessage = "${variant.label} 安装成功",
+                stopTimeoutMessage = "${variant.label} 安装前停止服务超时，请稍后重试",
+                failurePrefix = "安装失败",
+                pendingAction = PendingProxyAction.Install(variant),
+                applyBlock = { coreRepo.installCore(variant) }
             )
-            isOperating = false
         }
     }
 
@@ -155,21 +156,15 @@ class CoreViewModel @Inject constructor(
     private fun doUpdateCore(variant: ApiVariant) {
         showUpdateDialog = false
         viewModelScope.launch {
-            isOperating = true
-            operationMessage = "正在更新 ${variant.label}..."
-            coreRepo.updateCore(variant).fold(
-                onSuccess = {
-                    postCoreAppliedMessageAndRestartIfNeeded(
-                        variant = variant,
-                        baseMessage = "${variant.label} 更新成功"
-                    )
-                },
-                onFailure = {
-                    operationMessage = "更新失败: ${it.message}"
-                    promptProxyReselectIfNeeded(PendingProxyAction.DoUpdate(variant))
-                }
+            performCoreMutation(
+                variant = variant,
+                actionMessage = "正在更新 ${variant.label}...",
+                successMessage = "${variant.label} 更新成功",
+                stopTimeoutMessage = "${variant.label} 更新前停止服务超时，请稍后重试",
+                failurePrefix = "更新失败",
+                pendingAction = PendingProxyAction.DoUpdate(variant),
+                applyBlock = { coreRepo.updateCore(variant) }
             )
-            isOperating = false
         }
     }
 
@@ -185,21 +180,15 @@ class CoreViewModel @Inject constructor(
     private fun doReinstallCore(variant: ApiVariant) {
         showGearMenu = null
         viewModelScope.launch {
-            isOperating = true
-            operationMessage = "正在重装 ${variant.label}..."
-            coreRepo.installCore(variant).fold(
-                onSuccess = {
-                    postCoreAppliedMessageAndRestartIfNeeded(
-                        variant = variant,
-                        baseMessage = "${variant.label} 重装成功"
-                    )
-                },
-                onFailure = {
-                    operationMessage = "重装失败: ${it.message}"
-                    promptProxyReselectIfNeeded(PendingProxyAction.Reinstall(variant))
-                }
+            performCoreMutation(
+                variant = variant,
+                actionMessage = "正在重装 ${variant.label}...",
+                successMessage = "${variant.label} 重装成功",
+                stopTimeoutMessage = "${variant.label} 重装前停止服务超时，请稍后重试",
+                failurePrefix = "重装失败",
+                pendingAction = PendingProxyAction.Reinstall(variant),
+                applyBlock = { coreRepo.installCore(variant) }
             )
-            isOperating = false
         }
     }
 
@@ -235,21 +224,15 @@ class CoreViewModel @Inject constructor(
     private fun doRollbackTo(variant: ApiVariant, release: GithubRelease) {
         showRollbackDialog = false
         viewModelScope.launch {
-            isOperating = true
-            operationMessage = "正在回退到 ${release.tagName}..."
-            coreRepo.rollbackCore(variant, release).fold(
-                onSuccess = {
-                    postCoreAppliedMessageAndRestartIfNeeded(
-                        variant = variant,
-                        baseMessage = "已回退到 ${release.tagName}"
-                    )
-                },
-                onFailure = {
-                    operationMessage = "回退失败: ${it.message}"
-                    promptProxyReselectIfNeeded(PendingProxyAction.Rollback(variant, release))
-                }
+            performCoreMutation(
+                variant = variant,
+                actionMessage = "正在回退到 ${release.tagName}...",
+                successMessage = "已回退到 ${release.tagName}",
+                stopTimeoutMessage = "${variant.label} 回退前停止服务超时，请稍后重试",
+                failurePrefix = "回退失败",
+                pendingAction = PendingProxyAction.Rollback(variant, release),
+                applyBlock = { coreRepo.rollbackCore(variant, release) }
             )
-            isOperating = false
         }
     }
 
@@ -274,14 +257,53 @@ class CoreViewModel @Inject constructor(
         operationMessage = null
     }
 
-    private fun postCoreAppliedMessageAndRestartIfNeeded(variant: ApiVariant, baseMessage: String) {
-        val state = runtimeState.value
-        if (state.variant == variant && state.status == ServiceStatus.Running) {
-            runtimeRepo.restartService()
-            operationMessage = "${baseMessage}，服务正在重启以应用变更"
-        } else {
-            operationMessage = baseMessage
+    private suspend fun performCoreMutation(
+        variant: ApiVariant,
+        actionMessage: String,
+        successMessage: String,
+        stopTimeoutMessage: String,
+        failurePrefix: String,
+        pendingAction: PendingProxyAction,
+        applyBlock: suspend () -> Result<Unit>
+    ) {
+        isOperating = true
+        operationMessage = actionMessage
+        val applyPlan = decideCoreApplyPlan(runtimeState.value, variant)
+
+        if (applyPlan.shouldStopServiceBeforeApply) {
+            operationMessage = "正在停止服务以安全应用 ${variant.label} 变更..."
+            runtimeRepo.stopService()
+            val stopped = waitForRuntimeStoppedBeforeCoreMutation()
+            if (!stopped) {
+                operationMessage = stopTimeoutMessage
+                isOperating = false
+                return
+            }
         }
+
+        applyBlock().fold(
+            onSuccess = {
+                if (applyPlan.shouldStartServiceAfterApply) {
+                    runtimeRepo.startService()
+                    operationMessage = "${successMessage}，服务正在启动以应用变更"
+                } else {
+                    operationMessage = successMessage
+                }
+            },
+            onFailure = {
+                operationMessage = "$failurePrefix: ${it.message}"
+                promptProxyReselectIfNeeded(pendingAction)
+            }
+        )
+        isOperating = false
+    }
+
+    private suspend fun waitForRuntimeStoppedBeforeCoreMutation(timeoutMs: Long = 25_000L): Boolean {
+        return withTimeoutOrNull(timeoutMs) {
+            runtimeState.first { state ->
+                state.status == ServiceStatus.Stopped || state.status == ServiceStatus.Error
+            }
+        } != null
     }
 
     fun openProxyPickerManually() {
