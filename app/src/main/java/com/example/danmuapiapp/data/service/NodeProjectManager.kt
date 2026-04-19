@@ -294,8 +294,8 @@ object NodeProjectManager {
 
     fun hasValidCore(coreDir: File): Boolean {
         if (!coreDir.exists() || !coreDir.isDirectory) return false
-        if (File(coreDir, "worker.js").exists()) return true
-        return normalizeCoreLayout(coreDir) && File(coreDir, "worker.js").exists()
+        if (hasRequiredCoreFiles(coreDir)) return true
+        return normalizeCoreLayout(coreDir) && hasRequiredCoreFiles(coreDir)
     }
 
     fun readCoreVersion(coreDir: File): String? {
@@ -579,4 +579,15 @@ object NodeProjectManager {
         val key = runCatching { dir.canonicalPath }.getOrElse { dir.absolutePath }
         return store.getOrPut(key) { Any() }
     }
+}
+
+internal fun hasRequiredCoreFiles(coreDir: File): Boolean {
+    if (!coreDir.exists() || !coreDir.isDirectory) return false
+    if (!File(coreDir, "worker.js").exists()) return false
+    val globalsCandidates = listOf(
+        File(coreDir, "configs/globals.js"),
+        File(coreDir, "config/globals.js"),
+        File(coreDir, "globals.js")
+    )
+    return globalsCandidates.any { it.exists() }
 }

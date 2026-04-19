@@ -27,6 +27,7 @@ import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.screen.home.support.resolveAutoCoreUpdatePrompt
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -170,6 +171,7 @@ class HomeViewModel @Inject constructor(
         get() = appUpdateInstaller.uiState.showInstallDialog
 
     private val ignoredUpdateVersionMap = mutableMapOf<ApiVariant, String?>()
+    private val suppressedAutoUpdatePromptVersionMap = mutableMapOf<ApiVariant, String?>()
     private val proxyPickerController = ProxyPickerController(
         githubProxyService = githubProxyService,
         githubProxySpeedTester = githubProxySpeedTester,
@@ -563,6 +565,10 @@ class HomeViewModel @Inject constructor(
 
     fun updateFromPrompt() {
         val variant = updatePromptVariant ?: runtimeState.value.variant
+        val latest = updatePromptLatestVersion
+        if (!latest.isNullOrBlank()) {
+            suppressedAutoUpdatePromptVersionMap[variant] = latest.trim()
+        }
         showUpdatePromptDialog = false
         updateCurrentVariant(variant)
     }
@@ -1049,6 +1055,7 @@ class HomeViewModel @Inject constructor(
                 updatePromptCurrentVersion = null
                 updatePromptLatestVersion = null
             }
+            suppressedAutoUpdatePromptVersionMap.remove(currentVariant)
             return
         }
 
@@ -1059,17 +1066,25 @@ class HomeViewModel @Inject constructor(
             ignoredUpdateVersionMap[currentVariant] = null
         }
 
-        val effectiveIgnored = ignoredUpdateVersionMap[currentVariant]?.trim().orEmpty()
-        if (effectiveIgnored == latest) return
+        val suppressed = suppressedAutoUpdatePromptVersionMap[currentVariant]?.trim().orEmpty()
+        if (suppressed.isNotBlank() && suppressed != latest) {
+            suppressedAutoUpdatePromptVersionMap.remove(currentVariant)
+        }
 
         val samePromptShown = showUpdatePromptDialog &&
             updatePromptVariant == currentVariant &&
             updatePromptLatestVersion == latest
-        if (samePromptShown) return
+
+        val prompt = resolveAutoCoreUpdatePrompt(
+            info = info,
+            ignoredVersion = ignoredUpdateVersionMap[currentVariant],
+            suppressedVersion = suppressedAutoUpdatePromptVersionMap[currentVariant],
+            samePromptShown = samePromptShown
+        ) ?: return
 
         updatePromptVariant = currentVariant
-        updatePromptCurrentVersion = info.version
-        updatePromptLatestVersion = latest
+        updatePromptCurrentVersion = prompt.currentVersion
+        updatePromptLatestVersion = prompt.latestVersion
         showUpdatePromptDialog = true
     }
 

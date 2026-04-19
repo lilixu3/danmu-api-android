@@ -594,7 +594,7 @@ class CoreRepositoryImpl @Inject constructor(
             NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
 
             if (!NodeProjectManager.hasValidCore(stagingDir)) {
-                throw IOException("核心文件不完整，缺少 worker.js")
+                throw IOException("核心文件不完整，缺少关键入口文件")
             }
 
             backupDir = replaceCoreDirectory(targetDir, stagingDir)
@@ -603,7 +603,7 @@ class CoreRepositoryImpl @Inject constructor(
             if (mode != RunMode.Normal) {
                 syncCoreDirToRoot(targetDir, location.rootDirPath)
                 if (!rootHasValidCore(location.rootDirPath)) {
-                    throw IOException("Root 核心同步后仍缺少 worker.js")
+                    throw IOException("Root 核心同步后仍缺少关键入口文件")
                 }
             }
 
@@ -694,10 +694,7 @@ class CoreRepositoryImpl @Inject constructor(
         if (targetDir.exists()) {
             targetDir.deleteRecursively()
         }
-        sourceDir.copyRecursively(targetDir, overwrite = true)
-        if (!sourceDir.deleteRecursively()) {
-            throw IOException("无法清理目录: ${sourceDir.absolutePath}")
-        }
+        copyDirectoryOrThrow(sourceDir, targetDir)
     }
 
     private fun deleteRootCoreDir(rootDirPath: String) {
@@ -1089,4 +1086,20 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+}
+
+internal fun copyDirectoryOrThrow(
+    sourceDir: File,
+    targetDir: File,
+    copyBlock: (File, File) -> Boolean = { src, dst -> src.copyRecursively(dst, overwrite = true) },
+    cleanupBlock: (File) -> Boolean = { dir -> dir.deleteRecursively() }
+) {
+    val copied = copyBlock(sourceDir, targetDir)
+    if (!copied) {
+        runCatching { if (targetDir.exists()) targetDir.deleteRecursively() }
+        throw IOException("复制目录失败: ${sourceDir.absolutePath} -> ${targetDir.absolutePath}")
+    }
+    if (!cleanupBlock(sourceDir)) {
+        throw IOException("无法清理目录: ${sourceDir.absolutePath}")
+    }
 }
