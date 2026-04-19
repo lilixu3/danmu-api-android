@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -77,7 +78,6 @@ import kotlinx.coroutines.launch
 object StartupPermissionGatePrefs {
     private const val PREFS_NAME = "startup_permission_gate"
     private const val KEY_NOTIFICATION_REQUESTED = "notification_requested"
-    private const val KEY_GUIDE_DISMISSED = "guide_dismissed"
     private const val KEY_MODE_ACKNOWLEDGED = "mode_acknowledged"
 
     fun hasRequestedNotificationPermission(context: Context): Boolean {
@@ -88,12 +88,8 @@ object StartupPermissionGatePrefs {
         prefs(context).edit().putBoolean(KEY_NOTIFICATION_REQUESTED, true).apply()
     }
 
-    fun isGuideDismissed(context: Context): Boolean {
-        return prefs(context).getBoolean(KEY_GUIDE_DISMISSED, false)
-    }
-
-    fun setGuideDismissed(context: Context, dismissed: Boolean) {
-        prefs(context).edit().putBoolean(KEY_GUIDE_DISMISSED, dismissed).apply()
+    fun clearLegacyGuideDismissed(context: Context) {
+        prefs(context).edit().remove("guide_dismissed").apply()
     }
 
     fun isModeAcknowledged(context: Context): Boolean {
@@ -150,20 +146,34 @@ fun StartupPermissionGateHost(
     val coreInfoList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
 
     var permissionState by remember(runtimeState.runMode) {
         mutableStateOf(readPermissionState(context, runtimeState.runMode))
     }
-    var dismissedThisLaunch by remember { mutableStateOf(StartupPermissionGatePrefs.isGuideDismissed(context)) }
+    var dismissedThisLaunch by rememberSaveable { mutableStateOf(false) }
     var modeAcknowledged by remember { mutableStateOf(StartupPermissionGatePrefs.isModeAcknowledged(context)) }
-    var coreDeferredThisLaunch by remember { mutableStateOf(false) }
-    var requestedRunMode by remember { mutableStateOf<RunMode?>(null) }
-    var selectedRunMode by remember { mutableStateOf(runtimeState.runMode) }
-    var selectedVariant by remember { mutableStateOf(normalizeStartupVariant(runtimeState.variant)) }
-    var activeStep by remember { mutableStateOf<SetupStep?>(null) }
+    var coreDeferredThisLaunch by rememberSaveable { mutableStateOf(false) }
+    var requestedRunModeKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedRunModeKey by rememberSaveable { mutableStateOf(runtimeState.runMode.key) }
+    var selectedVariantKey by rememberSaveable {
+        mutableStateOf(normalizeStartupVariant(runtimeState.variant).key)
+    }
+    var activeStepName by rememberSaveable { mutableStateOf<String?>(null) }
+    val requestedRunMode = requestedRunModeKey?.let(RunMode::fromKey)
+    val selectedRunMode = RunMode.fromKey(selectedRunModeKey) ?: runtimeState.runMode
+    val selectedVariant = ApiVariant.entries.firstOrNull { it.key == selectedVariantKey }
+        ?: normalizeStartupVariant(runtimeState.variant)
+    val activeStep = activeStepName?.let { name ->
+        runCatching { enumValueOf<SetupStep>(name) }.getOrNull()
+    }
 
     ObserveResumeRefresh {
         permissionState = readPermissionState(context, runtimeState.runMode)
+    }
+
+    LaunchedEffect(Unit) {
+        StartupPermissionGatePrefs.clearLegacyGuideDismissed(context)
     }
 
     LaunchedEffect(runtimeState.runMode) {
@@ -171,23 +181,23 @@ fun StartupPermissionGateHost(
         if (requestedRunMode == runtimeState.runMode) {
             modeAcknowledged = true
             StartupPermissionGatePrefs.setModeAcknowledged(context, true)
-            requestedRunMode = null
+            requestedRunModeKey = null
         }
         if (requestedRunMode == null) {
-            selectedRunMode = runtimeState.runMode
+            selectedRunModeKey = runtimeState.runMode.key
         }
     }
 
     LaunchedEffect(viewModel.isRunModeSwitching, requestedRunMode, runtimeState.runMode) {
         val target = requestedRunMode
         if (target != null && viewModel.isRunModeSwitching.not() && runtimeState.runMode != target) {
-            requestedRunMode = null
+            requestedRunModeKey = null
         }
     }
 
     LaunchedEffect(runtimeState.variant, downloadProgress.inProgress) {
         if (downloadProgress.inProgress.not()) {
-            selectedVariant = normalizeStartupVariant(runtimeState.variant)
+            selectedVariantKey = normalizeStartupVariant(runtimeState.variant).key
         }
     }
 
@@ -213,10 +223,10 @@ fun StartupPermissionGateHost(
     }
 
     LaunchedEffect(pendingSteps) {
-        activeStep = when {
+        activeStepName = when {
             pendingSteps.isEmpty() -> null
-            activeStep in pendingSteps -> activeStep
-            else -> pendingSteps.first()
+            activeStep in pendingSteps -> activeStep?.name
+            else -> pendingSteps.first().name
         }
     }
 
@@ -230,32 +240,31 @@ fun StartupPermissionGateHost(
             pendingSteps = pendingSteps,
             currentStep = activeStep ?: pendingSteps.first(),
             selectedRunMode = selectedRunMode,
-            onSelectRunMode = { selectedRunMode = it },
+            onSelectRunMode = { selectedRunModeKey = it.key },
             onConfirmRunMode = {
                 if (selectedRunMode == runtimeState.runMode) {
                     modeAcknowledged = true
                     StartupPermissionGatePrefs.setModeAcknowledged(context, true)
                 } else {
-                    requestedRunMode = selectedRunMode
+                    requestedRunModeKey = selectedRunMode.key
                     viewModel.switchRunMode(selectedRunMode)
                 }
             },
             isRunModeSwitching = viewModel.isRunModeSwitching,
             selectedVariant = selectedVariant,
-            onSelectVariant = { selectedVariant = it },
+            customRepoConfigured = customRepo.trim().isNotBlank(),
+            onSelectVariant = { selectedVariantKey = it.key },
             onUseSelectedVariant = { viewModel.chooseVariant(selectedVariant) },
             onInstallSelectedVariant = { viewModel.installCore(selectedVariant) },
             onSkipCoreForNow = {
                 coreDeferredThisLaunch = true
                 dismissedThisLaunch = true
-                StartupPermissionGatePrefs.setGuideDismissed(context, true)
             },
             onRefreshPermissionState = {
                 permissionState = readPermissionState(context, runtimeState.runMode)
             },
             onContinueHome = {
                 dismissedThisLaunch = true
-                StartupPermissionGatePrefs.setGuideDismissed(context, true)
             },
             viewModel = viewModel
         )
@@ -278,6 +287,7 @@ private fun StartupPermissionGateScreen(
     onConfirmRunMode: () -> Unit,
     isRunModeSwitching: Boolean,
     selectedVariant: ApiVariant,
+    customRepoConfigured: Boolean,
     onSelectVariant: (ApiVariant) -> Unit,
     onUseSelectedVariant: () -> Unit,
     onInstallSelectedVariant: () -> Unit,
@@ -420,6 +430,7 @@ private fun StartupPermissionGateScreen(
                                 isCoreInfoLoading = isCoreInfoLoading,
                                 downloadProgress = downloadProgress,
                                 selectedVariant = selectedVariant,
+                                customRepoConfigured = customRepoConfigured,
                                 onSelectVariant = onSelectVariant,
                                 onUseSelectedVariant = onUseSelectedVariant,
                                 onInstallSelectedVariant = onInstallSelectedVariant,
@@ -592,6 +603,7 @@ private fun CoreStepContent(
     isCoreInfoLoading: Boolean,
     downloadProgress: CoreDownloadProgress,
     selectedVariant: ApiVariant,
+    customRepoConfigured: Boolean,
     onSelectVariant: (ApiVariant) -> Unit,
     onUseSelectedVariant: () -> Unit,
     onInstallSelectedVariant: () -> Unit,
@@ -599,9 +611,14 @@ private fun CoreStepContent(
 ) {
     val stableInfo = coreInfoList.find { it.variant == ApiVariant.Stable }
     val devInfo = coreInfoList.find { it.variant == ApiVariant.Dev }
+    val customInfo = coreInfoList.find { it.variant == ApiVariant.Custom }
     val selectedInfo = coreInfoList.find { it.variant == selectedVariant }
     val selectedInstalled = selectedInfo?.isInstalled == true
     val downloadForSelected = downloadProgress.inProgress && downloadProgress.variant == selectedVariant
+    val showCustomOption = runtimeState.variant == ApiVariant.Custom ||
+        selectedVariant == ApiVariant.Custom ||
+        customInfo?.isInstalled == true
+    val needsCustomRepo = selectedVariant == ApiVariant.Custom && customRepoConfigured.not()
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -637,6 +654,23 @@ private fun CoreStepContent(
             onClick = { onSelectVariant(ApiVariant.Dev) }
         )
 
+        if (showCustomOption) {
+            SetupChoiceCard(
+                icon = Icons.Rounded.Tune,
+                accent = MaterialTheme.colorScheme.tertiary,
+                title = "自定义版",
+                summary = "适合已经导入自定义仓库或本地核心的场景，首次使用前请先确认核心已准备好。",
+                badge = coreBadgeText(
+                    variant = ApiVariant.Custom,
+                    runtimeState = runtimeState,
+                    info = customInfo,
+                    selectedVariant = selectedVariant
+                ),
+                selected = selectedVariant == ApiVariant.Custom,
+                onClick = { onSelectVariant(ApiVariant.Custom) }
+            )
+        }
+
         if (downloadProgress.inProgress) {
             DownloadProgressCard(
                 progress = downloadProgress,
@@ -644,7 +678,9 @@ private fun CoreStepContent(
             )
         } else {
             SettingsHintCard(
-                text = if (runtimeState.runMode == RunMode.Root) {
+                text = if (needsCustomRepo) {
+                    "自定义版需要先在核心管理里填写仓库地址，再回来下载。"
+                } else if (runtimeState.runMode == RunMode.Root) {
                     "Root 模式下准备完核心后，会直接进入首页，不再显示权限步骤。"
                 } else {
                     "首次下载前会先让你选 GitHub 线路。这里只准备核心，不会在这里启动服务。"
@@ -658,6 +694,7 @@ private fun CoreStepContent(
             text = when {
                 isCoreInfoLoading -> "正在读取核心信息..."
                 downloadForSelected -> "正在下载${selectedVariant.label}..."
+                needsCustomRepo -> "先配置自定义仓库"
                 selectedInstalled -> "使用${selectedVariant.label}"
                 else -> "下载${selectedVariant.label}"
             },
@@ -1125,7 +1162,11 @@ private fun coreBadgeText(
 }
 
 private fun normalizeStartupVariant(variant: ApiVariant): ApiVariant {
-    return if (variant == ApiVariant.Dev) ApiVariant.Dev else ApiVariant.Stable
+    return when (variant) {
+        ApiVariant.Dev -> ApiVariant.Dev
+        ApiVariant.Custom -> ApiVariant.Custom
+        else -> ApiVariant.Stable
+    }
 }
 
 private fun readPermissionState(context: Context, runMode: RunMode): StartupPermissionState {

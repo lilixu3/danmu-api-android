@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +64,7 @@ class CompatTvConfigSyncServer(
     @Volatile
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
+    private var pendingRestartJob: Job? = null
 
     fun start(initialHost: String) {
         updateHost(initialHost)
@@ -102,6 +104,7 @@ class CompatTvConfigSyncServer(
                 }
             } finally {
                 serverSocket = null
+                acceptJob = null
             }
         }
     }
@@ -129,6 +132,8 @@ class CompatTvConfigSyncServer(
     fun stop() {
         acceptJob?.cancel()
         acceptJob = null
+        pendingRestartJob?.cancel()
+        pendingRestartJob = null
         runCatching { serverSocket?.close() }
         serverSocket = null
         scope.cancel()
@@ -219,12 +224,11 @@ class CompatTvConfigSyncServer(
         val resolvedVariant = resolveVariantAfterSync(requestedVariant, runtimeSnapshot.variant)
 
         val port = payload.runtime.port.takeIf { it in 1..65535 } ?: runtimeSnapshot.port
-        runtimeRepository.applyServiceConfig(
-            port = port,
-            token = payload.runtime.token,
-            restartIfRunning = false
-        )
-        if (resolvedVariant != runtimeSnapshot.variant) {
+        val token = payload.runtime.token
+        val portChanged = port != runtimeSnapshot.port
+        val tokenChanged = token.trim() != runtimeSnapshot.token.trim()
+        val variantChanged = resolvedVariant != runtimeSnapshot.variant
+        if (variantChanged) {
             runtimeRepository.updateVariant(resolvedVariant)
         }
 
@@ -237,8 +241,32 @@ class CompatTvConfigSyncServer(
 
         val currentStatus = runtimeRepository.runtimeState.value.status
         val shouldRestart = currentStatus == ServiceStatus.Running || currentStatus == ServiceStatus.Starting
-        if (shouldRestart) {
-            runtimeRepository.restartService()
+        var restartNote = ""
+        pendingRestartJob?.cancel()
+        pendingRestartJob = null
+        if (portChanged || tokenChanged) {
+            runtimeRepository.applyServiceConfig(
+                port = port,
+                token = token,
+                restartIfRunning = shouldRestart
+            )
+            if (shouldRestart) {
+                restartNote = "服务正在重启"
+            }
+        } else if (variantChanged) {
+            when (currentStatus) {
+                ServiceStatus.Running -> {
+                    runtimeRepository.restartService()
+                    restartNote = "服务正在重启"
+                }
+
+                ServiceStatus.Starting -> {
+                    scheduleRestartAfterStartup()
+                    restartNote = "服务将在启动完成后自动重启"
+                }
+
+                else -> Unit
+            }
         }
 
         val sourceName = payload.sourceDeviceName.trim().ifBlank { "手机端" }
@@ -252,8 +280,9 @@ class CompatTvConfigSyncServer(
                 append("，")
                 append(variantNote)
             }
-            if (shouldRestart) {
-                append("，服务正在重启")
+            if (restartNote.isNotBlank()) {
+                append("，")
+                append(restartNote)
             }
         }
         runtimeRepository.addLog(LogLevel.Info, message)
@@ -264,6 +293,31 @@ class CompatTvConfigSyncServer(
             )
         }
         return message
+    }
+
+    private fun scheduleRestartAfterStartup() {
+        val job = scope.launch {
+            repeat(40) {
+                when (runtimeRepository.runtimeState.value.status) {
+                    ServiceStatus.Starting,
+                    ServiceStatus.Stopping -> delay(500L)
+
+                    ServiceStatus.Running -> {
+                        runtimeRepository.restartService()
+                        return@launch
+                    }
+
+                    ServiceStatus.Stopped,
+                    ServiceStatus.Error -> return@launch
+                }
+            }
+        }
+        pendingRestartJob = job
+        job.invokeOnCompletion {
+            if (pendingRestartJob === job) {
+                pendingRestartJob = null
+            }
+        }
     }
 
     private suspend fun updateState(transform: (UiState) -> UiState) {

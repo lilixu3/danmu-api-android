@@ -74,6 +74,7 @@ enum class LogLevel { Info, Warn, Error }
 enum class AppLogSource(val label: String) {
     Core("核心"),
     App("App"),
+    NormalBootstrap("普通启动"),
     RootBootstrap("Root启动")
 }
 

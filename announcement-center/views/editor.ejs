@@ -290,16 +290,26 @@
       const secondaryButtonUrlField = document.getElementById('secondary_button_url_field');
 
       async function refreshPreview() {
-        const response = await fetch('/admin/api/preview-markdown', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ content: textarea.value })
-        });
-        const data = await response.json();
-        previewHtml.innerHTML = data.html || '';
-        previewText.textContent = data.preview || '';
+        try {
+          const response = await fetch('/admin/api/preview-markdown', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({ content: textarea.value })
+          });
+          const contentType = response.headers.get('content-type') || '';
+          if (response.redirected || response.status === 401 || response.status === 403 || !contentType.includes('application/json')) {
+            window.location.href = '/admin/login';
+            return;
+          }
+          const data = await response.json();
+          previewHtml.innerHTML = data.html || '';
+          previewText.textContent = data.preview || '';
+        } catch (_error) {
+          previewText.textContent = '预览暂时不可用，请稍后重试。';
+        }
       }
 
       function syncAnnouncementTypeHint() {

@@ -9,9 +9,18 @@
  */
 
 (async () => {
+  let startupFailure = null;
+  try {
+    startupFailure = await import('./startup-failure.mjs');
+    startupFailure.clearStartupFailure?.();
+  } catch {}
+
   try {
     await import('./android-server.mjs');
   } catch (e) {
+    try {
+      startupFailure?.recordStartupFailure?.(e, { stage: 'main.import', exitCode: 1 });
+    } catch {}
     console.error('[main] failed to start:', e && (e.stack || e));
     // 让 Node 退出码非 0，但不要硬杀宿主进程
     process.exitCode = 1;

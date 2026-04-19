@@ -14,6 +14,7 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
+import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,6 +33,7 @@ class StartupSetupViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val runtimeRepo: RuntimeRepository,
     private val coreRepo: CoreRepository,
+    private val settingsRepo: SettingsRepository,
     private val githubProxyService: GithubProxyService,
     private val githubProxySpeedTester: GithubProxySpeedTester
 ) : ViewModel() {
@@ -40,6 +42,7 @@ class StartupSetupViewModel @Inject constructor(
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val downloadProgress = coreRepo.downloadProgress
+    val customRepo = settingsRepo.customRepo
     val proxyOptions = githubProxyService.proxyOptions()
 
     var operationMessage by mutableStateOf<String?>(null)
@@ -130,6 +133,10 @@ class StartupSetupViewModel @Inject constructor(
 
     fun installCore(variant: ApiVariant) {
         if (downloadProgress.value.inProgress) return
+        validateVariantBeforeInstall(variant)?.let {
+            operationMessage = it
+            return
+        }
         runtimeRepo.updateVariant(variant)
         if (!githubProxyService.hasUserSelectedProxy()) {
             pendingInstallVariant = variant
@@ -167,6 +174,12 @@ class StartupSetupViewModel @Inject constructor(
                 operationMessage = "GitHub 线路已保存"
             }
         }
+    }
+
+    private fun validateVariantBeforeInstall(variant: ApiVariant): String? {
+        if (variant != ApiVariant.Custom) return null
+        if (customRepo.value.trim().isNotBlank()) return null
+        return "自定义版未配置仓库，请先到核心管理里填写仓库地址"
     }
 
     private fun doInstallCore(variant: ApiVariant) {

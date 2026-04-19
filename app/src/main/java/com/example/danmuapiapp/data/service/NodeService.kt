@@ -274,6 +274,8 @@ class NodeService : Service() {
             explicitStart = currentStartExplicit
         }
 
+        StartupFailureStore.clearNormal(this)
+
         scope.launch {
             try {
                 publishStarting("正在准备运行环境…", explicitStart = explicitStart)
@@ -300,33 +302,60 @@ class NodeService : Service() {
                         crashThrowable = t
                     } finally {
                         if (runtimeGeneration.get() == generation) {
-                            val unexpectedFailure = synchronized(stateLock) {
+                            val exitAction = synchronized(stateLock) {
                                 val stopping = isStopping
                                 if (runtimeGeneration.get() == generation) {
                                     isRunning = false
-                                    isStopping = false
+                                    if (!stopping) {
+                                        isStopping = false
+                                    }
                                     startupStartedAtMs = 0L
                                 }
                                 if (nodeThread === Thread.currentThread()) {
                                     nodeThread = null
                                 }
-                                !stopping && (crashThrowable != null || isUnexpectedExitCode(exitCode))
+                                decideNodeRuntimeExitAction(
+                                    stopping = stopping,
+                                    exitCode = exitCode,
+                                    crashThrowable = crashThrowable
+                                )
                             }
-                            if (unexpectedFailure) {
-                                val msg = crashThrowable?.let { buildErrorMessage(it) }
-                                    ?: "Node 进程异常退出，退出码：$exitCode"
-                                if (crashThrowable != null) {
-                                    AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg", crashThrowable)
-                                } else {
-                                    AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg")
+                            when (exitAction) {
+                                NodeRuntimeExitAction.ReportError -> {
+                                    val startupFailure = StartupFailureStore.readNormal(this@NodeService)
+                                    val msg = crashThrowable?.let { buildErrorMessage(it) }
+                                        ?: startupFailure?.userMessage()
+                                        ?: "Node 进程异常退出，退出码：$exitCode"
+                                    if (crashThrowable != null) {
+                                        AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg", crashThrowable)
+                                    } else if (startupFailure != null && startupFailure.detail.isNotBlank()) {
+                                        AppDiagnosticLogger.e(
+                                            this@NodeService,
+                                            TAG,
+                                            "Node crashed: ${startupFailure.detail}"
+                                        )
+                                    } else {
+                                        AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg")
+                                    }
+                                    recordRecoveryFailure()
+                                    SystemHeartbeatScheduler.refresh(applicationContext)
+                                    broadcastStatus(STATUS_ERROR, message = msg, error = msg)
+                                    stopForegroundAndSelf()
                                 }
-                                recordRecoveryFailure()
-                                SystemHeartbeatScheduler.refresh(applicationContext)
-                                broadcastStatus(STATUS_ERROR, message = msg, error = msg)
-                            } else {
-                                broadcastStatus(STATUS_STOPPED, message = "服务已停止")
+
+                                NodeRuntimeExitAction.ReportStopped -> {
+                                    broadcastStatus(STATUS_STOPPED, message = "服务已停止")
+                                    stopForegroundAndSelf()
+                                }
+
+                                NodeRuntimeExitAction.DeferToStopController -> {
+                                    AppDiagnosticLogger.i(
+                                        this@NodeService,
+                                        TAG,
+                                        "检测到受控停止流程，交由 stopNode/finalizeStop 收尾 generation=$generation"
+                                    )
+                                }
                             }
-                            stopForegroundAndSelf()
                         } else {
                             AppDiagnosticLogger.i(this@NodeService, TAG, "忽略旧实例退出广播，generation=$generation")
                         }
@@ -443,10 +472,6 @@ class NodeService : Service() {
         return (profile.startupTotalTimeoutMs - elapsedMs).coerceAtLeast(0L)
     }
 
-    private fun isUnexpectedExitCode(exitCode: Int): Boolean {
-        return exitCode != 0 && exitCode != 130 && exitCode != 143
-    }
-
     private fun recordRecoveryFailure() {
         NodeKeepAlivePrefs.recordRecoveryFailure(applicationContext)
     }
@@ -472,7 +497,13 @@ class NodeService : Service() {
 
     private suspend fun handleStartupTimeout(generation: Long, message: String) {
         if (runtimeGeneration.get() != generation) return
-        AppDiagnosticLogger.w(this, TAG, message)
+        val startupFailure = StartupFailureStore.readNormal(this)
+        val resolvedMessage = startupFailure?.userMessage() ?: message
+        AppDiagnosticLogger.w(
+            this,
+            TAG,
+            startupFailure?.detail?.takeIf { it.isNotBlank() } ?: resolvedMessage
+        )
         val shouldKillProcess = synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
             val threadAlive = nodeThread?.isAlive == true
@@ -488,8 +519,8 @@ class NodeService : Service() {
         }
         recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
-        updateNotification("启动失败：$message")
-        broadcastStatus(STATUS_ERROR, message = message, error = message)
+        updateNotification("启动失败：$resolvedMessage")
+        broadcastStatus(STATUS_ERROR, message = resolvedMessage, error = resolvedMessage)
         if (!shouldKillProcess) {
             stopForegroundAndSelf()
             return
