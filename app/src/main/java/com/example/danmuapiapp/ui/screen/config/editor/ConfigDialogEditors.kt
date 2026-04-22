@@ -110,7 +110,6 @@ internal fun EnvVarEditDialog(
         },
         text = {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val handledSpecial = when (normalizedKey) {
@@ -1051,9 +1050,7 @@ internal fun PlatformMultiSelectDialog(
         title = { Text("选择平台") },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -1136,4 +1133,3 @@ internal fun PlatformMultiSelectDialog(
         }
     )
 }
-
