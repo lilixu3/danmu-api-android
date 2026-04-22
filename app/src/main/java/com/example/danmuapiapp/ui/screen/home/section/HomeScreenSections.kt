@@ -700,7 +700,7 @@ internal fun ServiceRuntimeInfoDialog(
     status: ServiceStatus,
     uptime: String,
     runMode: RunMode,
-    variant: ApiVariant,
+    variantLabel: String,
     port: Int,
     pid: Int?,
     localUrl: String,
@@ -747,7 +747,7 @@ internal fun ServiceRuntimeInfoDialog(
                 }
 
                 RuntimeInfoItem(label = "运行模式", value = runMode.label)
-                RuntimeInfoItem(label = "核心通道", value = variant.label)
+                RuntimeInfoItem(label = "核心通道", value = variantLabel)
                 RuntimeInfoItem(label = "监听端口", value = "TCP $port")
                 if (pid != null) {
                     RuntimeInfoItem(label = "进程 PID", value = pid.toString())
@@ -819,17 +819,20 @@ internal fun ActionDeck(
     onOpenCoreDownload: () -> Unit,
     onOpenUpdatePrompt: () -> Unit,
     isCoreInstalled: Boolean,
-    hasUpdate: Boolean,
-    latestVersion: String?,
+    hasVersionUpdate: Boolean,
+    sourceMismatch: Boolean,
+    availableVersion: String?,
     coreOperationMessage: String?
 ) {
     val isStopping = status == ServiceStatus.Stopping
-    val coreActionEnabled = !isTransitioning && !isCoreInfoLoading && (!isCoreInstalled || hasUpdate)
+    val coreActionEnabled = !isTransitioning && !isCoreInfoLoading &&
+        (!isCoreInstalled || sourceMismatch || hasVersionUpdate)
     val coreActionText = resolveCoreActionButtonText(
         isCoreInfoLoading = isCoreInfoLoading,
         isCoreInstalled = isCoreInstalled,
-        hasUpdate = hasUpdate,
-        latestVersion = latestVersion,
+        hasVersionUpdate = hasVersionUpdate,
+        sourceMismatch = sourceMismatch,
+        availableVersion = availableVersion,
         isInstalling = isInstalling,
         isUpdating = isUpdating
     )
@@ -961,7 +964,7 @@ internal fun ActionDeck(
                     enabled = coreActionEnabled,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
-                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || hasUpdate)) {
+                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || sourceMismatch || hasVersionUpdate)) {
                         appDangerTonalButtonColors()
                     } else {
                         appTonalButtonColors()

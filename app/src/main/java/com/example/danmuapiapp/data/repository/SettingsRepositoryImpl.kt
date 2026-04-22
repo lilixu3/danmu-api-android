@@ -9,9 +9,18 @@ import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
+import com.example.danmuapiapp.domain.model.DEFAULT_CUSTOM_CORE_BRANCH
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
+import com.example.danmuapiapp.domain.model.ResolvedCustomCoreConfig
+import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
+import com.example.danmuapiapp.domain.model.normalizeGithubBranch
+import com.example.danmuapiapp.domain.model.normalizeGithubRepo
+import com.example.danmuapiapp.domain.model.resolveCustomCoreConfig
+import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.domain.model.resolveRepoOnlyCustomCoreSource
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -76,10 +85,19 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _hideFromRecents = MutableStateFlow(AppAppearancePrefs.readHideFromRecents(uiPrefs))
     override val hideFromRecents: StateFlow<Boolean> = _hideFromRecents.asStateFlow()
 
-    private val _customRepo = MutableStateFlow(resolveCustomRepo())
+    private val _coreDisplayNames = MutableStateFlow(resolveCoreDisplayNames())
+    override val coreDisplayNames: StateFlow<CoreVariantDisplayNames> = _coreDisplayNames.asStateFlow()
+
+    private val _customCoreSource = MutableStateFlow(resolveStoredCustomCoreSource())
+    override val customCoreSource: StateFlow<ResolvedCustomCoreSource> = _customCoreSource.asStateFlow()
+
+    private val _customRepo = MutableStateFlow(_customCoreSource.value.repo)
     override val customRepo: StateFlow<String> = _customRepo.asStateFlow()
 
-    private val _customRepoDisplayName = MutableStateFlow(resolveCustomRepoDisplayName())
+    private val _customRepoBranch = MutableStateFlow(_customCoreSource.value.branch)
+    override val customRepoBranch: StateFlow<String> = _customRepoBranch.asStateFlow()
+
+    private val _customRepoDisplayName = MutableStateFlow(_coreDisplayNames.value.custom)
     override val customRepoDisplayName: StateFlow<String> = _customRepoDisplayName.asStateFlow()
 
     private val _tokenVisible = MutableStateFlow(settingsPrefs.safeGetBoolean("token_visible", false))
@@ -97,7 +115,21 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _logMaxCount = MutableStateFlow(settingsPrefs.getInt("log_max_count", 500))
     override val logMaxCount: StateFlow<Int> = _logMaxCount.asStateFlow()
 
+    private val prefChangeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        if (prefs !== settingsPrefs) return@OnSharedPreferenceChangeListener
+        when (key) {
+            "custom_repo",
+            "custom_repo_branch" -> applyCustomCoreSourceState(resolveStoredCustomCoreSource())
+            displayNameKeyForVariant(ApiVariant.Stable),
+            displayNameKeyForVariant(ApiVariant.Dev),
+            displayNameKeyForVariant(ApiVariant.Custom) -> {
+                applyCoreDisplayNamesState(resolveCoreDisplayNames())
+            }
+        }
+    }
+
     init {
+        settingsPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
         // 统一禁用文件日志，日志只走 /api/logs。
         if (settingsPrefs.safeGetBoolean("file_log_enabled", false)) {
             settingsPrefs.edit { putBoolean("file_log_enabled", false) }
@@ -172,17 +204,73 @@ class SettingsRepositoryImpl @Inject constructor(
         _hideFromRecents.value = enabled
     }
 
+    override fun setVariantDisplayName(variant: ApiVariant, name: String) {
+        val normalized = name.trim()
+        settingsPrefs.edit { putString(displayNameKeyForVariant(variant), normalized) }
+        applyCoreDisplayNamesState(
+            when (variant) {
+                ApiVariant.Stable -> _coreDisplayNames.value.copy(stable = normalized)
+                ApiVariant.Dev -> _coreDisplayNames.value.copy(dev = normalized)
+                ApiVariant.Custom -> _coreDisplayNames.value.copy(custom = normalized)
+            }
+        )
+    }
+
+    override fun saveCustomCoreSource(
+        repoInput: String,
+        branchInput: String
+    ): ResolvedCustomCoreSource {
+        val resolved = resolveCustomCoreSource(repoInput, branchInput)
+        settingsPrefs.edit {
+            putString("custom_repo", resolved.repo)
+            if (resolved.repo.isBlank()) {
+                remove("custom_repo_branch")
+            } else {
+                putString("custom_repo_branch", resolved.branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH })
+            }
+        }
+        saveLegacyCustomRepo(resolved.repo)
+        applyCustomCoreSourceState(resolved)
+        return resolved
+    }
+
+    override fun saveCustomCoreConfig(
+        displayName: String,
+        repoInput: String,
+        branchInput: String
+    ): ResolvedCustomCoreConfig {
+        val resolvedConfig = resolveCustomCoreConfig(displayName, repoInput, branchInput)
+        settingsPrefs.edit {
+            putString(displayNameKeyForVariant(ApiVariant.Custom), resolvedConfig.displayName)
+            putString("custom_repo", resolvedConfig.repo)
+            if (resolvedConfig.repo.isBlank()) {
+                remove("custom_repo_branch")
+            } else {
+                putString("custom_repo_branch", resolvedConfig.branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH })
+            }
+        }
+        saveLegacyCustomRepo(resolvedConfig.repo)
+        applyCoreDisplayNamesState(_coreDisplayNames.value.copy(custom = resolvedConfig.displayName))
+        applyCustomCoreSourceState(
+            resolveCustomCoreSource(resolvedConfig.repo, resolvedConfig.branch)
+        )
+        return resolvedConfig
+    }
+
     override fun setCustomRepo(repo: String) {
-        val normalized = repo.trim()
-        settingsPrefs.edit { putString("custom_repo", normalized) }
-        saveLegacyCustomRepo(normalized)
-        _customRepo.value = normalized
+        val resolved = resolveRepoOnlyCustomCoreSource(
+            repoInput = repo,
+            currentBranch = _customRepoBranch.value
+        )
+        saveCustomCoreSource(repoInput = resolved.repo, branchInput = resolved.branch)
+    }
+
+    override fun setCustomRepoBranch(branch: String) {
+        saveCustomCoreSource(repoInput = _customRepo.value, branchInput = branch)
     }
 
     override fun setCustomRepoDisplayName(name: String) {
-        val normalized = name.trim()
-        settingsPrefs.edit { putString("custom_repo_display_name", normalized) }
-        _customRepoDisplayName.value = normalized
+        setVariantDisplayName(ApiVariant.Custom, name)
     }
 
     override fun setTokenVisible(visible: Boolean) {
@@ -222,24 +310,50 @@ class SettingsRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun resolveCoreDisplayNames(): CoreVariantDisplayNames {
+        return CoreVariantDisplayNames(
+            stable = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Stable)).trim(),
+            dev = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Dev)).trim(),
+            custom = resolveCustomRepoDisplayName()
+        )
+    }
+
     private fun resolveCustomRepoDisplayName(): String {
-        return settingsPrefs.safeGetString("custom_repo_display_name").trim()
+        return settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Custom)).trim()
+    }
+
+    private fun resolveStoredCustomBranch(): String {
+        return settingsPrefs.safeGetString("custom_repo_branch")
     }
 
     private fun resolveCustomRepo(): String {
-        val direct = settingsPrefs.safeGetString("custom_repo").trim()
+        val direct = normalizeGithubRepo(settingsPrefs.safeGetString("custom_repo"))
         if (direct.isNotBlank()) return direct
         val owner = legacyVariantPrefs.safeGetString("custom_owner").trim()
         val repo = legacyVariantPrefs.safeGetString("custom_repo").trim()
-        return if (owner.isNotBlank() && repo.isNotBlank()) "$owner/$repo" else repo
+        return normalizeGithubRepo(if (owner.isNotBlank() && repo.isNotBlank()) "$owner/$repo" else repo)
+    }
+
+    private fun resolveStoredCustomCoreSource(): ResolvedCustomCoreSource {
+        return resolveCustomCoreSource(
+            repoInput = resolveCustomRepo(),
+            branchInput = resolveStoredCustomBranch()
+        )
+    }
+
+    private fun applyCoreDisplayNamesState(names: CoreVariantDisplayNames) {
+        _coreDisplayNames.value = names
+        _customRepoDisplayName.value = names.custom
+    }
+
+    private fun applyCustomCoreSourceState(source: ResolvedCustomCoreSource) {
+        _customCoreSource.value = source
+        _customRepo.value = source.repo
+        _customRepoBranch.value = source.branch
     }
 
     private fun saveLegacyCustomRepo(value: String) {
-        val normalized = value
-            .removePrefix("https://github.com/")
-            .removePrefix("http://github.com/")
-            .trim()
-            .trim('/')
+        val normalized = normalizeGithubRepo(value)
 
         if (normalized.isBlank()) {
             legacyVariantPrefs.edit {
@@ -255,6 +369,14 @@ class SettingsRepositoryImpl @Inject constructor(
         legacyVariantPrefs.edit {
             putString("custom_owner", owner)
             putString("custom_repo", repo)
+        }
+    }
+
+    private fun displayNameKeyForVariant(variant: ApiVariant): String {
+        return when (variant) {
+            ApiVariant.Stable -> "stable_repo_display_name"
+            ApiVariant.Dev -> "dev_repo_display_name"
+            ApiVariant.Custom -> "custom_repo_display_name"
         }
     }
 }

@@ -206,7 +206,7 @@ fun AppBottomSheetDialog(
                 when (style) {
                     AppBottomSheetStyle.Form -> {
                         Column(
-                            modifier = contentModifier,
+                            modifier = contentModifier.verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             text()

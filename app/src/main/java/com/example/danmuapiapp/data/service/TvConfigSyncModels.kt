@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TvConfigSyncPayload(
-    val version: Int = 1,
+    val version: Int = 2,
     val sourceDeviceName: String = "",
     val sentAtEpochMs: Long = 0L,
     val envContent: String = "",
@@ -23,7 +23,10 @@ data class TvConfigSyncRuntime(
 data class TvConfigSyncSettings(
     val githubProxy: String = "original",
     val githubToken: String = "",
+    val stableRepoDisplayName: String = "",
+    val devRepoDisplayName: String = "",
     val customRepo: String = "",
+    val customRepoBranch: String = "",
     val customRepoDisplayName: String = ""
 )
 

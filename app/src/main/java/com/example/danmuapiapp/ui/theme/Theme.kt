@@ -65,6 +65,7 @@ private val LightColorScheme = lightColorScheme(
     onTertiaryContainer = Color(0xFF322F4B),
     background = Color(0xFFF4F5FA),
     surface = Color(0xFFF4F5FA),
+    surfaceVariant = Color(0xFFDCE2EE),
     surfaceContainerLowest = Color(0xFFFFFFFF),
     surfaceContainerLow = Color(0xFFF0F2F8),
     surfaceContainer = Color(0xFFECEEF5),

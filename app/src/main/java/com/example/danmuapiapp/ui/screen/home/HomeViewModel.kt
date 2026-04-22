@@ -80,6 +80,9 @@ class HomeViewModel @Inject constructor(
     val runtimeState = runtimeRepo.runtimeState
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
+    val coreDisplayNames = settingsRepo.coreDisplayNames
+    val customRepo = settingsRepo.customRepo
+    val customRepoBranch = settingsRepo.customRepoBranch
     val tokenVisible = settingsRepo.tokenVisible
     val proxyOptions = githubProxyService.proxyOptions()
     val cacheStats = cacheRepo.cacheStats
@@ -121,6 +124,10 @@ class HomeViewModel @Inject constructor(
     var updatePromptCurrentVersion by mutableStateOf<String?>(null)
         private set
     var updatePromptLatestVersion by mutableStateOf<String?>(null)
+        private set
+    var updatePromptSourceMismatch by mutableStateOf(false)
+        private set
+    var updatePromptDesiredSource by mutableStateOf<String?>(null)
         private set
     var coreUpdateCheckDialogMessage by mutableStateOf<String?>(null)
         private set
@@ -430,11 +437,16 @@ class HomeViewModel @Inject constructor(
         if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
         val variant = runtimeState.value.variant
         viewModelScope.launch {
-            val installed = withContext(Dispatchers.IO) {
-                coreRepo.isCoreInstalled(variant)
+            val ready = withContext(Dispatchers.IO) {
+                coreRepo.isCoreReady(variant)
             }
-            if (!installed) {
-                showNoCoreDialog = true
+            if (!ready) {
+                val info = coreInfoList.value.find { it.variant == variant }
+                if (info?.sourceMismatch == true) {
+                    appUpdateMessage = "${variantLabel(variant)} 当前来源与设置不一致，请先重新下载核心"
+                } else {
+                    showNoCoreDialog = true
+                }
                 return@launch
             }
             runtimeRepo.startService()
@@ -464,12 +476,12 @@ class HomeViewModel @Inject constructor(
     private fun doInstallAndStart(variant: ApiVariant) {
         isInstallingCore = true
         viewModelScope.launch {
-            runtimeRepo.addLog(LogLevel.Info, "正在下载 ${variant.label}...")
+            runtimeRepo.addLog(LogLevel.Info, "正在下载 ${variantLabel(variant)}...")
             coreRepo.installCore(variant).fold(
                 onSuccess = {
                     isInstallingCore = false
                     runtimeRepo.updateVariant(variant)
-                    runtimeRepo.addLog(LogLevel.Info, "${variant.label} 安装成功，已切换为当前核心")
+                    runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 安装成功，已切换为当前核心")
                     val status = runtimeState.value.status
                     if (status == ServiceStatus.Running) {
                         runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用新核心...")
@@ -493,11 +505,8 @@ class HomeViewModel @Inject constructor(
     fun openUpdatePromptFromCard() {
         val variant = runtimeState.value.variant
         val info = coreInfoList.value.find { it.variant == variant } ?: return
-        if (!info.hasUpdate || info.latestVersion.isNullOrBlank()) return
-        updatePromptVariant = variant
-        updatePromptCurrentVersion = info.version
-        updatePromptLatestVersion = info.latestVersion
-        showUpdatePromptDialog = true
+        if (!info.needsAttention) return
+        showCoreAttentionPrompt(variant, info)
     }
 
     fun quickCheckCurrentCoreUpdate() {
@@ -507,7 +516,7 @@ class HomeViewModel @Inject constructor(
         val variant = runtimeState.value.variant
         val info = coreInfoList.value.find { it.variant == variant }
         if (info?.isInstalled != true) {
-            coreUpdateCheckDialogMessage = "${variant.label} 未安装，无法检查更新"
+            coreUpdateCheckDialogMessage = "${variantLabel(variant)} 未安装，无法检查更新"
             coreUpdateCheckDialogIsError = true
             return
         }
@@ -540,13 +549,10 @@ class HomeViewModel @Inject constructor(
             }
 
             val latestInfo = coreInfoList.value.find { it.variant == variant }
-            if (latestInfo?.hasUpdate == true && !latestInfo.latestVersion.isNullOrBlank()) {
-                updatePromptVariant = variant
-                updatePromptCurrentVersion = latestInfo.version
-                updatePromptLatestVersion = latestInfo.latestVersion
-                showUpdatePromptDialog = true
+            if (latestInfo?.needsAttention == true) {
+                showCoreAttentionPrompt(variant, latestInfo)
             } else if (latestInfo?.isInstalled == true) {
-                coreUpdateCheckDialogMessage = "已确认 ${variant.label} 当前是最新版本"
+                coreUpdateCheckDialogMessage = "已确认 ${variantLabel(variant)} 当前是最新版本"
                 coreUpdateCheckDialogIsError = false
             }
             isCheckingCoreUpdate = false
@@ -556,20 +562,20 @@ class HomeViewModel @Inject constructor(
     fun ignoreCurrentUpdatePrompt() {
         val variant = updatePromptVariant
         val latest = updatePromptLatestVersion?.trim().orEmpty()
-        if (variant != null && latest.isNotBlank()) {
+        if (variant != null && updatePromptSourceMismatch.not() && latest.isNotBlank()) {
             settingsRepo.setIgnoredUpdateVersion(variant, latest)
             ignoredUpdateVersionMap[variant] = latest
         }
-        showUpdatePromptDialog = false
+        clearCoreAttentionPrompt()
     }
 
     fun updateFromPrompt() {
         val variant = updatePromptVariant ?: runtimeState.value.variant
         val latest = updatePromptLatestVersion
-        if (!latest.isNullOrBlank()) {
+        if (updatePromptSourceMismatch.not() && !latest.isNullOrBlank()) {
             suppressedAutoUpdatePromptVersionMap[variant] = latest.trim()
         }
-        showUpdatePromptDialog = false
+        clearCoreAttentionPrompt()
         updateCurrentVariant(variant)
     }
 
@@ -586,10 +592,10 @@ class HomeViewModel @Inject constructor(
     private fun doUpdateCurrentVariant(variant: ApiVariant) {
         isUpdatingCore = true
         viewModelScope.launch {
-            runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variant.label}...")
+            runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
             coreRepo.updateCore(variant).fold(
                 onSuccess = {
-                    runtimeRepo.addLog(LogLevel.Info, "${variant.label} 更新成功")
+                    runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 更新成功")
                     maybeRestartAfterCoreUpdate(variant)
                     settingsRepo.setIgnoredUpdateVersion(variant, null)
                     ignoredUpdateVersionMap[variant] = null
@@ -852,21 +858,27 @@ class HomeViewModel @Inject constructor(
             try {
                 val wasRunning = current.status == ServiceStatus.Running
 
-                val installed = withContext(Dispatchers.IO) {
-                    coreRepo.isCoreInstalled(variant)
+                val ready = withContext(Dispatchers.IO) {
+                    coreRepo.isCoreReady(variant)
                 }
-                if (!installed) {
+                if (!ready) {
+                    val latestInfo = coreInfoList.value.find { it.variant == variant }
+                    if (latestInfo?.sourceMismatch == true) {
+                        runtimeRepo.addLog(LogLevel.Warn, "${variantLabel(variant)} 来源与设置不一致，需先重新下载")
+                        appUpdateMessage = "${variantLabel(variant)} 当前来源与设置不一致，请先重新下载核心"
+                        return@launch
+                    }
                     runtimeRepo.updateVariant(variant)
-                    runtimeRepo.addLog(LogLevel.Warn, "${variant.label} 未安装，已切换选择，下载后可直接使用")
+                    runtimeRepo.addLog(LogLevel.Warn, "${variantLabel(variant)} 未安装，已切换选择，下载后可直接使用")
                     if (current.status == ServiceStatus.Running) {
                         runtimeRepo.addLog(LogLevel.Info, "服务仍在运行当前核心，下载后会自动重启应用新核心")
                     }
-                    appUpdateMessage = "${variant.label} 尚未安装，请先下载核心"
+                    appUpdateMessage = "${variantLabel(variant)} 尚未安装，请先下载核心"
                     showNoCoreDialog = true
                     return@launch
                 }
 
-                runtimeRepo.addLog(LogLevel.Info, "切换核心到 ${variant.label}")
+                runtimeRepo.addLog(LogLevel.Info, "切换核心到 ${variantLabel(variant)}")
                 runtimeRepo.updateVariant(variant)
 
                 if (wasRunning) {
@@ -1039,7 +1051,7 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             runtimeState.map { it.variant }.distinctUntilChanged().collect {
-                showUpdatePromptDialog = false
+                clearCoreAttentionPrompt()
                 refreshUpdatePrompt(coreInfoList.value)
             }
         }
@@ -1048,18 +1060,15 @@ class HomeViewModel @Inject constructor(
     private fun refreshUpdatePrompt(list: List<CoreInfo>) {
         val currentVariant = runtimeState.value.variant
         val info = list.find { it.variant == currentVariant }
-        if (info == null || !info.isInstalled || !info.hasUpdate || info.latestVersion.isNullOrBlank()) {
-            if (updatePromptVariant == currentVariant) {
-                showUpdatePromptDialog = false
-                updatePromptVariant = null
-                updatePromptCurrentVersion = null
-                updatePromptLatestVersion = null
+        if (info == null || !info.isInstalled || !info.hasVersionUpdate || info.availableVersion.isNullOrBlank()) {
+            if (updatePromptVariant == currentVariant && updatePromptSourceMismatch.not()) {
+                clearCoreAttentionPrompt()
             }
             suppressedAutoUpdatePromptVersionMap.remove(currentVariant)
             return
         }
 
-        val latest = info.latestVersion.trim()
+        val latest = info.availableVersion.trim()
         val ignored = ignoredUpdateVersionMap[currentVariant]?.trim().orEmpty()
         if (ignored.isNotBlank() && ignored != latest) {
             settingsRepo.setIgnoredUpdateVersion(currentVariant, null)
@@ -1085,9 +1094,35 @@ class HomeViewModel @Inject constructor(
         updatePromptVariant = currentVariant
         updatePromptCurrentVersion = prompt.currentVersion
         updatePromptLatestVersion = prompt.latestVersion
+        updatePromptSourceMismatch = false
+        updatePromptDesiredSource = null
         showUpdatePromptDialog = true
     }
 
+    private fun showCoreAttentionPrompt(
+        variant: ApiVariant,
+        info: CoreInfo
+    ) {
+        updatePromptVariant = variant
+        updatePromptCurrentVersion = info.version
+        updatePromptLatestVersion = info.availableVersion
+        updatePromptSourceMismatch = info.sourceMismatch
+        updatePromptDesiredSource = info.desiredSource
+        showUpdatePromptDialog = true
+    }
+
+    private fun clearCoreAttentionPrompt() {
+        showUpdatePromptDialog = false
+        updatePromptVariant = null
+        updatePromptCurrentVersion = null
+        updatePromptLatestVersion = null
+        updatePromptSourceMismatch = false
+        updatePromptDesiredSource = null
+    }
+
+    private fun variantLabel(variant: ApiVariant): String {
+        return coreDisplayNames.value.resolve(variant)
+    }
 
     override fun onCleared() {
         stopCacheFileObserver()

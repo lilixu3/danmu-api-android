@@ -221,21 +221,31 @@ class CompatTvConfigSyncServer(
         val requestedVariant = ApiVariant.entries.firstOrNull {
             it.key.equals(payload.runtime.variantKey, ignoreCase = true)
         }
-        val resolvedVariant = resolveVariantAfterSync(requestedVariant, runtimeSnapshot.variant)
-
         val port = payload.runtime.port.takeIf { it in 1..65535 } ?: runtimeSnapshot.port
         val token = payload.runtime.token
+
+        settingsRepository.setGithubProxy(payload.settings.githubProxy)
+        settingsRepository.setGithubToken(payload.settings.githubToken)
+        if (payload.version >= 2) {
+            settingsRepository.setVariantDisplayName(ApiVariant.Stable, payload.settings.stableRepoDisplayName)
+            settingsRepository.setVariantDisplayName(ApiVariant.Dev, payload.settings.devRepoDisplayName)
+            settingsRepository.saveCustomCoreConfig(
+                displayName = payload.settings.customRepoDisplayName,
+                repoInput = payload.settings.customRepo,
+                branchInput = payload.settings.customRepoBranch
+            )
+        } else {
+            settingsRepository.setCustomRepo(payload.settings.customRepo)
+            settingsRepository.setCustomRepoDisplayName(payload.settings.customRepoDisplayName)
+        }
+
+        val resolvedVariant = resolveVariantAfterSync(requestedVariant, runtimeSnapshot.variant)
         val portChanged = port != runtimeSnapshot.port
         val tokenChanged = token.trim() != runtimeSnapshot.token.trim()
         val variantChanged = resolvedVariant != runtimeSnapshot.variant
         if (variantChanged) {
             runtimeRepository.updateVariant(resolvedVariant)
         }
-
-        settingsRepository.setGithubProxy(payload.settings.githubProxy)
-        settingsRepository.setGithubToken(payload.settings.githubToken)
-        settingsRepository.setCustomRepo(payload.settings.customRepo)
-        settingsRepository.setCustomRepoDisplayName(payload.settings.customRepoDisplayName)
 
         coreRepository.refreshCoreInfo()
 
@@ -327,10 +337,16 @@ class CompatTvConfigSyncServer(
     }
 
     private fun resolveVariantAfterSync(requestedVariant: ApiVariant?, currentVariant: ApiVariant): ApiVariant {
-        if (requestedVariant == null) return currentVariant
-        if (coreRepository.isCoreInstalled(requestedVariant)) return requestedVariant
-        if (coreRepository.isCoreInstalled(currentVariant)) return currentVariant
-        return ApiVariant.entries.firstOrNull { coreRepository.isCoreInstalled(it) } ?: currentVariant
+        if (requestedVariant == null) {
+            return if (coreRepository.isCoreReady(currentVariant)) {
+                currentVariant
+            } else {
+                ApiVariant.entries.firstOrNull { coreRepository.isCoreReady(it) } ?: currentVariant
+            }
+        }
+        if (coreRepository.isCoreReady(requestedVariant)) return requestedVariant
+        if (coreRepository.isCoreReady(currentVariant)) return currentVariant
+        return ApiVariant.entries.firstOrNull { coreRepository.isCoreReady(it) } ?: currentVariant
     }
 
     private fun buildVariantSyncNote(
@@ -338,13 +354,15 @@ class CompatTvConfigSyncServer(
         resolvedVariant: ApiVariant,
         previousVariant: ApiVariant
     ): String {
+        val displayNames = settingsRepository.coreDisplayNames.value
+        fun label(variant: ApiVariant): String = displayNames.resolve(variant)
         if (requestedVariant == null) return ""
         if (requestedVariant == resolvedVariant) {
-            return if (resolvedVariant == previousVariant) "" else "已切换到 ${resolvedVariant.label}"
+            return if (resolvedVariant == previousVariant) "" else "已切换到 ${label(resolvedVariant)}"
         }
         return when {
-            resolvedVariant == previousVariant -> "${requestedVariant.label} 未安装，已保留当前核心 ${resolvedVariant.label}"
-            else -> "${requestedVariant.label} 未安装，已改用 ${resolvedVariant.label}"
+            resolvedVariant == previousVariant -> "${label(requestedVariant)} 不可用，已保留当前核心 ${label(resolvedVariant)}"
+            else -> "${label(requestedVariant)} 不可用，已改用 ${label(resolvedVariant)}"
         }
     }
 

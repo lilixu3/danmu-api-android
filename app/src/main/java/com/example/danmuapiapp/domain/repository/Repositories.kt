@@ -25,6 +25,7 @@ interface CoreRepository {
     val isCoreInfoLoading: StateFlow<Boolean>
     val downloadProgress: StateFlow<CoreDownloadProgress>
     fun isCoreInstalled(variant: ApiVariant): Boolean
+    fun isCoreReady(variant: ApiVariant): Boolean
     fun refreshCoreInfo()
     suspend fun checkUpdate(variant: ApiVariant): GithubRelease?
     suspend fun checkAndMarkUpdate(variant: ApiVariant)
@@ -49,7 +50,10 @@ interface SettingsRepository {
     val nightMode: StateFlow<NightModePreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
+    val coreDisplayNames: StateFlow<CoreVariantDisplayNames>
+    val customCoreSource: StateFlow<ResolvedCustomCoreSource>
     val customRepo: StateFlow<String>
+    val customRepoBranch: StateFlow<String>
     val customRepoDisplayName: StateFlow<String>
     val tokenVisible: StateFlow<Boolean>
     val fileLogEnabled: StateFlow<Boolean>
@@ -67,7 +71,15 @@ interface SettingsRepository {
     fun setNightMode(mode: NightModePreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
+    fun setVariantDisplayName(variant: ApiVariant, name: String)
+    fun saveCustomCoreSource(repoInput: String, branchInput: String): ResolvedCustomCoreSource
+    fun saveCustomCoreConfig(
+        displayName: String,
+        repoInput: String,
+        branchInput: String
+    ): ResolvedCustomCoreConfig
     fun setCustomRepo(repo: String)
+    fun setCustomRepoBranch(branch: String)
     fun setCustomRepoDisplayName(name: String)
     fun setTokenVisible(visible: Boolean)
     fun setFileLogEnabled(enabled: Boolean)

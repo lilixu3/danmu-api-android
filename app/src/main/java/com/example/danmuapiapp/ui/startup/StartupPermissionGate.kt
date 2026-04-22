@@ -17,8 +17,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -65,9 +67,12 @@ import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.ui.common.CustomCoreSettingsForm
+import com.example.danmuapiapp.ui.common.rememberCustomCoreSettingsFormState
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SettingsHintCard
@@ -146,7 +151,10 @@ fun StartupPermissionGateHost(
     val coreInfoList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
+    val customCoreSource by viewModel.customCoreSource.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
+    val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
 
     var permissionState by remember(runtimeState.runMode) {
         mutableStateOf(readPermissionState(context, runtimeState.runMode))
@@ -203,15 +211,11 @@ fun StartupPermissionGateHost(
 
     val canConfigureSetup = runtimeState.status == ServiceStatus.Stopped ||
         runtimeState.status == ServiceStatus.Error
-    val currentCoreInstalled = coreInfoList.find { it.variant == runtimeState.variant }?.isInstalled == true
     val anyInstalledCore = coreInfoList.any { it.isInstalled }
-    val shouldShowModeStep = canConfigureSetup &&
-        isCoreInfoLoading.not() &&
-        anyInstalledCore.not() &&
-        modeAcknowledged.not()
+    val shouldShowModeStep = canConfigureSetup && modeAcknowledged.not()
     val shouldShowCoreStep = canConfigureSetup &&
         isCoreInfoLoading.not() &&
-        currentCoreInstalled.not() &&
+        anyInstalledCore.not() &&
         coreDeferredThisLaunch.not()
     val shouldShowPermissionStep = runtimeState.runMode == RunMode.Normal &&
         (permissionState.notificationReady.not() || permissionState.batteryReady.not())
@@ -252,10 +256,14 @@ fun StartupPermissionGateHost(
             },
             isRunModeSwitching = viewModel.isRunModeSwitching,
             selectedVariant = selectedVariant,
-            customRepoConfigured = customRepo.trim().isNotBlank(),
+            coreDisplayNames = coreDisplayNames,
+            customRepo = customRepo,
+            customRepoBranch = customRepoBranch,
+            customRepoConfigured = customCoreSource.isValidRepo,
             onSelectVariant = { selectedVariantKey = it.key },
             onUseSelectedVariant = { viewModel.chooseVariant(selectedVariant) },
             onInstallSelectedVariant = { viewModel.installCore(selectedVariant) },
+            onSaveCustomSettings = viewModel::saveCustomCoreSettings,
             onSkipCoreForNow = {
                 coreDeferredThisLaunch = true
                 dismissedThisLaunch = true
@@ -287,10 +295,14 @@ private fun StartupPermissionGateScreen(
     onConfirmRunMode: () -> Unit,
     isRunModeSwitching: Boolean,
     selectedVariant: ApiVariant,
+    coreDisplayNames: CoreVariantDisplayNames,
+    customRepo: String,
+    customRepoBranch: String,
     customRepoConfigured: Boolean,
     onSelectVariant: (ApiVariant) -> Unit,
     onUseSelectedVariant: () -> Unit,
     onInstallSelectedVariant: () -> Unit,
+    onSaveCustomSettings: (displayName: String, repo: String, branch: String) -> Boolean,
     onSkipCoreForNow: () -> Unit,
     onRefreshPermissionState: () -> Unit,
     onContinueHome: () -> Unit,
@@ -430,10 +442,14 @@ private fun StartupPermissionGateScreen(
                                 isCoreInfoLoading = isCoreInfoLoading,
                                 downloadProgress = downloadProgress,
                                 selectedVariant = selectedVariant,
+                                coreDisplayNames = coreDisplayNames,
+                                customRepo = customRepo,
+                                customRepoBranch = customRepoBranch,
                                 customRepoConfigured = customRepoConfigured,
                                 onSelectVariant = onSelectVariant,
                                 onUseSelectedVariant = onUseSelectedVariant,
                                 onInstallSelectedVariant = onInstallSelectedVariant,
+                                onSaveCustomSettings = onSaveCustomSettings,
                                 onSkipForNow = onSkipCoreForNow
                             )
 
@@ -603,10 +619,14 @@ private fun CoreStepContent(
     isCoreInfoLoading: Boolean,
     downloadProgress: CoreDownloadProgress,
     selectedVariant: ApiVariant,
+    coreDisplayNames: CoreVariantDisplayNames,
+    customRepo: String,
+    customRepoBranch: String,
     customRepoConfigured: Boolean,
     onSelectVariant: (ApiVariant) -> Unit,
     onUseSelectedVariant: () -> Unit,
     onInstallSelectedVariant: () -> Unit,
+    onSaveCustomSettings: (displayName: String, repo: String, branch: String) -> Boolean,
     onSkipForNow: () -> Unit
 ) {
     val stableInfo = coreInfoList.find { it.variant == ApiVariant.Stable }
@@ -615,97 +635,179 @@ private fun CoreStepContent(
     val selectedInfo = coreInfoList.find { it.variant == selectedVariant }
     val selectedInstalled = selectedInfo?.isInstalled == true
     val downloadForSelected = downloadProgress.inProgress && downloadProgress.variant == selectedVariant
-    val showCustomOption = runtimeState.variant == ApiVariant.Custom ||
-        selectedVariant == ApiVariant.Custom ||
-        customInfo?.isInstalled == true
+    val showCustomOption = true
+    val stableLabel = coreDisplayNames.resolve(ApiVariant.Stable)
+    val devLabel = coreDisplayNames.resolve(ApiVariant.Dev)
+    val customLabel = coreDisplayNames.resolve(ApiVariant.Custom)
+    val selectedVariantLabel = coreDisplayNames.resolve(selectedVariant)
+    val customFormState = rememberCustomCoreSettingsFormState(
+        initialDisplayName = coreDisplayNames.custom,
+        initialRepo = customRepo,
+        initialBranch = customRepoBranch
+    )
+    val customSettingsDirty = selectedVariant == ApiVariant.Custom && customFormState.isDirty
+    val canSaveCustomSettings = customFormState.canSaveConfig
     val needsCustomRepo = selectedVariant == ApiVariant.Custom && customRepoConfigured.not()
+    val canInstallSelectedCustom = if (selectedVariant == ApiVariant.Custom) {
+        when {
+            needsCustomRepo -> customFormState.canInstall
+            customSettingsDirty -> customFormState.canInstall
+            else -> true
+        }
+    } else {
+        true
+    }
+    val scrollState = rememberScrollState()
 
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 12.dp)
     ) {
-        SetupChoiceCard(
-            icon = Icons.Rounded.CheckCircle,
-            accent = MaterialTheme.colorScheme.primary,
-            title = "稳定版",
-            summary = "更适合长期使用，优先推荐新设备第一次先下这个版本。",
-            badge = coreBadgeText(
-                variant = ApiVariant.Stable,
-                runtimeState = runtimeState,
-                info = stableInfo,
-                selectedVariant = selectedVariant
-            ),
-            selected = selectedVariant == ApiVariant.Stable,
-            onClick = { onSelectVariant(ApiVariant.Stable) }
-        )
-
-        SetupChoiceCard(
-            icon = Icons.Rounded.DownloadForOffline,
-            accent = MaterialTheme.colorScheme.secondary,
-            title = "开发版",
-            summary = "更新更快，适合愿意第一时间体验新特性的用户。",
-            badge = coreBadgeText(
-                variant = ApiVariant.Dev,
-                runtimeState = runtimeState,
-                info = devInfo,
-                selectedVariant = selectedVariant
-            ),
-            selected = selectedVariant == ApiVariant.Dev,
-            onClick = { onSelectVariant(ApiVariant.Dev) }
-        )
-
-        if (showCustomOption) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 12.dp)
+        ) {
             SetupChoiceCard(
-                icon = Icons.Rounded.Tune,
-                accent = MaterialTheme.colorScheme.tertiary,
-                title = "自定义版",
-                summary = "适合已经导入自定义仓库或本地核心的场景，首次使用前请先确认核心已准备好。",
+                icon = Icons.Rounded.CheckCircle,
+                accent = MaterialTheme.colorScheme.primary,
+                title = stableLabel,
+                summary = "更适合长期使用，优先推荐新设备第一次先下这个版本。",
                 badge = coreBadgeText(
-                    variant = ApiVariant.Custom,
+                    variant = ApiVariant.Stable,
                     runtimeState = runtimeState,
-                    info = customInfo,
+                    info = stableInfo,
                     selectedVariant = selectedVariant
                 ),
-                selected = selectedVariant == ApiVariant.Custom,
-                onClick = { onSelectVariant(ApiVariant.Custom) }
+                selected = selectedVariant == ApiVariant.Stable,
+                onClick = { onSelectVariant(ApiVariant.Stable) }
             )
-        }
 
-        if (downloadProgress.inProgress) {
-            DownloadProgressCard(
-                progress = downloadProgress,
-                compact = compact
+            SetupChoiceCard(
+                icon = Icons.Rounded.DownloadForOffline,
+                accent = MaterialTheme.colorScheme.secondary,
+                title = devLabel,
+                summary = "更新更快，适合愿意第一时间体验新特性的用户。",
+                badge = coreBadgeText(
+                    variant = ApiVariant.Dev,
+                    runtimeState = runtimeState,
+                    info = devInfo,
+                    selectedVariant = selectedVariant
+                ),
+                selected = selectedVariant == ApiVariant.Dev,
+                onClick = { onSelectVariant(ApiVariant.Dev) }
             )
-        } else {
-            SettingsHintCard(
-                text = if (needsCustomRepo) {
-                    "自定义版需要先在核心管理里填写仓库地址，再回来下载。"
-                } else if (runtimeState.runMode == RunMode.Root) {
-                    "Root 模式下准备完核心后，会直接进入首页，不再显示权限步骤。"
-                } else {
-                    "首次下载前会先让你选 GitHub 线路。这里只准备核心，不会在这里启动服务。"
+
+            if (showCustomOption) {
+                SetupChoiceCard(
+                    icon = Icons.Rounded.Tune,
+                    accent = MaterialTheme.colorScheme.tertiary,
+                    title = customLabel,
+                    summary = "适合已经导入自定义仓库或本地核心的场景，首次使用前请先确认核心已准备好。",
+                    badge = coreBadgeText(
+                        variant = ApiVariant.Custom,
+                        runtimeState = runtimeState,
+                        info = customInfo,
+                        selectedVariant = selectedVariant
+                    ),
+                    selected = selectedVariant == ApiVariant.Custom,
+                    onClick = { onSelectVariant(ApiVariant.Custom) }
+                )
+            }
+
+            if (selectedVariant == ApiVariant.Custom) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "自定义核心设置",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        CustomCoreSettingsForm(
+                            state = customFormState,
+                            displayNamePlaceholder = customLabel
+                        )
+                        if (customSettingsDirty) {
+                            TextButton(
+                                onClick = {
+                                    val input = customFormState.toInput()
+                                    onSaveCustomSettings(
+                                        input.displayName,
+                                        input.repo,
+                                        input.branch
+                                    )
+                                },
+                                enabled = canSaveCustomSettings,
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("仅保存配置")
+                            }
+                        }
+                    }
                 }
-            )
-        }
+            }
 
-        Spacer(modifier = Modifier.weight(1f))
+            if (downloadProgress.inProgress) {
+                DownloadProgressCard(
+                    progress = downloadProgress,
+                    compact = compact
+                )
+            } else {
+                SettingsHintCard(
+                    text = if (needsCustomRepo) {
+                        "先在这里填好 $customLabel 的仓库和分支，再点下载即可。"
+                    } else if (runtimeState.runMode == RunMode.Root) {
+                        "Root 模式下准备完核心后，会直接进入首页，不再显示权限步骤。"
+                    } else {
+                        "首次下载前会先让你选 GitHub 线路。这里只准备核心，不会在这里启动服务。"
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(if (compact) 12.dp else 16.dp))
+        }
 
         GradientButton(
             text = when {
                 isCoreInfoLoading -> "正在读取核心信息..."
-                downloadForSelected -> "正在下载${selectedVariant.label}..."
-                needsCustomRepo -> "先配置自定义仓库"
-                selectedInstalled -> "使用${selectedVariant.label}"
-                else -> "下载${selectedVariant.label}"
+                downloadForSelected -> "正在下载$selectedVariantLabel..."
+                selectedVariant == ApiVariant.Custom && (needsCustomRepo || customSettingsDirty) ->
+                    "保存并下载$customLabel"
+                selectedInstalled -> "使用$selectedVariantLabel"
+                else -> "下载$selectedVariantLabel"
             },
             onClick = {
-                if (selectedInstalled) {
+                if (selectedVariant == ApiVariant.Custom && (needsCustomRepo || customSettingsDirty)) {
+                    val input = customFormState.toInput()
+                    val saved = onSaveCustomSettings(
+                        input.displayName,
+                        input.repo,
+                        input.branch
+                    )
+                    if (saved) {
+                        onInstallSelectedVariant()
+                    }
+                } else if (selectedInstalled) {
                     onUseSelectedVariant()
                 } else {
                     onInstallSelectedVariant()
                 }
             },
-            enabled = isCoreInfoLoading.not() && downloadProgress.inProgress.not(),
+            enabled = isCoreInfoLoading.not() &&
+                downloadProgress.inProgress.not() &&
+                canInstallSelectedCustom,
             modifier = Modifier.fillMaxWidth(),
             colors = listOf(
                 MaterialTheme.colorScheme.primary,

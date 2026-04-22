@@ -31,15 +31,17 @@ class CoreViewModel @Inject constructor(
     val coreInfoList = coreRepo.coreInfoList
     val downloadProgress = coreRepo.downloadProgress
     val runtimeState = runtimeRepo.runtimeState
+    val coreDisplayNames = settingsRepo.coreDisplayNames
+    val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
-    val customRepoDisplayName = settingsRepo.customRepoDisplayName
+    val customRepoBranch = settingsRepo.customRepoBranch
     val proxyOptions = githubProxyService.proxyOptions()
 
     var isOperating by mutableStateOf(false)
         private set
     var operationMessage by mutableStateOf<String?>(null)
         private set
-    var showCustomRepoDialog by mutableStateOf(false)
+    var showVariantSettingsDialog by mutableStateOf<ApiVariant?>(null)
         private set
     var isCheckingUpdate by mutableStateOf(false)
         private set
@@ -108,12 +110,13 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun doInstallCore(variant: ApiVariant) {
+        val label = variantLabel(variant)
         viewModelScope.launch {
             performCoreMutation(
                 variant = variant,
-                actionMessage = "正在安装 ${variant.label}...",
-                successMessage = "${variant.label} 安装成功",
-                stopTimeoutMessage = "${variant.label} 安装前停止服务超时，请稍后重试",
+                actionMessage = "正在安装 $label...",
+                successMessage = "$label 安装成功",
+                stopTimeoutMessage = "$label 安装前停止服务超时，请稍后重试",
                 failurePrefix = "安装失败",
                 pendingAction = PendingProxyAction.Install(variant),
                 applyBlock = { coreRepo.installCore(variant) }
@@ -122,10 +125,11 @@ class CoreViewModel @Inject constructor(
     }
 
     fun deleteCore(variant: ApiVariant) {
+        val label = variantLabel(variant)
         viewModelScope.launch {
             isOperating = true
             coreRepo.deleteCore(variant).fold(
-                onSuccess = { operationMessage = "${variant.label} 已删除" },
+                onSuccess = { operationMessage = "$label 已删除" },
                 onFailure = { operationMessage = "删除失败: ${it.message}" }
             )
             isOperating = false
@@ -154,13 +158,14 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun doUpdateCore(variant: ApiVariant) {
+        val label = variantLabel(variant)
         showUpdateDialog = false
         viewModelScope.launch {
             performCoreMutation(
                 variant = variant,
-                actionMessage = "正在更新 ${variant.label}...",
-                successMessage = "${variant.label} 更新成功",
-                stopTimeoutMessage = "${variant.label} 更新前停止服务超时，请稍后重试",
+                actionMessage = "正在更新 $label...",
+                successMessage = "$label 更新成功",
+                stopTimeoutMessage = "$label 更新前停止服务超时，请稍后重试",
                 failurePrefix = "更新失败",
                 pendingAction = PendingProxyAction.DoUpdate(variant),
                 applyBlock = { coreRepo.updateCore(variant) }
@@ -178,13 +183,14 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun doReinstallCore(variant: ApiVariant) {
+        val label = variantLabel(variant)
         showGearMenu = null
         viewModelScope.launch {
             performCoreMutation(
                 variant = variant,
-                actionMessage = "正在重装 ${variant.label}...",
-                successMessage = "${variant.label} 重装成功",
-                stopTimeoutMessage = "${variant.label} 重装前停止服务超时，请稍后重试",
+                actionMessage = "正在重装 $label...",
+                successMessage = "$label 重装成功",
+                stopTimeoutMessage = "$label 重装前停止服务超时，请稍后重试",
                 failurePrefix = "重装失败",
                 pendingAction = PendingProxyAction.Reinstall(variant),
                 applyBlock = { coreRepo.installCore(variant) }
@@ -228,7 +234,7 @@ class CoreViewModel @Inject constructor(
                 variant = variant,
                 actionMessage = "正在回退到 ${release.tagName}...",
                 successMessage = "已回退到 ${release.tagName}",
-                stopTimeoutMessage = "${variant.label} 回退前停止服务超时，请稍后重试",
+                stopTimeoutMessage = "${variantLabel(variant)} 回退前停止服务超时，请稍后重试",
                 failurePrefix = "回退失败",
                 pendingAction = PendingProxyAction.Rollback(variant, release),
                 applyBlock = { coreRepo.rollbackCore(variant, release) }
@@ -236,21 +242,38 @@ class CoreViewModel @Inject constructor(
         }
     }
 
-    fun openCustomRepoDialog() { showCustomRepoDialog = true }
-    fun dismissCustomRepoDialog() { showCustomRepoDialog = false }
-
-    fun updateCustomRepo(repo: String) {
-        settingsRepo.setCustomRepo(repo)
+    fun openVariantSettingsDialog(variant: ApiVariant) {
+        showGearMenu = null
+        showVariantSettingsDialog = variant
     }
 
-    fun saveCustomRepo(repo: String) {
-        updateCustomRepo(repo)
-        showCustomRepoDialog = false
-        operationMessage = "自定义仓库已保存: $repo"
+    fun dismissVariantSettingsDialog() {
+        showVariantSettingsDialog = null
     }
 
-    fun updateCustomRepoDisplayName(name: String) {
-        settingsRepo.setCustomRepoDisplayName(name)
+    fun saveVariantSettings(
+        variant: ApiVariant,
+        displayName: String,
+        customRepo: String = "",
+        customBranch: String = ""
+    ) {
+        if (variant == ApiVariant.Custom) {
+            val resolved = settingsRepo.saveCustomCoreConfig(
+                displayName = displayName,
+                repoInput = customRepo,
+                branchInput = customBranch
+            )
+            coreRepo.refreshCoreInfo()
+            val label = resolved.displayName.ifBlank { variant.label }
+            val repoText = resolved.repo.ifBlank { "未配置仓库" }
+            val branchText = resolved.branch.ifBlank { "--" }
+            operationMessage = "$label 已保存（$repoText · $branchText）"
+        } else {
+            settingsRepo.setVariantDisplayName(variant, displayName)
+            val label = displayName.trim().ifBlank { variant.label }
+            operationMessage = "$label 名称已保存"
+        }
+        showVariantSettingsDialog = null
     }
 
     fun dismissMessage() {
@@ -271,7 +294,7 @@ class CoreViewModel @Inject constructor(
         val applyPlan = decideCoreApplyPlan(runtimeState.value, variant)
 
         if (applyPlan.shouldStopServiceBeforeApply) {
-            operationMessage = "正在停止服务以安全应用 ${variant.label} 变更..."
+            operationMessage = "正在停止服务以安全应用 ${variantLabel(variant)} 变更..."
             runtimeRepo.stopService()
             val stopped = waitForRuntimeStoppedBeforeCoreMutation()
             if (!stopped) {
@@ -390,5 +413,9 @@ class CoreViewModel @Inject constructor(
         proxyTestJob?.cancel()
         proxyTestJob = null
         proxyTestingIds = emptySet()
+    }
+
+    private fun variantLabel(variant: ApiVariant): String {
+        return coreDisplayNames.value.resolve(variant)
     }
 }

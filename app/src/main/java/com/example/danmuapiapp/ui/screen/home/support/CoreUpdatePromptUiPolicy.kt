@@ -13,9 +13,9 @@ internal fun resolveAutoCoreUpdatePrompt(
     suppressedVersion: String?,
     samePromptShown: Boolean
 ): CoreAutoUpdatePromptState? {
-    if (info == null || !info.isInstalled || !info.hasUpdate) return null
+    if (info == null || !info.isInstalled || !info.hasVersionUpdate) return null
 
-    val latest = info.latestVersion?.trim().orEmpty()
+    val latest = info.availableVersion?.trim().orEmpty()
     if (latest.isBlank()) return null
 
     val ignored = ignoredVersion?.trim().orEmpty()
@@ -35,8 +35,9 @@ internal fun resolveAutoCoreUpdatePrompt(
 internal fun resolveCoreActionButtonText(
     isCoreInfoLoading: Boolean,
     isCoreInstalled: Boolean,
-    hasUpdate: Boolean,
-    latestVersion: String?,
+    hasVersionUpdate: Boolean,
+    sourceMismatch: Boolean,
+    availableVersion: String?,
     isInstalling: Boolean,
     isUpdating: Boolean
 ): String {
@@ -45,7 +46,8 @@ internal fun resolveCoreActionButtonText(
         isUpdating -> "更新中..."
         isCoreInfoLoading -> "检测中"
         !isCoreInstalled -> "点击下载"
-        hasUpdate -> "更新 ${latestVersion?.let { "v$it" } ?: "核心"}"
+        sourceMismatch -> "重新下载"
+        hasVersionUpdate -> "更新 ${availableVersion?.let { "v$it" } ?: "核心"}"
         else -> "暂无更新"
     }
 }
