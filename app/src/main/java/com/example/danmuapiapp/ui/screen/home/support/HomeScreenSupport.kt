@@ -137,10 +137,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
@@ -157,31 +159,48 @@ import kotlin.math.max
 
 @Composable
 internal fun UpdatePromptDialog(
-    variant: ApiVariant?,
+    variantLabel: String?,
     currentVersion: String?,
     latestVersion: String?,
+    sourceMismatch: Boolean,
+    desiredSource: String?,
     onUpdate: () -> Unit,
     onIgnore: () -> Unit
 ) {
-    if (variant == null || latestVersion.isNullOrBlank()) return
+    if (variantLabel.isNullOrBlank()) return
+    if (!sourceMismatch && latestVersion.isNullOrBlank()) return
     AppBottomSheetDialog(
         onDismissRequest = onIgnore,
         style = AppBottomSheetStyle.Confirm,
         tone = AppBottomSheetTone.Brand,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
-        title = { Text("发现核心更新") },
+        title = { Text(if (sourceMismatch) "需要替换核心" else "发现核心更新") },
         text = {
-            val from = currentVersion?.takeIf { it.isNotBlank() } ?: "?"
-            Text("${variant.label}：v$from → v$latestVersion")
+            if (sourceMismatch) {
+                Text("$variantLabel 当前来源与设置不一致，将替换为 ${desiredSource ?: "目标仓库"}")
+            } else {
+                Text(
+                    "$variantLabel：${
+                        com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
+                            currentVersion,
+                            latestVersion
+                        )
+                    }"
+                )
+            }
         },
-        confirmButton = { TextButton(onClick = onUpdate) { Text("更新") } },
-        dismissButton = { TextButton(onClick = onIgnore) { Text("忽略") } }
+        confirmButton = { TextButton(onClick = onUpdate) { Text(if (sourceMismatch) "重新下载" else "更新") } },
+        dismissButton = { TextButton(onClick = onIgnore) { Text(if (sourceMismatch) "稍后" else "忽略") } }
     )
 }
 
 @Composable
 internal fun NoCoreDialog(
     currentVariant: ApiVariant,
+    currentVariantLabel: String,
+    coreDisplayNames: CoreVariantDisplayNames,
+    customRepo: String,
+    customRepoBranch: String,
     onDismiss: () -> Unit,
     onInstall: (ApiVariant) -> Unit
 ) {
@@ -193,13 +212,17 @@ internal fun NoCoreDialog(
         title = { Text("核心未安装") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("当前选择的 ${currentVariant.label} 尚未安装，请选择要下载的版本：")
+                Text("当前选择的 $currentVariantLabel 尚未安装，请选择要下载的版本：")
                 Text(
                     "下载完成后会自动切换到所选核心并启动服务。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                ApiVariant.entries.filter { it.repo.isNotBlank() }.forEach { variant ->
+                ApiVariant.entries.filter { variant ->
+                    variant != ApiVariant.Custom ||
+                        resolveCoreVariantSourceText(variant, customRepo, customRepoBranch).isNotBlank()
+                }.forEach { variant ->
+                    val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
                     OutlinedCard(
                         onClick = { onInstall(variant) },
                         modifier = Modifier.fillMaxWidth(),
@@ -217,12 +240,14 @@ internal fun NoCoreDialog(
                                 modifier = Modifier.size(20.dp)
                             )
                             Column {
-                                Text(variant.label, style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    variant.repo,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text(coreDisplayNames.resolve(variant), style = MaterialTheme.typography.bodyLarge)
+                                if (sourceText.isNotBlank()) {
+                                    Text(
+                                        sourceText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
@@ -241,6 +266,9 @@ internal fun VariantPickerSheet(
     currentVariant: ApiVariant,
     coreList: List<com.example.danmuapiapp.domain.model.CoreInfo>,
     isCoreInfoLoading: Boolean,
+    coreDisplayNames: CoreVariantDisplayNames,
+    customRepo: String,
+    customRepoBranch: String,
     isBusy: Boolean,
     onSelect: (ApiVariant) -> Unit,
     onDismiss: () -> Unit
@@ -286,6 +314,8 @@ internal fun VariantPickerSheet(
             ApiVariant.entries.forEach { variant ->
                 val info = coreList.find { it.variant == variant }
                 val isSelected = variant == currentVariant
+                val variantLabel = coreDisplayNames.resolve(variant)
+                val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
                 Card(
                     onClick = { if (!isBusy) onSelect(variant) },
                     enabled = !isBusy,
@@ -313,26 +343,26 @@ internal fun VariantPickerSheet(
                             modifier = Modifier.size(24.dp)
                         )
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(variant.label, style = MaterialTheme.typography.titleMedium)
+                            Text(variantLabel, style = MaterialTheme.typography.titleMedium)
                             if (info?.version != null) {
-                                val vText = if (info.hasUpdate && info.latestVersion != null) {
-                                    "v${info.version} → v${info.latestVersion}"
+                                val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
+                                    "v${info.version} → v${info.availableVersion}"
                                 } else {
                                     "v${info.version}"
                                 }
                                 Text(
                                     vText,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (info.hasUpdate) {
+                                    color = if (info.hasVersionUpdate) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     }
                                 )
                             }
-                            if (variant.repo.isNotBlank()) {
+                            if (sourceText.isNotBlank()) {
                                 Text(
-                                    variant.repo,
+                                    sourceText,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -342,7 +372,7 @@ internal fun VariantPickerSheet(
                             shape = RoundedCornerShape(7.dp),
                             color = when {
                                 isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                info?.isInstalled == true && info.hasUpdate -> MaterialTheme.colorScheme.primaryContainer
+                                info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
                                 info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                                 else -> MaterialTheme.colorScheme.errorContainer
                             }
@@ -350,14 +380,15 @@ internal fun VariantPickerSheet(
                             Text(
                                 text = when {
                                     isCoreInfoLoading -> "加载中"
-                                    info?.isInstalled == true && info.hasUpdate -> "有更新"
+                                    info?.sourceMismatch == true -> "需替换"
+                                    info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
                                     info?.isInstalled == true -> "已安装"
                                     else -> "未安装"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
                                     isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    info?.isInstalled == true && info.hasUpdate -> MaterialTheme.colorScheme.primary
+                                    info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primary
                                     info?.isInstalled == true -> MaterialTheme.colorScheme.primary
                                     else -> MaterialTheme.colorScheme.error
                                 },

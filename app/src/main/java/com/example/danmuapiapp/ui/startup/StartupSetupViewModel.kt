@@ -12,6 +12,7 @@ import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.resolveCustomCoreConfig
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
@@ -42,7 +43,10 @@ class StartupSetupViewModel @Inject constructor(
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val downloadProgress = coreRepo.downloadProgress
+    val coreDisplayNames = settingsRepo.coreDisplayNames
+    val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
+    val customRepoBranch = settingsRepo.customRepoBranch
     val proxyOptions = githubProxyService.proxyOptions()
 
     var operationMessage by mutableStateOf<String?>(null)
@@ -125,9 +129,9 @@ class StartupSetupViewModel @Inject constructor(
         coreRepo.refreshCoreInfo()
         val installed = coreInfoList.value.find { it.variant == variant }?.isInstalled == true
         operationMessage = if (installed) {
-            "已选择${variant.label}"
+            "已选择${variantLabel(variant)}"
         } else {
-            "已选择${variant.label}，可以开始下载"
+            "已选择${variantLabel(variant)}，可以开始下载"
         }
     }
 
@@ -176,20 +180,47 @@ class StartupSetupViewModel @Inject constructor(
         }
     }
 
+    fun saveCustomCoreSettings(
+        displayName: String,
+        repo: String,
+        branch: String
+    ): Boolean {
+        val preview = resolveCustomCoreConfig(displayName, repo, branch)
+        if (!preview.isValidRepo) {
+            operationMessage = "请先填写正确的 GitHub 仓库地址"
+            return false
+        }
+        val resolved = settingsRepo.saveCustomCoreConfig(
+            displayName = displayName,
+            repoInput = repo,
+            branchInput = branch
+        )
+        coreRepo.refreshCoreInfo()
+        operationMessage = buildString {
+            append(coreDisplayNames.value.resolve(ApiVariant.Custom))
+            append(" 已保存（")
+            append(resolved.repo)
+            append(" · ")
+            append(resolved.branch)
+            append("）")
+        }
+        return true
+    }
+
     private fun validateVariantBeforeInstall(variant: ApiVariant): String? {
         if (variant != ApiVariant.Custom) return null
-        if (customRepo.value.trim().isNotBlank()) return null
-        return "自定义版未配置仓库，请先到核心管理里填写仓库地址"
+        if (customCoreSource.value.isValidRepo) return null
+        return "${variantLabel(variant)} 未配置仓库，请先到核心管理里填写仓库地址"
     }
 
     private fun doInstallCore(variant: ApiVariant) {
         viewModelScope.launch {
             runtimeRepo.updateVariant(variant)
-            operationMessage = "正在下载${variant.label}..."
+            operationMessage = "正在下载${variantLabel(variant)}..."
             coreRepo.installCore(variant).fold(
                 onSuccess = {
                     coreRepo.refreshCoreInfo()
-                    operationMessage = "${variant.label} 已准备好"
+                    operationMessage = "${variantLabel(variant)} 已准备好"
                 },
                 onFailure = {
                     operationMessage = "下载失败：${it.message ?: "请稍后重试"}"
@@ -200,5 +231,9 @@ class StartupSetupViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+    private fun variantLabel(variant: ApiVariant): String {
+        return coreDisplayNames.value.resolve(variant)
     }
 }

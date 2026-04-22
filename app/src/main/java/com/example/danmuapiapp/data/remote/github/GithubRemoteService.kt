@@ -138,11 +138,20 @@ class GithubRemoteService @Inject constructor(
         ) { body -> parseReleaseList(body).takeIf { it.isNotEmpty() } } ?: emptyList()
     }
 
-    fun fetchVersionFromGlobals(repo: String): String? {
-        val paths = listOf(
-            "refs/heads/main/danmu_api/configs/globals.js",
-            "refs/heads/main/danmu-api/configs/globals.js"
-        )
+    fun fetchVersionFromGlobals(
+        repo: String,
+        branches: List<String> = listOf("main", "master")
+    ): String? {
+        val paths = branches
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .ifEmpty { listOf("main", "master") }
+            .flatMap { branch ->
+                listOf(
+                    "refs/heads/$branch/danmu_api/configs/globals.js",
+                    "refs/heads/$branch/danmu-api/configs/globals.js"
+                )
+            }
         return paths.firstNotNullOfOrNull { path ->
             requestMapped(
                 urls = rawUrlCandidates(repo, path),

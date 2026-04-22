@@ -12,7 +12,7 @@ class CoreUpdatePromptUiPolicyTest {
     @Test
     fun `同版本更新进行中时不应再次自动弹出更新提示`() {
         val result = resolveAutoCoreUpdatePrompt(
-            info = coreInfo(hasUpdate = true, latestVersion = "2.0.0"),
+            info = coreInfo(hasVersionUpdate = true, availableVersion = "2.0.0"),
             ignoredVersion = null,
             suppressedVersion = "2.0.0",
             samePromptShown = false
@@ -24,7 +24,7 @@ class CoreUpdatePromptUiPolicyTest {
     @Test
     fun `存在新版本且未忽略未抑制时应返回自动提示内容`() {
         val result = resolveAutoCoreUpdatePrompt(
-            info = coreInfo(hasUpdate = true, latestVersion = "2.0.0"),
+            info = coreInfo(hasVersionUpdate = true, availableVersion = "2.0.0"),
             ignoredVersion = null,
             suppressedVersion = null,
             samePromptShown = false
@@ -36,12 +36,25 @@ class CoreUpdatePromptUiPolicyTest {
     }
 
     @Test
+    fun `来源不一致不应进入自动版本更新提示`() {
+        val result = resolveAutoCoreUpdatePrompt(
+            info = coreInfo(sourceMismatch = true),
+            ignoredVersion = null,
+            suppressedVersion = null,
+            samePromptShown = false
+        )
+
+        assertNull(result)
+    }
+
+    @Test
     fun `更新进行中时按钮文案应优先显示更新中`() {
         val text = resolveCoreActionButtonText(
             isCoreInfoLoading = false,
             isCoreInstalled = true,
-            hasUpdate = true,
-            latestVersion = "2.0.0",
+            hasVersionUpdate = true,
+            sourceMismatch = false,
+            availableVersion = "2.0.0",
             isInstalling = false,
             isUpdating = true
         )
@@ -49,16 +62,33 @@ class CoreUpdatePromptUiPolicyTest {
         assertEquals("更新中...", text)
     }
 
+    @Test
+    fun `来源不一致时按钮文案应提示重新下载`() {
+        val text = resolveCoreActionButtonText(
+            isCoreInfoLoading = false,
+            isCoreInstalled = true,
+            hasVersionUpdate = false,
+            sourceMismatch = true,
+            availableVersion = null,
+            isInstalling = false,
+            isUpdating = false
+        )
+
+        assertEquals("重新下载", text)
+    }
+
     private fun coreInfo(
-        hasUpdate: Boolean,
-        latestVersion: String?
+        hasVersionUpdate: Boolean = false,
+        sourceMismatch: Boolean = false,
+        availableVersion: String? = null
     ): CoreInfo {
         return CoreInfo(
             variant = ApiVariant.Stable,
             version = "1.0.0",
             isInstalled = true,
-            hasUpdate = hasUpdate,
-            latestVersion = latestVersion
+            hasVersionUpdate = hasVersionUpdate,
+            sourceMismatch = sourceMismatch,
+            availableVersion = availableVersion
         )
     }
 }

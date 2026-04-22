@@ -87,6 +87,7 @@ fun ToolsScreen(
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
+    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
     val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -136,7 +137,7 @@ fun ToolsScreen(
         ToolsOverviewCard(
             status = runtimeState.status,
             port = runtimeState.port,
-            variantLabel = runtimeState.variant.label,
+            variantLabel = coreDisplayNames.resolve(runtimeState.variant),
             adminEnabled = adminState.isAdminMode,
             logEnabled = logEnabled,
             logCount = logs.size,

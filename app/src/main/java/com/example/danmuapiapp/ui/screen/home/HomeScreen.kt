@@ -159,6 +159,7 @@ import com.example.danmuapiapp.domain.model.AppAnnouncement
 import com.example.danmuapiapp.domain.model.AnnouncementSeverity
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
@@ -187,11 +188,15 @@ fun HomeScreen(
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
+    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
+    val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
+    val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val tokenVisible by viewModel.tokenVisible.collectAsStateWithLifecycle()
     val cacheStats by viewModel.cacheStats.collectAsStateWithLifecycle()
     val isCacheLoading by viewModel.isCacheLoading.collectAsStateWithLifecycle()
     val unreadAnnouncements by viewModel.unreadAnnouncements.collectAsStateWithLifecycle()
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val currentVariantLabel = coreDisplayNames.resolve(state.variant)
 
     val clipboardManager = LocalClipboard.current
     val context = LocalContext.current
@@ -242,8 +247,9 @@ fun HomeScreen(
     val currentCoreInfo = coreList.find { it.variant == state.variant }
     val isCoreInstalled = currentCoreInfo?.isInstalled == true
     val currentCoreVersion = currentCoreInfo?.version
-    val hasUpdate = currentCoreInfo?.hasUpdate == true
-    val latestVersion = currentCoreInfo?.latestVersion
+    val hasVersionUpdate = currentCoreInfo?.hasVersionUpdate == true
+    val sourceMismatch = currentCoreInfo?.sourceMismatch == true
+    val availableVersion = currentCoreInfo?.availableVersion
     val isBusy = isTransitioning || viewModel.isInstallingCore ||
         viewModel.isSwitchingCore || viewModel.isUpdatingCore
     val isHeroChipBusy = isBusy || viewModel.isCheckingCoreUpdate
@@ -251,21 +257,22 @@ fun HomeScreen(
     val coreVersionText = when {
         isCoreInfoLoading -> "检测中"
         !isCoreInstalled -> "未安装"
-        hasUpdate && !currentCoreVersion.isNullOrBlank() && !latestVersion.isNullOrBlank() ->
-            "v$currentCoreVersion→v$latestVersion"
+        hasVersionUpdate && !availableVersion.isNullOrBlank() ->
+            formatCoreVersionTransition(currentCoreVersion, availableVersion)
         !currentCoreVersion.isNullOrBlank() -> "v$currentCoreVersion"
         else -> "--"
     }
     val coreVersionBadge = when {
         isCoreInfoLoading -> "读取中"
         !isCoreInstalled -> "需安装"
-        hasUpdate -> "有更新"
+        sourceMismatch -> "需替换"
+        hasVersionUpdate -> "有更新"
         else -> null
     }
     val coreVersionAccent = when {
         isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
         !isCoreInstalled -> MaterialTheme.colorScheme.error
-        hasUpdate -> MaterialTheme.colorScheme.primary
+        sourceMismatch || hasVersionUpdate -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
     }
     val maskedToken = when {
@@ -514,7 +521,7 @@ fun HomeScreen(
                         RunMode.Root -> "Root"
                     },
                     uptime = uptimeText,
-                    variantLabel = state.variant.label,
+                    variantLabel = currentVariantLabel,
                     isRunning = isRunning,
                     isInstalling = viewModel.isInstallingCore,
                     isSwitching = viewModel.isSwitchingCore,
@@ -598,8 +605,9 @@ fun HomeScreen(
                     onOpenCoreDownload = viewModel::openCoreDownloadDialog,
                     onOpenUpdatePrompt = viewModel::openUpdatePromptFromCard,
                     isCoreInstalled = isCoreInstalled,
-                    hasUpdate = hasUpdate,
-                    latestVersion = latestVersion,
+                    hasVersionUpdate = hasVersionUpdate,
+                    sourceMismatch = sourceMismatch,
+                    availableVersion = availableVersion,
                     coreOperationMessage = coreOperationStatus(
                         isInstalling = viewModel.isInstallingCore,
                         isSwitching = viewModel.isSwitchingCore,
@@ -667,6 +675,10 @@ fun HomeScreen(
     if (viewModel.showNoCoreDialog) {
         NoCoreDialog(
             currentVariant = state.variant,
+            currentVariantLabel = currentVariantLabel,
+            coreDisplayNames = coreDisplayNames,
+            customRepo = customRepo,
+            customRepoBranch = customRepoBranch,
             onDismiss = viewModel::dismissNoCoreDialog,
             onInstall = viewModel::installAndStart
         )
@@ -677,7 +689,7 @@ fun HomeScreen(
             status = state.status,
             uptime = uptimeText,
             runMode = state.runMode,
-            variant = state.variant,
+            variantLabel = currentVariantLabel,
             port = state.port,
             pid = state.pid,
             localUrl = state.localUrl,
@@ -732,9 +744,9 @@ fun HomeScreen(
 
     if (showCoreUpdateConfirmDialog) {
         CoreUpdateConfirmDialog(
-            variantLabel = state.variant.label,
+            variantLabel = currentVariantLabel,
             currentVersion = currentCoreVersion,
-            latestVersion = latestVersion,
+            availableVersion = availableVersion,
             isChecking = viewModel.isCheckingCoreUpdate,
             resultMessage = viewModel.coreUpdateCheckDialogMessage,
             resultIsError = viewModel.coreUpdateCheckDialogIsError,
@@ -757,6 +769,9 @@ fun HomeScreen(
             currentVariant = state.variant,
             coreList = coreList,
             isCoreInfoLoading = isCoreInfoLoading,
+            coreDisplayNames = coreDisplayNames,
+            customRepo = customRepo,
+            customRepoBranch = customRepoBranch,
             isBusy = isBusy,
             onSelect = viewModel::switchVariant,
             onDismiss = viewModel::dismissVariantPicker
@@ -781,9 +796,11 @@ fun HomeScreen(
 
     if (viewModel.showUpdatePromptDialog) {
         UpdatePromptDialog(
-            variant = viewModel.updatePromptVariant,
+            variantLabel = viewModel.updatePromptVariant?.let { coreDisplayNames.resolve(it) },
             currentVersion = viewModel.updatePromptCurrentVersion,
             latestVersion = viewModel.updatePromptLatestVersion,
+            sourceMismatch = viewModel.updatePromptSourceMismatch,
+            desiredSource = viewModel.updatePromptDesiredSource,
             onUpdate = viewModel::updateFromPrompt,
             onIgnore = viewModel::ignoreCurrentUpdatePrompt
         )

@@ -42,7 +42,7 @@ class UpdateChecker @Inject constructor(
         return try {
             coreRepo.checkAndMarkUpdate(variant)
             val info = coreRepo.coreInfoList.value.find { it.variant == variant }
-            info?.hasUpdate == true
+            info?.needsAttention == true
         } finally {
             isManualChecking.set(false)
         }
