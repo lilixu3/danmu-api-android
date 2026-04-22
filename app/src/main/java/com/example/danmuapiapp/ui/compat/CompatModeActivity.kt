@@ -36,6 +36,9 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
+import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -552,10 +555,10 @@ class CompatModeActivity : AppCompatActivity() {
         nameCol.addView(TextView(this).apply {
             text = coreVersionText(info)
             textSize = 13f
-            setTextColor(if (info.hasUpdate) primaryColor else secondary)
+            setTextColor(if (info.needsAttention) primaryColor else secondary)
             setPadding(0, dp(2), 0, 0)
         })
-        val repoText = resolveVariantRepo(info.variant).ifBlank {
+        val repoText = resolveVariantSource(info.variant).ifBlank {
             if (info.variant == ApiVariant.Custom) "未配置仓库" else ""
         }
         if (repoText.isNotBlank()) {
@@ -571,13 +574,15 @@ class CompatModeActivity : AppCompatActivity() {
         // Status badge
         val badgeText = when {
             isActive -> "使用中"
-            info.hasUpdate -> "可更新"
+            info.sourceMismatch -> "需替换"
+            info.hasVersionUpdate -> "可更新"
             info.isInstalled -> "已安装"
             else -> "未安装"
         }
         val badgeColor = when {
             isActive -> primaryColor
-            info.hasUpdate -> themeColor(com.google.android.material.R.attr.colorTertiary)
+            info.sourceMismatch -> primaryColor
+            info.hasVersionUpdate -> themeColor(com.google.android.material.R.attr.colorTertiary)
             else -> secondary
         }
         header.addView(TextView(this).apply {
@@ -601,7 +606,7 @@ class CompatModeActivity : AppCompatActivity() {
                 layoutParams = marginLp(top = 12)
             }
             val editText = EditText(this).apply {
-                hint = "owner/repo"
+                hint = "owner/repo 或 GitHub 链接"
                 textSize = 14f
                 inputType = InputType.TYPE_CLASS_TEXT
                 setSingleLine(true)
@@ -617,7 +622,14 @@ class CompatModeActivity : AppCompatActivity() {
                     val repo = editText.text.toString().trim()
                     graph.settingsRepository.setCustomRepo(repo)
                     graph.coreRepository.refreshCoreInfo()
-                    toast(if (repo.isNotBlank()) "已保存仓库: $repo" else "已清除自定义仓库")
+                    val source = graph.settingsRepository.customCoreSource.value
+                    toast(
+                        when {
+                            repo.isBlank() -> "已清除自定义仓库"
+                            source.sourceText.isNotBlank() -> "已保存自定义核心：${source.sourceText}"
+                            else -> "已保存仓库：$repo"
+                        }
+                    )
                 }
             }
             inputRow.addView(saveBtn, LinearLayout.LayoutParams(
@@ -636,7 +648,7 @@ class CompatModeActivity : AppCompatActivity() {
         // Switch button (not for active variant)
         if (!isActive) {
             btnRow.addView(makeButton("切换使用", primary = false).apply {
-                isEnabled = info.isInstalled && !isOperating
+                isEnabled = info.isReady && !isOperating
                 alpha = if (isEnabled) 1f else 0.48f
                 setOnClickListener { switchVariant(info.variant) }
             }, weightLp(1f, end = 6))
@@ -645,17 +657,18 @@ class CompatModeActivity : AppCompatActivity() {
         // Main action: install / update / check
         val mainText = when {
             !info.isInstalled -> "下载核心"
-            info.hasUpdate -> "立即更新"
+            info.sourceMismatch -> "重新下载"
+            info.hasVersionUpdate -> "立即更新"
             else -> "检查更新"
         }
-        val mainPrimary = !info.isInstalled || info.hasUpdate
+        val mainPrimary = !info.isInstalled || info.hasVersionUpdate || info.sourceMismatch
         btnRow.addView(makeButton(mainText, primary = mainPrimary).apply {
             isEnabled = !isOperating
             alpha = if (isEnabled) 1f else 0.48f
             setOnClickListener {
                 when {
                     !info.isInstalled -> installCore(info.variant)
-                    info.hasUpdate -> updateCore(info.variant)
+                    info.needsAttention -> updateCore(info.variant)
                     else -> checkUpdate(info.variant)
                 }
             }
@@ -709,7 +722,12 @@ class CompatModeActivity : AppCompatActivity() {
                     graph.settingsRepository.customRepo.collectLatest { renderCoreList() }
                 }
                 launch {
-                    graph.settingsRepository.customRepoDisplayName.collectLatest {
+                    graph.settingsRepository.customRepoBranch.collectLatest {
+                        renderCoreList()
+                    }
+                }
+                launch {
+                    graph.settingsRepository.coreDisplayNames.collectLatest {
                         renderDashboard()
                         renderCoreList()
                     }
@@ -942,11 +960,18 @@ class CompatModeActivity : AppCompatActivity() {
         if (isOperating) return
         lifecycleScope.launch {
             val variant = runtimeState.variant
-            val installed = withContext(Dispatchers.IO) {
-                graph.coreRepository.isCoreInstalled(variant)
+            val ready = withContext(Dispatchers.IO) {
+                graph.coreRepository.isCoreReady(variant)
             }
-            if (!installed) {
-                toast("${resolveVariantLabel(variant)} 未安装，请先下载核心")
+            if (!ready) {
+                val info = coreInfos.find { it.variant == variant }
+                toast(
+                    if (info?.sourceMismatch == true) {
+                        "${resolveVariantLabel(variant)} 来源与设置不一致，请先重新下载核心"
+                    } else {
+                        "${resolveVariantLabel(variant)} 未安装，请先下载核心"
+                    }
+                )
                 return@launch
             }
             graph.runtimeRepository.startService()
@@ -1006,6 +1031,10 @@ class CompatModeActivity : AppCompatActivity() {
             toast("${resolveVariantLabel(variant)} 未安装，请先下载核心")
             return
         }
+        if (!info.isReady) {
+            toast("${resolveVariantLabel(variant)} 来源与设置不一致，请先重新下载核心")
+            return
+        }
         graph.runtimeRepository.updateVariant(variant)
         if (runtimeState.status == ServiceStatus.Running) {
             graph.runtimeRepository.restartService()
@@ -1062,8 +1091,10 @@ class CompatModeActivity : AppCompatActivity() {
             runCatching {
                 graph.coreRepository.checkAndMarkUpdate(variant)
                 val refreshed = graph.coreRepository.coreInfoList.value.find { it.variant == variant }
-                if (refreshed?.hasUpdate == true && !refreshed.latestVersion.isNullOrBlank()) {
-                    toast("${resolveVariantLabel(variant)} 有新版本 ${refreshed.latestVersion}")
+                if (refreshed?.sourceMismatch == true) {
+                    toast("${resolveVariantLabel(variant)} 需替换为 ${refreshed.desiredSource ?: "目标仓库"}")
+                } else if (refreshed?.hasVersionUpdate == true && !refreshed.availableVersion.isNullOrBlank()) {
+                    toast("${resolveVariantLabel(variant)} 有新版本 ${refreshed.availableVersion}")
                 } else {
                     toast("${resolveVariantLabel(variant)} 已是最新版本")
                 }
@@ -1114,8 +1145,18 @@ class CompatModeActivity : AppCompatActivity() {
 
     private fun canOperateVariant(variant: ApiVariant): Boolean {
         if (variant != ApiVariant.Custom) return true
-        if (graph.settingsRepository.customRepo.value.trim().isNotBlank()) return true
-        toast("自定义版未配置仓库，请先输入仓库地址")
+        val source = resolveCustomCoreSource(
+            repoInput = graph.settingsRepository.customRepo.value,
+            branchInput = graph.settingsRepository.customRepoBranch.value
+        )
+        if (source.isValidRepo) return true
+        toast(
+            if (source.isConfigured) {
+                "${resolveVariantLabel(ApiVariant.Custom)} 仓库格式无效，请检查后重试"
+            } else {
+                "${resolveVariantLabel(ApiVariant.Custom)} 未配置仓库，请先输入仓库地址"
+            }
+        )
         return false
     }
 
@@ -1229,20 +1270,23 @@ class CompatModeActivity : AppCompatActivity() {
         return when {
             info == null -> if (isCoreInfoLoading) "读取中" else "未知"
             !info.isInstalled -> "未安装"
-            info.hasUpdate && !info.version.isNullOrBlank() && !info.latestVersion.isNullOrBlank() ->
-                "v${info.version} → v${info.latestVersion}"
-            !info.version.isNullOrBlank() -> "v${info.version}"
+            info.hasVersionUpdate && !info.version.isNullOrBlank() ->
+                formatCoreVersionTransition(info.version, info.availableVersion)
+            !info.version.isNullOrBlank() -> formatCoreVersionTransition(info.version, null)
             else -> "版本未知"
         }
     }
 
     private fun resolveVariantLabel(variant: ApiVariant): String {
-        val displayName = graph.settingsRepository.customRepoDisplayName.value.trim()
-        return if (variant == ApiVariant.Custom && displayName.isNotBlank()) displayName else variant.label
+        return graph.settingsRepository.coreDisplayNames.value.resolve(variant)
     }
 
-    private fun resolveVariantRepo(variant: ApiVariant): String {
-        return if (variant == ApiVariant.Custom) graph.settingsRepository.customRepo.value.trim() else variant.repo
+    private fun resolveVariantSource(variant: ApiVariant): String {
+        return resolveCoreVariantSourceText(
+            variant = variant,
+            customRepo = graph.settingsRepository.customRepo.value,
+            customBranch = graph.settingsRepository.customRepoBranch.value
+        )
     }
 
     private fun resolveSyncHost(state: RuntimeState): String {

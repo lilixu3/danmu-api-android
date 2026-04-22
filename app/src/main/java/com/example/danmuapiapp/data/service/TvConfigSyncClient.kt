@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.os.Build
+import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
@@ -66,6 +67,7 @@ class TvConfigSyncClient @Inject constructor(
     private fun buildPayload(): TvConfigSyncPayload {
         val runtime = runtimeRepository.runtimeState.value
         val envContent = envConfigRepository.rawContent.value.ifBlank { "# DanmuApiApp .env\n" }
+        val displayNames = settingsRepository.coreDisplayNames.value
         return TvConfigSyncPayload(
             sourceDeviceName = buildDeviceName(),
             sentAtEpochMs = System.currentTimeMillis(),
@@ -78,7 +80,10 @@ class TvConfigSyncClient @Inject constructor(
             settings = TvConfigSyncSettings(
                 githubProxy = settingsRepository.githubProxy.value,
                 githubToken = settingsRepository.githubToken.value,
+                stableRepoDisplayName = displayNames.stable,
+                devRepoDisplayName = displayNames.dev,
                 customRepo = settingsRepository.customRepo.value,
+                customRepoBranch = settingsRepository.customRepoBranch.value,
                 customRepoDisplayName = settingsRepository.customRepoDisplayName.value
             )
         )

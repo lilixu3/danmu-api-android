@@ -7,6 +7,7 @@ import android.os.FileObserver
 import android.os.Looper
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.service.CoreVersionParser
+import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
@@ -14,14 +15,19 @@ import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
+import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.*
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
@@ -31,7 +37,9 @@ import javax.inject.Singleton
 class CoreRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient,
-    private val githubRemoteService: GithubRemoteService
+    private val githubRemoteService: GithubRemoteService,
+    private val githubProxyService: GithubProxyService,
+    private val settingsRepository: SettingsRepository
 ) : CoreRepository {
 
     companion object {
@@ -40,9 +48,29 @@ class CoreRepositoryImpl @Inject constructor(
         private const val WORK_DIR_PREFS = "danmu_work_dir"
         private const val WORK_DIR_KEY_CUSTOM_BASE_PATH = "custom_path"
         private const val RUNTIME_PREFS = "runtime"
+        private const val CORE_SOURCE_METADATA_FILE = ".danmuapiapp-core-source.json"
     }
 
-    private val settingsPrefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    @Serializable
+    private data class CoreSourceMetadata(
+        val repo: String = "",
+        val branch: String = "",
+        val commitSha: String = "",
+        val commitPublishedAt: String = "",
+        val versionLabel: String = ""
+    )
+
+    private data class CoreRemoteSource(
+        val release: GithubRelease,
+        val metadata: CoreSourceMetadata? = null
+    )
+
+    private data class BranchHeadInfo(
+        val sha: String,
+        val publishedAt: String,
+        val title: String
+    )
+
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
@@ -82,6 +110,14 @@ class CoreRepositoryImpl @Inject constructor(
     init {
         workDirPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
         runtimePrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
+        repoScope.launch {
+            settingsRepository.customCoreSource
+                .map { it.repo to it.branch }
+                .distinctUntilChanged()
+                .collect {
+                    refreshCoreInfo()
+                }
+        }
         ensureCoreDirWatcher(currentRunMode())
         refreshCoreInfo()
     }
@@ -100,6 +136,19 @@ class CoreRepositoryImpl @Inject constructor(
         return hasValidCore(variant, mode)
     }
 
+    override fun isCoreReady(variant: ApiVariant): Boolean {
+        val cached = _coreInfoList.value.find { it.variant == variant }
+        if (cached?.isReady == true) return true
+
+        val isMainThread = Looper.myLooper() == Looper.getMainLooper()
+        val mode = currentRunMode()
+        if (mode != RunMode.Normal && isMainThread) {
+            refreshCoreInfo()
+            return cached?.isReady == true
+        }
+        return loadCoreState(variant, mode).info.isReady
+    }
+
     override fun refreshCoreInfo() {
         refreshAllJob?.cancel()
         if (!hasLoadedCoreInfoOnce) {
@@ -111,22 +160,13 @@ class CoreRepositoryImpl @Inject constructor(
                 val mode = currentRunMode()
                 ensureCoreDirWatcher(mode)
                 val previous = _coreInfoList.value
-                val refreshed = ApiVariant.entries.map { loadCoreInfo(it, mode) }
-                val merged = refreshed.map { newInfo ->
-                    val prev = previous.find { it.variant == newInfo.variant }
-                    if (prev != null && prev.hasUpdate && !prev.latestVersion.isNullOrBlank()) {
-                        val localVer = newInfo.version?.removePrefix("v")?.trim().orEmpty()
-                        val remoteVer = prev.latestVersion.removePrefix("v").trim()
-                        val stillHasUpdate = localVer.isBlank() || remoteVer.isBlank() ||
-                            compareVersions(remoteVer, localVer) > 0
-                        if (stillHasUpdate) {
-                            newInfo.copy(hasUpdate = true, latestVersion = prev.latestVersion)
-                        } else {
-                            newInfo
-                        }
-                    } else {
-                        newInfo
-                    }
+                val refreshed = ApiVariant.entries.map { loadCoreState(it, mode) }
+                val merged = refreshed.map { state ->
+                    mergeVersionUpdateState(
+                        previousInfo = previous.find { it.variant == state.info.variant },
+                        refreshedInfo = state.info,
+                        refreshedMetadata = state.localMetadata
+                    )
                 }
                 _coreInfoList.value = merged
             } finally {
@@ -138,19 +178,75 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun loadCoreInfo(variant: ApiVariant, mode: RunMode): CoreInfo {
+    private data class LoadedCoreState(
+        val info: CoreInfo,
+        val localMetadata: CoreSourceMetadata?
+    )
+
+    private fun loadCoreState(variant: ApiVariant, mode: RunMode): LoadedCoreState {
         val location = getCoreLocation(variant, mode)
         if (mode == RunMode.Normal) {
             NodeProjectManager.normalizeCoreLayout(location.normalDir)
         }
         val installed = hasValidCore(variant, mode)
         val version = if (installed) readLocalCoreVersion(variant, mode) else null
+        val localMetadata = if (installed) readLocalCoreSourceMetadata(variant, mode) else null
+        val desiredSourceText = if (variant == ApiVariant.Custom && installed) buildDesiredCustomSourceText() else ""
+        val sourceMismatch = if (variant == ApiVariant.Custom && installed) {
+            isCustomSourceMismatch(
+                localMetadata = localMetadata,
+                desiredRepo = resolveRepo(variant),
+                desiredBranch = resolveBranch(variant)
+            )
+        } else {
+            false
+        }
 
-        return CoreInfo(
-            variant = variant,
-            version = version,
-            isInstalled = installed
+        return LoadedCoreState(
+            info = CoreInfo(
+                variant = variant,
+                version = version,
+                isInstalled = installed,
+                sourceMismatch = sourceMismatch,
+                desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch }
+            ),
+            localMetadata = localMetadata
         )
+    }
+
+    private fun mergeVersionUpdateState(
+        previousInfo: CoreInfo?,
+        refreshedInfo: CoreInfo,
+        refreshedMetadata: CoreSourceMetadata?
+    ): CoreInfo {
+        if (previousInfo == null ||
+            previousInfo.hasVersionUpdate.not() ||
+            previousInfo.availableVersion.isNullOrBlank() ||
+            refreshedInfo.isInstalled.not() ||
+            refreshedInfo.sourceMismatch
+        ) {
+            return refreshedInfo
+        }
+
+        val previousAvailable = parseAvailableVersionLabel(previousInfo.availableVersion)
+        val localVersion = refreshedInfo.version?.removePrefix("v")?.trim().orEmpty()
+        val localSha = refreshedMetadata?.commitSha?.trim().orEmpty()
+        val stillHasUpdate = when {
+            previousAvailable.commitSha.isNotBlank() && localSha.isNotBlank() ->
+                commitShasEquivalent(previousAvailable.commitSha, localSha).not()
+            previousAvailable.commitSha.isNotBlank() -> true
+            localVersion.isBlank() || previousAvailable.version.isBlank() ->
+                true
+            else -> compareVersions(previousAvailable.version, localVersion) > 0
+        }
+        return if (stillHasUpdate) {
+            refreshedInfo.copy(
+                hasVersionUpdate = true,
+                availableVersion = previousInfo.availableVersion
+            )
+        } else {
+            refreshedInfo
+        }
     }
 
     private data class CoreLocation(
@@ -217,40 +313,165 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun fetchVersionFromGlobals(repo: String): String? = githubRemoteService.fetchVersionFromGlobals(repo)
+    private fun fetchVersionFromGlobals(
+        repo: String,
+        branches: List<String> = defaultBranchCandidates()
+    ): String? = githubRemoteService.fetchVersionFromGlobals(repo, branches)
+
+    private fun defaultBranchCandidates(): List<String> = listOf("main", "master")
 
     override suspend fun checkUpdate(variant: ApiVariant): GithubRelease? =
         withContext(Dispatchers.IO) {
-            val repo = resolveRepo(variant)
-            if (repo.isBlank()) return@withContext null
             try {
-                // 优先走 release；失败时回退到 main 分支直链，兼容无 release/限流场景。
-                fetchLatestRelease(repo) ?: run {
-                    val version = fetchVersionFromGlobals(repo) ?: "main"
-                    GithubRelease(
-                        tagName = version,
-                        name = version,
-                        body = "",
-                        publishedAt = "",
-                        zipballUrl = "https://github.com/$repo/archive/refs/heads/main.zip"
-                    )
-                }
+                resolveRemoteSource(variant)?.release
             } catch (_: Exception) {
                 null
             }
         }
 
+    private fun currentCustomCoreSource(): ResolvedCustomCoreSource = settingsRepository.customCoreSource.value
+
     private fun resolveRepo(variant: ApiVariant): String {
-        if (variant == ApiVariant.Custom) {
-            val direct = settingsPrefs.getString("custom_repo", "")?.trim().orEmpty()
-            if (direct.isNotBlank()) return direct
-            val legacy = context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
-            val owner = legacy.getString("custom_owner", "")?.trim().orEmpty()
-            val repo = legacy.getString("custom_repo", "")?.trim().orEmpty()
-            if (owner.isNotBlank() && repo.isNotBlank()) return "$owner/$repo"
-            return repo
+        return if (variant == ApiVariant.Custom) currentCustomCoreSource().repo else variant.repo
+    }
+
+    private fun resolveBranch(variant: ApiVariant): String? {
+        return if (variant == ApiVariant.Custom) {
+            currentCustomCoreSource().branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
+        } else {
+            null
         }
-        return variant.repo
+    }
+
+    private fun resolveBranchCandidates(variant: ApiVariant): List<String> {
+        return if (variant == ApiVariant.Custom) {
+            listOf(resolveBranch(variant) ?: DEFAULT_CUSTOM_CORE_BRANCH)
+        } else {
+            defaultBranchCandidates()
+        }
+    }
+
+    private fun resolveRemoteSource(variant: ApiVariant): CoreRemoteSource? {
+        val repo = resolveRepo(variant)
+        if (repo.isBlank()) return null
+
+        val branch = resolveBranch(variant)
+        if (!branch.isNullOrBlank()) {
+            return fetchBranchRemoteSource(repo, branch)
+                ?: throw IOException("未找到分支 $branch，请检查仓库与分支名")
+        }
+
+        fetchLatestRelease(repo)?.let { return CoreRemoteSource(release = it) }
+
+        resolveBranchCandidates(variant).forEach { candidate ->
+            fetchBranchRemoteSource(repo, candidate)?.let { return it }
+        }
+        return null
+    }
+
+    private fun fetchBranchRemoteSource(repo: String, branch: String): CoreRemoteSource? {
+        val resolvedBranch = resolveRemoteBranchName(repo, branch) ?: return null
+        val versionLabel = fetchVersionFromGlobals(repo, listOf(resolvedBranch)).orEmpty()
+        val head = fetchBranchHead(repo, resolvedBranch) ?: return null
+
+        val shortSha = head.sha.take(7)
+        val branchTag = versionLabel.ifBlank { shortSha.ifBlank { resolvedBranch } }
+        val branchName = buildString {
+            append(resolvedBranch)
+            if (shortSha.isNotBlank()) {
+                append(" @ ")
+                append(shortSha)
+            }
+        }
+        return CoreRemoteSource(
+            release = GithubRelease(
+                tagName = branchTag,
+                name = branchName,
+                body = head.title,
+                publishedAt = head.publishedAt,
+                zipballUrl = buildBranchZipUrl(repo, resolvedBranch)
+            ),
+            metadata = CoreSourceMetadata(
+                repo = repo,
+                branch = resolvedBranch,
+                commitSha = head.sha,
+                commitPublishedAt = head.publishedAt,
+                versionLabel = versionLabel.ifBlank { branchTag }
+            )
+        )
+    }
+
+    private fun resolveRemoteBranchName(repo: String, requestedBranch: String): String? {
+        val normalized = requestedBranch.trim()
+            .removePrefix("refs/heads/")
+            .trim()
+            .trim('/')
+        if (normalized.isBlank()) return null
+
+        if (fetchBranchHead(repo, normalized) != null) return normalized
+        if (!fetchVersionFromGlobals(repo, listOf(normalized)).isNullOrBlank()) return normalized
+        if (normalized.contains('/')) return null
+
+        val branches = fetchBranchList(repo)
+        val direct = branches.firstOrNull { it.equals(normalized, ignoreCase = true) }
+        if (direct != null) return direct
+
+        val suffixMatches = branches.filter { branchName ->
+            branchName.substringAfterLast('/').equals(normalized, ignoreCase = true) ||
+                branchName.endsWith("/$normalized", ignoreCase = true)
+        }
+        return suffixMatches.singleOrNull()
+    }
+
+    private fun fetchBranchList(repo: String): List<String> {
+        return requestMapped(
+            urls = apiUrlCandidates("repos/$repo/branches?per_page=100"),
+            headers = mapOf(
+                "Accept" to "application/vnd.github+json",
+                "User-Agent" to USER_AGENT
+            )
+        ) { body ->
+            val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray
+                ?: return@requestMapped null
+            root.mapNotNull { element ->
+                ((element as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
+                    ?.takeIf { it.isNotBlank() }
+            }.takeIf { it.isNotEmpty() }
+        } ?: emptyList()
+    }
+
+    private fun fetchBranchHead(repo: String, branch: String): BranchHeadInfo? {
+        val encodedBranch = encodeUrlPart(branch)
+        return requestMapped(
+            urls = apiUrlCandidates("repos/$repo/commits/$encodedBranch"),
+            headers = mapOf(
+                "Accept" to "application/vnd.github+json",
+                "User-Agent" to USER_AGENT
+            )
+        ) { body ->
+            val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
+                ?: return@requestMapped null
+            val sha = (root["sha"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            if (sha.isBlank()) return@requestMapped null
+            val commitObj = root["commit"] as? JsonObject
+            val message = (commitObj?.get("message") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            val title = message.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "提交 ${sha.take(7)}" }
+            val authorObj = commitObj?.get("author") as? JsonObject
+            val publishedAt = (authorObj?.get("date") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            BranchHeadInfo(
+                sha = sha,
+                publishedAt = publishedAt,
+                title = title
+            )
+        }
+    }
+
+    private fun encodeUrlPart(raw: String): String {
+        return URLEncoder.encode(raw, Charsets.UTF_8.name()).replace("+", "%20")
+    }
+
+    private fun buildBranchZipUrl(repo: String, branch: String): String {
+        return "https://api.github.com/repos/$repo/zipball/${encodeUrlPart(branch)}"
     }
 
     override suspend fun installCore(variant: ApiVariant): Result<Unit> =
@@ -280,15 +501,42 @@ class CoreRepositoryImpl @Inject constructor(
             try {
                 val info = _coreInfoList.value.find { it.variant == variant } ?: return@withContext
                 if (!info.isInstalled) return@withContext
-                val release = checkUpdate(variant) ?: return@withContext
-                val remoteVersion = release.tagName.removePrefix("v").trim()
-                    .ifBlank { release.name.removePrefix("v").trim() }
-                if (remoteVersion.isBlank()) return@withContext
+                val remoteSource = resolveRemoteSource(variant) ?: return@withContext
+                val remoteVersion = remoteSource.metadata?.versionLabel
+                    ?.removePrefix("v")
+                    ?.trim()
+                    .orEmpty()
+                    .ifBlank {
+                        remoteSource.release.tagName.removePrefix("v").trim()
+                            .ifBlank { remoteSource.release.name.removePrefix("v").trim() }
+                    }
                 val localVersion = info.version?.removePrefix("v")?.trim().orEmpty()
-                val hasUpdate = remoteVersion.isNotBlank() && localVersion.isNotBlank() &&
-                    compareVersions(remoteVersion, localVersion) > 0
+                val localMetadata = readLocalCoreSourceMetadata(variant, currentRunMode())
+                val remoteSha = remoteSource.metadata?.commitSha?.trim().orEmpty()
+                val localSha = localMetadata?.commitSha?.trim().orEmpty()
+                val sourceMismatch = isCustomSourceMismatch(
+                    localMetadata = localMetadata,
+                    desiredRepo = resolveRepo(variant),
+                    desiredBranch = resolveBranch(variant)
+                )
+                val hasVersionUpdate = when {
+                    sourceMismatch -> false
+                    remoteSha.isNotBlank() && localSha.isNotBlank() -> !commitShasEquivalent(remoteSha, localSha)
+                    remoteVersion.isNotBlank() && localVersion.isNotBlank() ->
+                        compareVersions(remoteVersion, localVersion) > 0
+                    else -> false
+                }
+                val availableVersionLabel = buildLatestVersionLabel(remoteVersion, remoteSha)
+                val desiredSource = buildDesiredCustomSourceText().ifBlank { null }
                 _coreInfoList.value = _coreInfoList.value.map {
-                    if (it.variant == variant) it.copy(latestVersion = remoteVersion, hasUpdate = hasUpdate)
+                    if (it.variant == variant) {
+                        it.copy(
+                            availableVersion = availableVersionLabel.ifBlank { null }.takeIf { hasVersionUpdate },
+                            hasVersionUpdate = hasVersionUpdate,
+                            sourceMismatch = sourceMismatch,
+                            desiredSource = desiredSource.takeIf { sourceMismatch }
+                        )
+                    }
                     else it
                 }
             } catch (_: Exception) {}
@@ -309,7 +557,13 @@ class CoreRepositoryImpl @Inject constructor(
                 val versionHint = release.tagName.ifBlank {
                     release.name.ifBlank { "" }
                 }.ifBlank { null }
-                downloadAndExtract(variant, release.zipballUrl, versionHint, actionLabel = "回退")
+                downloadAndExtract(
+                    variant = variant,
+                    zipUrl = release.zipballUrl,
+                    versionHint = versionHint,
+                    actionLabel = "回退",
+                    sourceMetadata = buildRollbackMetadata(variant, release, versionHint)
+                )
                 refreshCoreInfo()
                 Result.success(Unit)
             } catch (e: Exception) {
@@ -322,7 +576,7 @@ class CoreRepositoryImpl @Inject constructor(
             val repo = resolveRepo(variant)
             if (repo.isBlank()) return@withContext emptyList()
             try {
-                val commitHistory = fetchCommitHistory(repo)
+                val commitHistory = fetchCommitHistory(repo, resolveBranchCandidates(variant))
                 if (commitHistory.isNotEmpty()) return@withContext commitHistory
 
                 fetchReleaseHistoryFromReleases(repo)
@@ -331,10 +585,14 @@ class CoreRepositoryImpl @Inject constructor(
             }
         }
 
-    private fun fetchCommitHistory(repo: String): List<GithubRelease> {
+    private fun fetchCommitHistory(
+        repo: String,
+        branchCandidates: List<String>
+    ): List<GithubRelease> {
         val urls = buildList {
-            addAll(apiUrlCandidates("repos/$repo/commits?sha=main&per_page=20"))
-            addAll(apiUrlCandidates("repos/$repo/commits?sha=master&per_page=20"))
+            branchCandidates.forEach { branch ->
+                addAll(apiUrlCandidates("repos/$repo/commits?sha=${encodeUrlPart(branch)}&per_page=20"))
+            }
             addAll(apiUrlCandidates("repos/$repo/commits?per_page=20"))
         }.distinct()
 
@@ -354,7 +612,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
         if (!result.isNullOrEmpty()) return result
 
-        return fetchCommitHistoryFromAtom(repo)
+        return fetchCommitHistoryFromAtom(repo, branchCandidates)
     }
 
     private fun parseCommitAsRelease(repo: String, obj: JsonObject): GithubRelease? {
@@ -373,7 +631,7 @@ class CoreRepositoryImpl @Inject constructor(
             name = title,
             body = message,
             publishedAt = publishedAt,
-            zipballUrl = "https://github.com/$repo/archive/$sha.zip"
+            zipballUrl = "https://api.github.com/repos/$repo/zipball/$sha"
         )
     }
 
@@ -394,11 +652,13 @@ class CoreRepositoryImpl @Inject constructor(
         } ?: emptyList()
     }
 
-    private fun fetchCommitHistoryFromAtom(repo: String): List<GithubRelease> {
-        val branchCandidates = listOf("main", "master")
+    private fun fetchCommitHistoryFromAtom(
+        repo: String,
+        branchCandidates: List<String>
+    ): List<GithubRelease> {
         for (branch in branchCandidates) {
             val parsed = requestMapped(
-                urls = withProxyCandidates("https://github.com/$repo/commits/$branch.atom"),
+                urls = withProxyCandidates("https://github.com/$repo/commits/${encodeUrlPart(branch)}.atom"),
                 headers = mapOf(
                     "Accept" to "application/atom+xml,application/xml,text/xml,*/*",
                     "User-Agent" to USER_AGENT
@@ -431,7 +691,7 @@ class CoreRepositoryImpl @Inject constructor(
                 name = title,
                 body = title,
                 publishedAt = publishedAt,
-                zipballUrl = "https://github.com/$repo/archive/$sha.zip"
+                zipballUrl = "https://api.github.com/repos/$repo/zipball/$sha"
             )
         }.toList()
     }
@@ -476,17 +736,153 @@ class CoreRepositoryImpl @Inject constructor(
         } catch (_: Exception) { null }
     }
 
+    private fun buildLatestVersionLabel(
+        versionLabel: String,
+        commitSha: String
+    ): String {
+        val normalizedVersion = versionLabel.trim()
+        val shortSha = commitSha.trim().takeIf { it.isNotBlank() }?.take(7).orEmpty()
+        return when {
+            normalizedVersion.isNotBlank() && shortSha.isNotBlank() -> "$normalizedVersion@$shortSha"
+            normalizedVersion.isNotBlank() -> normalizedVersion
+            shortSha.isNotBlank() -> shortSha
+            else -> ""
+        }
+    }
+
+    private data class AvailableVersionLabel(
+        val version: String = "",
+        val commitSha: String = ""
+    )
+
+    private fun parseAvailableVersionLabel(value: String?): AvailableVersionLabel {
+        val trimmed = value?.trim().orEmpty()
+        if (trimmed.isBlank()) return AvailableVersionLabel()
+        val version = trimmed.substringBefore('@').trim()
+        val commitSha = trimmed.substringAfter('@', "").trim()
+        return AvailableVersionLabel(
+            version = version.removePrefix("v").trim(),
+            commitSha = commitSha
+        )
+    }
+
+    private fun commitShasEquivalent(left: String, right: String): Boolean {
+        val normalizedLeft = left.trim().lowercase()
+        val normalizedRight = right.trim().lowercase()
+        if (normalizedLeft.isBlank() || normalizedRight.isBlank()) return false
+        return normalizedLeft == normalizedRight ||
+            normalizedLeft.startsWith(normalizedRight) ||
+            normalizedRight.startsWith(normalizedLeft)
+    }
+
+    private fun buildRollbackMetadata(
+        variant: ApiVariant,
+        release: GithubRelease,
+        versionHint: String?
+    ): CoreSourceMetadata? {
+        val branch = resolveBranch(variant) ?: return null
+        val repo = resolveRepo(variant)
+        if (repo.isBlank()) return null
+        val commitSha = extractArchiveCommitSha(release.zipballUrl).orEmpty()
+        return CoreSourceMetadata(
+            repo = repo,
+            branch = branch,
+            commitSha = commitSha,
+            commitPublishedAt = release.publishedAt,
+            versionLabel = versionHint.orEmpty()
+        )
+    }
+
+    private fun extractArchiveCommitSha(zipUrl: String): String? {
+        val match = Regex("""/(?:archive|zipball)/([0-9a-fA-F]{7,40})(?:\.zip)?""").find(zipUrl)
+        return match?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun buildDesiredCustomSourceText(): String {
+        return currentCustomCoreSource()
+            .takeIf { it.isValidRepo }
+            ?.sourceText
+            .orEmpty()
+    }
+
+    private fun isCustomSourceMismatch(
+        localMetadata: CoreSourceMetadata?,
+        desiredRepo: String,
+        desiredBranch: String?
+    ): Boolean {
+        if (desiredRepo.isBlank()) return false
+        val localRepo = normalizeGithubRepo(localMetadata?.repo)
+        val localBranch = normalizeGithubBranch(localMetadata?.branch)
+        val targetBranch = normalizeGithubBranch(desiredBranch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
+        return localRepo.isBlank() ||
+            !localRepo.equals(desiredRepo, ignoreCase = true) ||
+            localBranch.isBlank() ||
+            !branchesEquivalent(localBranch, targetBranch)
+    }
+
+    private fun branchesEquivalent(localBranch: String, desiredBranch: String): Boolean {
+        if (localBranch.equals(desiredBranch, ignoreCase = true)) return true
+        if (!desiredBranch.contains('/')) {
+            return localBranch.substringAfterLast('/').equals(desiredBranch, ignoreCase = true) ||
+                localBranch.endsWith("/$desiredBranch", ignoreCase = true)
+        }
+        return false
+    }
+
+    private fun metadataFile(coreDir: File): File = File(coreDir, CORE_SOURCE_METADATA_FILE)
+
+    private fun writeCoreSourceMetadata(
+        coreDir: File,
+        metadata: CoreSourceMetadata?
+    ) {
+        val file = metadataFile(coreDir)
+        if (metadata == null || (metadata.repo.isBlank() && metadata.branch.isBlank() && metadata.commitSha.isBlank())) {
+            runCatching { file.delete() }
+            return
+        }
+        runCatching {
+            file.writeText(json.encodeToString(metadata), Charsets.UTF_8)
+        }
+    }
+
+    private fun readLocalCoreSourceMetadata(
+        variant: ApiVariant,
+        mode: RunMode
+    ): CoreSourceMetadata? {
+        val location = getCoreLocation(variant, mode)
+        val candidates = buildList {
+            add(metadataFile(location.normalDir))
+            if (mode != RunMode.Normal) {
+                add(File(location.rootDirPath, CORE_SOURCE_METADATA_FILE))
+            }
+        }
+        return candidates.firstNotNullOfOrNull { file ->
+            if (!file.exists() || !file.isFile) return@firstNotNullOfOrNull null
+            runCatching {
+                json.decodeFromString<CoreSourceMetadata>(file.readText(Charsets.UTF_8))
+            }.getOrNull()
+        }
+    }
+
     private suspend fun installOrUpdateCore(
         variant: ApiVariant,
         actionLabel: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val release = checkUpdate(variant)
+            val remoteSource = resolveRemoteSource(variant)
                 ?: return@withContext Result.failure(Exception("无法获取版本信息"))
-            val versionHint = release.tagName.ifBlank {
+            val release = remoteSource.release
+            val versionHint = remoteSource.metadata?.versionLabel?.ifBlank { null } ?: release.tagName.ifBlank {
                 release.name.ifBlank { "" }
             }.ifBlank { null }
-            downloadAndExtract(variant, release.zipballUrl, versionHint, actionLabel)
+            downloadAndExtract(
+                variant = variant,
+                zipUrl = release.zipballUrl,
+                versionHint = versionHint,
+                actionLabel = actionLabel,
+                sourceMetadata = remoteSource.metadata
+            )
+            persistResolvedCustomSourceIfNeeded(variant, remoteSource.metadata)
             refreshCoreInfo()
             Result.success(Unit)
         } catch (e: Exception) {
@@ -494,11 +890,32 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun persistResolvedCustomSourceIfNeeded(
+        variant: ApiVariant,
+        metadata: CoreSourceMetadata?
+    ) {
+        if (variant != ApiVariant.Custom || metadata == null) return
+        val normalizedRepo = normalizeGithubRepo(metadata.repo)
+        val normalizedBranch = normalizeGithubBranch(metadata.branch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
+        val currentRepo = resolveRepo(variant)
+        val currentBranch = resolveBranch(variant).orEmpty()
+        if (normalizedRepo.equals(currentRepo, ignoreCase = true) &&
+            normalizedBranch.equals(currentBranch, ignoreCase = true)
+        ) {
+            return
+        }
+        settingsRepository.saveCustomCoreSource(
+            repoInput = normalizedRepo,
+            branchInput = normalizedBranch
+        )
+    }
+
     private fun downloadAndExtract(
         variant: ApiVariant,
         zipUrl: String,
         versionHint: String?,
-        actionLabel: String
+        actionLabel: String,
+        sourceMetadata: CoreSourceMetadata? = null
     ) {
         val mode = currentRunMode()
         val location = getCoreLocation(variant, mode)
@@ -517,21 +934,29 @@ class CoreRepositoryImpl @Inject constructor(
         )
 
         try {
-            val response = withProxyCandidates(zipUrl).asSequence().mapNotNull { url ->
+            val candidateUrls = buildDownloadUrlCandidates(zipUrl)
+            var lastFailureMessage: String? = null
+            val response = candidateUrls.asSequence().mapNotNull { url ->
                 try {
-                    val req = Request.Builder()
+                    val reqBuilder = Request.Builder()
                         .url(url)
                         .header("User-Agent", USER_AGENT)
-                        .build()
-                    val resp = httpClient.newCall(req).execute()
+                    githubProxyService.applyGithubAuth(reqBuilder, url)
+                    val resp = httpClient.newCall(reqBuilder.build()).execute()
                     if (resp.isSuccessful) resp else {
+                        lastFailureMessage = when (resp.code) {
+                            401, 403 -> "下载失败：GitHub 拒绝访问（HTTP ${resp.code}），请检查 Token、仓库权限或代理线路"
+                            404 -> "下载失败：仓库、分支或版本不存在（HTTP 404）"
+                            else -> "下载失败：GitHub 返回 HTTP ${resp.code}"
+                        }
                         resp.close()
                         null
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    lastFailureMessage = e.message ?: "下载失败：网络异常"
                     null
                 }
-            }.firstOrNull() ?: throw IOException("Download failed")
+            }.firstOrNull() ?: throw IOException(lastFailureMessage ?: "下载失败，请检查仓库、分支和 GitHub 线路")
 
             var lastBytes = 0L
             var totalBytes = -1L
@@ -592,6 +1017,7 @@ class CoreRepositoryImpl @Inject constructor(
 
             NodeProjectManager.normalizeCoreLayout(stagingDir)
             NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
+            writeCoreSourceMetadata(stagingDir, sourceMetadata)
 
             if (!NodeProjectManager.hasValidCore(stagingDir)) {
                 throw IOException("核心文件不完整，缺少关键入口文件")
@@ -621,6 +1047,15 @@ class CoreRepositoryImpl @Inject constructor(
             throw e
         } finally {
             _downloadProgress.value = CoreDownloadProgress()
+        }
+    }
+
+    private fun buildDownloadUrlCandidates(zipUrl: String): List<String> {
+        val preferDirectFirst = zipUrl.contains("://api.github.com/")
+        return if (preferDirectFirst) {
+            listOf(zipUrl).plus(withProxyCandidates(zipUrl)).distinct()
+        } else {
+            withProxyCandidates(zipUrl)
         }
     }
 

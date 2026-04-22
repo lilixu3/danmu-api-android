@@ -784,7 +784,7 @@ internal fun QuickTokenDialog(
 internal fun CoreUpdateConfirmDialog(
     variantLabel: String,
     currentVersion: String?,
-    latestVersion: String?,
+    availableVersion: String?,
     isChecking: Boolean,
     resultMessage: String?,
     resultIsError: Boolean,
@@ -832,17 +832,17 @@ internal fun CoreUpdateConfirmDialog(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "分支：$variantLabel",
+                        text = "核心：$variantLabel",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "当前版本：${currentVersion?.let { "v$it" } ?: "--"}",
+                        text = "当前版本：${com.example.danmuapiapp.domain.model.formatCoreVersionValue(currentVersion)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "远程版本：${latestVersion?.let { "v$it" } ?: "待查询"}",
+                        text = "远程版本：${availableVersion?.let { com.example.danmuapiapp.domain.model.formatCoreVersionValue(it) } ?: "待查询"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )

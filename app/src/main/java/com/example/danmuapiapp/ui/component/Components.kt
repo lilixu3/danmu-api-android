@@ -152,8 +152,11 @@ fun GradientButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: List<Color> = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary),
-    disabledColors: List<Color> = listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surfaceVariant)
+    colors: List<Color> = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary),
+    disabledColors: List<Color> = listOf(
+        MaterialTheme.colorScheme.surfaceContainerHighest,
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    )
 ) {
     Button(
         onClick = onClick, modifier = modifier.height(52.dp), enabled = enabled,
@@ -169,7 +172,15 @@ fun GradientButton(
             ),
             contentAlignment = Alignment.Center
         ) {
-            Text(text, style = MaterialTheme.typography.labelLarge, color = if (enabled) Color.White else Color.White.copy(alpha = 0.6f))
+            Text(
+                text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) {
+                    Color.White
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
+                }
+            )
         }
     }
 }

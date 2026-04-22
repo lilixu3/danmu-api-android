@@ -742,9 +742,9 @@ class RuntimeRepositoryImpl @Inject constructor(
                         NodeProjectManager.hasValidCore(File(projectDir, "danmu_api_${variant.key}"))
                     }
                     val reason = if (fallback != null && fallback != state.variant) {
-                        "当前核心 ${state.variant.label} 未安装，可先切换到 ${fallback.label} 或下载后再启动"
+                        "当前核心 ${settingsRepository.coreDisplayNames.value.resolve(state.variant)} 未安装，可先切换到 ${settingsRepository.coreDisplayNames.value.resolve(fallback)} 或下载后再启动"
                     } else {
-                        "当前核心 ${state.variant.label} 未安装，请先下载核心后再启动"
+                        "当前核心 ${settingsRepository.coreDisplayNames.value.resolve(state.variant)} 未安装，请先下载核心后再启动"
                     }
                     markError(reason)
                     addLog(LogLevel.Error, reason)

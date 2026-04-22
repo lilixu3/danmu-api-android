@@ -24,7 +24,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubRelease
+import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
+import com.example.danmuapiapp.domain.model.resolveCoreVariantRepo
+import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
+import com.example.danmuapiapp.ui.common.CustomCoreSettingsForm
+import com.example.danmuapiapp.ui.common.rememberCustomCoreSettingsFormState
 import com.example.danmuapiapp.ui.component.GlassCard
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
@@ -37,8 +43,9 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
-    val customRepoDisplayName by viewModel.customRepoDisplayName.collectAsStateWithLifecycle()
+    val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val activeVariant = runtimeState.variant
 
@@ -91,33 +98,8 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
                             selected = activeVariant == variant,
                             onClick = { viewModel.updateVariant(variant) },
                             shape = SegmentedButtonDefaults.itemShape(index, ApiVariant.entries.size)
-                        ) { Text(resolveVariantLabel(variant, customRepoDisplayName)) }
+                        ) { Text(coreDisplayNames.resolve(variant)) }
                     }
-                }
-            }
-
-            AnimatedVisibility(visible = activeVariant == ApiVariant.Custom) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = customRepoDisplayName,
-                        onValueChange = { viewModel.updateCustomRepoDisplayName(it) },
-                        label = { Text("自定义名称") },
-                        placeholder = { Text("例如：追剧版") },
-                        leadingIcon = { Icon(Icons.Rounded.Edit, null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = customRepo,
-                        onValueChange = { viewModel.updateCustomRepo(it) },
-                        label = { Text("自定义仓库") },
-                        placeholder = { Text("owner/repo") },
-                        leadingIcon = { Icon(Icons.Rounded.Tune, null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
 
@@ -128,21 +110,35 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
                     vm = viewModel,
                     downloadProgress = downloadProgress,
                     customRepo = customRepo,
-                    customRepoDisplayName = customRepoDisplayName
+                    customRepoBranch = customRepoBranch,
+                    coreDisplayNames = coreDisplayNames
                 )
             }
         }
     }
 
     if (viewModel.showUpdateDialog) {
-        UpdateResultDialog(viewModel, customRepoDisplayName)
+        UpdateResultDialog(viewModel, coreDisplayNames)
     }
     if (viewModel.showRollbackDialog) {
         RollbackDialog(viewModel.rollbackVariant, viewModel.releaseHistory,
             viewModel.isLoadingHistory, viewModel::rollbackTo, viewModel::dismissRollbackDialog)
     }
-    if (viewModel.showCustomRepoDialog) {
-        CustomRepoDialog(customRepo, viewModel::saveCustomRepo, viewModel::dismissCustomRepoDialog)
+    viewModel.showVariantSettingsDialog?.let { variant ->
+        VariantSettingsDialog(
+            variant = variant,
+            currentDisplayName = when (variant) {
+                ApiVariant.Stable -> coreDisplayNames.stable
+                ApiVariant.Dev -> coreDisplayNames.dev
+                ApiVariant.Custom -> coreDisplayNames.custom
+            },
+            currentRepo = customRepo,
+            currentBranch = customRepoBranch,
+            onSave = { displayName, repo, branch ->
+                viewModel.saveVariantSettings(variant, displayName, repo, branch)
+            },
+            onDismiss = viewModel::dismissVariantSettingsDialog
+        )
     }
     if (viewModel.showProxyPickerDialog) {
         GithubProxyPickerDialog(
@@ -167,14 +163,15 @@ private fun CoreVariantCard(
     vm: CoreViewModel,
     downloadProgress: CoreDownloadProgress,
     customRepo: String,
-    customRepoDisplayName: String
+    customRepoBranch: String,
+    coreDisplayNames: CoreVariantDisplayNames
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val showGearMenu = vm.showGearMenu == info.variant
     val isDownloadingThisCard = downloadProgress.inProgress && downloadProgress.variant == info.variant
     val dark = isSystemInDarkTheme()
-    val variantLabel = resolveVariantLabel(info.variant, customRepoDisplayName)
-    val variantRepo = resolveVariantRepo(info.variant, customRepo)
+    val variantLabel = coreDisplayNames.resolve(info.variant)
+    val variantSource = resolveCoreVariantSourceText(info.variant, customRepo, customRepoBranch)
 
     GlassCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -208,33 +205,36 @@ private fun CoreVariantCard(
                     }
                 }
                 if (info.version != null) {
-                    val versionText = if (info.hasUpdate && info.latestVersion != null)
-                        "v${info.version} → v${info.latestVersion}"
-                    else "v${info.version}"
+                    val versionText = if (info.hasVersionUpdate && info.availableVersion != null) {
+                        formatCoreVersionTransition(info.version, info.availableVersion)
+                    } else {
+                        formatCoreVersionTransition(info.version, null)
+                    }
                     Text(versionText, style = MaterialTheme.typography.bodySmall,
-                        color = if (info.hasUpdate) MaterialTheme.colorScheme.primary
+                        color = if (info.hasVersionUpdate) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (variantRepo.isNotBlank()) {
-                    Text(variantRepo, style = MaterialTheme.typography.labelSmall,
+                if (variantSource.isNotBlank()) {
+                    Text(variantSource, style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Surface(shape = RoundedCornerShape(8.dp),
                 color = when {
-                    info.hasUpdate -> MaterialTheme.colorScheme.primaryContainer
+                    info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
                     info.isInstalled -> MaterialTheme.colorScheme.primaryContainer
                     else -> MaterialTheme.colorScheme.surfaceContainerHighest
                 }) {
                 Text(
                     text = when {
-                        info.hasUpdate -> "有更新"
+                        info.sourceMismatch -> "需替换"
+                        info.hasVersionUpdate -> "有更新"
                         info.isInstalled -> "已安装"
                         else -> "未安装"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = when {
-                        info.hasUpdate -> MaterialTheme.colorScheme.primary
+                        info.needsAttention -> MaterialTheme.colorScheme.primary
                         info.isInstalled -> MaterialTheme.colorScheme.onPrimaryContainer
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -248,49 +248,63 @@ private fun CoreVariantCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!info.isInstalled) {
-                Button(
-                    onClick = { vm.installCore(info.variant) },
-                    enabled = !vm.isOperating && (info.variant.repo.isNotBlank() ||
-                        (info.variant == ApiVariant.Custom && customRepo.isNotBlank())),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 44.dp)
-                ) {
-                    Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("安装")
-                }
-                if (info.variant == ApiVariant.Custom && customRepo.isBlank()) {
-                    OutlinedButton(onClick = { vm.openCustomRepoDialog() },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.heightIn(min = 44.dp)) {
-                        Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("设置仓库")
-                    }
-                }
-            } else {
-                Box {
+            Box {
                 FilledTonalIconButton(
                     onClick = { vm.openGearMenu(info.variant) },
                     enabled = !vm.isOperating,
                     modifier = Modifier.size(44.dp),
                     colors = appTonalIconButtonColors()
                 ) {
-                    Icon(Icons.Rounded.Settings, "核心维护", Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Settings, "核心设置", Modifier.size(20.dp))
                 }
-                    DropdownMenu(expanded = showGearMenu, onDismissRequest = { vm.dismissGearMenu() }) {
-                        DropdownMenuItem(text = { Text("重装") }, onClick = { vm.reinstallCore(info.variant) },
-                            leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(20.dp)) })
-                        DropdownMenuItem(text = { Text("回退") }, onClick = { vm.openRollbackDialog(info.variant) },
-                            leadingIcon = { Icon(Icons.Rounded.History, null, Modifier.size(20.dp)) })
+                DropdownMenu(expanded = showGearMenu, onDismissRequest = { vm.dismissGearMenu() }) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(if (info.variant == ApiVariant.Custom) "编辑名称 / 仓库 / 分支" else "编辑显示名称")
+                        },
+                        onClick = { vm.openVariantSettingsDialog(info.variant) },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, null, Modifier.size(20.dp)) }
+                    )
+                    if (info.isInstalled) {
+                        DropdownMenuItem(
+                            text = { Text("重装") },
+                            onClick = { vm.reinstallCore(info.variant) },
+                            leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(20.dp)) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("回退") },
+                            onClick = { vm.openRollbackDialog(info.variant) },
+                            leadingIcon = { Icon(Icons.Rounded.History, null, Modifier.size(20.dp)) }
+                        )
                     }
                 }
+            }
+
+            if (!info.isInstalled) {
+                val needsCustomSource = info.variant == ApiVariant.Custom && variantSource.isBlank()
+                Button(
+                    onClick = {
+                        if (needsCustomSource) vm.openVariantSettingsDialog(info.variant)
+                        else vm.installCore(info.variant)
+                    },
+                    enabled = !vm.isOperating,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                ) {
+                    Icon(
+                        if (needsCustomSource) Icons.Rounded.Edit else Icons.Rounded.Download,
+                        null,
+                        Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (needsCustomSource) "配置来源" else "安装")
+                }
+            } else {
                 FilledTonalButton(
                     onClick = {
-                        if (info.hasUpdate) vm.doUpdate(info.variant)
+                        if (info.needsAttention) vm.doUpdate(info.variant)
                         else vm.checkUpdate(info.variant)
                     },
                     enabled = !vm.isOperating && !vm.isCheckingUpdate,
@@ -300,17 +314,23 @@ private fun CoreVariantCard(
                         .heightIn(min = 44.dp),
                     colors = appTonalButtonColors()
                 ) {
-                    if (!info.hasUpdate && vm.isCheckingUpdate) {
+                    if (!info.needsAttention && vm.isCheckingUpdate) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
                         Icon(
-                            if (info.hasUpdate) Icons.Rounded.SystemUpdate else Icons.Rounded.Update,
+                            if (info.needsAttention) Icons.Rounded.SystemUpdate else Icons.Rounded.Update,
                             null,
                             Modifier.size(18.dp)
                         )
                     }
                     Spacer(Modifier.width(6.dp))
-                    Text(if (info.hasUpdate) "点击更新" else "检查更新")
+                    Text(
+                        when {
+                            info.sourceMismatch -> "重新下载"
+                            info.hasVersionUpdate -> "点击更新"
+                            else -> "检查更新"
+                        }
+                    )
                 }
                 OutlinedButton(
                     onClick = { showDeleteConfirm = true },
@@ -386,18 +406,6 @@ private fun CoreVariantCard(
     }
 }
 
-private fun resolveVariantLabel(variant: ApiVariant, customRepoDisplayName: String): String {
-    return if (variant == ApiVariant.Custom && customRepoDisplayName.isNotBlank()) {
-        customRepoDisplayName
-    } else {
-        variant.label
-    }
-}
-
-private fun resolveVariantRepo(variant: ApiVariant, customRepo: String): String {
-    return if (variant == ApiVariant.Custom) customRepo else variant.repo
-}
-
 private fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
     val kb = 1024.0
@@ -412,7 +420,10 @@ private fun formatBytes(bytes: Long): String {
 }
 
 @Composable
-private fun UpdateResultDialog(vm: CoreViewModel, customRepoDisplayName: String) {
+private fun UpdateResultDialog(
+    vm: CoreViewModel,
+    coreDisplayNames: CoreVariantDisplayNames
+) {
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
     AppBottomSheetDialog(
@@ -421,27 +432,44 @@ private fun UpdateResultDialog(vm: CoreViewModel, customRepoDisplayName: String)
         tone = AppBottomSheetTone.Brand,
         icon = {
             Icon(
-                if (info?.hasUpdate == true) Icons.Rounded.SystemUpdate else Icons.Rounded.CheckCircle,
+                if (info?.needsAttention == true) Icons.Rounded.SystemUpdate else Icons.Rounded.CheckCircle,
                 null
             )
         },
-        title = { Text(if (info?.hasUpdate == true) "发现新版本" else "已是最新") },
+        title = {
+            Text(
+                when {
+                    info?.sourceMismatch == true -> "需要替换核心"
+                    info?.hasVersionUpdate == true -> "发现新版本"
+                    else -> "已是最新"
+                }
+            )
+        },
         text = {
-            if (info?.hasUpdate == true) {
-                Text("${resolveVariantLabel(info.variant, customRepoDisplayName)}: v${info.version ?: "?"} → v${info.latestVersion}")
+            if (info?.sourceMismatch == true) {
+                Text(
+                    "${coreDisplayNames.resolve(info.variant)} 当前来源与设置不一致，将替换为 ${info.desiredSource ?: "目标仓库"}"
+                )
+            } else if (info?.hasVersionUpdate == true) {
+                Text(
+                    "${coreDisplayNames.resolve(info.variant)}: " +
+                        formatCoreVersionTransition(info.version, info.availableVersion)
+                )
             } else {
-                Text("${info?.let { resolveVariantLabel(it.variant, customRepoDisplayName) } ?: ""} 当前已是最新版本")
+                Text("${info?.let { coreDisplayNames.resolve(it.variant) } ?: ""} 当前已是最新版本")
             }
         },
         confirmButton = {
-            if (info?.hasUpdate == true && variant != null) {
-                TextButton(onClick = { vm.doUpdate(variant) }) { Text("立即更新") }
+            if (info?.needsAttention == true && variant != null) {
+                TextButton(onClick = { vm.doUpdate(variant) }) {
+                    Text(if (info.sourceMismatch) "重新下载" else "立即更新")
+                }
             } else {
                 TextButton(onClick = vm::dismissUpdateDialog) { Text("确定") }
             }
         },
         dismissButton = {
-            if (info?.hasUpdate == true) {
+            if (info?.needsAttention == true) {
                 TextButton(onClick = vm::dismissUpdateDialog) { Text("稍后") }
             }
         }
@@ -509,34 +537,82 @@ private fun RollbackDialog(
 }
 
 @Composable
-private fun CustomRepoDialog(
+private fun VariantSettingsDialog(
+    variant: ApiVariant,
+    currentDisplayName: String,
     currentRepo: String,
-    onSave: (String) -> Unit,
+    currentBranch: String,
+    onSave: (displayName: String, repo: String, branch: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var repoText by remember { mutableStateOf(currentRepo) }
+    val isCustom = variant == ApiVariant.Custom
+    val customFormState = rememberCustomCoreSettingsFormState(
+        initialDisplayName = currentDisplayName,
+        initialRepo = currentRepo,
+        initialBranch = currentBranch
+    )
+    var displayNameText by remember(variant, currentDisplayName) { mutableStateOf(currentDisplayName) }
+
     AppBottomSheetDialog(
         onDismissRequest = onDismiss,
         style = AppBottomSheetStyle.Form,
         tone = AppBottomSheetTone.Brand,
-        icon = { Icon(Icons.Rounded.Tune, null) },
-        title = { Text("自定义仓库") },
+        icon = { Icon(if (isCustom) Icons.Rounded.Tune else Icons.Rounded.Edit, null) },
+        title = { Text(if (isCustom) "编辑自定义核心" else "编辑显示名称") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("输入 GitHub 仓库地址，格式: owner/repo",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(
-                    value = repoText, onValueChange = { repoText = it },
-                    label = { Text("仓库地址") }, placeholder = { Text("owner/repo") },
-                    singleLine = true, shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (isCustom) {
+                    CustomCoreSettingsForm(
+                        state = customFormState,
+                        displayNamePlaceholder = variant.label
+                    )
+                } else {
+                    Text(
+                        "这里只改显示名称，不影响实际仓库来源。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = displayNameText,
+                        onValueChange = { displayNameText = it },
+                        label = { Text("显示名称") },
+                        placeholder = { Text(variant.label) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                        )
+                    ) {
+                        Text(
+                            text = "实际仓库：${resolveCoreVariantRepo(variant, currentRepo)}",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(repoText.trim()) },
-                enabled = repoText.trim().contains('/')) { Text("保存") }
+            TextButton(
+                onClick = {
+                    if (isCustom) {
+                        val input = customFormState.toInput()
+                        onSave(input.displayName, input.repo, input.branch)
+                    } else {
+                        onSave(displayNameText.trim(), "", "")
+                    }
+                },
+                enabled = if (isCustom) customFormState.canSaveConfig else true
+            ) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )

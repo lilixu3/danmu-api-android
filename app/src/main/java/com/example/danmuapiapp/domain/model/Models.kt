@@ -47,9 +47,17 @@ data class CoreInfo(
     val version: String?,
     val isInstalled: Boolean,
     val isUpdating: Boolean = false,
-    val latestVersion: String? = null,
-    val hasUpdate: Boolean = false
-)
+    val availableVersion: String? = null,
+    val hasVersionUpdate: Boolean = false,
+    val sourceMismatch: Boolean = false,
+    val desiredSource: String? = null
+) {
+    val isReady: Boolean
+        get() = isInstalled && !sourceMismatch
+
+    val needsAttention: Boolean
+        get() = sourceMismatch || hasVersionUpdate
+}
 
 data class CoreDownloadProgress(
     val inProgress: Boolean = false,
