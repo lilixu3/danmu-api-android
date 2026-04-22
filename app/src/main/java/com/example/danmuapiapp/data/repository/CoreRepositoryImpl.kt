@@ -410,7 +410,6 @@ class CoreRepositoryImpl @Inject constructor(
 
         if (fetchBranchHead(repo, normalized) != null) return normalized
         if (!fetchVersionFromGlobals(repo, listOf(normalized)).isNullOrBlank()) return normalized
-        if (normalized.contains('/')) return null
 
         val branches = fetchBranchList(repo)
         val direct = branches.firstOrNull { it.equals(normalized, ignoreCase = true) }
@@ -424,7 +423,7 @@ class CoreRepositoryImpl @Inject constructor(
     }
 
     private fun fetchBranchList(repo: String): List<String> {
-        return requestMapped(
+        val apiBranches = requestMapped(
             urls = apiUrlCandidates("repos/$repo/branches?per_page=100"),
             headers = mapOf(
                 "Accept" to "application/vnd.github+json",
@@ -437,6 +436,28 @@ class CoreRepositoryImpl @Inject constructor(
                 ((element as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
                     ?.takeIf { it.isNotBlank() }
             }.takeIf { it.isNotEmpty() }
+        }
+        if (!apiBranches.isNullOrEmpty()) return apiBranches
+
+        return fetchBranchListFromHtml(repo)
+    }
+
+    private fun fetchBranchListFromHtml(repo: String): List<String> {
+        val escapedRepo = Regex.escape(repo)
+        val branchRegex = Regex("""href=["']/""" + escapedRepo + """/tree/([^"'?#]+)["']""")
+        return requestMapped(
+            urls = withProxyCandidates("https://github.com/$repo/branches/all"),
+            headers = mapOf("User-Agent" to USER_AGENT)
+        ) { body ->
+            branchRegex.findAll(body)
+                .mapNotNull { match ->
+                    match.groupValues.getOrNull(1)
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                }
+                .toList()
+                .distinct()
+                .takeIf { it.isNotEmpty() }
         } ?: emptyList()
     }
 
