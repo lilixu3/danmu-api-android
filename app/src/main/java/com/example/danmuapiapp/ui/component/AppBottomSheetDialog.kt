@@ -38,6 +38,11 @@ import androidx.compose.ui.unit.dp
 
 /**
  * 弹窗版式：按场景区分布局。
+ *
+ * 注意：
+ * - Form / Selection / Status 样式内部已自带纵向滚动容器；
+ * - 调用方传入 text 内容时不要再额外套 `verticalScroll`，否则容易触发
+ *   Compose 的 “infinity maximum height constraints” 崩溃。
  */
 enum class AppBottomSheetStyle {
     Confirm,
