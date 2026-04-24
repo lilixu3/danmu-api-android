@@ -10,14 +10,14 @@ import org.junit.Test
 class CoreApplyPolicyTest {
 
     @Test
-    fun `运行中的当前核心变更前应先停服务并在成功后重启`() {
+    fun `运行中的当前核心变更前不应停服务并在成功后重启`() {
         val plan = decideCoreApplyPlan(
             state = RuntimeState(status = ServiceStatus.Running, variant = ApiVariant.Stable),
             targetVariant = ApiVariant.Stable
         )
 
-        assertTrue(plan.shouldStopServiceBeforeApply)
-        assertTrue(plan.shouldStartServiceAfterApply)
+        assertFalse(plan.shouldStopServiceBeforeApply)
+        assertTrue(plan.shouldRestartServiceAfterApply)
     }
 
     @Test
@@ -28,7 +28,7 @@ class CoreApplyPolicyTest {
         )
 
         assertFalse(plan.shouldStopServiceBeforeApply)
-        assertFalse(plan.shouldStartServiceAfterApply)
+        assertFalse(plan.shouldRestartServiceAfterApply)
     }
 
     @Test
@@ -39,6 +39,17 @@ class CoreApplyPolicyTest {
         )
 
         assertFalse(plan.shouldStopServiceBeforeApply)
-        assertFalse(plan.shouldStartServiceAfterApply)
+        assertFalse(plan.shouldRestartServiceAfterApply)
+    }
+
+    @Test
+    fun `启动中的当前核心变更前不应停服务但成功后需要重启`() {
+        val plan = decideCoreApplyPlan(
+            state = RuntimeState(status = ServiceStatus.Starting, variant = ApiVariant.Stable),
+            targetVariant = ApiVariant.Stable
+        )
+
+        assertFalse(plan.shouldStopServiceBeforeApply)
+        assertTrue(plan.shouldRestartServiceAfterApply)
     }
 }

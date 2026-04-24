@@ -28,6 +28,13 @@ enum class RunMode(
     }
 }
 
+enum class CoreSourceStatus {
+    NotApplicable,
+    Matched,
+    UnknownLegacy,
+    Mismatched
+}
+
 data class RuntimeState(
     val status: ServiceStatus = ServiceStatus.Stopped,
     val port: Int = 9321,
@@ -50,13 +57,16 @@ data class CoreInfo(
     val availableVersion: String? = null,
     val hasVersionUpdate: Boolean = false,
     val sourceMismatch: Boolean = false,
+    val sourceStatus: CoreSourceStatus = CoreSourceStatus.NotApplicable,
     val desiredSource: String? = null
 ) {
     val isReady: Boolean
-        get() = isInstalled && !sourceMismatch
+        get() = isInstalled
 
     val needsAttention: Boolean
-        get() = sourceMismatch || hasVersionUpdate
+        get() = sourceMismatch ||
+            sourceStatus == CoreSourceStatus.UnknownLegacy ||
+            hasVersionUpdate
 }
 
 data class CoreDownloadProgress(

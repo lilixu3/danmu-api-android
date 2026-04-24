@@ -37,6 +37,7 @@ internal fun resolveCoreActionButtonText(
     isCoreInstalled: Boolean,
     hasVersionUpdate: Boolean,
     sourceMismatch: Boolean,
+    sourceUnknownLegacy: Boolean = false,
     availableVersion: String?,
     isInstalling: Boolean,
     isUpdating: Boolean
@@ -47,6 +48,7 @@ internal fun resolveCoreActionButtonText(
         isCoreInfoLoading -> "检测中"
         !isCoreInstalled -> "点击下载"
         sourceMismatch -> "重新下载"
+        sourceUnknownLegacy -> "重新下载"
         hasVersionUpdate -> "更新 ${availableVersion?.let { "v$it" } ?: "核心"}"
         else -> "暂无更新"
     }
