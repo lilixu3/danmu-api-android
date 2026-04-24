@@ -153,6 +153,7 @@ import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.AppAnnouncement
@@ -249,6 +250,7 @@ fun HomeScreen(
     val currentCoreVersion = currentCoreInfo?.version
     val hasVersionUpdate = currentCoreInfo?.hasVersionUpdate == true
     val sourceMismatch = currentCoreInfo?.sourceMismatch == true
+    val sourceUnknownLegacy = currentCoreInfo?.sourceStatus == CoreSourceStatus.UnknownLegacy
     val availableVersion = currentCoreInfo?.availableVersion
     val isBusy = isTransitioning || viewModel.isInstallingCore ||
         viewModel.isSwitchingCore || viewModel.isUpdatingCore
@@ -266,13 +268,14 @@ fun HomeScreen(
         isCoreInfoLoading -> "读取中"
         !isCoreInstalled -> "需安装"
         sourceMismatch -> "需替换"
+        sourceUnknownLegacy -> "需刷新"
         hasVersionUpdate -> "有更新"
         else -> null
     }
     val coreVersionAccent = when {
         isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
         !isCoreInstalled -> MaterialTheme.colorScheme.error
-        sourceMismatch || hasVersionUpdate -> MaterialTheme.colorScheme.primary
+        sourceMismatch || sourceUnknownLegacy || hasVersionUpdate -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
     }
     val maskedToken = when {
@@ -607,6 +610,7 @@ fun HomeScreen(
                     isCoreInstalled = isCoreInstalled,
                     hasVersionUpdate = hasVersionUpdate,
                     sourceMismatch = sourceMismatch,
+                    sourceUnknownLegacy = sourceUnknownLegacy,
                     availableVersion = availableVersion,
                     coreOperationMessage = coreOperationStatus(
                         isInstalling = viewModel.isInstallingCore,
@@ -800,6 +804,7 @@ fun HomeScreen(
             currentVersion = viewModel.updatePromptCurrentVersion,
             latestVersion = viewModel.updatePromptLatestVersion,
             sourceMismatch = viewModel.updatePromptSourceMismatch,
+            sourceUnknownLegacy = viewModel.updatePromptSourceUnknownLegacy,
             desiredSource = viewModel.updatePromptDesiredSource,
             onUpdate = viewModel::updateFromPrompt,
             onIgnore = viewModel::ignoreCurrentUpdatePrompt

@@ -821,17 +821,19 @@ internal fun ActionDeck(
     isCoreInstalled: Boolean,
     hasVersionUpdate: Boolean,
     sourceMismatch: Boolean,
+    sourceUnknownLegacy: Boolean,
     availableVersion: String?,
     coreOperationMessage: String?
 ) {
     val isStopping = status == ServiceStatus.Stopping
     val coreActionEnabled = !isTransitioning && !isCoreInfoLoading &&
-        (!isCoreInstalled || sourceMismatch || hasVersionUpdate)
+        (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)
     val coreActionText = resolveCoreActionButtonText(
         isCoreInfoLoading = isCoreInfoLoading,
         isCoreInstalled = isCoreInstalled,
         hasVersionUpdate = hasVersionUpdate,
         sourceMismatch = sourceMismatch,
+        sourceUnknownLegacy = sourceUnknownLegacy,
         availableVersion = availableVersion,
         isInstalling = isInstalling,
         isUpdating = isUpdating
@@ -964,7 +966,7 @@ internal fun ActionDeck(
                     enabled = coreActionEnabled,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
-                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || sourceMismatch || hasVersionUpdate)) {
+                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)) {
                         appDangerTonalButtonColors()
                     } else {
                         appTonalButtonColors()

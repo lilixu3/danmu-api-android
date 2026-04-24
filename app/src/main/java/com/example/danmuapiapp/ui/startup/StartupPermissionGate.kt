@@ -211,11 +211,11 @@ fun StartupPermissionGateHost(
 
     val canConfigureSetup = runtimeState.status == ServiceStatus.Stopped ||
         runtimeState.status == ServiceStatus.Error
-    val anyInstalledCore = coreInfoList.any { it.isInstalled }
+    val currentCoreReady = coreInfoList.find { it.variant == runtimeState.variant }?.isReady == true
     val shouldShowModeStep = canConfigureSetup && modeAcknowledged.not()
     val shouldShowCoreStep = canConfigureSetup &&
         isCoreInfoLoading.not() &&
-        anyInstalledCore.not() &&
+        currentCoreReady.not() &&
         coreDeferredThisLaunch.not()
     val shouldShowPermissionStep = runtimeState.runMode == RunMode.Normal &&
         (permissionState.notificationReady.not() || permissionState.batteryReady.not())

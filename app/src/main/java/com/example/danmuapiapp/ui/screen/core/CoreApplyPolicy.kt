@@ -6,7 +6,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 
 internal data class CoreApplyPlan(
     val shouldStopServiceBeforeApply: Boolean,
-    val shouldStartServiceAfterApply: Boolean
+    val shouldRestartServiceAfterApply: Boolean
 )
 
 internal fun decideCoreApplyPlan(
@@ -15,9 +15,8 @@ internal fun decideCoreApplyPlan(
 ): CoreApplyPlan {
     val sameVariant = state.variant == targetVariant
     val runtimeActive = state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting
-    val shouldStopAndResume = sameVariant && runtimeActive
     return CoreApplyPlan(
-        shouldStopServiceBeforeApply = shouldStopAndResume,
-        shouldStartServiceAfterApply = shouldStopAndResume
+        shouldStopServiceBeforeApply = false,
+        shouldRestartServiceAfterApply = sameVariant && runtimeActive
     )
 }

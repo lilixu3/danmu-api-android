@@ -137,6 +137,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
@@ -163,21 +164,32 @@ internal fun UpdatePromptDialog(
     currentVersion: String?,
     latestVersion: String?,
     sourceMismatch: Boolean,
+    sourceUnknownLegacy: Boolean,
     desiredSource: String?,
     onUpdate: () -> Unit,
     onIgnore: () -> Unit
 ) {
     if (variantLabel.isNullOrBlank()) return
-    if (!sourceMismatch && latestVersion.isNullOrBlank()) return
+    if (!sourceMismatch && !sourceUnknownLegacy && latestVersion.isNullOrBlank()) return
     AppBottomSheetDialog(
         onDismissRequest = onIgnore,
         style = AppBottomSheetStyle.Confirm,
         tone = AppBottomSheetTone.Brand,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
-        title = { Text(if (sourceMismatch) "需要替换核心" else "发现核心更新") },
+        title = {
+            Text(
+                when {
+                    sourceMismatch -> "需要替换核心"
+                    sourceUnknownLegacy -> "核心来源待确认"
+                    else -> "发现核心更新"
+                }
+            )
+        },
         text = {
             if (sourceMismatch) {
                 Text("$variantLabel 当前来源与设置不一致，将替换为 ${desiredSource ?: "目标仓库"}")
+            } else if (sourceUnknownLegacy) {
+                Text("$variantLabel 是旧版安装，缺少来源标记；本地核心可继续启动，重新下载后会写入当前来源标记。")
             } else {
                 Text(
                     "$variantLabel：${
@@ -189,8 +201,16 @@ internal fun UpdatePromptDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onUpdate) { Text(if (sourceMismatch) "重新下载" else "更新") } },
-        dismissButton = { TextButton(onClick = onIgnore) { Text(if (sourceMismatch) "稍后" else "忽略") } }
+        confirmButton = {
+            TextButton(onClick = onUpdate) {
+                Text(if (sourceMismatch || sourceUnknownLegacy) "重新下载" else "更新")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onIgnore) {
+                Text(if (sourceMismatch || sourceUnknownLegacy) "稍后" else "忽略")
+            }
+        }
     )
 }
 
@@ -381,6 +401,7 @@ internal fun VariantPickerSheet(
                                 text = when {
                                     isCoreInfoLoading -> "加载中"
                                     info?.sourceMismatch == true -> "需替换"
+                                    info?.sourceStatus == CoreSourceStatus.UnknownLegacy -> "需刷新"
                                     info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
                                     info?.isInstalled == true -> "已安装"
                                     else -> "未安装"

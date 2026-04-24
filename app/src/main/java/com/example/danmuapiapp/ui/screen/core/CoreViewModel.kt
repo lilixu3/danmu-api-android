@@ -98,6 +98,12 @@ class CoreViewModel @Inject constructor(
         data class Rollback(val variant: ApiVariant, val release: GithubRelease) : PendingProxyAction
     }
 
+    private enum class PostApplyRestartResult {
+        None,
+        Restarting,
+        StopTimeout
+    }
+
     fun updateVariant(variant: ApiVariant) {
         runtimeRepo.updateVariant(variant)
         if (runtimeState.value.status == ServiceStatus.Running) {
@@ -306,11 +312,23 @@ class CoreViewModel @Inject constructor(
 
         applyBlock().fold(
             onSuccess = {
-                if (applyPlan.shouldStartServiceAfterApply) {
-                    runtimeRepo.startService()
-                    operationMessage = "${successMessage}，服务正在启动以应用变更"
-                } else {
-                    operationMessage = successMessage
+                val restartPlan = decideCoreApplyPlan(runtimeState.value, variant)
+                when (
+                    if (restartPlan.shouldRestartServiceAfterApply) {
+                        restartRuntimeAfterCoreMutation(variant)
+                    } else {
+                        PostApplyRestartResult.None
+                    }
+                ) {
+                    PostApplyRestartResult.Restarting -> {
+                        operationMessage = "${successMessage}，服务正在重启以应用变更"
+                    }
+                    PostApplyRestartResult.StopTimeout -> {
+                        operationMessage = "${successMessage}，但服务自动重启前停止超时，请稍后手动重启服务"
+                    }
+                    PostApplyRestartResult.None -> {
+                        operationMessage = successMessage
+                    }
                 }
             },
             onFailure = {
@@ -319,6 +337,29 @@ class CoreViewModel @Inject constructor(
             }
         )
         isOperating = false
+    }
+
+    private suspend fun restartRuntimeAfterCoreMutation(variant: ApiVariant): PostApplyRestartResult {
+        val state = runtimeState.value
+        if (state.variant != variant) return PostApplyRestartResult.None
+
+        return when (state.status) {
+            ServiceStatus.Running -> {
+                runtimeRepo.restartService()
+                PostApplyRestartResult.Restarting
+            }
+            ServiceStatus.Starting -> {
+                runtimeRepo.stopService()
+                val stopped = waitForRuntimeStoppedBeforeCoreMutation()
+                if (stopped) {
+                    runtimeRepo.startService()
+                    PostApplyRestartResult.Restarting
+                } else {
+                    PostApplyRestartResult.StopTimeout
+                }
+            }
+            else -> PostApplyRestartResult.None
+        }
     }
 
     private suspend fun waitForRuntimeStoppedBeforeCoreMutation(timeoutMs: Long = 25_000L): Boolean {
