@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
@@ -172,6 +173,7 @@ private fun CoreVariantCard(
     val dark = isSystemInDarkTheme()
     val variantLabel = coreDisplayNames.resolve(info.variant)
     val variantSource = resolveCoreVariantSourceText(info.variant, customRepo, customRepoBranch)
+    val sourceUnknownLegacy = info.sourceStatus == CoreSourceStatus.UnknownLegacy
 
     GlassCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -228,6 +230,7 @@ private fun CoreVariantCard(
                 Text(
                     text = when {
                         info.sourceMismatch -> "需替换"
+                        sourceUnknownLegacy -> "需刷新"
                         info.hasVersionUpdate -> "有更新"
                         info.isInstalled -> "已安装"
                         else -> "未安装"
@@ -327,6 +330,7 @@ private fun CoreVariantCard(
                     Text(
                         when {
                             info.sourceMismatch -> "重新下载"
+                            sourceUnknownLegacy -> "重新下载"
                             info.hasVersionUpdate -> "点击更新"
                             else -> "检查更新"
                         }
@@ -426,6 +430,7 @@ private fun UpdateResultDialog(
 ) {
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
+    val sourceUnknownLegacy = info?.sourceStatus == CoreSourceStatus.UnknownLegacy
     AppBottomSheetDialog(
         onDismissRequest = vm::dismissUpdateDialog,
         style = AppBottomSheetStyle.Status,
@@ -440,6 +445,7 @@ private fun UpdateResultDialog(
             Text(
                 when {
                     info?.sourceMismatch == true -> "需要替换核心"
+                    sourceUnknownLegacy -> "核心来源待确认"
                     info?.hasVersionUpdate == true -> "发现新版本"
                     else -> "已是最新"
                 }
@@ -449,6 +455,10 @@ private fun UpdateResultDialog(
             if (info?.sourceMismatch == true) {
                 Text(
                     "${coreDisplayNames.resolve(info.variant)} 当前来源与设置不一致，将替换为 ${info.desiredSource ?: "目标仓库"}"
+                )
+            } else if (sourceUnknownLegacy) {
+                Text(
+                    "${coreDisplayNames.resolve(info.variant)} 是旧版安装，缺少来源标记；本地核心可继续启动，重新下载后会写入当前来源标记。"
                 )
             } else if (info?.hasVersionUpdate == true) {
                 Text(
@@ -462,7 +472,7 @@ private fun UpdateResultDialog(
         confirmButton = {
             if (info?.needsAttention == true && variant != null) {
                 TextButton(onClick = { vm.doUpdate(variant) }) {
-                    Text(if (info.sourceMismatch) "重新下载" else "立即更新")
+                    Text(if (info.sourceMismatch || sourceUnknownLegacy) "重新下载" else "立即更新")
                 }
             } else {
                 TextButton(onClick = vm::dismissUpdateDialog) { Text("确定") }

@@ -252,9 +252,8 @@ class CompatTvConfigSyncServer(
         val currentStatus = runtimeRepository.runtimeState.value.status
         val shouldRestart = currentStatus == ServiceStatus.Running || currentStatus == ServiceStatus.Starting
         var restartNote = ""
-        pendingRestartJob?.cancel()
-        pendingRestartJob = null
         if (portChanged || tokenChanged) {
+            cancelPendingRestart()
             runtimeRepository.applyServiceConfig(
                 port = port,
                 token = token,
@@ -266,6 +265,7 @@ class CompatTvConfigSyncServer(
         } else if (variantChanged) {
             when (currentStatus) {
                 ServiceStatus.Running -> {
+                    cancelPendingRestart()
                     runtimeRepository.restartService()
                     restartNote = "服务正在重启"
                 }
@@ -305,7 +305,13 @@ class CompatTvConfigSyncServer(
         return message
     }
 
+    private fun cancelPendingRestart() {
+        pendingRestartJob?.cancel()
+        pendingRestartJob = null
+    }
+
     private fun scheduleRestartAfterStartup() {
+        cancelPendingRestart()
         val job = scope.launch {
             repeat(40) {
                 when (runtimeRepository.runtimeState.value.status) {

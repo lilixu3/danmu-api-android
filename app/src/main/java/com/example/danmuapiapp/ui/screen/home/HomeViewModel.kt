@@ -127,6 +127,8 @@ class HomeViewModel @Inject constructor(
         private set
     var updatePromptSourceMismatch by mutableStateOf(false)
         private set
+    var updatePromptSourceUnknownLegacy by mutableStateOf(false)
+        private set
     var updatePromptDesiredSource by mutableStateOf<String?>(null)
         private set
     var coreUpdateCheckDialogMessage by mutableStateOf<String?>(null)
@@ -562,7 +564,12 @@ class HomeViewModel @Inject constructor(
     fun ignoreCurrentUpdatePrompt() {
         val variant = updatePromptVariant
         val latest = updatePromptLatestVersion?.trim().orEmpty()
-        if (variant != null && updatePromptSourceMismatch.not() && latest.isNotBlank()) {
+        if (
+            variant != null &&
+            updatePromptSourceMismatch.not() &&
+            updatePromptSourceUnknownLegacy.not() &&
+            latest.isNotBlank()
+        ) {
             settingsRepo.setIgnoredUpdateVersion(variant, latest)
             ignoredUpdateVersionMap[variant] = latest
         }
@@ -572,7 +579,11 @@ class HomeViewModel @Inject constructor(
     fun updateFromPrompt() {
         val variant = updatePromptVariant ?: runtimeState.value.variant
         val latest = updatePromptLatestVersion
-        if (updatePromptSourceMismatch.not() && !latest.isNullOrBlank()) {
+        if (
+            updatePromptSourceMismatch.not() &&
+            updatePromptSourceUnknownLegacy.not() &&
+            !latest.isNullOrBlank()
+        ) {
             suppressedAutoUpdatePromptVersionMap[variant] = latest.trim()
         }
         clearCoreAttentionPrompt()
@@ -1061,7 +1072,11 @@ class HomeViewModel @Inject constructor(
         val currentVariant = runtimeState.value.variant
         val info = list.find { it.variant == currentVariant }
         if (info == null || !info.isInstalled || !info.hasVersionUpdate || info.availableVersion.isNullOrBlank()) {
-            if (updatePromptVariant == currentVariant && updatePromptSourceMismatch.not()) {
+            if (
+                updatePromptVariant == currentVariant &&
+                updatePromptSourceMismatch.not() &&
+                updatePromptSourceUnknownLegacy.not()
+            ) {
                 clearCoreAttentionPrompt()
             }
             suppressedAutoUpdatePromptVersionMap.remove(currentVariant)
@@ -1095,6 +1110,7 @@ class HomeViewModel @Inject constructor(
         updatePromptCurrentVersion = prompt.currentVersion
         updatePromptLatestVersion = prompt.latestVersion
         updatePromptSourceMismatch = false
+        updatePromptSourceUnknownLegacy = false
         updatePromptDesiredSource = null
         showUpdatePromptDialog = true
     }
@@ -1107,6 +1123,7 @@ class HomeViewModel @Inject constructor(
         updatePromptCurrentVersion = info.version
         updatePromptLatestVersion = info.availableVersion
         updatePromptSourceMismatch = info.sourceMismatch
+        updatePromptSourceUnknownLegacy = info.sourceStatus == CoreSourceStatus.UnknownLegacy
         updatePromptDesiredSource = info.desiredSource
         showUpdatePromptDialog = true
     }
@@ -1117,6 +1134,7 @@ class HomeViewModel @Inject constructor(
         updatePromptCurrentVersion = null
         updatePromptLatestVersion = null
         updatePromptSourceMismatch = false
+        updatePromptSourceUnknownLegacy = false
         updatePromptDesiredSource = null
     }
 

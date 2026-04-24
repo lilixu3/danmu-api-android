@@ -192,15 +192,16 @@ class CoreRepositoryImpl @Inject constructor(
         val version = if (installed) readLocalCoreVersion(variant, mode) else null
         val localMetadata = if (installed) readLocalCoreSourceMetadata(variant, mode) else null
         val desiredSourceText = if (variant == ApiVariant.Custom && installed) buildDesiredCustomSourceText() else ""
-        val sourceMismatch = if (variant == ApiVariant.Custom && installed) {
-            isCustomSourceMismatch(
+        val sourceStatus = if (variant == ApiVariant.Custom && installed) {
+            resolveCustomSourceStatus(
                 localMetadata = localMetadata,
                 desiredRepo = resolveRepo(variant),
                 desiredBranch = resolveBranch(variant)
             )
         } else {
-            false
+            CoreSourceStatus.NotApplicable
         }
+        val sourceMismatch = sourceStatus == CoreSourceStatus.Mismatched
 
         return LoadedCoreState(
             info = CoreInfo(
@@ -208,6 +209,7 @@ class CoreRepositoryImpl @Inject constructor(
                 version = version,
                 isInstalled = installed,
                 sourceMismatch = sourceMismatch,
+                sourceStatus = sourceStatus,
                 desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch }
             ),
             localMetadata = localMetadata
@@ -535,11 +537,16 @@ class CoreRepositoryImpl @Inject constructor(
                 val localMetadata = readLocalCoreSourceMetadata(variant, currentRunMode())
                 val remoteSha = remoteSource.metadata?.commitSha?.trim().orEmpty()
                 val localSha = localMetadata?.commitSha?.trim().orEmpty()
-                val sourceMismatch = isCustomSourceMismatch(
-                    localMetadata = localMetadata,
-                    desiredRepo = resolveRepo(variant),
-                    desiredBranch = resolveBranch(variant)
-                )
+                val sourceStatus = if (variant == ApiVariant.Custom) {
+                    resolveCustomSourceStatus(
+                        localMetadata = localMetadata,
+                        desiredRepo = resolveRepo(variant),
+                        desiredBranch = resolveBranch(variant)
+                    )
+                } else {
+                    CoreSourceStatus.NotApplicable
+                }
+                val sourceMismatch = sourceStatus == CoreSourceStatus.Mismatched
                 val hasVersionUpdate = when {
                     sourceMismatch -> false
                     remoteSha.isNotBlank() && localSha.isNotBlank() -> !commitShasEquivalent(remoteSha, localSha)
@@ -555,6 +562,7 @@ class CoreRepositoryImpl @Inject constructor(
                             availableVersion = availableVersionLabel.ifBlank { null }.takeIf { hasVersionUpdate },
                             hasVersionUpdate = hasVersionUpdate,
                             sourceMismatch = sourceMismatch,
+                            sourceStatus = sourceStatus,
                             desiredSource = desiredSource.takeIf { sourceMismatch }
                         )
                     }
@@ -826,19 +834,23 @@ class CoreRepositoryImpl @Inject constructor(
             .orEmpty()
     }
 
-    private fun isCustomSourceMismatch(
+    private fun resolveCustomSourceStatus(
         localMetadata: CoreSourceMetadata?,
         desiredRepo: String,
         desiredBranch: String?
-    ): Boolean {
-        if (desiredRepo.isBlank()) return false
-        val localRepo = normalizeGithubRepo(localMetadata?.repo)
-        val localBranch = normalizeGithubBranch(localMetadata?.branch)
+    ): CoreSourceStatus {
+        if (desiredRepo.isBlank()) return CoreSourceStatus.NotApplicable
+        if (localMetadata == null) return CoreSourceStatus.UnknownLegacy
+
+        val localRepo = normalizeGithubRepo(localMetadata.repo)
+        val localBranch = normalizeGithubBranch(localMetadata.branch)
         val targetBranch = normalizeGithubBranch(desiredBranch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
-        return localRepo.isBlank() ||
-            !localRepo.equals(desiredRepo, ignoreCase = true) ||
-            localBranch.isBlank() ||
-            !branchesEquivalent(localBranch, targetBranch)
+        return when {
+            localRepo.isBlank() || localBranch.isBlank() -> CoreSourceStatus.UnknownLegacy
+            !localRepo.equals(desiredRepo, ignoreCase = true) -> CoreSourceStatus.Mismatched
+            !branchesEquivalent(localBranch, targetBranch) -> CoreSourceStatus.Mismatched
+            else -> CoreSourceStatus.Matched
+        }
     }
 
     private fun branchesEquivalent(localBranch: String, desiredBranch: String): Boolean {
@@ -872,10 +884,10 @@ class CoreRepositoryImpl @Inject constructor(
     ): CoreSourceMetadata? {
         val location = getCoreLocation(variant, mode)
         val candidates = buildList {
-            add(metadataFile(location.normalDir))
             if (mode != RunMode.Normal) {
                 add(File(location.rootDirPath, CORE_SOURCE_METADATA_FILE))
             }
+            add(metadataFile(location.normalDir))
         }
         return candidates.firstNotNullOfOrNull { file ->
             if (!file.exists() || !file.isFile) return@firstNotNullOfOrNull null
