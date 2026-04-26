@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.zip.ZipFile
 import org.gradle.api.GradleException
 
 plugins {
@@ -17,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.30"
+    ?: "1.0.5.31"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 111
+    ?: 112
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -316,6 +317,11 @@ fun org.gradle.api.file.CopySpec.includeNodeModuleDirs(packages: Iterable<String
     }
 }
 
+fun normalizeNodeDependencyVersion(raw: String): String {
+    val value = raw.trim()
+    return value.removePrefix("^").removePrefix("~").trim()
+}
+
 val baseNodeModulesPackages = listOf(
     "https-proxy-agent",
     "agent-base",
@@ -403,6 +409,17 @@ tasks.register("prepareNodeModules") {
             else -> return@doLast
         }
 
+        val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
+        if (workspaceNodeModules.exists()) {
+            copy {
+                from(workspaceNodeModules) {
+                    includeNodeModuleDirs(baseNodeModulesPackages + optionalRedisNodeModulesPackages)
+                    includeEmptyDirs = false
+                }
+                into(sourceNodeModules)
+            }
+        }
+
         delete(baseTargetDir)
         delete(optionalRootDir)
 
@@ -440,8 +457,8 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
         if (!workspaceNodeModules.exists()) {
             throw GradleException("未找到工作区依赖目录：${workspaceNodeModules.absolutePath}")
         }
-        delete(baseTargetDir)
-        delete(optionalRedisTargetDir)
+        baseTargetDir.mkdirs()
+        optionalRedisTargetDir.mkdirs()
         copy {
             from(workspaceNodeModules) {
                 includeNodeModuleDirs(baseNodeModulesPackages)
@@ -459,11 +476,100 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
     }
 }
 
+tasks.register("verifyBundledNodeModules") {
+    val packageJsonFile = file("src/main/assets/nodejs-project/package.json")
+    val nodeModulesDir = file("src/main/assets/nodejs-project/node_modules")
+    dependsOn("prepareNodeModules")
+    dependsOn("syncBundledNodeModulesFromWorkspace")
+    inputs.file(packageJsonFile)
+    inputs.dir(nodeModulesDir)
+    doLast {
+        if (!packageJsonFile.exists()) {
+            throw GradleException("缺少运行时依赖声明文件：${packageJsonFile.absolutePath}")
+        }
+
+        val pkg = groovy.json.JsonSlurper().parse(packageJsonFile) as? Map<*, *>
+            ?: throw GradleException("无法解析 package.json：${packageJsonFile.absolutePath}")
+        val dependencies = (pkg["dependencies"] as? Map<*, *>)?.mapNotNull { (key, value) ->
+            val name = key?.toString()?.trim().orEmpty()
+            val version = value?.toString()?.trim().orEmpty()
+            if (name.isBlank() || version.isBlank()) null else name to normalizeNodeDependencyVersion(version)
+        }.orEmpty()
+
+        val missing = mutableListOf<String>()
+        val mismatched = mutableListOf<String>()
+        dependencies.forEach { (name, expectedVersion) ->
+            val depPkg = file("src/main/assets/nodejs-project/node_modules/$name/package.json")
+            if (!depPkg.exists()) {
+                missing += "$name@$expectedVersion"
+                return@forEach
+            }
+            val depJson = groovy.json.JsonSlurper().parse(depPkg) as? Map<*, *>
+            val actualVersion = depJson?.get("version")?.toString()?.trim().orEmpty()
+            if (actualVersion.isBlank()) {
+                missing += "$name@$expectedVersion"
+            } else if (actualVersion != expectedVersion) {
+                mismatched += "$name 期望 $expectedVersion，实际 $actualVersion"
+            }
+        }
+
+        if (missing.isNotEmpty() || mismatched.isNotEmpty()) {
+            val details = buildList {
+                if (missing.isNotEmpty()) add("缺少依赖：${missing.joinToString(", ")}")
+                if (mismatched.isNotEmpty()) add("版本不匹配：${mismatched.joinToString("；")}")
+            }.joinToString("；")
+            throw GradleException("运行时 assets 依赖校验失败：$details")
+        }
+    }
+}
+
+tasks.register("verifyPackagedNodeModulesDebug") {
+    val apkFile = layout.buildDirectory.file("outputs/apk/debug/app-arm64-v8a-debug.apk")
+    dependsOn("assembleDebug")
+    inputs.file(apkFile)
+    doLast {
+        val file = apkFile.get().asFile
+        if (!file.exists()) throw GradleException("未找到 debug APK：${file.absolutePath}")
+        val requiredEntries = listOf(
+            "assets/nodejs-project/node_modules/node-fetch/package.json",
+            "assets/nodejs-project/node_modules/pako/package.json"
+        )
+        ZipFile(file).use { zip ->
+            val missing = requiredEntries.filter { zip.getEntry(it) == null }
+            if (missing.isNotEmpty()) {
+                throw GradleException("Debug APK 缺少关键依赖文件：${missing.joinToString(", ")}")
+            }
+        }
+    }
+}
+
+tasks.register("verifyPackagedNodeModulesRelease") {
+    val apkFile = layout.buildDirectory.file("outputs/apk/release/app-arm64-v8a-release.apk")
+    dependsOn("assembleRelease")
+    inputs.file(apkFile)
+    doLast {
+        val file = apkFile.get().asFile
+        if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
+        val requiredEntries = listOf(
+            "assets/nodejs-project/node_modules/node-fetch/package.json",
+            "assets/nodejs-project/node_modules/pako/package.json"
+        )
+        ZipFile(file).use { zip ->
+            val missing = requiredEntries.filter { zip.getEntry(it) == null }
+            if (missing.isNotEmpty()) {
+                throw GradleException("Release APK 缺少关键依赖文件：${missing.joinToString(", ")}")
+            }
+        }
+    }
+}
+
 val prepareNodeModulesTask = tasks.named("prepareNodeModules")
 val syncBundledNodeModulesTask = tasks.named("syncBundledNodeModulesFromWorkspace")
+val verifyBundledNodeModulesTask = tasks.named("verifyBundledNodeModules")
 tasks.named("preBuild").configure {
     dependsOn(prepareNodeModulesTask)
     dependsOn(syncBundledNodeModulesTask)
+    dependsOn(verifyBundledNodeModulesTask)
 }
 
 tasks.matching {
@@ -475,6 +581,7 @@ tasks.matching {
 }.configureEach {
     dependsOn(prepareNodeModulesTask)
     dependsOn(syncBundledNodeModulesTask)
+    dependsOn(verifyBundledNodeModulesTask)
 }
 
 // Termux 下预裁剪 JNI so，避免 AGP strip 工具链与宿主架构不兼容导致体积异常
