@@ -17,13 +17,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.29"
+    ?: "1.0.5.30"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 110
+    ?: 111
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -320,7 +320,14 @@ val baseNodeModulesPackages = listOf(
     "https-proxy-agent",
     "agent-base",
     "debug",
-    "ms"
+    "ms",
+    "node-fetch",
+    "data-uri-to-buffer",
+    "fetch-blob",
+    "formdata-polyfill",
+    "node-domexception",
+    "web-streams-polyfill",
+    "pako"
 )
 val optionalRedisNodeModulesPackages = listOf(
     "redis",
@@ -423,9 +430,40 @@ tasks.register("prepareNodeModules") {
     }
 }
 
+tasks.register("syncBundledNodeModulesFromWorkspace") {
+    val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
+    val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
+    val optionalRedisTargetDir = file("src/main/assets/nodejs-optional/redis/node_modules")
+    inputs.dir(workspaceNodeModules)
+    outputs.dirs(baseTargetDir, optionalRedisTargetDir)
+    doLast {
+        if (!workspaceNodeModules.exists()) {
+            throw GradleException("未找到工作区依赖目录：${workspaceNodeModules.absolutePath}")
+        }
+        delete(baseTargetDir)
+        delete(optionalRedisTargetDir)
+        copy {
+            from(workspaceNodeModules) {
+                includeNodeModuleDirs(baseNodeModulesPackages)
+                includeEmptyDirs = false
+            }
+            into(baseTargetDir)
+        }
+        copy {
+            from(workspaceNodeModules) {
+                includeNodeModuleDirs(optionalRedisNodeModulesPackages)
+                includeEmptyDirs = false
+            }
+            into(optionalRedisTargetDir)
+        }
+    }
+}
+
 val prepareNodeModulesTask = tasks.named("prepareNodeModules")
+val syncBundledNodeModulesTask = tasks.named("syncBundledNodeModulesFromWorkspace")
 tasks.named("preBuild").configure {
     dependsOn(prepareNodeModulesTask)
+    dependsOn(syncBundledNodeModulesTask)
 }
 
 tasks.matching {
@@ -436,6 +474,7 @@ tasks.matching {
         it.name.contains("lintVital", ignoreCase = true)
 }.configureEach {
     dependsOn(prepareNodeModulesTask)
+    dependsOn(syncBundledNodeModulesTask)
 }
 
 // Termux 下预裁剪 JNI so，避免 AGP strip 工具链与宿主架构不兼容导致体积异常
