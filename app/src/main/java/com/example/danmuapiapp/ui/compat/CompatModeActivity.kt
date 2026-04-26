@@ -36,6 +36,7 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
@@ -1094,7 +1095,7 @@ class CompatModeActivity : AppCompatActivity() {
                 if (refreshed?.sourceMismatch == true) {
                     toast("${resolveVariantLabel(variant)} 需替换为 ${refreshed.desiredSource ?: "目标仓库"}")
                 } else if (refreshed?.hasVersionUpdate == true && !refreshed.availableVersion.isNullOrBlank()) {
-                    toast("${resolveVariantLabel(variant)} 有新版本 ${refreshed.availableVersion}")
+                    toast("${resolveVariantLabel(variant)} 有新版本 ${formatCoreVersionValue(refreshed.availableVersion)}")
                 } else {
                     toast("${resolveVariantLabel(variant)} 已是最新版本")
                 }
