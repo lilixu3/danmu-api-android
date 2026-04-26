@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.home.support
 
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 
 internal data class CoreAutoUpdatePromptState(
     val currentVersion: String?,
@@ -49,7 +50,13 @@ internal fun resolveCoreActionButtonText(
         !isCoreInstalled -> "点击下载"
         sourceMismatch -> "重新下载"
         sourceUnknownLegacy -> "重新下载"
-        hasVersionUpdate -> "更新 ${availableVersion?.let { "v$it" } ?: "核心"}"
+        hasVersionUpdate -> "更新 ${
+            availableVersion
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::formatCoreVersionValue)
+                ?: "核心"
+        }"
         else -> "暂无更新"
     }
 }

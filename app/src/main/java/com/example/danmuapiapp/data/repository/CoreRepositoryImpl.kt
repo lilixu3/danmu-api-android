@@ -28,6 +28,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.*
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
@@ -71,6 +72,12 @@ class CoreRepositoryImpl @Inject constructor(
         val title: String
     )
 
+    private data class LatestRemoteVersionCacheEntry(
+        val versionLabel: String,
+        val repo: String,
+        val branch: String
+    )
+
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
@@ -106,6 +113,7 @@ class CoreRepositoryImpl @Inject constructor(
     private var pendingCoreRefreshReason: String? = null
     private var hasLoadedCoreInfoOnce = false
     private val refreshTicket = AtomicLong(0L)
+    private val latestRemoteVersionCache = ConcurrentHashMap<ApiVariant, LatestRemoteVersionCacheEntry>()
 
     init {
         workDirPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
@@ -221,16 +229,21 @@ class CoreRepositoryImpl @Inject constructor(
         refreshedInfo: CoreInfo,
         refreshedMetadata: CoreSourceMetadata?
     ): CoreInfo {
-        if (previousInfo == null ||
-            previousInfo.hasVersionUpdate.not() ||
-            previousInfo.availableVersion.isNullOrBlank() ||
-            refreshedInfo.isInstalled.not() ||
-            refreshedInfo.sourceMismatch
-        ) {
+        if (refreshedInfo.isInstalled.not() || refreshedInfo.sourceMismatch) {
             return refreshedInfo
         }
 
-        val previousAvailable = parseAvailableVersionLabel(previousInfo.availableVersion)
+        val latestKnownVersionLabel = previousInfo?.availableVersion
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: latestRemoteVersionCache[refreshedInfo.variant]
+                ?.takeIf { it.repo == resolveRepo(refreshedInfo.variant) && it.branch == (resolveBranch(refreshedInfo.variant) ?: "") }
+                ?.versionLabel
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            ?: return refreshedInfo
+
+        val previousAvailable = parseAvailableVersionLabel(latestKnownVersionLabel)
         val localVersion = refreshedInfo.version?.removePrefix("v")?.trim().orEmpty()
         val localSha = refreshedMetadata?.commitSha?.trim().orEmpty()
         val stillHasUpdate = when {
@@ -244,7 +257,7 @@ class CoreRepositoryImpl @Inject constructor(
         return if (stillHasUpdate) {
             refreshedInfo.copy(
                 hasVersionUpdate = true,
-                availableVersion = previousInfo.availableVersion
+                availableVersion = latestKnownVersionLabel
             )
         } else {
             refreshedInfo
@@ -555,6 +568,15 @@ class CoreRepositoryImpl @Inject constructor(
                     else -> false
                 }
                 val availableVersionLabel = buildLatestVersionLabel(remoteVersion, remoteSha)
+                if (availableVersionLabel.isNotBlank()) {
+                    latestRemoteVersionCache[variant] = LatestRemoteVersionCacheEntry(
+                        versionLabel = availableVersionLabel,
+                        repo = resolveRepo(variant),
+                        branch = resolveBranch(variant).orEmpty()
+                    )
+                } else {
+                    latestRemoteVersionCache.remove(variant)
+                }
                 val desiredSource = buildDesiredCustomSourceText().ifBlank { null }
                 _coreInfoList.value = _coreInfoList.value.map {
                     if (it.variant == variant) {
@@ -594,6 +616,8 @@ class CoreRepositoryImpl @Inject constructor(
                     sourceMetadata = buildRollbackMetadata(variant, release, versionHint)
                 )
                 refreshCoreInfo()
+                refreshAllJob?.join()
+                checkAndMarkUpdate(variant)
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -787,6 +811,9 @@ class CoreRepositoryImpl @Inject constructor(
     private fun parseAvailableVersionLabel(value: String?): AvailableVersionLabel {
         val trimmed = value?.trim().orEmpty()
         if (trimmed.isBlank()) return AvailableVersionLabel()
+        if ('@' !in trimmed && trimmed.matches(Regex("^[0-9a-fA-F]{7,40}$"))) {
+            return AvailableVersionLabel(commitSha = trimmed)
+        }
         val version = trimmed.substringBefore('@').trim()
         val commitSha = trimmed.substringAfter('@', "").trim()
         return AvailableVersionLabel(
@@ -1051,6 +1078,7 @@ class CoreRepositoryImpl @Inject constructor(
             NodeProjectManager.normalizeCoreLayout(stagingDir)
             NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
             writeCoreSourceMetadata(stagingDir, sourceMetadata)
+            verifyCoreRuntimeDependencies(stagingDir)
 
             if (!NodeProjectManager.hasValidCore(stagingDir)) {
                 throw IOException("核心文件不完整，缺少关键入口文件")
@@ -1336,17 +1364,18 @@ class CoreRepositoryImpl @Inject constructor(
                 val entry = zis.nextEntry ?: break
                 val name = entry.name ?: ""
                 val rel = resolveDanmuRelativePath(name)
-                if (rel == null) {
+                val rootFileName = resolveRootLevelFileName(name)
+                if (rel == null && rootFileName == null) {
                     zis.closeEntry()
                     continue
                 }
 
-                if (rel.isBlank()) {
+                if (rel != null && rel.isBlank()) {
                     zis.closeEntry()
                     continue
                 }
 
-                val outFile = File(outDir, rel)
+                val outFile = File(outDir, rel ?: rootFileName.orEmpty())
                 val canonRoot = outDir.canonicalPath
                 val canonOut = outFile.canonicalPath
                 if (canonOut != canonRoot && !canonOut.startsWith(canonRoot + File.separator)) {
@@ -1365,6 +1394,17 @@ class CoreRepositoryImpl @Inject constructor(
             }
         }
         return extractedAny
+    }
+
+    private fun resolveRootLevelFileName(entryName: String): String? {
+        val clean = entryName.replace('\\', '/').trim('/')
+        if (clean.isBlank()) return null
+        val parts = clean.split('/')
+        if (parts.size != 2) return null
+        return when (parts[1]) {
+            "package.json" -> "package.json"
+            else -> null
+        }
     }
 
     private fun resolveDanmuRelativePath(entryName: String): String? {
@@ -1405,6 +1445,16 @@ class CoreRepositoryImpl @Inject constructor(
                 onRead(totalRead)
             }
             return readSize
+        }
+    }
+
+    private fun verifyCoreRuntimeDependencies(coreDir: File) {
+        val runtimeNodeModulesDir = File(NodeProjectManager.projectDir(context), "node_modules")
+        val missing = NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+        if (missing.isNotEmpty()) {
+            throw IOException(
+                "当前 App 缺少该核心所需运行时依赖：${missing.joinToString(", ")}。请先升级 App 到带这些依赖的新版本后再更新核心。"
+            )
         }
     }
 
