@@ -1449,7 +1449,12 @@ class CoreRepositoryImpl @Inject constructor(
     }
 
     private fun verifyCoreRuntimeDependencies(coreDir: File) {
-        val runtimeNodeModulesDir = File(NodeProjectManager.projectDir(context), "node_modules")
+        val normalProjectDir = RuntimePaths.normalProjectDir(context)
+        runCatching {
+            NodeProjectManager.ensureProjectExtracted(context, normalProjectDir)
+            NodeProjectManager.ensureOptionalRuntimeDependencies(context, normalProjectDir)
+        }
+        val runtimeNodeModulesDir = File(normalProjectDir, "node_modules")
         val missing = NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
         if (missing.isNotEmpty()) {
             throw IOException(

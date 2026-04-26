@@ -12,6 +12,11 @@ local.properties
 /app/build
 /app/src/main/assets/nodejs-project/node_modules
 /app/src/main/assets/nodejs-optional
+/app/src/main/assets/nodejs-project/node_modules/*
+!/app/src/main/assets/nodejs-project/node_modules/node-fetch/
+!/app/src/main/assets/nodejs-project/node_modules/node-fetch/**
+!/app/src/main/assets/nodejs-project/node_modules/pako/
+!/app/src/main/assets/nodejs-project/node_modules/pako/**
 /dist
 *.jks
 
