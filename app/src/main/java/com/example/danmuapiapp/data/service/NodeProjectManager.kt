@@ -380,7 +380,7 @@ object NodeProjectManager {
                     json.parseToJsonElement(pkgFile.readText()).jsonObject["version"]?.jsonPrimitive?.content?.trim()
                 }.getOrNull()
             }.getOrNull().orEmpty()
-            if (!pkgFile.exists() || installedVersion.isBlank()) {
+            if (!pkgFile.exists() || installedVersion.isBlank() || installedVersion != version.removePrefix("^").removePrefix("~")) {
                 "$name@$version"
             } else {
                 null
@@ -609,7 +609,30 @@ object NodeProjectManager {
         context: Context,
         targetProjectDir: File = projectDir(context)
     ) {
+        ensureBundledRuntimeDependencies(context, targetProjectDir)
         ensureOptionalRedisDependency(context, targetProjectDir)
+    }
+
+    private fun ensureBundledRuntimeDependencies(
+        context: Context,
+        targetProjectDir: File
+    ) {
+        val nodeModulesDir = File(targetProjectDir, "node_modules")
+        nodeModulesDir.mkdirs()
+
+        val missingBasePackages = runtimeBundledDependencyVersions.keys.filter { name ->
+            val assetPkg = "nodejs-project/node_modules/$name/package.json"
+            val assetSignature = assetSha256(context, assetPkg) ?: return@filter false
+            val runtimeSignature = fileSha256(File(nodeModulesDir, "$name/package.json"))
+            runtimeSignature != assetSignature
+        }
+        if (missingBasePackages.isEmpty()) return
+
+        copyAssetFolder(
+            context = context,
+            assetPath = "nodejs-project/node_modules",
+            targetDir = nodeModulesDir
+        )
     }
 
     private fun copyAssetFolder(
