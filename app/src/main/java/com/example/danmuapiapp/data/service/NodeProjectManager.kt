@@ -7,6 +7,10 @@ import com.example.danmuapiapp.data.util.safeGetInt
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
@@ -27,6 +31,11 @@ object NodeProjectManager {
     private const val OPTIONAL_REDIS_ENV_KEY = "LOCAL_REDIS_URL"
     private const val OPTIONAL_REDIS_ASSET_BASE = "nodejs-optional/redis/node_modules"
     private const val OPTIONAL_REDIS_ASSET_PACKAGE = "$OPTIONAL_REDIS_ASSET_BASE/redis/package.json"
+    private val runtimeBundledDependencyVersions = linkedMapOf(
+        "https-proxy-agent" to "7.0.6",
+        "node-fetch" to "3.3.2",
+        "pako" to "2.1.0"
+    )
 
     private val json = Json { ignoreUnknownKeys = true }
     private val coreDirNameRegex = Regex("^danmu[-_]api$", RegexOption.IGNORE_CASE)
@@ -322,30 +331,104 @@ object NodeProjectManager {
         val normalizedVersion = version?.trim()?.removePrefix("v").orEmpty()
 
         if (!pkg.exists()) {
-            val body = buildString {
-                append("{\n")
-                append("  \"type\": \"module\"")
-                if (normalizedVersion.isNotBlank()) {
-                    append(",\n  \"version\": \"")
-                    append(normalizedVersion)
-                    append("\"")
-                }
-                append("\n}\n")
-            }
+            val body = buildCorePackageJsonText(version = normalizedVersion)
             pkg.writeText(body)
             return
         }
 
-        if (normalizedVersion.isBlank()) return
-
         runCatching {
             val obj = json.parseToJsonElement(pkg.readText()).jsonObject
-            val oldVersion = obj["version"]?.jsonPrimitive?.content?.trim()
-            if (oldVersion.isNullOrBlank()) {
-                val body = "{\n  \"type\": \"module\",\n  \"version\": \"$normalizedVersion\"\n}\n"
-                pkg.writeText(body)
+            val existingType = runCatching { obj["type"]?.jsonPrimitive?.content?.trim() }.getOrNull()
+            val existingVersion = runCatching { obj["version"]?.jsonPrimitive?.content?.trim() }.getOrNull().orEmpty()
+            val dependencies = obj["dependencies"] as? JsonObject
+            val shouldRewrite =
+                existingType != "module" ||
+                    (normalizedVersion.isNotBlank() && existingVersion.isBlank()) ||
+                    (dependencies == null && looksLikeCoreDir(coreDir))
+
+            if (shouldRewrite) {
+                val merged = buildJsonObject {
+                    put("type", "module")
+                    val versionValue = existingVersion.ifBlank { normalizedVersion }
+                    if (versionValue.isNotBlank()) {
+                        put("version", versionValue)
+                    }
+                    if (dependencies != null) {
+                        put("dependencies", dependencies)
+                    } else if (looksLikeCoreDir(coreDir)) {
+                        put("dependencies", buildCoreBundledDependenciesJson())
+                    }
+                    obj.forEach { (key, value) ->
+                        if (key !in setOf("type", "version", "dependencies")) {
+                            put(key, value)
+                        }
+                    }
+                }
+                pkg.writeText(json.encodeToString(JsonObject.serializer(), merged) + "\n")
             }
         }
+    }
+
+    fun collectMissingRuntimeDepsForCore(coreDir: File, runtimeNodeModulesDir: File): List<String> {
+        val dependencies = readCoreDependencies(coreDir)
+        if (dependencies.isEmpty()) return emptyList()
+        return dependencies.mapNotNull { (name, version) ->
+            if (!runtimeBundledDependencyVersions.containsKey(name)) return@mapNotNull null
+            val pkgFile = File(runtimeNodeModulesDir, "$name/package.json")
+            val installedVersion = runCatching {
+                runCatching {
+                    json.parseToJsonElement(pkgFile.readText()).jsonObject["version"]?.jsonPrimitive?.content?.trim()
+                }.getOrNull()
+            }.getOrNull().orEmpty()
+            if (!pkgFile.exists() || installedVersion.isBlank()) {
+                "$name@$version"
+            } else {
+                null
+            }
+        }.sorted()
+    }
+
+    fun readCoreDependencies(coreDir: File): Map<String, String> {
+        val pkgJson = File(coreDir, "package.json")
+        if (!pkgJson.exists() || !pkgJson.isFile) return emptyMap()
+        return runCatching {
+            val obj = json.parseToJsonElement(pkgJson.readText()).jsonObject
+            val dependencies = obj["dependencies"] as? JsonObject ?: return@runCatching emptyMap()
+            buildMap {
+                dependencies.forEach { (key, value) ->
+                    val version = (value as? JsonPrimitive)?.content?.trim().orEmpty()
+                    if (key.isNotBlank() && version.isNotBlank()) {
+                        put(key, version)
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun buildCorePackageJsonText(version: String): String {
+        val obj = buildJsonObject {
+            put("type", "module")
+            if (version.isNotBlank()) {
+                put("version", version)
+            }
+            put("dependencies", buildCoreBundledDependenciesJson())
+        }
+        return json.encodeToString(JsonObject.serializer(), obj) + "\n"
+    }
+
+    private fun buildCoreBundledDependenciesJson(): JsonObject {
+        return buildJsonObject {
+            runtimeBundledDependencyVersions.forEach { (name, version) ->
+                put(name, version)
+            }
+        }
+    }
+
+    private fun looksLikeCoreDir(coreDir: File): Boolean {
+        return File(coreDir, "worker.js").exists() ||
+            File(coreDir, "server.js").exists() ||
+            File(coreDir, "configs").exists() ||
+            File(coreDir, "utils").exists()
     }
 
     private fun readVersionFromPackageJson(coreDir: File): String? {

@@ -366,9 +366,12 @@ internal fun VariantPickerSheet(
                             Text(variantLabel, style = MaterialTheme.typography.titleMedium)
                             if (info?.version != null) {
                                 val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
-                                    "v${info.version} → v${info.availableVersion}"
+                                    com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
+                                        info.version,
+                                        info.availableVersion
+                                    )
                                 } else {
-                                    "v${info.version}"
+                                    com.example.danmuapiapp.domain.model.formatCoreVersionValue(info.version)
                                 }
                                 Text(
                                     vText,
