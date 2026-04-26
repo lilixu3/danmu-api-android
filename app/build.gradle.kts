@@ -322,19 +322,37 @@ fun normalizeNodeDependencyVersion(raw: String): String {
     return value.removePrefix("^").removePrefix("~").trim()
 }
 
-val baseNodeModulesPackages = listOf(
-    "https-proxy-agent",
-    "agent-base",
-    "debug",
-    "ms",
-    "node-fetch",
-    "data-uri-to-buffer",
-    "fetch-blob",
-    "formdata-polyfill",
-    "node-domexception",
-    "web-streams-polyfill",
-    "pako"
-)
+fun readBundledNodeDependencyNames(): List<String> {
+    val packageJsonFile = file("src/main/assets/nodejs-project/package.json")
+    if (!packageJsonFile.exists()) {
+        throw GradleException("缺少运行时依赖声明文件：${packageJsonFile.absolutePath}")
+    }
+    val pkg = groovy.json.JsonSlurper().parse(packageJsonFile) as? Map<*, *>
+        ?: throw GradleException("无法解析 package.json：${packageJsonFile.absolutePath}")
+    val dependencies = (pkg["dependencies"] as? Map<*, *>)?.keys
+        ?.mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotBlank) }
+        .orEmpty()
+    if (dependencies.isEmpty()) {
+        throw GradleException("package.json 未声明任何运行时依赖：${packageJsonFile.absolutePath}")
+    }
+    return dependencies
+}
+
+val baseNodeModulesPackages = buildList {
+    addAll(readBundledNodeDependencyNames())
+    addAll(
+        listOf(
+            "agent-base",
+            "debug",
+            "ms",
+            "data-uri-to-buffer",
+            "fetch-blob",
+            "formdata-polyfill",
+            "node-domexception",
+            "web-streams-polyfill"
+        )
+    )
+}.distinct()
 val optionalRedisNodeModulesPackages = listOf(
     "redis",
     "@redis",
