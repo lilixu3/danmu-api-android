@@ -33,6 +33,14 @@ object NodeProjectManager {
     private const val OPTIONAL_REDIS_ASSET_PACKAGE = "$OPTIONAL_REDIS_ASSET_BASE/redis/package.json"
     private val runtimeBundledDependencyVersions = linkedMapOf(
         "https-proxy-agent" to "7.0.6",
+        "agent-base" to "7.1.4",
+        "debug" to "4.4.3",
+        "ms" to "2.1.3",
+        "data-uri-to-buffer" to "4.0.1",
+        "fetch-blob" to "3.2.0",
+        "formdata-polyfill" to "4.0.10",
+        "node-domexception" to "1.0.0",
+        "web-streams-polyfill" to "3.3.3",
         "node-fetch" to "3.3.2",
         "pako" to "2.1.0"
     )
@@ -628,11 +636,15 @@ object NodeProjectManager {
         }
         if (missingBasePackages.isEmpty()) return
 
-        copyAssetFolder(
-            context = context,
-            assetPath = "nodejs-project/node_modules",
-            targetDir = nodeModulesDir
-        )
+        missingBasePackages.forEach { name ->
+            val packageDir = File(nodeModulesDir, name)
+            runCatching { packageDir.deleteRecursively() }
+            copyAssetFolder(
+                context = context,
+                assetPath = "nodejs-project/node_modules/$name",
+                targetDir = packageDir
+            )
+        }
     }
 
     private fun copyAssetFolder(
