@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.31"
+    ?: "1.0.5.32"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 112
+    ?: 113
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -338,6 +338,45 @@ fun readBundledNodeDependencyNames(): List<String> {
     return dependencies
 }
 
+fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
+    if (!rootDir.exists() || !rootDir.isDirectory) return
+
+    val redundantDocName = Regex("""(?i)^(readme|changelog|history)(\..*)?$""")
+    val redundantPakoDistFiles = setOf(
+        "pako/dist/pako.es5.js",
+        "pako/dist/pako.es5.min.js",
+        "pako/dist/pako.js",
+        "pako/dist/pako.min.js",
+        "pako/dist/pako_deflate.es5.js",
+        "pako/dist/pako_deflate.es5.min.js",
+        "pako/dist/pako_deflate.js",
+        "pako/dist/pako_deflate.min.js",
+        "pako/dist/pako_inflate.es5.js",
+        "pako/dist/pako_inflate.es5.min.js",
+        "pako/dist/pako_inflate.js",
+        "pako/dist/pako_inflate.min.js"
+    )
+
+    rootDir.walkTopDown()
+        .filter { it.isFile }
+        .forEach { file ->
+            val relativePath = file.relativeTo(rootDir).invariantSeparatorsPath
+            val shouldDelete =
+                relativePath.endsWith(".map") ||
+                    relativePath.endsWith(".d.ts") ||
+                    redundantDocName.matches(file.name) ||
+                    relativePath in redundantPakoDistFiles
+
+            if (shouldDelete) {
+                file.delete()
+            }
+        }
+
+    rootDir.walkBottomUp()
+        .filter { it.isDirectory && it != rootDir && it.list()?.isEmpty() == true }
+        .forEach { it.delete() }
+}
+
 val baseNodeModulesPackages = buildList {
     addAll(readBundledNodeDependencyNames())
     addAll(
@@ -438,6 +477,8 @@ tasks.register("prepareNodeModules") {
             }
         }
 
+        pruneNodeModuleRuntimeNoise(sourceNodeModules)
+
         delete(baseTargetDir)
         delete(optionalRootDir)
 
@@ -491,6 +532,8 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
             }
             into(optionalRedisTargetDir)
         }
+        pruneNodeModuleRuntimeNoise(baseTargetDir)
+        pruneNodeModuleRuntimeNoise(optionalRedisTargetDir)
     }
 }
 
