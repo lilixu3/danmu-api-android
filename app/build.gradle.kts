@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.32"
+    ?: "1.0.5.33"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 113
+    ?: 114
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -582,6 +582,15 @@ tasks.register("verifyBundledNodeModules") {
             throw GradleException("运行时 assets 依赖校验失败：$details")
         }
     }
+}
+
+tasks.register<Exec>("checkNodeRuntimeScripts") {
+    commandLine("node", "--check", "src/main/assets/nodejs-project/android-server.mjs")
+}
+
+tasks.register<Exec>("testNodeRuntimeParsing") {
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/parse-dotenv-regression.mjs")
 }
 
 tasks.register("verifyPackagedNodeModulesDebug") {

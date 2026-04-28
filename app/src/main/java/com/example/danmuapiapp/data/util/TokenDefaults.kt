@@ -58,21 +58,11 @@ object TokenDefaults {
     }
 
     private fun parseTokenFromLines(lines: Sequence<String>): String? {
-        lines.forEach { rawLine ->
-            val line = rawLine.trim()
-            if (line.isEmpty() || line.startsWith("#")) return@forEach
-            val idx = line.indexOf('=')
-            if (idx <= 0) return@forEach
-            val key = line.substring(0, idx).trim()
-            if (!key.equals(TOKEN_ENV_KEY, ignoreCase = true)) return@forEach
-            var value = line.substring(idx + 1).trim()
-            if ((value.startsWith("\"") && value.endsWith("\"")) ||
-                (value.startsWith("'") && value.endsWith("'"))
-            ) {
-                value = value.substring(1, value.length - 1)
-            }
-            return value.trim().ifBlank { null }
-        }
-        return null
+        return DotEnvCodec.parse(lines.joinToString("\n"))
+            .entries
+            .firstOrNull { it.key.equals(TOKEN_ENV_KEY, ignoreCase = true) }
+            ?.value
+            ?.trim()
+            ?.ifBlank { null }
     }
 }

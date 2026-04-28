@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.service
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.safeGetInt
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
@@ -141,18 +142,7 @@ object NodeProjectManager {
             mutableListOf()
         }
 
-        val existingEnv = linkedMapOf<String, String>()
-        lines.forEach { line ->
-            val raw = line.trim()
-            if (raw.isEmpty() || raw.startsWith("#")) return@forEach
-            val eq = raw.indexOf('=')
-            if (eq <= 0) return@forEach
-            val key = raw.substring(0, eq).trim()
-            val value = raw.substring(eq + 1).trim()
-            if (key.isNotBlank()) {
-                existingEnv[key] = value
-            }
-        }
+        val existingEnv = DotEnvCodec.parse(lines.joinToString("\n"))
 
         fun normalizeVariantOrNull(raw: String?): String? {
             val value = raw?.trim()?.lowercase().orEmpty()
@@ -237,7 +227,7 @@ object NodeProjectManager {
                 i++
                 continue
             }
-            lines[i] = "$key=$newValue"
+            lines[i] = "$key=${DotEnvCodec.formatValue(newValue)}"
             touched += key
             i++
         }
@@ -249,7 +239,7 @@ object NodeProjectManager {
             }
             lines += "# App 运行时关键配置"
             missing.forEach { (key, value) ->
-                lines += "$key=$value"
+                lines += "$key=${DotEnvCodec.formatValue(value)}"
             }
         }
 
@@ -569,23 +559,7 @@ object NodeProjectManager {
     private fun readEnvValue(envFile: File, key: String): String? {
         if (!envFile.exists() || !envFile.isFile) return null
         return runCatching {
-            envFile.readLines(Charsets.UTF_8).firstNotNullOfOrNull { line ->
-                val raw = line.trim()
-                if (raw.isEmpty() || raw.startsWith("#")) return@firstNotNullOfOrNull null
-                val eq = raw.indexOf('=')
-                if (eq <= 0) return@firstNotNullOfOrNull null
-                if (raw.substring(0, eq).trim() != key) return@firstNotNullOfOrNull null
-                val value = raw.substring(eq + 1).trim()
-                when {
-                    value.length >= 2 && value.startsWith('"') && value.endsWith('"') -> {
-                        value.substring(1, value.length - 1)
-                    }
-                    value.length >= 2 && value.startsWith("'") && value.endsWith("'") -> {
-                        value.substring(1, value.length - 1)
-                    }
-                    else -> value
-                }
-            }
+            DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))[key]
         }.getOrNull()
     }
 

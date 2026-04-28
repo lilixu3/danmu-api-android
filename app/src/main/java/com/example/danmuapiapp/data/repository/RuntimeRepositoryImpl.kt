@@ -13,6 +13,7 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.FileObserver
 import androidx.core.content.edit
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
@@ -330,24 +331,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun readRuntimeEnvValues(envFile: File?): Map<String, String> {
         if (envFile == null || !envFile.exists() || !envFile.isFile) return emptyMap()
         return runCatching {
-            val map = linkedMapOf<String, String>()
-            envFile.readLines(Charsets.UTF_8).forEach { line ->
-                val raw = line.trim()
-                if (raw.isEmpty() || raw.startsWith("#")) return@forEach
-                val eq = raw.indexOf('=')
-                if (eq <= 0) return@forEach
-                val key = raw.substring(0, eq).trim()
-                if (key.isBlank()) return@forEach
-                var value = raw.substring(eq + 1).trim()
-                if (value.length >= 2 &&
-                    ((value.startsWith("\"") && value.endsWith("\"")) ||
-                        (value.startsWith("'") && value.endsWith("'")))
-                ) {
-                    value = value.substring(1, value.length - 1)
-                }
-                map[key] = value
-            }
-            map
+            DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))
         }.getOrDefault(emptyMap())
     }
 

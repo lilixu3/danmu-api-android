@@ -7,6 +7,7 @@ import com.example.danmuapiapp.data.parser.EnvVarConfigLoader
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.example.danmuapiapp.domain.model.RunMode
@@ -60,7 +61,7 @@ class EnvConfigRepositoryImpl @Inject constructor(
                     Log.w(TAG, "读取 .env 失败：${file.absolutePath}", it)
                     ""
                 }
-                val userValues = parseEnvFile(text)
+                val userValues = DotEnvCodec.parse(text)
                 val defaultValues = runCatching { EnvVarConfigLoader.loadDefaultValues(context) }
                     .getOrElse {
                         Log.w(TAG, "加载核心默认值失败", it)
@@ -90,7 +91,7 @@ class EnvConfigRepositoryImpl @Inject constructor(
             mutableListOf()
         }
 
-        val formatted = formatValue(value)
+        val formatted = DotEnvCodec.formatValue(value)
         var found = false
         for (idx in lines.indices) {
             val line = lines[idx]
@@ -206,24 +207,6 @@ class EnvConfigRepositoryImpl @Inject constructor(
         return RootShell.exec(script, timeoutMs = 7000L).ok
     }
 
-    private fun parseEnvFile(text: String): Map<String, String> {
-        val map = LinkedHashMap<String, String>()
-        for (line in text.lines()) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
-            val eqIdx = trimmed.indexOf('=')
-            if (eqIdx <= 0) continue
-            val key = trimmed.substring(0, eqIdx).trim()
-            var value = trimmed.substring(eqIdx + 1).trim()
-            if ((value.startsWith("\"") && value.endsWith("\"")) ||
-                (value.startsWith("'") && value.endsWith("'"))) {
-                value = value.substring(1, value.length - 1)
-            }
-            map[key] = value
-        }
-        return map
-    }
-
     private fun mergeEffectiveEnv(
         defaults: Map<String, String>,
         userValues: Map<String, String>
@@ -244,10 +227,4 @@ class EnvConfigRepositoryImpl @Inject constructor(
         return merged
     }
 
-    private fun formatValue(value: String): String {
-        return if (value.contains(' ') || value.contains('=') || value.contains('#') || value.contains('"')) {
-            val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
-            "\"$escaped\""
-        } else value
-    }
 }
