@@ -17,6 +17,7 @@ import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.NodeBridge
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.R
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.domain.model.ErrorHandler
 import kotlinx.coroutines.*
 import java.net.HttpURLConnection
@@ -437,9 +438,9 @@ class NodeService : Service() {
                 // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
                 val envVariant = runCatching {
                     java.io.File(projectDir, "config/.env").takeIf { it.exists() }
-                        ?.readLines()
-                        ?.firstOrNull { it.startsWith("DANMU_API_VARIANT=") }
-                        ?.substringAfter("=")?.trim()
+                        ?.readText(Charsets.UTF_8)
+                        ?.let { DotEnvCodec.parse(it)["DANMU_API_VARIANT"] }
+                        ?.trim()
                 }.getOrNull()
                 NodeProjectManager.writeRuntimeEnv(
                     context = this@NodeService,
@@ -761,10 +762,9 @@ class NodeService : Service() {
         return try {
             val envFile = java.io.File(NodeProjectManager.projectDir(this), "config/.env")
             if (!envFile.exists()) return 0
-            val line = envFile.readLines().firstOrNull {
-                it.trim().startsWith("DANMU_API_PORT=")
-            } ?: return 0
-            line.substringAfter("=").trim().toIntOrNull() ?: 0
+            DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["DANMU_API_PORT"]
+                ?.trim()
+                ?.toIntOrNull() ?: 0
         } catch (_: Exception) {
             0
         }

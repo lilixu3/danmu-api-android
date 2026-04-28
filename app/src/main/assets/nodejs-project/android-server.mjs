@@ -1034,17 +1034,38 @@ function parseDotEnv(envText) {
   const out = {};
   const lines = envText.split(/\r?\n/);
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    const line = rawLine.trim().replace(/^\uFEFF/, '');
     if (!line || line.startsWith('#')) continue;
     const eq = line.indexOf('=');
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
     let val = line.slice(eq + 1).trim();
-    // strip surrounding quotes
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+    if (val.startsWith('"') && val.endsWith('"')) {
+      val = unescapeDoubleQuotedEnvValue(val.slice(1, -1));
+    } else if (val.startsWith("'") && val.endsWith("'")) {
       val = val.slice(1, -1);
     }
     out[key] = val;
+  }
+  return out;
+}
+
+function unescapeDoubleQuotedEnvValue(value) {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch !== '\\' || i === value.length - 1) {
+      out += ch;
+      continue;
+    }
+
+    const next = value[++i];
+    if (next === '\\') out += '\\';
+    else if (next === '"') out += '"';
+    else if (next === 'n') out += '\n';
+    else if (next === 'r') out += '\r';
+    else if (next === 't') out += '\t';
+    else out += `\\${next}`;
   }
   return out;
 }

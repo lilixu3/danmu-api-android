@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.EnvType
@@ -50,21 +51,7 @@ object EnvVarConfigLoader {
         } else {
             runCatching { if (envFile.exists()) envFile.readText(Charsets.UTF_8) else "" }.getOrNull()
         } ?: return null
-        for (line in text.lineSequence()) {
-            val raw = line.trim()
-            if (raw.isEmpty() || raw.startsWith("#")) continue
-            val idx = raw.indexOf('=')
-            if (idx <= 0) continue
-            if (raw.substring(0, idx).trim() != "DANMU_API_VARIANT") continue
-
-            var value = raw.substring(idx + 1).trim()
-            if ((value.startsWith('"') && value.endsWith('"')) ||
-                (value.startsWith('\'') && value.endsWith('\''))) {
-                value = value.substring(1, value.length - 1)
-            }
-            return normalizeVariant(value)
-        }
-        return null
+        return normalizeVariant(DotEnvCodec.parse(text)["DANMU_API_VARIANT"])
     }
 
     private fun normalizeVariant(raw: String?): String? {
