@@ -387,7 +387,27 @@ class CoreRepositoryImpl @Inject constructor(
     private fun fetchBranchRemoteSource(repo: String, branch: String): CoreRemoteSource? {
         val resolvedBranch = resolveRemoteBranchName(repo, branch) ?: return null
         val versionLabel = fetchVersionFromGlobals(repo, listOf(resolvedBranch)).orEmpty()
-        val head = fetchBranchHead(repo, resolvedBranch) ?: return null
+        val head = fetchBranchHead(repo, resolvedBranch)
+        if (head == null) {
+            if (versionLabel.isBlank()) return null
+            val fallback = buildBranchRemoteFallbackPlan(repo, resolvedBranch, versionLabel)
+            return CoreRemoteSource(
+                release = GithubRelease(
+                    tagName = fallback.tagName,
+                    name = fallback.name,
+                    body = "",
+                    publishedAt = "",
+                    zipballUrl = fallback.zipballUrl
+                ),
+                metadata = CoreSourceMetadata(
+                    repo = repo,
+                    branch = resolvedBranch,
+                    commitSha = "",
+                    commitPublishedAt = "",
+                    versionLabel = fallback.versionLabel
+                )
+            )
+        }
 
         val shortSha = head.sha.take(7)
         val branchTag = versionLabel.ifBlank { shortSha.ifBlank { resolvedBranch } }

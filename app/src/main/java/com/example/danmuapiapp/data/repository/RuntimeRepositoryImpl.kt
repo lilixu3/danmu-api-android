@@ -291,7 +291,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                             ?: System.currentTimeMillis()
                     }
 
-                    RunMode.Normal -> System.currentTimeMillis()
+                    RunMode.Normal -> recoverNormalRuntimeStartedAtFromHealth(port)
+                        ?: System.currentTimeMillis()
                 }
                 saveRuntimeStartedAt(startedAt)
             }
@@ -1978,15 +1979,46 @@ class RuntimeRepositoryImpl @Inject constructor(
         val current = readRuntimeStartedAt()
         if (!forceNew && current > 0L) return current
 
+        val fromNormalHealth = if (!forceNew && mode == RunMode.Normal) {
+            recoverNormalRuntimeStartedAtFromHealth(_runtimeState.value.port)
+        } else {
+            null
+        }
         val fromRootPidFile = if (!forceNew && mode == RunMode.Root) {
             RootRuntimeController.getPidFileLastModified(context)
         } else {
             null
         }
 
-        val startedAt = fromRootPidFile ?: System.currentTimeMillis()
+        val startedAt = fromNormalHealth ?: fromRootPidFile ?: System.currentTimeMillis()
         saveRuntimeStartedAt(startedAt)
         return startedAt
+    }
+
+    private fun recoverNormalRuntimeStartedAtFromHealth(port: Int): Long? {
+        return calculateStartedAtFromUptime(
+            nowMs = System.currentTimeMillis(),
+            uptimeSec = readNormalHealthUptimeSeconds(port)
+        )
+    }
+
+    private fun readNormalHealthUptimeSeconds(port: Int): Long? {
+        if (port !in 1..65535) return null
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 450
+                readTimeout = 700
+                requestMethod = "GET"
+            }
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            parseHealthUptimeSeconds(body)
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
     }
 
     private fun readRuntimeStartedAt(): Long {
