@@ -74,6 +74,7 @@ import com.example.danmuapiapp.ui.component.AppBottomSheetTone
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
+import com.example.danmuapiapp.ui.screen.download.buildAnimeSearchResultPresentation
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1163,6 +1164,7 @@ private fun AnimeCandidateRow(
     loading: Boolean,
     onClick: () -> Unit
 ) {
+    val presentation = buildAnimeSearchResultPresentation(anime)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -1172,7 +1174,7 @@ private fun AnimeCandidateRow(
         Row(
             modifier = Modifier.padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -1186,30 +1188,55 @@ private fun AnimeCandidateRow(
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = anime.title,
+                    text = presentation.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "来源：${presentation.source}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    ) {
+                        Text(
+                            text = presentation.episodeCountText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            maxLines = 1
+                        )
+                    }
                     Text(
-                        text = if (anime.episodeCount > 0) "共 ${anime.episodeCount} 集" else "集数未知",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        maxLines = 1
+                        text = presentation.idText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .size(20.dp),
+                    strokeWidth = 2.dp
+                )
             } else {
                 Box(
                     modifier = Modifier
+                        .padding(top = 2.dp)
                         .size(36.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
