@@ -50,6 +50,8 @@ interface SettingsRepository {
     val nightMode: StateFlow<NightModePreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
+    val dialogPresentation: StateFlow<DialogPresentationPreference>
+    val bottomSheetGesturesEnabled: StateFlow<Boolean>
     val coreDisplayNames: StateFlow<CoreVariantDisplayNames>
     val customCoreSource: StateFlow<ResolvedCustomCoreSource>
     val customRepo: StateFlow<String>
@@ -71,6 +73,8 @@ interface SettingsRepository {
     fun setNightMode(mode: NightModePreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
+    fun setDialogPresentation(mode: DialogPresentationPreference)
+    fun setBottomSheetGesturesEnabled(enabled: Boolean)
     fun setVariantDisplayName(variant: ApiVariant, name: String)
     fun saveCustomCoreSource(repoInput: String, branchInput: String): ResolvedCustomCoreSource
     fun saveCustomCoreConfig(

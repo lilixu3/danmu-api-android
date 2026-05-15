@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
@@ -30,6 +31,8 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.DanmuApiApp
 import com.example.danmuapiapp.ui.compat.CompatModeActivity
+import com.example.danmuapiapp.ui.component.DialogPreferences
+import com.example.danmuapiapp.ui.component.LocalDialogPreferences
 import com.example.danmuapiapp.ui.theme.DanmuApiTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -85,6 +88,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val nightMode by settingsRepository.nightMode.collectAsStateWithLifecycle()
+            val dialogPresentation by settingsRepository.dialogPresentation.collectAsStateWithLifecycle()
+            val bottomSheetGesturesEnabled by settingsRepository.bottomSheetGesturesEnabled.collectAsStateWithLifecycle()
             val startupUiState by runtimeWarmupCoordinator.uiState.collectAsStateWithLifecycle()
             val darkTheme = when (nightMode) {
                 NightModePreference.FollowSystem -> isSystemInDarkTheme()
@@ -103,7 +108,14 @@ class MainActivity : ComponentActivity() {
                         insetsController.isAppearanceLightNavigationBars = !darkTheme
                     }
                 }
-                DanmuApiApp(startupUiState = startupUiState)
+                CompositionLocalProvider(
+                    LocalDialogPreferences provides DialogPreferences(
+                        presentation = dialogPresentation,
+                        bottomSheetGesturesEnabled = bottomSheetGesturesEnabled
+                    )
+                ) {
+                    DanmuApiApp(startupUiState = startupUiState)
+                }
             }
         }
     }
