@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppPanelDialog
 
 import android.Manifest
 import android.app.Activity
@@ -48,9 +49,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -91,7 +90,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -106,7 +104,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -116,7 +113,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -135,7 +131,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1320,39 +1315,19 @@ private fun AnnouncementCenterDialog(
     val showSnoozeAction = !announcement.forcePopup &&
         !announcement.isShortTerm() &&
         announcement.allowSnoozeToday
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
+    AppPanelDialog(
         onDismissRequest = {
             if (!announcement.forcePopup) onDismissRequest()
         },
-        sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = colorScheme.surfaceContainerLow,
-        contentColor = colorScheme.onSurface,
-        tonalElevation = 1.dp,
-        dragHandle = if (!announcement.forcePopup) {
-            {
-                BottomSheetDefaults.DragHandle(
-                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
-                )
-            }
-        } else null
+        showDragHandle = !announcement.forcePopup,
+        sheetMaxHeightFraction = 0.85f,
+        popupMaxHeightFraction = 0.85f,
+        horizontalPadding = 18.dp,
+        sheetTopPadding = if (announcement.forcePopup) 16.dp else 4.dp,
+        sheetBottomPadding = 10.dp,
+        popupVerticalPadding = if (announcement.forcePopup) 20.dp else 18.dp,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = screenHeight * 0.85f)
-                .navigationBarsPadding()
-                .padding(horizontal = 18.dp)
-                .padding(
-                    top = if (announcement.forcePopup) 16.dp else 4.dp,
-                    bottom = 10.dp
-                ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
             // ── Header: icon + title + meta ──
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1599,7 +1574,6 @@ private fun AnnouncementCenterDialog(
                 }
             }
         }
-    }
 }
 
 @Composable

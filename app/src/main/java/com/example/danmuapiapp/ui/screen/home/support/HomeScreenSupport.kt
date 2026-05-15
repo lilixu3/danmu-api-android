@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppPanelDialog
 
 import android.app.Activity
 import android.content.Context
@@ -39,9 +40,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -78,7 +77,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -93,7 +91,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -103,7 +100,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -121,7 +117,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -293,140 +288,118 @@ internal fun VariantPickerSheet(
     onSelect: (ApiVariant) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val variantSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val variantSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
-
-    ModalBottomSheet(
+    AppPanelDialog(
         onDismissRequest = onDismiss,
-        sheetState = variantSheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+        horizontalPadding = 20.dp
+    ) {
+        Text(
+            "切换 API 核心",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        if (isBusy) {
+            Text(
+                "正在切换，请稍候…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 10.dp)
             )
         }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = variantSheetMaxHeight)
-                .imePadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(top = 4.dp, bottom = 10.dp)
-        ) {
-            Text(
-                "切换 API 核心",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-            if (isBusy) {
-                Text(
-                    "正在切换，请稍候…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 10.dp)
+        ApiVariant.entries.forEach { variant ->
+            val info = coreList.find { it.variant == variant }
+            val isSelected = variant == currentVariant
+            val variantLabel = coreDisplayNames.resolve(variant)
+            val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
+            Card(
+                onClick = { if (!isBusy) onSelect(variant) },
+                enabled = !isBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
                 )
-            }
-            ApiVariant.entries.forEach { variant ->
-                val info = coreList.find { it.variant == variant }
-                val isSelected = variant == currentVariant
-                val variantLabel = coreDisplayNames.resolve(variant)
-                val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-                Card(
-                    onClick = { if (!isBusy) onSelect(variant) },
-                    enabled = !isBusy,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        }
-                    )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            variantIcon(variant),
-                            null,
-                            tint = variantAccent(variant),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(variantLabel, style = MaterialTheme.typography.titleMedium)
-                            if (info?.version != null) {
-                                val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
-                                    com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
-                                        info.version,
-                                        info.availableVersion
-                                    )
-                                } else {
-                                    com.example.danmuapiapp.domain.model.formatCoreVersionValue(info.version)
-                                }
-                                Text(
-                                    vText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (info.hasVersionUpdate) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                    Icon(
+                        variantIcon(variant),
+                        null,
+                        tint = variantAccent(variant),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(variantLabel, style = MaterialTheme.typography.titleMedium)
+                        if (info?.version != null) {
+                            val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
+                                com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
+                                    info.version,
+                                    info.availableVersion
                                 )
+                            } else {
+                                com.example.danmuapiapp.domain.model.formatCoreVersionValue(info.version)
                             }
-                            if (sourceText.isNotBlank()) {
-                                Text(
-                                    sourceText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(7.dp),
-                            color = when {
-                                isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
-                                info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                                else -> MaterialTheme.colorScheme.errorContainer
-                            }
-                        ) {
                             Text(
-                                text = when {
-                                    isCoreInfoLoading -> "加载中"
-                                    info?.sourceMismatch == true -> "需替换"
-                                    info?.sourceStatus == CoreSourceStatus.UnknownLegacy -> "需刷新"
-                                    info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
-                                    info?.isInstalled == true -> "已安装"
-                                    else -> "未安装"
-                                },
+                                vText,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = when {
-                                    isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primary
-                                    info?.isInstalled == true -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.error
-                                },
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                color = if (info.hasVersionUpdate) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
                         }
-                        if (isSelected) {
-                            Icon(
-                                Icons.Rounded.CheckCircle,
-                                null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                        if (sourceText.isNotBlank()) {
+                            Text(
+                                sourceText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = when {
+                            isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
+                            info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
+                            info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                            else -> MaterialTheme.colorScheme.errorContainer
+                        }
+                    ) {
+                        Text(
+                            text = when {
+                                isCoreInfoLoading -> "加载中"
+                                info?.sourceMismatch == true -> "需替换"
+                                info?.sourceStatus == CoreSourceStatus.UnknownLegacy -> "需刷新"
+                                info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
+                                info?.isInstalled == true -> "已安装"
+                                else -> "未安装"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when {
+                                isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
+                                info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primary
+                                info?.isInstalled == true -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.error
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    if (isSelected) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }

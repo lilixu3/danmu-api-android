@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -186,6 +187,117 @@ fun AppBottomSheetDialog(
             confirmButton = confirmButton,
             dismissButton = dismissButton
         )
+    }
+}
+
+/**
+ * 自适应面板弹窗：用于首页/控制台这类自定义内容较多的面板。
+ *
+ * 与 [AppBottomSheetDialog] 共用全局弹窗偏好：
+ * - 默认跟随设置显示为居中弹窗；
+ * - 用户在设置中切到底部弹窗时，仍保留原来的底部面板体验；
+ * - 底部弹窗手势同样跟随全局开关。
+ */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+fun AppPanelDialog(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    presentation: DialogPresentationPreference? = null,
+    bottomSheetGesturesEnabled: Boolean? = null,
+    sheetGesturesEnabled: Boolean? = null,
+    showDragHandle: Boolean = true,
+    sheetMaxHeightFraction: Float = 0.9f,
+    popupMaxHeightFraction: Float = 0.86f,
+    minHeight: Dp = 320.dp,
+    popupMaxWidth: Dp = 560.dp,
+    horizontalPadding: Dp = 20.dp,
+    sheetTopPadding: Dp = 4.dp,
+    sheetBottomPadding: Dp = 10.dp,
+    popupVerticalPadding: Dp = 18.dp,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val dialogPreferences = LocalDialogPreferences.current
+    val resolvedPresentation = resolveDialogPresentation(
+        globalPreference = dialogPreferences.presentation,
+        presentation = presentation
+    )
+    val resolvedSheetGesturesEnabled = resolveSheetGesturesEnabled(
+        bottomSheetGesturesEnabled = sheetGesturesEnabled
+            ?: bottomSheetGesturesEnabled
+            ?: dialogPreferences.bottomSheetGesturesEnabled
+    )
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+
+    when (resolvedPresentation) {
+        DialogPresentationPreference.Popup -> {
+            val dialogMaxHeight = (screenHeight * popupMaxHeightFraction).coerceAtLeast(minHeight)
+            BasicAlertDialog(onDismissRequest = onDismissRequest) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = popupMaxWidth),
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                    )
+                ) {
+                    Column(
+                        modifier = modifier
+                            .fillMaxWidth()
+                            .heightIn(max = dialogMaxHeight)
+                            .imePadding()
+                            .padding(horizontal = horizontalPadding, vertical = popupVerticalPadding),
+                        verticalArrangement = verticalArrangement,
+                        horizontalAlignment = horizontalAlignment,
+                        content = content
+                    )
+                }
+            }
+        }
+
+        DialogPresentationPreference.BottomSheet -> {
+            val sheetMaxHeight = (screenHeight * sheetMaxHeightFraction).coerceAtLeast(minHeight)
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = onDismissRequest,
+                sheetState = sheetState,
+                sheetGesturesEnabled = resolvedSheetGesturesEnabled,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 1.dp,
+                dragHandle = if (showDragHandle) {
+                    {
+                        BottomSheetDefaults.DragHandle(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+                        )
+                    }
+                } else {
+                    null
+                }
+            ) {
+                Column(
+                    modifier = modifier
+                        .fillMaxWidth()
+                        .heightIn(max = sheetMaxHeight)
+                        .imePadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = horizontalPadding)
+                        .padding(top = sheetTopPadding, bottom = sheetBottomPadding),
+                    verticalArrangement = verticalArrangement,
+                    horizontalAlignment = horizontalAlignment,
+                    content = content
+                )
+            }
+        }
     }
 }
 

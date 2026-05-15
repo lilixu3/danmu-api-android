@@ -5,6 +5,7 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppPanelDialog
 
 import android.app.Activity
 import android.content.Context
@@ -41,9 +42,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -80,7 +79,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -95,7 +93,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -105,7 +102,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -123,7 +119,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -185,226 +180,199 @@ internal fun DownloadQueueSheet(
     } else {
         MaterialTheme.colorScheme.tertiary
     }
-    val queueSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val queueSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
 
-    ModalBottomSheet(
+    AppPanelDialog(
         onDismissRequest = onDismiss,
-        sheetState = queueSheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
+        horizontalPadding = 18.dp,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = accentColor.copy(alpha = 0.14f)
+            ) {
+                Box(
+                    modifier = Modifier.size(36.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.DownloadForOffline,
+                        contentDescription = null,
+                        tint = accentColor
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "下载任务队列",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "总任务 ${queueSummary.total} · 待处理 ${queueSummary.pending} · 运行 ${queueSummary.running}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = when {
+                    isQueueDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                    isQueuePaused -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                }
+            ) {
+                Text(
+                    queueStatusText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        isQueueDownloading -> MaterialTheme.colorScheme.primary
+                        isQueuePaused -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest
+            ) {
+                Text(
+                    "总进度 $displayPercent%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        LinearProgressIndicator(
+            progress = { displayProgress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(999.dp)),
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            color = accentColor
+        )
+        Text(
+            text = "已完成 $completed/${queueSummary.total.coerceAtLeast(0)} · 失败 ${queueSummary.failed}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (showRunningDetail) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Text(
+                    text = queueRunningDetail,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Text(
+            text = queueProgressSummary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (!queueThrottleHint.isNullOrBlank()) {
+            Text(
+                text = queueThrottleHint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
             )
         }
-    ) {
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QueueMetricBadge(modifier = Modifier.weight(1f), label = "待处理", value = queueSummary.pending)
+            QueueMetricBadge(modifier = Modifier.weight(1f), label = "运行", value = queueSummary.running)
+            QueueMetricBadge(modifier = Modifier.weight(1f), label = "完成", value = completed)
+            QueueMetricBadge(modifier = Modifier.weight(1f), label = "失败", value = queueSummary.failed)
+        }
+
+        val sheetScroll = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = queueSheetMaxHeight)
-                .imePadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 18.dp)
-                .padding(top = 4.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .heightIn(max = 320.dp)
+                .verticalScroll(sheetScroll),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = accentColor.copy(alpha = 0.14f)
-                ) {
-                    Box(
-                        modifier = Modifier.size(36.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.DownloadForOffline,
-                            contentDescription = null,
-                            tint = accentColor
-                        )
-                    }
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = "下载任务队列",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "总任务 ${queueSummary.total} · 待处理 ${queueSummary.pending} · 运行 ${queueSummary.running}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // Status badges
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = when {
-                        isQueueDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                        isQueuePaused -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
-                        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                    }
-                ) {
-                    Text(
-                        queueStatusText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = when {
-                            isQueueDownloading -> MaterialTheme.colorScheme.primary
-                            isQueuePaused -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest
-                ) {
-                    Text(
-                        "总进度 $displayPercent%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            // Progress bar
-            LinearProgressIndicator(
-                progress = { displayProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(999.dp)),
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                color = accentColor
-            )
-            Text(
-                text = "已完成 $completed/${queueSummary.total.coerceAtLeast(0)} · 失败 ${queueSummary.failed}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            if (showRunningDetail) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                ) {
-                    Text(
-                        text = queueRunningDetail,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Text(
-                text = queueProgressSummary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (!queueThrottleHint.isNullOrBlank()) {
+            if (queueDialogGroups.isEmpty()) {
                 Text(
-                    text = queueThrottleHint,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "队列暂无任务",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-
-            // Metric badges
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QueueMetricBadge(modifier = Modifier.weight(1f), label = "待处理", value = queueSummary.pending)
-                QueueMetricBadge(modifier = Modifier.weight(1f), label = "运行", value = queueSummary.running)
-                QueueMetricBadge(modifier = Modifier.weight(1f), label = "完成", value = completed)
-                QueueMetricBadge(modifier = Modifier.weight(1f), label = "失败", value = queueSummary.failed)
-            }
-
-            // Task groups
-            val sheetScroll = rememberScrollState()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .verticalScroll(sheetScroll),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (queueDialogGroups.isEmpty()) {
-                    Text(
-                        text = "队列暂无任务",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                Text(
+                    text = "任务分组",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                queueDialogGroups.forEach { group ->
+                    val expanded = expandedQueueGroupKeys.contains(group.key)
+                    DownloadQueueGroupCard(
+                        group = group,
+                        expanded = expanded,
+                        onToggle = {
+                            onExpandedQueueGroupKeysChange(
+                                if (expanded) {
+                                    expandedQueueGroupKeys - group.key
+                                } else {
+                                    expandedQueueGroupKeys + group.key
+                                }
+                            )
+                        }
                     )
-                } else {
-                    Text(
-                        text = "任务分组",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    queueDialogGroups.forEach { group ->
-                        val expanded = expandedQueueGroupKeys.contains(group.key)
-                        DownloadQueueGroupCard(
-                            group = group,
-                            expanded = expanded,
-                            onToggle = {
-                                onExpandedQueueGroupKeysChange(
-                                    if (expanded) {
-                                        expandedQueueGroupKeys - group.key
-                                    } else {
-                                        expandedQueueGroupKeys + group.key
-                                    }
-                                )
-                            }
-                        )
-                    }
                 }
             }
+        }
 
-            // Action buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DialogActionButton(
-                    text = "下载页",
-                    icon = Icons.AutoMirrored.Rounded.OpenInNew,
-                    onClick = onOpenDownloadPage
-                )
-                DialogActionButton(
-                    text = if (isQueueDownloading) "暂停" else "继续",
-                    icon = if (isQueueDownloading) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                    onClick = onTogglePauseResume,
-                    enabled = if (isQueueDownloading) true else isQueuePaused,
-                    primary = isQueueDownloading || isQueuePaused
-                )
-                DialogActionButton(
-                    text = "清空",
-                    icon = Icons.Rounded.CloudOff,
-                    onClick = onClearQueue,
-                    enabled = !isQueueDownloading && queueSummary.total > 0
-                )
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DialogActionButton(
+                text = "下载页",
+                icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                onClick = onOpenDownloadPage
+            )
+            DialogActionButton(
+                text = if (isQueueDownloading) "暂停" else "继续",
+                icon = if (isQueueDownloading) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                onClick = onTogglePauseResume,
+                enabled = if (isQueueDownloading) true else isQueuePaused,
+                primary = isQueueDownloading || isQueuePaused
+            )
+            DialogActionButton(
+                text = "清空",
+                icon = Icons.Rounded.CloudOff,
+                onClick = onClearQueue,
+                enabled = !isQueueDownloading && queueSummary.total > 0
+            )
         }
     }
 }
