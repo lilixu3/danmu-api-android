@@ -20,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,6 +31,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.ui.component.AppPanelDialog
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -93,91 +93,70 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
 
     // Settings bottom sheet
     if (showSettings) {
-        val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-        val settingsSheetMaxHeight = (screenHeight * 0.9f).coerceAtLeast(320.dp)
-        ModalBottomSheet(
+        AppPanelDialog(
             onDismissRequest = { showSettings = false },
-            sheetState = settingsSheetState,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle(
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.34f)
-                )
-            }
+            horizontalPadding = 20.dp,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = settingsSheetMaxHeight)
-                    .imePadding()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 4.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            Text("日志设置", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("日志设置", style = MaterialTheme.typography.titleMedium)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("开启日志", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "关闭后不拉取和显示日志",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = logEnabled, onCheckedChange = viewModel::setLogEnabled)
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("日志预览", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "在工具页显示日志预览卡片",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = logPreviewEnabled, onCheckedChange = viewModel::setLogPreviewEnabled)
-                }
-
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("日志上限", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "$logMaxCount 条",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Slider(
-                        value = logMaxCount.toFloat(),
-                        onValueChange = { viewModel.setLogMaxCount((it / 100).roundToInt() * 100) },
-                        valueRange = 100f..2000f,
-                        steps = 18
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("开启日志", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "关闭后不拉取和显示日志",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("100", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("2000", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                }
+                Switch(checked = logEnabled, onCheckedChange = viewModel::setLogEnabled)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("日志预览", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "在工具页显示日志预览卡片",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = logPreviewEnabled, onCheckedChange = viewModel::setLogPreviewEnabled)
+            }
+
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("日志上限", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "$logMaxCount 条",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Slider(
+                    value = logMaxCount.toFloat(),
+                    onValueChange = { viewModel.setLogMaxCount((it / 100).roundToInt() * 100) },
+                    valueRange = 100f..2000f,
+                    steps = 18
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("100", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("2000", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
