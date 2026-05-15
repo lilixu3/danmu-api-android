@@ -633,6 +633,7 @@ internal fun AnimeEntryRow(
     loading: Boolean,
     onClick: () -> Unit
 ) {
+    val presentation = buildAnimeSearchResultPresentation(anime)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -644,21 +645,41 @@ internal fun AnimeEntryRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(anime.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "ID:${anime.animeId} · ${anime.episodeCount} 集",
+                    text = presentation.title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "来源：${presentation.source}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${presentation.idText} · ${presentation.episodeCountText}",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .size(18.dp),
+                    strokeWidth = 2.dp
+                )
             } else {
                 Surface(
+                    modifier = Modifier.padding(top = 2.dp),
                     shape = RoundedCornerShape(999.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 ) {
@@ -772,4 +793,3 @@ internal fun EpisodeRow(
         }
     }
 }
-
