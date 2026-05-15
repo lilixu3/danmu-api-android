@@ -42,10 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
+import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 import androidx.compose.ui.graphics.Color
 import kotlin.math.roundToInt
 
@@ -59,6 +61,8 @@ fun ThemeDisplayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
+    val dialogPresentation by viewModel.dialogPresentation.collectAsStateWithLifecycle()
+    val bottomSheetGesturesEnabled by viewModel.bottomSheetGesturesEnabled.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
     val appCurrentDpi = configuration.densityDpi
@@ -126,6 +130,44 @@ fun ThemeDisplayScreen(
                             }
                         }
                     }
+                }
+            }
+
+            SettingsGroup(title = "弹窗样式") {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("默认使用居中弹出式弹窗，避免底部弹窗在长内容滚动时抖动。")
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        DialogPresentationPreference.entries.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = dialogPresentation == mode,
+                                onClick = { viewModel.setDialogPresentation(mode) },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = DialogPresentationPreference.entries.size
+                                )
+                            ) {
+                                Text(mode.label)
+                            }
+                        }
+                    }
+                    Text(dialogPresentation.description)
+                }
+
+                if (dialogPresentation == DialogPresentationPreference.BottomSheet) {
+                    SettingsDivider(startIndent = 16.dp)
+                    SettingsSwitchItem(
+                        title = "底部弹窗拖拽手势",
+                        subtitle = if (bottomSheetGesturesEnabled) {
+                            "允许拖动底部弹窗；若长内容滚动仍抖动，可关闭"
+                        } else {
+                            "已关闭底部弹窗整体拖拽，仅保留内容滚动"
+                        },
+                        checked = bottomSheetGesturesEnabled,
+                        onCheckedChange = viewModel::setBottomSheetGesturesEnabled
+                    )
                 }
             }
 

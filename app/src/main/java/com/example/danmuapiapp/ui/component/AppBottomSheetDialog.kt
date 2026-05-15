@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -34,7 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 
 /**
  * 弹窗版式：按场景区分布局。
@@ -61,6 +64,19 @@ enum class AppBottomSheetTone {
     Warning,
     Danger,
     Info
+}
+
+internal fun resolveSheetGesturesEnabled(
+    bottomSheetGesturesEnabled: Boolean?
+): Boolean {
+    return bottomSheetGesturesEnabled ?: true
+}
+
+internal fun resolveDialogPresentation(
+    globalPreference: DialogPresentationPreference?,
+    presentation: DialogPresentationPreference?
+): DialogPresentationPreference {
+    return presentation ?: globalPreference ?: DialogPresentationPreference.Popup
 }
 
 private data class SheetTonePalette(
@@ -125,6 +141,62 @@ fun AppBottomSheetDialog(
     modifier: Modifier = Modifier,
     style: AppBottomSheetStyle = AppBottomSheetStyle.Form,
     tone: AppBottomSheetTone = AppBottomSheetTone.Brand,
+    presentation: DialogPresentationPreference? = null,
+    bottomSheetGesturesEnabled: Boolean? = null,
+    sheetGesturesEnabled: Boolean? = null,
+    icon: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    confirmButton: (@Composable () -> Unit)? = null,
+    dismissButton: (@Composable () -> Unit)? = null,
+) {
+    val dialogPreferences = LocalDialogPreferences.current
+    val resolvedPresentation = resolveDialogPresentation(
+        globalPreference = dialogPreferences.presentation,
+        presentation = presentation
+    )
+    val resolvedSheetGesturesEnabled = resolveSheetGesturesEnabled(
+        bottomSheetGesturesEnabled = sheetGesturesEnabled
+            ?: bottomSheetGesturesEnabled
+            ?: dialogPreferences.bottomSheetGesturesEnabled
+    )
+
+    when (resolvedPresentation) {
+        DialogPresentationPreference.Popup -> AppPopupDialogContent(
+            onDismissRequest = onDismissRequest,
+            modifier = modifier,
+            style = style,
+            tone = tone,
+            icon = icon,
+            title = title,
+            text = text,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton
+        )
+
+        DialogPresentationPreference.BottomSheet -> AppBottomSheetDialogContent(
+            onDismissRequest = onDismissRequest,
+            modifier = modifier,
+            style = style,
+            tone = tone,
+            sheetGesturesEnabled = resolvedSheetGesturesEnabled,
+            icon = icon,
+            title = title,
+            text = text,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AppBottomSheetDialogContent(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: AppBottomSheetStyle = AppBottomSheetStyle.Form,
+    tone: AppBottomSheetTone = AppBottomSheetTone.Brand,
+    sheetGesturesEnabled: Boolean,
     icon: (@Composable () -> Unit)? = null,
     title: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
@@ -141,10 +213,11 @@ fun AppBottomSheetDialog(
         AppBottomSheetStyle.Form -> (screenHeight * 0.62f).coerceAtLeast(320.dp)
     }
 
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
+        sheetGesturesEnabled = sheetGesturesEnabled,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -155,7 +228,7 @@ fun AppBottomSheetDialog(
             )
         }
     ) {
-        Column(
+        AppDialogScaffoldContent(
             modifier = modifier
                 .fillMaxWidth()
                 .heightIn(max = sheetMaxHeight)
@@ -163,133 +236,215 @@ fun AppBottomSheetDialog(
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(top = 4.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            style = style,
+            tonePalette = tonePalette,
+            bodyMaxHeight = bodyMaxHeight,
+            icon = icon,
+            title = title,
+            text = text,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AppPopupDialogContent(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: AppBottomSheetStyle = AppBottomSheetStyle.Form,
+    tone: AppBottomSheetTone = AppBottomSheetTone.Brand,
+    icon: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    confirmButton: (@Composable () -> Unit)? = null,
+    dismissButton: (@Composable () -> Unit)? = null,
+) {
+    val tonePalette = rememberSheetTonePalette(tone)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxHeight = (screenHeight * 0.86f).coerceAtLeast(320.dp)
+    val bodyMaxHeight = when (style) {
+        AppBottomSheetStyle.Confirm -> (screenHeight * 0.36f).coerceAtLeast(140.dp)
+        AppBottomSheetStyle.Status -> (screenHeight * 0.46f).coerceAtLeast(220.dp)
+        AppBottomSheetStyle.Selection -> (screenHeight * 0.58f).coerceAtLeast(280.dp)
+        AppBottomSheetStyle.Form -> (screenHeight * 0.64f).coerceAtLeast(320.dp)
+    }
+
+    BasicAlertDialog(onDismissRequest = onDismissRequest) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 560.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+            )
         ) {
-            if (icon != null || title != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (icon != null) {
-                        Surface(
-                            shape = CircleShape,
-                            color = tonePalette.iconContainer
-                        ) {
-                            Box(
-                                modifier = Modifier.size(40.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CompositionLocalProvider(LocalContentColor provides tonePalette.iconTint) {
-                                    icon()
-                                }
-                            }
-                        }
-                    }
-                    if (title != null) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            title()
-                        }
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .height(2.dp)
-                        .widthIn(max = 120.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(tonePalette.accent.copy(alpha = 0.22f))
-                )
-            }
-
-            if (text != null) {
-                val contentModifier = Modifier
+            AppDialogScaffoldContent(
+                modifier = modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false)
-                    .heightIn(max = bodyMaxHeight)
+                    .heightIn(max = dialogMaxHeight)
+                    .imePadding()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                style = style,
+                tonePalette = tonePalette,
+                bodyMaxHeight = bodyMaxHeight,
+                icon = icon,
+                title = title,
+                text = text,
+                confirmButton = confirmButton,
+                dismissButton = dismissButton
+            )
+        }
+    }
+}
 
-                when (style) {
-                    AppBottomSheetStyle.Form -> {
-                        Column(
-                            modifier = contentModifier.verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            text()
-                        }
-                    }
-
-                    AppBottomSheetStyle.Confirm -> {
+@Composable
+private fun AppDialogScaffoldContent(
+    modifier: Modifier,
+    style: AppBottomSheetStyle,
+    tonePalette: SheetTonePalette,
+    bodyMaxHeight: Dp,
+    icon: (@Composable () -> Unit)?,
+    title: (@Composable () -> Unit)?,
+    text: (@Composable () -> Unit)?,
+    confirmButton: (@Composable () -> Unit)?,
+    dismissButton: (@Composable () -> Unit)?
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (icon != null || title != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (icon != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = tonePalette.iconContainer
+                    ) {
                         Box(
-                            modifier = contentModifier
+                            modifier = Modifier.size(40.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            text()
-                        }
-                    }
-
-                    AppBottomSheetStyle.Selection -> {
-                        Surface(
-                            modifier = contentModifier,
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                text()
-                            }
-                        }
-                    }
-
-                    AppBottomSheetStyle.Status -> {
-                        Surface(
-                            modifier = contentModifier,
-                            shape = RoundedCornerShape(18.dp),
-                            color = tonePalette.statusTint.copy(alpha = 0.46f),
-                            border = BorderStroke(
-                                1.dp,
-                                tonePalette.accent.copy(alpha = 0.22f)
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                text()
+                            CompositionLocalProvider(LocalContentColor provides tonePalette.iconTint) {
+                                icon()
                             }
                         }
                     }
                 }
+                if (title != null) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        title()
+                    }
+                }
             }
 
-            if (dismissButton != null || confirmButton != null) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (dismissButton != null) {
-                        dismissButton()
+            Box(
+                modifier = Modifier
+                    .height(2.dp)
+                    .widthIn(max = 120.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(tonePalette.accent.copy(alpha = 0.22f))
+            )
+        }
+
+        if (text != null) {
+            val contentModifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .heightIn(max = bodyMaxHeight)
+
+            when (style) {
+                AppBottomSheetStyle.Form -> {
+                    Column(
+                        modifier = contentModifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        text()
                     }
-                    if (confirmButton != null) {
-                        confirmButton()
+                }
+
+                AppBottomSheetStyle.Confirm -> {
+                    Box(
+                        modifier = contentModifier
+                    ) {
+                        text()
                     }
+                }
+
+                AppBottomSheetStyle.Selection -> {
+                    Surface(
+                        modifier = contentModifier,
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            text()
+                        }
+                    }
+                }
+
+                AppBottomSheetStyle.Status -> {
+                    Surface(
+                        modifier = contentModifier,
+                        shape = RoundedCornerShape(18.dp),
+                        color = tonePalette.statusTint.copy(alpha = 0.46f),
+                        border = BorderStroke(
+                            1.dp,
+                            tonePalette.accent.copy(alpha = 0.22f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            text()
+                        }
+                    }
+                }
+            }
+        }
+
+        if (dismissButton != null || confirmButton != null) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (dismissButton != null) {
+                    dismissButton()
+                }
+                if (confirmButton != null) {
+                    confirmButton()
                 }
             }
         }
