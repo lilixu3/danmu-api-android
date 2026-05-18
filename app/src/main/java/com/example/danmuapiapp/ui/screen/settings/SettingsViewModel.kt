@@ -1,15 +1,20 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import android.app.Activity
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Context
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.content.res.Resources
+import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.service.DanmuQuickSettingsTileService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
@@ -24,6 +29,7 @@ import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.service.TvConfigSyncClient
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.WebDavService
+import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
@@ -377,6 +383,46 @@ class SettingsViewModel @Inject constructor(
             "已隐藏最近任务卡片"
         } else {
             "已恢复显示最近任务卡片"
+        }
+    }
+
+    fun requestAddQuickSettingsTile(activity: Activity?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            operationMessage = "当前系统版本不支持控制中心快捷按钮"
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            operationMessage = "请在控制中心编辑页手动添加“弹幕API服务”"
+            return
+        }
+        if (activity == null) {
+            operationMessage = "当前界面无法发起添加，请稍后重试"
+            return
+        }
+
+        val manager = activity.getSystemService(StatusBarManager::class.java)
+        if (manager == null) {
+            operationMessage = "系统控制中心服务不可用，请手动添加"
+            return
+        }
+
+        val component = ComponentName(activity, DanmuQuickSettingsTileService::class.java)
+        val label = activity.getString(R.string.qs_tile_label)
+        val icon = Icon.createWithResource(activity, R.drawable.ic_qs_danmu_service)
+        manager.requestAddTileService(
+            component,
+            label,
+            icon,
+            activity.mainExecutor
+        ) { result ->
+            operationMessage = when (result) {
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "已添加控制中心按钮"
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "控制中心按钮已存在"
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> "未添加控制中心按钮"
+                StatusBarManager.TILE_ADD_REQUEST_ERROR_REQUEST_IN_PROGRESS -> "系统正在处理上一次添加请求"
+                StatusBarManager.TILE_ADD_REQUEST_ERROR_APP_NOT_IN_FOREGROUND -> "请保持应用在前台后重试"
+                else -> "添加控制中心按钮失败：$result"
+            }
         }
     }
 

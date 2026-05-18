@@ -4,4 +4,5 @@
     <string name="a11y_keepalive_desc">用于保持"弹幕API"后台服务更稳定：当 Node 前台服务异常退出时自动拉起。不会读取屏幕内容。</string>
     <string name="notification_channel_name">弹幕API服务</string>
     <string name="notification_channel_desc">用于显示弹幕API服务运行状态</string>
+    <string name="qs_tile_label">弹幕API</string>
 </resources>

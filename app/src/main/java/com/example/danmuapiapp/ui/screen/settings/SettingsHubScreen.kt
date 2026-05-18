@@ -1,5 +1,9 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +25,7 @@ import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
@@ -36,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -67,6 +73,7 @@ fun SettingsHubScreen(
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val adminSessionState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val hideFromRecents by viewModel.hideFromRecents.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val runModeLabel = state.runMode.label
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
@@ -87,6 +94,13 @@ fun SettingsHubScreen(
         "当前监听 ${state.port} 端口，尚未启用访问 Token"
     } else {
         "当前监听 ${state.port} 端口，已启用访问 Token"
+    }
+    val quickTileSummary = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.N -> "当前系统版本不支持控制中心快捷按钮"
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> {
+            "可在系统控制中心编辑页手动添加，用于一键启停当前模式"
+        }
+        else -> "添加到控制中心，用于一键启停普通/Root 模式"
     }
     val githubTokenSummary = if (githubTokenConfigured) {
         "已配置，用于提升 GitHub API 配额与下载稳定性"
@@ -171,6 +185,25 @@ fun SettingsHubScreen(
                         SettingsStatusBadge(
                             text = "TCP ${state.port}",
                             accent = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "控制中心按钮",
+                    subtitle = quickTileSummary,
+                    icon = Icons.Rounded.PowerSettingsNew,
+                    onClick = {
+                        viewModel.requestAddQuickSettingsTile(context.findActivity())
+                    },
+                    trailing = {
+                        SettingsStatusBadge(
+                            text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                "一键添加"
+                            } else {
+                                "手动添加"
+                            },
+                            accent = MaterialTheme.colorScheme.primary
                         )
                     }
                 )
@@ -290,6 +323,14 @@ fun SettingsHubScreen(
                 )
             }
         }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 }
 
