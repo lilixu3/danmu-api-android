@@ -25,6 +25,7 @@ import com.example.danmuapiapp.data.service.TvConfigSyncClient
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.WebDavService
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -195,7 +196,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun saveServiceConfig(port: Int, token: String) {
-        val normalizedToken = token.trim()
+        val normalizedToken = RuntimeTokenNormalizer.normalizeInput(token)
         val old = runtimeState.value
         if (old.runMode == RunMode.Normal && port in 1..1023) {
             operationMessage = "普通模式无法监听 1-1023 端口，请切换 Root 模式或改用 1024+ 端口"
@@ -888,7 +889,7 @@ class SettingsViewModel @Inject constructor(
         val port = env["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: current.port
         runtimeRepo.applyServiceConfig(
             port = port,
-            token = env["TOKEN"].orEmpty(),
+            token = RuntimeTokenNormalizer.normalizeInput(env["TOKEN"]),
             restartIfRunning = false
         )
         env["DANMU_API_VARIANT"]?.lowercase()?.let { raw ->

@@ -4,6 +4,7 @@ import android.os.Build
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.TvConfigSyncPayload
 import com.example.danmuapiapp.data.service.TvConfigSyncResponse
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.ServiceStatus
@@ -222,7 +223,7 @@ class CompatTvConfigSyncServer(
             it.key.equals(payload.runtime.variantKey, ignoreCase = true)
         }
         val port = payload.runtime.port.takeIf { it in 1..65535 } ?: runtimeSnapshot.port
-        val token = payload.runtime.token
+        val token = RuntimeTokenNormalizer.normalizeInput(payload.runtime.token)
 
         settingsRepository.setGithubProxy(payload.settings.githubProxy)
         settingsRepository.setGithubToken(payload.settings.githubToken)

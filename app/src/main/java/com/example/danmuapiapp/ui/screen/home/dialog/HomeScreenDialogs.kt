@@ -131,6 +131,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
@@ -739,7 +740,7 @@ internal fun QuickTokenDialog(
                 text = "保存",
                 icon = Icons.Rounded.CheckCircle,
                 onClick = {
-                    val normalized = quickTokenText.trim()
+                    val normalized = RuntimeTokenNormalizer.normalizeInput(quickTokenText)
                     if (normalized == currentToken) {
                         onTokenError("Token 未变化")
                         return@DialogActionButton

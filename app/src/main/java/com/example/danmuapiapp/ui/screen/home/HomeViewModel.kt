@@ -17,6 +17,7 @@ import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
@@ -787,7 +788,7 @@ class HomeViewModel @Inject constructor(
             return
         }
 
-        val normalized = token.trim()
+        val normalized = RuntimeTokenNormalizer.normalizeInput(token)
         if (state.token == normalized) {
             postMessage("Token 未变化")
             return

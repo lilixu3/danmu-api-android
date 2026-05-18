@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.example.danmuapiapp.data.util.DotEnvCodec
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.safeGetInt
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
@@ -179,18 +180,22 @@ object NodeProjectManager {
         updates["DANMU_API_VARIANT"] = variantValue
         updates["DANMU_API_PORT"] = portValue.toString()
         val removeKeys = linkedSetOf<String>()
-        val tokenFromPrefs = prefs.safeGetString("token").trim()
+        val rawTokenFromPrefs = prefs.safeGetString("token")
+        val tokenFromPrefs = RuntimeTokenNormalizer.normalizeInput(rawTokenFromPrefs)
         if (prefs.contains("token")) {
             if (tokenFromPrefs.isNotBlank()) {
                 updates["TOKEN"] = tokenFromPrefs
             } else {
-                // 用户显式清空 token 时才移除，避免覆盖旧项目保存在 .env 的 token。
+                // 用户显式清空 token，或误写 null/undefined 占位值时移除，避免生成 /null。
                 removeKeys += "TOKEN"
             }
         } else {
-            val tokenFromEnv = existingEnv["TOKEN"].orEmpty().trim()
+            val rawTokenFromEnv = existingEnv["TOKEN"]
+            val tokenFromEnv = RuntimeTokenNormalizer.normalizeInput(rawTokenFromEnv)
             if (tokenFromEnv.isNotBlank()) {
                 updates["TOKEN"] = tokenFromEnv
+            } else if (rawTokenFromEnv != null) {
+                removeKeys += "TOKEN"
             }
         }
         updates["LOG_LEVEL"] = prefs.safeGetString("log_level", "info").ifBlank { "info" }
