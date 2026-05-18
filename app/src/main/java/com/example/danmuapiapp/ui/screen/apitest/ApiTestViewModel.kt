@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.RequestRecord
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
@@ -692,7 +693,7 @@ class ApiTestViewModel @Inject constructor(
             "http://$raw".trimEnd('/')
         }
 
-        val token = runtimeState.value.token.trim().trim('/')
+        val token = RuntimeTokenNormalizer.normalizeInput(runtimeState.value.token).trim('/')
         if (token.isBlank()) return normalized
 
         val uri = runCatching { URI(normalized) }.getOrNull() ?: return normalized

@@ -17,7 +17,9 @@ internal object RuntimeApiAccessResolver {
         defaultPort: Int
     ): RuntimeApiAccess {
         val port = prefs.getInt("port", defaultPort).coerceIn(1, 65535)
-        val runtimeToken = TokenDefaults.resolveTokenFromPrefs(prefs, context).trim()
+        val runtimeToken = RuntimeTokenNormalizer.normalizeInput(
+            TokenDefaults.resolveTokenFromPrefs(prefs, context)
+        )
         val tokenPaths = linkedSetOf<String>()
         if (runtimeToken.isNotBlank()) {
             tokenPaths += "/$runtimeToken"

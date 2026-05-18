@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DanmuDownloadInput
@@ -1337,8 +1338,10 @@ class DanmuDownloadViewModel @Inject constructor(
 
     private fun buildLocalControlApiUrl(path: String): String {
         val state = runtimeState.value
-        val runtimeToken = state.token.trim().trim('/')
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim().trim('/')
+        val runtimeToken = RuntimeTokenNormalizer.normalizeInput(state.token).trim('/')
+        val adminToken = RuntimeTokenNormalizer.normalizeInput(
+            adminSessionRepository.currentAdminTokenOrNull()
+        ).trim('/')
         val tokenPath = when {
             adminSessionRepository.sessionState.value.isAdminMode && adminToken.isNotBlank() -> "/$adminToken"
             runtimeToken.isNotBlank() -> "/$runtimeToken"
@@ -1604,7 +1607,7 @@ class DanmuDownloadViewModel @Inject constructor(
         val raw = sourceBase.trim()
         if (raw.isBlank()) return null
         val normalized = ensureHttpPrefix(raw).trimEnd('/')
-        val token = runtimeState.value.token.trim().trim('/')
+        val token = RuntimeTokenNormalizer.normalizeInput(runtimeState.value.token).trim('/')
         if (token.isBlank()) return normalized
 
         val uri = runCatching { URI(normalized) }.getOrNull() ?: return normalized

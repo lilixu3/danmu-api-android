@@ -8,6 +8,7 @@ import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.util.DotEnvCodec
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.example.danmuapiapp.domain.model.RunMode
@@ -83,6 +84,17 @@ class EnvConfigRepositoryImpl @Inject constructor(
     }
 
     override fun setValue(key: String, value: String) {
+        val isRuntimeToken = key.equals("TOKEN", ignoreCase = true)
+        val normalizedValue = if (isRuntimeToken) {
+            RuntimeTokenNormalizer.normalizeInput(value)
+        } else {
+            value
+        }
+        if (isRuntimeToken && normalizedValue.isBlank()) {
+            deleteKey(key)
+            return
+        }
+
         val file = envFile()
         val lines = readEnvText(file).map { text ->
             if (text.isBlank()) mutableListOf() else text.split('\n').toMutableList()
@@ -91,7 +103,7 @@ class EnvConfigRepositoryImpl @Inject constructor(
             mutableListOf()
         }
 
-        val formatted = DotEnvCodec.formatValue(value)
+        val formatted = DotEnvCodec.formatValue(normalizedValue)
         var found = false
         for (idx in lines.indices) {
             val line = lines[idx]
@@ -219,7 +231,10 @@ class EnvConfigRepositoryImpl @Inject constructor(
             }
         }
         userValues.forEach { (key, value) ->
-            if (key.equals("TOKEN", ignoreCase = true) && value.isBlank()) {
+            if (
+                key.equals("TOKEN", ignoreCase = true) &&
+                RuntimeTokenNormalizer.normalizeInput(value).isBlank()
+            ) {
                 return@forEach
             }
             merged[key] = value

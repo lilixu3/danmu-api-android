@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.FileObserver
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.DotEnvCodec
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
@@ -404,7 +405,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         launchSerializedUserOperation("应用服务配置") {
             applyServiceConfigLocked(
                 port = port,
-                token = token.trim(),
+                token = RuntimeTokenNormalizer.normalizeInput(token),
                 restartIfRunning = restartIfRunning
             )
         }
@@ -422,7 +423,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     override fun updateToken(token: String) {
         applyServiceConfig(
             port = _runtimeState.value.port,
-            token = token.trim(),
+            token = RuntimeTokenNormalizer.normalizeInput(token),
             restartIfRunning = false
         )
     }
@@ -1378,7 +1379,10 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun resolveRuntimeTokenApiBaseUrl(): String? {
         val state = _runtimeState.value
-        val tokenPath = state.token.trim().trim('/').takeIf { it.isNotBlank() } ?: return null
+        val tokenPath = RuntimeTokenNormalizer.normalizeInput(state.token)
+            .trim('/')
+            .takeIf { it.isNotBlank() }
+            ?: return null
         return "http://127.0.0.1:${state.port}/$tokenPath"
     }
 
@@ -2139,12 +2143,18 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun buildLocalUrl(port: Int, token: String): String {
-        val tokenPath = token.trim().takeIf { it.isNotEmpty() }?.let { "/$it" }.orEmpty()
+        val tokenPath = RuntimeTokenNormalizer.normalizeInput(token)
+            .takeIf { it.isNotEmpty() }
+            ?.let { "/$it" }
+            .orEmpty()
         return "http://127.0.0.1:$port$tokenPath"
     }
 
     private fun buildLanUrl(ip: String, port: Int, token: String): String {
-        val tokenPath = token.trim().takeIf { it.isNotEmpty() }?.let { "/$it" }.orEmpty()
+        val tokenPath = RuntimeTokenNormalizer.normalizeInput(token)
+            .takeIf { it.isNotEmpty() }
+            ?.let { "/$it" }
+            .orEmpty()
         return "http://$ip:$port$tokenPath"
     }
 
