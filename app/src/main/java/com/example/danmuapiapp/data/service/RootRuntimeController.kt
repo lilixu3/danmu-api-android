@@ -7,6 +7,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.net.URL
 
@@ -452,7 +453,7 @@ object RootRuntimeController {
         val port = prefs.getInt("port", 9321).coerceIn(1, 65535)
         val logLevel = prefs.getString("log_level", "info").orEmpty().trim().ifBlank { "info" }
         val tokenConfigured = prefs.contains("token")
-        val token = prefs.getString("token", "").orEmpty().trim()
+        val token = RuntimeTokenNormalizer.normalizeInput(prefs.getString("token", ""))
         return RuntimeEnvSnapshot(
             variant = variant,
             port = port,

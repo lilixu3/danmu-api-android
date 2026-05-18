@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.config
 
 import android.content.Context
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import androidx.lifecycle.ViewModel
 import com.example.danmuapiapp.domain.model.EnvVarDef
@@ -224,8 +225,12 @@ class ConfigViewModel @Inject constructor(
     private fun buildLocalApiUrl(path: String): String {
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
         val port = prefs.getInt("port", DEFAULT_PORT)
-        val runtimeToken = TokenDefaults.resolveTokenFromPrefs(prefs, context).trim()
-        val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim()
+        val runtimeToken = RuntimeTokenNormalizer.normalizeInput(
+            TokenDefaults.resolveTokenFromPrefs(prefs, context)
+        )
+        val adminToken = RuntimeTokenNormalizer.normalizeInput(
+            adminSessionRepository.currentAdminTokenOrNull()
+        )
         val tokenPath = when {
             adminSessionRepository.sessionState.value.isAdminMode && adminToken.isNotBlank() -> "/$adminToken"
             runtimeToken.isNotBlank() -> "/$runtimeToken"

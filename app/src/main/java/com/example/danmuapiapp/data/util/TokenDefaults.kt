@@ -23,26 +23,26 @@ object TokenDefaults {
     ): String {
         if (prefs.contains(key)) {
             // prefs 中显式存在空字符串表示“用户主动清空 token”，不能再回灌旧 .env 或默认值。
-            return prefs.safeGetString(key).trim()
+            return RuntimeTokenNormalizer.normalizeInput(prefs.safeGetString(key))
         }
 
-        val envToken = resolveTokenFromEnvFile(envFile).orEmpty().trim()
+        val envToken = RuntimeTokenNormalizer.normalizeInput(resolveTokenFromEnvFile(envFile))
         if (envToken.isNotBlank()) return envToken
 
         return resolveCoreDefaultToken(context)
     }
 
     fun resolveCoreDefaultToken(context: Context): String {
-        val fromCoreConfig = runCatching {
+        val fromCoreConfig = RuntimeTokenNormalizer.normalizeInput(runCatching {
             EnvVarConfigLoader.loadDefaultValue(context, TOKEN_ENV_KEY).orEmpty().trim()
-        }.getOrNull().orEmpty()
+        }.getOrNull())
         if (fromCoreConfig.isNotBlank()) return fromCoreConfig
 
-        val fromAssetEnv = runCatching {
+        val fromAssetEnv = RuntimeTokenNormalizer.normalizeInput(runCatching {
             context.assets.open(ASSET_ENV_PATH).bufferedReader(Charsets.UTF_8).useLines { lines ->
                 parseTokenFromLines(lines)
             }
-        }.getOrNull().orEmpty()
+        }.getOrNull())
         if (fromAssetEnv.isNotBlank()) return fromAssetEnv
 
         return FALLBACK_DEFAULT_TOKEN
@@ -62,7 +62,7 @@ object TokenDefaults {
             .entries
             .firstOrNull { it.key.equals(TOKEN_ENV_KEY, ignoreCase = true) }
             ?.value
-            ?.trim()
+            ?.let(RuntimeTokenNormalizer::normalizeInput)
             ?.ifBlank { null }
     }
 }
