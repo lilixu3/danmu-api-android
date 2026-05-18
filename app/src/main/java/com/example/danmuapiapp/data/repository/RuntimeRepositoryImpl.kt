@@ -382,6 +382,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                     reconcileInitialState()
                     if (_runtimeState.value.runMode == RunMode.Normal) {
                         reconcileNormalStateLocked()
+                    } else if (_runtimeState.value.runMode == RunMode.Root) {
+                        reconcileRootStateLocked()
                     }
                 }
             }.onFailure {
@@ -1204,6 +1206,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     operationMutex.withLock {
                         reconcileInitialState()
                         reconcileNormalStateLocked()
+                        reconcileRootStateLocked()
                     }
                 }
             }
@@ -1303,6 +1306,45 @@ class RuntimeRepositoryImpl @Inject constructor(
             ServiceStatus.Stopping -> {
                 reconcileConsecutiveDeadCount = 0
                 if (!processRunning && !portOpen) {
+                    markStopped()
+                }
+            }
+
+            ServiceStatus.Stopped,
+            ServiceStatus.Error -> Unit
+        }
+    }
+
+    private fun reconcileRootStateLocked() {
+        val state = _runtimeState.value
+        if (state.runMode != RunMode.Root) return
+        if (state.status != ServiceStatus.Running &&
+            state.status != ServiceStatus.Starting &&
+            state.status != ServiceStatus.Stopping
+        ) {
+            return
+        }
+
+        val running = RootRuntimeController.isRunning(context, state.port)
+        when (state.status) {
+            ServiceStatus.Running -> {
+                if (!running) {
+                    markStopped("Root 服务未运行，可重新启动")
+                    addLog(LogLevel.Warn, "检测到 Root 模式服务已退出，状态已自动重置")
+                }
+            }
+
+            ServiceStatus.Starting -> {
+                if (running) {
+                    markRunning(
+                        pid = RootRuntimeController.getPid(context),
+                        forceNewStart = false
+                    )
+                }
+            }
+
+            ServiceStatus.Stopping -> {
+                if (!running) {
                     markStopped()
                 }
             }
