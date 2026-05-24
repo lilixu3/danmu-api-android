@@ -810,6 +810,7 @@ class CompatModeActivity : AppCompatActivity() {
                 }
                 recommendedProfileEnabled -> {
                     append("\n已自动配置：普通模式开机恢复、系统定时心跳、${heartbeatIntervalMinutes} 分钟恢复间隔。")
+                    append("\n运行期间会额外保持 CPU 唤醒，降低部分盒子待机后被系统打断的概率。")
                     if (!desiredRunning) {
                         append("\n启用后请至少手动启动一次服务，系统才会按“期望运行”继续尝试恢复。")
                     }

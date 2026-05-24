@@ -181,6 +181,16 @@ object NodeKeepAlivePrefs {
             getHeartbeatMode(context) == KeepAliveHeartbeatMode.System
     }
 
+    fun shouldHoldRuntimeWakeLock(
+        isCompatModeDevice: Boolean,
+        isRootMode: Boolean,
+        serviceRunning: Boolean
+    ): Boolean {
+        return isCompatModeDevice &&
+            !isRootMode &&
+            serviceRunning
+    }
+
     fun hasPostNotificationsPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==

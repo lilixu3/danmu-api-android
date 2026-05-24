@@ -11,12 +11,14 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.NodeBridge
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.R
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.domain.model.ErrorHandler
 import kotlinx.coroutines.*
@@ -182,6 +184,7 @@ class NodeService : Service() {
     private var runningPublishedGeneration = -1L
     private var startupStartedAtMs = 0L
     private var currentStartExplicit = false
+    private var runtimeWakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -238,6 +241,56 @@ class NodeService : Service() {
         }
     }
 
+    private fun syncRuntimeWakeLock() {
+        val serviceRunning = synchronized(stateLock) { isRunning && !isStopping }
+        val shouldHold = NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
+            isCompatModeDevice = DeviceCompatMode.shouldUseCompatMode(applicationContext),
+            isRootMode = NodeKeepAlivePrefs.isRootMode(applicationContext),
+            serviceRunning = serviceRunning
+        )
+        if (shouldHold) {
+            acquireRuntimeWakeLock()
+        } else {
+            releaseRuntimeWakeLock()
+        }
+    }
+
+    private fun acquireRuntimeWakeLock() {
+        synchronized(stateLock) {
+            if (runtimeWakeLock?.isHeld == true) return
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            val wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "$packageName:$TAG:runtime"
+            ).apply {
+                setReferenceCounted(false)
+            }
+            try {
+                wakeLock.acquire()
+                runtimeWakeLock = wakeLock
+            } catch (t: Throwable) {
+                runtimeWakeLock = null
+                AppDiagnosticLogger.w(this, TAG, "启用 TV 兼容模式 CPU 唤醒锁失败：${t.message}")
+                return
+            }
+            AppDiagnosticLogger.i(this, TAG, "TV 兼容模式运行中，已启用 CPU 唤醒锁")
+        }
+    }
+
+    private fun releaseRuntimeWakeLock() {
+        val wakeLock = synchronized(stateLock) {
+            runtimeWakeLock.also { runtimeWakeLock = null }
+        } ?: return
+        runCatching {
+            if (wakeLock.isHeld) {
+                wakeLock.release()
+                AppDiagnosticLogger.i(this, TAG, "已释放 TV 兼容模式 CPU 唤醒锁")
+            }
+        }.onFailure {
+            AppDiagnosticLogger.w(this, TAG, "释放 TV 兼容模式 CPU 唤醒锁失败：${it.message}")
+        }
+    }
+
     override fun onTimeout(startId: Int) {
         AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，正在强制停止")
         synchronized(stateLock) {
@@ -248,6 +301,7 @@ class NodeService : Service() {
             currentStartExplicit = false
             nodeThread = null
         }
+        releaseRuntimeWakeLock()
         broadcastStatus(
             STATUS_ERROR,
             message = "前台服务被系统超时限制，已停止",
@@ -274,6 +328,7 @@ class NodeService : Service() {
             runningPublishedGeneration = -1L
             explicitStart = currentStartExplicit
         }
+        syncRuntimeWakeLock()
 
         StartupFailureStore.clearNormal(this)
 
@@ -527,6 +582,7 @@ class NodeService : Service() {
             return
         }
         delay(START_TIMEOUT_KILL_DELAY_MS)
+        releaseRuntimeWakeLock()
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
@@ -561,6 +617,7 @@ class NodeService : Service() {
             publishStopping("停止较慢，正在强制回收服务进程…")
             broadcastStatus(STATUS_STOPPED, message = "服务已停止")
             delay(350)
+            releaseRuntimeWakeLock()
             android.os.Process.killProcess(android.os.Process.myPid())
         }
     }
@@ -684,6 +741,7 @@ class NodeService : Service() {
         synchronized(stateLock) {
             isStopping = false
         }
+        releaseRuntimeWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -853,6 +911,7 @@ class NodeService : Service() {
             startupStartedAtMs = 0L
             currentStartExplicit = false
         }
+        releaseRuntimeWakeLock()
         super.onDestroy()
     }
 }
