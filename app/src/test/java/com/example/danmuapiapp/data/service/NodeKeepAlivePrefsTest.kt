@@ -59,6 +59,42 @@ class NodeKeepAlivePrefsTest {
         assertFalse(prefs.contains("recovery_failure_count"))
         assertFalse(prefs.contains("recovery_block_until_ms"))
     }
+
+    @Test
+    fun `compat runtime wake lock should be enabled only while tv service is running`() {
+        assertTrue(
+            NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
+                isCompatModeDevice = true,
+                isRootMode = false,
+                serviceRunning = true
+            )
+        )
+    }
+
+    @Test
+    fun `compat runtime wake lock should stay disabled outside tv foreground service lifetime`() {
+        assertFalse(
+            NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
+                isCompatModeDevice = false,
+                isRootMode = false,
+                serviceRunning = true
+            )
+        )
+        assertFalse(
+            NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
+                isCompatModeDevice = true,
+                isRootMode = true,
+                serviceRunning = true
+            )
+        )
+        assertFalse(
+            NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
+                isCompatModeDevice = true,
+                isRootMode = false,
+                serviceRunning = false
+            )
+        )
+    }
 }
 
 private class FakeSharedPreferences : SharedPreferences {
