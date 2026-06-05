@@ -58,9 +58,16 @@ import java.util.Locale
 internal const val KEY_SOURCE_ORDER = "SOURCE_ORDER"
 internal const val KEY_BILIBILI_COOKIE = "BILIBILI_COOKIE"
 internal const val KEY_MERGE_SOURCE_PAIRS = "MERGE_SOURCE_PAIRS"
+internal const val KEY_CUSTOM_MERGE_RULES = "CUSTOM_MERGE_RULES"
+internal const val KEY_DANMU_OFFSET = "DANMU_OFFSET"
+internal const val KEY_MATCH_PLATFORM_RULES = "MATCH_PLATFORM_RULES"
 internal const val KEY_PLATFORM_ORDER = "PLATFORM_ORDER"
 internal const val KEY_TITLE_MAPPING_TABLE = "TITLE_MAPPING_TABLE"
 internal const val KEY_TITLE_PLATFORM_OFFSET_TABLE = "TITLE_PLATFORM_OFFSET_TABLE"
+internal const val KEY_VOD_SERVERS = "VOD_SERVERS"
+internal const val KEY_SOURCE_DETAIL_CONCURRENCY_BY_SOURCE = "SOURCE_DETAIL_CONCURRENCY_BY_SOURCE"
+internal const val KEY_BLOCKED_WORDS = "BLOCKED_WORDS"
+internal const val KEY_IP_BLACKLIST = "IP_BLACKLIST"
 internal const val KEY_AI_API_KEY = "AI_API_KEY"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -142,7 +149,8 @@ fun ConfigScreen(
             onGenerateBiliQr = { viewModel.generateBilibiliQr() },
             onPollBiliQr = { key -> viewModel.pollBilibiliQr(key) },
             onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) },
-            onVerifyAiConnectivity = { apiKey -> viewModel.verifyAiConnectivity(apiKey) }
+            onVerifyAiConnectivity = { apiKey -> viewModel.verifyAiConnectivity(apiKey) },
+            onFetchRecentAnimeCache = { viewModel.fetchRecentAnimeCache() }
         )
     }
 

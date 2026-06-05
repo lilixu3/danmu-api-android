@@ -332,3 +332,238 @@ internal fun String?.ifNullOrBlank(fallback: String): String {
     val value = this?.trim().orEmpty()
     return if (value.isBlank()) fallback else value
 }
+
+internal data class CustomMergeRuleRow(
+    val action: String = "merge",
+    val secondaryTitle: String = "",
+    val secondarySeason: String = "",
+    val secondarySource: String = "",
+    val primaryTitle: String = "",
+    val primarySeason: String = "",
+    val primarySource: String = "",
+    val routesRaw: String = "",
+)
+
+internal data class TimelineOffsetRuleRow(
+    val title: String = "",
+    val season: String = "",
+    val episode: String = "",
+    val selectedSources: List<String> = listOf("all"),
+    val offset: String = "",
+    val usePercent: Boolean = false,
+)
+
+internal data class MatchPlatformRuleRow(
+    val title: String = "",
+    val season: String = "",
+    val platformsRaw: String = "",
+)
+
+internal fun cleanCacheAnimeTitle(rawTitle: String): String {
+    return rawTitle.orEmpty()
+        .replace(Regex("[\\u200B-\\u200F\\uFEFF]"), "")
+        .replace(Regex("\\s*from\\s+.*$", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\s*[（(〔\\[]\\s*[0-9０-９]{4}\\s*年?\\s*[）)〕\\]]"), "")
+        .replace(Regex("(.+?)\\s*【[^】]+】$"), "\$1")
+        .trim()
+}
+
+internal fun normalizeNumericInput(raw: String?): String {
+    val digits = raw?.trim().orEmpty().filter { it.isDigit() }
+    if (digits.isBlank()) return ""
+    return digits.toIntOrNull()?.toString() ?: digits
+}
+
+internal fun formatIndexedSegment(prefix: String, raw: String?): String {
+    val numeric = normalizeNumericInput(raw)
+    if (numeric.isBlank()) return ""
+    val padded = numeric.toIntOrNull()?.toString()?.padStart(2, '0') ?: numeric
+    return prefix.uppercase(Locale.getDefault()) + padded
+}
+
+internal fun parseCustomMergeRules(raw: String): List<CustomMergeRuleRow> {
+    return raw.split(Regex("[;\\n]+"))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .mapNotNull { ruleText ->
+            val parts = ruleText.split("|", limit = 2).map { it.trim() }
+            val entityPart = parts[0]
+            val routesRaw = parts.getOrNull(1).orEmpty()
+            val action = when {
+                entityPart.contains("->") -> "merge"
+                entityPart.contains("×") -> "block"
+                else -> return@mapNotNull null
+            }
+            val entityParts = if (action == "merge") entityPart.split("->", limit = 2) else entityPart.split("×", limit = 2)
+            if (entityParts.size < 2) return@mapNotNull null
+            val secondary = parseCustomMergeEntity(entityParts[0].trim()) ?: return@mapNotNull null
+            val primary = parseCustomMergeEntity(entityParts[1].trim()) ?: return@mapNotNull null
+            CustomMergeRuleRow(
+                action = action,
+                secondaryTitle = secondary.title,
+                secondarySeason = secondary.season,
+                secondarySource = secondary.source,
+                primaryTitle = primary.title,
+                primarySeason = primary.season,
+                primarySource = primary.source,
+                routesRaw = if (action == "merge") routesRaw else ""
+            )
+        }
+}
+
+internal fun serializeCustomMergeRules(rows: List<CustomMergeRuleRow>): String {
+    return rows.mapNotNull { row ->
+        val secondary = formatCustomMergeEntity(row.secondaryTitle, row.secondarySeason, row.secondarySource)
+        val primary = formatCustomMergeEntity(row.primaryTitle, row.primarySeason, row.primarySource)
+        if (secondary.isBlank() || primary.isBlank()) return@mapNotNull null
+        val entity = if (row.action == "block") "$secondary × $primary" else "$secondary -> $primary"
+        val routes = row.routesRaw.trim()
+        if (row.action == "merge" && routes.isNotBlank()) "$entity | $routes" else entity
+    }.joinToString("; ")
+}
+
+internal fun parseTimelineOffsetRules(raw: String): List<TimelineOffsetRuleRow> {
+    return raw.split(Regex("[,;\\n]+"))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .mapNotNull { line ->
+            val colonIdx = line.lastIndexOf(':')
+            if (colonIdx == -1) {
+                return@mapNotNull TimelineOffsetRuleRow(title = line)
+            }
+            var rawPath = line.substring(0, colonIdx).trim()
+            val offset = line.substring(colonIdx + 1).trim()
+            var usePercent = false
+
+            if (rawPath.endsWith('%')) {
+                usePercent = true
+                rawPath = rawPath.dropLast(1).trim()
+            }
+
+            val atIdx = rawPath.lastIndexOf('@')
+            val pathPart: String
+            val sourcePart: String?
+            if (atIdx == -1) {
+                pathPart = rawPath
+                sourcePart = null
+            } else {
+                pathPart = rawPath.substring(0, atIdx).trim()
+                sourcePart = rawPath.substring(atIdx + 1).trim()
+            }
+
+            val segments = pathPart.split('/').map { it.trim() }.filter { it.isNotBlank() }
+            val title = segments.getOrNull(0).orEmpty()
+            if (title.isBlank()) return@mapNotNull null
+            val season = normalizeNumericInput(segments.getOrNull(1))
+            val episode = normalizeNumericInput(segments.getOrNull(2))
+            val selectedSources = when {
+                sourcePart.isNullOrBlank() -> listOf("all")
+                sourcePart.equals("all", true) || sourcePart == "*" -> listOf("all")
+                else -> sourcePart.split('&').map { it.trim() }.filter { it.isNotBlank() }
+                    .ifEmpty { listOf("all") }
+            }
+
+            TimelineOffsetRuleRow(
+                title = title,
+                season = season,
+                episode = episode,
+                selectedSources = selectedSources,
+                offset = offset,
+                usePercent = usePercent
+            )
+        }
+}
+
+internal fun serializeTimelineOffsetRules(rows: List<TimelineOffsetRuleRow>): String {
+    return rows.mapNotNull { row ->
+        val title = row.title.trim()
+        val offset = row.offset.trim()
+        if (title.isBlank() || offset.isBlank()) return@mapNotNull null
+        val pathParts = buildList {
+            add(title)
+            formatIndexedSegment("S", row.season).takeIf { it.isNotBlank() }?.let { add(it) }
+            formatIndexedSegment("E", row.episode).takeIf { it.isNotBlank() }?.let { add(it) }
+        }
+        val sources = normalizeTimelineOffsetSources(row.selectedSources)
+        val scopedPath = pathParts.joinToString("/") + "@" + sources
+        scopedPath + if (row.usePercent) "%" else "" + ":" + offset
+    }.joinToString(",")
+}
+
+internal fun parseMatchPlatformRules(raw: String): List<MatchPlatformRuleRow> {
+    return raw.split(Regex("[;\\n]+"))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .mapNotNull { entry ->
+            val arrowIdx = entry.indexOf("->")
+            if (arrowIdx == -1) return@mapNotNull null
+            val keyPart = entry.substring(0, arrowIdx).trim()
+            val platformsRaw = entry.substring(arrowIdx + 2).trim()
+            val (title, season) = parseMatchPlatformRuleKey(keyPart) ?: return@mapNotNull null
+            if (platformsRaw.isBlank()) return@mapNotNull null
+            MatchPlatformRuleRow(
+                title = title,
+                season = season,
+                platformsRaw = platformsRaw
+            )
+        }
+}
+
+internal fun serializeMatchPlatformRules(rows: List<MatchPlatformRuleRow>): String {
+    return rows.mapNotNull { row ->
+        val title = row.title.trim()
+        if (title.isBlank()) return@mapNotNull null
+        val seasonPart = formatIndexedSegment("S", row.season)
+        val key = if (seasonPart.isBlank()) title else "$title/$seasonPart"
+        val platforms = parseCsvTokens(row.platformsRaw).joinToString(",")
+        if (platforms.isBlank()) return@mapNotNull null
+        "$key->$platforms"
+    }.joinToString(";")
+}
+
+private data class ParsedCustomMergeEntity(
+    val title: String,
+    val season: String,
+    val source: String,
+)
+
+private fun parseCustomMergeEntity(raw: String): ParsedCustomMergeEntity? {
+    val match = Regex("^(.+?)(?:/S(\\d+))?@([a-zA-Z0-9_&]+)$", RegexOption.IGNORE_CASE)
+        .find(raw.trim()) ?: return null
+    val title = match.groupValues.getOrNull(1)?.trim().orEmpty()
+    val season = normalizeNumericInput(match.groupValues.getOrNull(2))
+    val source = match.groupValues.getOrNull(3)?.trim().orEmpty().lowercase(Locale.getDefault())
+    if (title.isBlank() || source.isBlank()) return null
+    return ParsedCustomMergeEntity(title = title, season = season, source = source)
+}
+
+private fun formatCustomMergeEntity(title: String, season: String?, source: String): String {
+    val cleanTitle = title.trim()
+    val cleanSource = source.trim().lowercase(Locale.getDefault())
+    if (cleanTitle.isBlank() || cleanSource.isBlank()) return ""
+    val seasonPart = formatIndexedSegment("S", season)
+    return buildString {
+        append(cleanTitle)
+        if (seasonPart.isNotBlank()) append('/').append(seasonPart)
+        append('@').append(cleanSource)
+    }
+}
+
+private fun parseMatchPlatformRuleKey(rawKey: String): Pair<String, String>? {
+    val normalized = rawKey.trim()
+    if (normalized.isBlank()) return null
+    val slashIdx = normalized.lastIndexOf('/')
+    if (slashIdx == -1) return normalized to ""
+    val seasonPart = normalized.substring(slashIdx + 1).trim()
+    val seasonMatch = Regex("^S?(\\d+)$", RegexOption.IGNORE_CASE).find(seasonPart) ?: return normalized to ""
+    val title = normalized.substring(0, slashIdx).trim()
+    val season = normalizeNumericInput(seasonMatch.groupValues.getOrNull(1))
+    if (title.isBlank()) return null
+    return title to season
+}
+
+private fun normalizeTimelineOffsetSources(selectedSources: List<String>): String {
+    val tokens = selectedSources.map { it.trim() }.filter { it.isNotBlank() }
+    if (tokens.isEmpty() || tokens.any { it.equals("all", true) || it == "*" }) return "all"
+    return tokens.distinctBy { it.lowercase(Locale.getDefault()) }.joinToString("&")
+}

@@ -40,6 +40,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.danmuapiapp.domain.model.AnimeCacheItem
 import com.example.danmuapiapp.domain.model.EnvType
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.google.zxing.BarcodeFormat
@@ -66,6 +67,7 @@ internal fun EnvVarEditDialog(
     onPollBiliQr: suspend (String) -> Result<BilibiliQrPollResult>,
     onVerifyBiliCookie: suspend (String) -> Result<BilibiliCookieVerifyResult>,
     onVerifyAiConnectivity: suspend (String) -> Result<AiConnectivityVerifyResult>,
+    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     var value by remember(def.key, currentValue) { mutableStateOf(currentValue) }
     var showPassword by remember(def.key) { mutableStateOf(false) }
@@ -136,27 +138,102 @@ internal fun EnvVarEditDialog(
                     }
 
                     KEY_MERGE_SOURCE_PAIRS -> {
-                        MergeSourcePairsEditor(
+                        CompactMergeSourcePairsEditor(
+                            rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it },
-                            options = def.options
+                            options = def.options,
+                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
                         )
                         true
                     }
 
                     KEY_TITLE_MAPPING_TABLE -> {
-                        TitleMappingTableEditor(
+                        CompactTitleMappingTableEditor(
+                            rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it }
                         )
                         true
                     }
 
-                    KEY_TITLE_PLATFORM_OFFSET_TABLE -> {
-                        TitlePlatformOffsetTableEditor(
+                    KEY_MATCH_PLATFORM_RULES -> {
+                        CompactMatchPlatformRulesEditor(
+                            rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it },
                             options = def.options
+                        )
+                        true
+                    }
+
+                    KEY_TITLE_PLATFORM_OFFSET_TABLE -> {
+                        CompactTitlePlatformOffsetTableEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            options = def.options
+                        )
+                        true
+                    }
+
+                    KEY_CUSTOM_MERGE_RULES -> {
+                        CompactCustomMergeRulesEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            options = def.options,
+                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
+                        )
+                        true
+                    }
+
+                    KEY_DANMU_OFFSET -> {
+                        CompactDanmuOffsetEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            options = def.options,
+                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
+                        )
+                        true
+                    }
+
+                    KEY_VOD_SERVERS -> {
+                        VodServersEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it }
+                        )
+                        true
+                    }
+
+                    KEY_SOURCE_DETAIL_CONCURRENCY_BY_SOURCE -> {
+                        SourceConcurrencyBySourceEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            sourceOptions = def.options
+                        )
+                        true
+                    }
+
+                    KEY_BLOCKED_WORDS -> {
+                        KeywordListEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            title = "屏蔽词列表",
+                            subtitle = "按关键词标签维护"
+                        )
+                        true
+                    }
+
+                    KEY_IP_BLACKLIST -> {
+                        IpBlacklistEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it }
                         )
                         true
                     }
@@ -186,142 +263,49 @@ internal fun EnvVarEditDialog(
 
                 if (!handledSpecial) {
                     when (def.type) {
-                        EnvType.BOOLEAN -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("启用", style = MaterialTheme.typography.bodyMedium)
-                                Switch(
-                                    checked = value.lowercase().let { it == "true" || it == "1" },
-                                    onCheckedChange = { value = if (it) "true" else "false" }
-                                )
-                            }
-                        }
+                        EnvType.BOOLEAN -> StableBooleanValueEditor(
+                            value = value,
+                            onValueChange = { value = it }
+                        )
 
-                        EnvType.SELECT -> {
-                            if (def.options.isNotEmpty()) {
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    def.options.forEach { option ->
-                                        FilterChip(
-                                            selected = value == option,
-                                            onClick = { value = option },
-                                            label = { Text(option) }
-                                        )
-                                    }
-                                }
-                            } else {
-                                OutlinedTextField(
-                                    value = value,
-                                    onValueChange = { value = it },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
+                        EnvType.NUMBER -> StableNumberValueEditor(
+                            def = def,
+                            value = value,
+                            onValueChange = { value = it }
+                        )
 
-                        EnvType.MULTI_SELECT -> {
-                            val selected = remember(value) {
-                                parseCsvTokens(value).toMutableStateList()
-                            }
-                            if (def.options.isNotEmpty()) {
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    def.options.forEach { option ->
-                                        val isSelected = option in selected
-                                        FilterChip(
-                                            selected = isSelected,
-                                            onClick = {
-                                                if (isSelected) selected.remove(option)
-                                                else selected.add(option)
-                                                value = selected.joinToString(",")
-                                            },
-                                            label = { Text(option) }
-                                        )
-                                    }
-                                }
-                            }
-                            OutlinedTextField(
-                                value = value,
-                                onValueChange = { value = it },
-                                label = { Text("值（逗号分隔）") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                        EnvType.SELECT -> StableSelectValueEditor(
+                            def = def,
+                            value = value,
+                            onValueChange = { value = it }
+                        )
 
-                        else -> {}
-                    }
+                        EnvType.MULTI_SELECT -> StableMultiSelectValueEditor(
+                            def = def,
+                            value = value,
+                            onValueChange = { value = it }
+                        )
 
-                    when (def.type) {
-                        EnvType.NUMBER -> {
-                            OutlinedTextField(
-                                value = value,
-                                onValueChange = { value = it },
-                                label = { Text("值") },
-                                supportingText = {
-                                    val hints = buildList {
-                                        if (def.min != null) add("最小: ${def.min}")
-                                        if (def.max != null) add("最大: ${def.max}")
-                                    }
-                                    if (hints.isNotEmpty()) Text(hints.joinToString("  "))
-                                },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                        EnvType.MAP -> StableMapValueEditor(
+                            value = value,
+                            onValueChange = { value = it }
+                        )
 
-                        EnvType.TEXT -> {
-                            OutlinedTextField(
-                                value = value,
-                                onValueChange = { value = it },
-                                label = { Text("值") },
-                                visualTransformation = if (def.sensitive && !showPassword) {
-                                    PasswordVisualTransformation()
-                                } else {
-                                    VisualTransformation.None
-                                },
-                                trailingIcon = if (def.sensitive) {
-                                    {
-                                        IconButton(onClick = { showPassword = !showPassword }) {
-                                            Icon(
-                                                if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                                "切换可见"
-                                            )
-                                        }
-                                    }
-                                } else null,
-                                singleLine = false,
-                                maxLines = 4,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                        EnvType.COLOR_LIST -> ColorListEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            title = def.description.ifBlank { def.key },
+                            envKey = def.key
+                        )
 
-                        EnvType.MAP, EnvType.COLOR_LIST -> {
-                            OutlinedTextField(
-                                value = value,
-                                onValueChange = { value = it },
-                                label = { Text("值") },
-                                singleLine = false,
-                                minLines = 3,
-                                maxLines = 8,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        else -> {}
+                        EnvType.TEXT, EnvType.CUSTOM_MERGE_RULES, EnvType.TIMELINE_OFFSET -> StableTextValueEditor(
+                            def = def,
+                            value = value,
+                            showPassword = showPassword,
+                            onTogglePassword = { showPassword = !showPassword },
+                            onValueChange = { value = it }
+                        )
                     }
                 }
             }
@@ -337,6 +321,315 @@ internal fun EnvVarEditDialog(
                 FilledTonalButton(onClick = { onSave(value) }) { Text("保存") }
             }
         }
+    )
+}
+
+@Composable
+private fun StableBooleanValueEditor(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val checked = value.lowercase(Locale.getDefault()).let { it == "true" || it == "1" }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(if (checked) "启用" else "禁用", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = checked,
+                    onCheckedChange = { onValueChange(if (it) "true" else "false") }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StableNumberValueEditor(
+    def: EnvVarDef,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val current = value.toIntOrNull()
+    val minValue = def.min ?: 0
+    val maxValue = def.max ?: maxOf(minValue + 100, current ?: minValue)
+    val safeValue = (current ?: minValue).coerceIn(minValue, maxValue)
+
+    fun setNumber(next: Int) {
+        onValueChange(next.coerceIn(minValue, maxValue).toString())
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("值 (${minValue}-${maxValue})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledTonalIconButton(onClick = { setNumber(safeValue - 1) }, enabled = safeValue > minValue) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, "减少")
+                }
+                Text(
+                    safeValue.toString(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                FilledTonalIconButton(onClick = { setNumber(safeValue + 1) }, enabled = safeValue < maxValue) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, "增加")
+                }
+            }
+        }
+        if (maxValue > minValue) {
+            Slider(
+                value = safeValue.toFloat(),
+                onValueChange = { setNumber(it.toInt()) },
+                valueRange = minValue.toFloat()..maxValue.toFloat(),
+                steps = (maxValue - minValue - 1).coerceAtLeast(0).coerceAtMost(200)
+            )
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("手动输入") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StableSelectValueEditor(
+    def: EnvVarDef,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("选择值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (def.options.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                def.options.forEach { option ->
+                    FilterChip(
+                        selected = value == option,
+                        onClick = { onValueChange(option) },
+                        label = { Text(option) }
+                    )
+                }
+            }
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("原始值") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StableMultiSelectValueEditor(
+    def: EnvVarDef,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val selected = remember(value) { parseCsvTokens(value) }
+    val available = remember(def.options, selected) {
+        def.options.map { it.trim() }.filter { it.isNotBlank() }.distinct().filterNot { it in selected }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("已选择（按顺序保存）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (selected.isEmpty()) {
+                Text(
+                    "点击下方选项添加…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(12.dp)
+                )
+            } else {
+                FlowRow(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    selected.forEach { token ->
+                        FilterChip(
+                            selected = true,
+                            onClick = { onValueChange(selected.filterNot { it == token }.joinToString(",")) },
+                            label = { Text("$token ×") }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (available.isNotEmpty()) {
+            Text("可选项（点击添加）", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                available.forEach { option ->
+                    AssistChip(
+                        onClick = { onValueChange((selected + option).joinToString(",")) },
+                        label = { Text(option) }
+                    )
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("原始值（逗号分隔）") },
+            singleLine = false,
+            minLines = 1,
+            maxLines = 4,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+private data class StableMapRow(
+    val left: String = "",
+    val right: String = "",
+)
+
+private fun parseStableMapRows(raw: String): List<StableMapRow> {
+    return raw.split(';')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .map { item ->
+            val idx = item.indexOf("->")
+            if (idx >= 0) StableMapRow(item.substring(0, idx).trim(), item.substring(idx + 2).trim())
+            else StableMapRow(item, "")
+        }
+}
+
+private fun serializeStableMapRows(rows: List<StableMapRow>): String {
+    return rows.mapNotNull { row ->
+        val left = row.left.trim()
+        val right = row.right.trim()
+        when {
+            left.isBlank() && right.isBlank() -> null
+            right.isBlank() -> left
+            else -> "$left->$right"
+        }
+    }.joinToString(";")
+}
+
+@Composable
+private fun StableMapValueEditor(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var rows by remember(value) { mutableStateOf(parseStableMapRows(value).ifEmpty { listOf(StableMapRow()) }) }
+
+    fun syncRows(next: List<StableMapRow>) {
+        rows = next
+        onValueChange(serializeStableMapRows(next))
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("映射配置", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        rows.forEachIndexed { index, row ->
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("映射 ${index + 1}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        IconButton(onClick = {
+                            val next = rows.filterIndexed { i, _ -> i != index }
+                            syncRows(if (next.isEmpty()) listOf(StableMapRow()) else next)
+                        }) { Icon(Icons.Rounded.DeleteOutline, "删除") }
+                    }
+                    OutlinedTextField(
+                        value = row.left,
+                        onValueChange = { syncRows(rows.replace(index, row.copy(left = it))) },
+                        label = { Text("原始值") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = row.right,
+                        onValueChange = { syncRows(rows.replace(index, row.copy(right = it))) },
+                        label = { Text("映射值") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        FilledTonalButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("原始值") },
+            singleLine = false,
+            minLines = 2,
+            maxLines = 6,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun StableTextValueEditor(
+    def: EnvVarDef,
+    value: String,
+    showPassword: Boolean,
+    onTogglePassword: () -> Unit,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("变量值") },
+        visualTransformation = if (def.sensitive && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        trailingIcon = if (def.sensitive) {
+            {
+                IconButton(onClick = onTogglePassword) {
+                    Icon(if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "切换可见")
+                }
+            }
+        } else null,
+        singleLine = false,
+        minLines = if (value.length > 50) 3 else 1,
+        maxLines = 8,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
     )
 }
 
@@ -508,7 +801,8 @@ internal fun OrderedTokenEditor(
 internal fun MergeSourcePairsEditor(
     value: String,
     onValueChange: (String) -> Unit,
-    options: List<String>
+    options: List<String>,
+    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     val groups = remember(value) { parseCsvTokens(value) }
     val allOptions = remember(options) {
@@ -679,6 +973,18 @@ internal fun MergeSourcePairsEditor(
                 minLines = 2,
                 maxLines = 4,
                 modifier = Modifier.fillMaxWidth()
+            )
+
+            RecentAnimeCachePanel(
+                rememberKey = KEY_MERGE_SOURCE_PAIRS,
+                currentKey = KEY_MERGE_SOURCE_PAIRS,
+                onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                onAddSourcePair = { source ->
+                    val cleanSource = source.trim()
+                    if (cleanSource.isNotBlank() && !groups.contains(cleanSource)) {
+                        onValueChange((groups + cleanSource).joinToString(","))
+                    }
+                }
             )
         }
     }

@@ -155,6 +155,8 @@ object EnvVarConfigLoader {
                 "multi-select", "multiselect" -> EnvType.MULTI_SELECT
                 "map" -> EnvType.MAP
                 "color-list", "colorlist" -> EnvType.COLOR_LIST
+                "custom-merge-rules", "custommergerules" -> EnvType.CUSTOM_MERGE_RULES
+                "timeline-offset", "timelineoffset" -> EnvType.TIMELINE_OFFSET
                 else -> EnvType.TEXT
             }
             EnvVarDef(key, category, type, desc, options, min, max, inferSensitive(key))
@@ -185,8 +187,30 @@ object EnvVarConfigLoader {
                 if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(mergeSources)
             }
 
+            "CUSTOM_MERGE_RULES" -> {
+                if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(mergeSources)
+            }
+
             "PLATFORM_ORDER" -> {
                 if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(allowedPlatforms)
+            }
+
+            "MATCH_PLATFORM_RULES" -> {
+                if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(allowedPlatforms)
+            }
+
+            "DANMU_OFFSET" -> {
+                val parsedWithoutAll = cleanedParsed.filterNot { it.equals("all", ignoreCase = true) }
+                val sourceOptions = if (parsedWithoutAll.isNotEmpty()) {
+                    parsedWithoutAll
+                } else {
+                    sanitizeOptions(allowedSources)
+                }
+                withAllFirst(sourceOptions)
+            }
+
+            "SOURCE_DETAIL_CONCURRENCY_BY_SOURCE" -> {
+                if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(allowedSources)
             }
 
             "TITLE_PLATFORM_OFFSET_TABLE" -> {
