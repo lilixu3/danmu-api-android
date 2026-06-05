@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import androidx.lifecycle.ViewModel
+import com.example.danmuapiapp.domain.model.AnimeCacheItem
+import com.example.danmuapiapp.domain.model.AnimeCacheLink
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
@@ -18,6 +20,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -75,6 +78,17 @@ class ConfigViewModel @Inject constructor(
         if (!ensureAdminMode()) return
         envConfigRepo.saveRawContent(content)
         _operationMessage.value = "源码已保存"
+    }
+
+    suspend fun fetchRecentAnimeCache(): Result<List<AnimeCacheItem>> {
+        return runCatching {
+            val root = getJson("/api/cache/animes")
+            if (root.has("success") && !root.optBoolean("success", false)) {
+                error(extractMessage(root, "获取最近缓存失败"))
+            }
+            val data = root.optJSONArray("data") ?: JSONArray()
+            data.toAnimeCacheItems()
+        }
     }
 
     fun getEnvFilePath(): String = envConfigRepo.getEnvFilePath()
@@ -222,6 +236,29 @@ class ConfigViewModel @Inject constructor(
         }
     }
 
+    private suspend fun getJson(path: String): JSONObject {
+        return withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(buildLocalApiUrl(path))
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val raw = response.body.string()
+                if (!response.isSuccessful) {
+                    val msg = runCatching {
+                        JSONObject(raw).optString("message").trim().ifBlank { null }
+                    }.getOrNull()
+                    error(msg ?: "请求失败：HTTP ${response.code}")
+                }
+                if (raw.isBlank()) return@withContext JSONObject()
+                runCatching { JSONObject(raw) }.getOrElse {
+                    error("服务返回了无效 JSON")
+                }
+            }
+        }
+    }
+
     private fun buildLocalApiUrl(path: String): String {
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
         val port = prefs.getInt("port", DEFAULT_PORT)
@@ -328,6 +365,67 @@ class ConfigViewModel @Inject constructor(
             parseLongField(root, key)?.let { return it }
         }
         return null
+    }
+
+    private fun JSONArray.toAnimeCacheItems(): List<AnimeCacheItem> {
+        val items = ArrayList<AnimeCacheItem>(length())
+        for (i in 0 until length()) {
+            optJSONObject(i)?.let { items += it.toAnimeCacheItem() }
+        }
+        return items
+    }
+
+    private fun JSONArray.toAnimeCacheLinks(): List<AnimeCacheLink> {
+        val items = ArrayList<AnimeCacheLink>(length())
+        for (i in 0 until length()) {
+            optJSONObject(i)?.let { items += it.toAnimeCacheLink() }
+        }
+        return items
+    }
+
+    private fun JSONObject.toAnimeCacheItem(): AnimeCacheItem {
+        return AnimeCacheItem(
+            animeId = readFirstLongField(this, this, listOf("animeId", "id")),
+            source = readFirstStringField(this, this, listOf("source")) ?: "",
+            animeTitle = readFirstStringField(this, this, listOf("animeTitle", "title", "name")) ?: "",
+            imageUrl = readFirstStringField(this, this, listOf("imageUrl", "cover", "coverUrl", "pic")) ?: "",
+            episodeCount = readFirstIntField(this, this, listOf("episodeCount")) ?: 0,
+            episodes = readFirstIntField(this, this, listOf("episodes", "episodeCount")) ?: 0,
+            links = optJSONArray("links")?.toAnimeCacheLinks().orEmpty(),
+            mergedChildren = optJSONArray("mergedChildren")?.toAnimeCacheItems().orEmpty(),
+            isHiddenChild = optBoolean("isHiddenChild", false)
+        )
+    }
+
+    private fun JSONObject.toAnimeCacheLink(): AnimeCacheLink {
+        return AnimeCacheLink(
+            title = readFirstStringField(this, this, listOf("title")) ?: "",
+            name = readFirstStringField(this, this, listOf("name")) ?: "",
+            url = readFirstStringField(this, this, listOf("url")) ?: ""
+        )
+    }
+
+    private fun readFirstIntField(
+        data: JSONObject?,
+        root: JSONObject,
+        keys: List<String>
+    ): Int? {
+        keys.forEach { key ->
+            parseIntField(data, key)?.let { return it }
+            parseIntField(root, key)?.let { return it }
+        }
+        return null
+    }
+
+    private fun parseIntField(target: JSONObject?, key: String): Int? {
+        if (target == null || !target.has(key)) return null
+        val raw = target.opt(key)
+        val value = when (raw) {
+            is Number -> raw.toInt()
+            is String -> raw.trim().toIntOrNull()
+            else -> null
+        } ?: return null
+        return value.takeIf { it >= 0 }
     }
 
     private fun parseLongField(target: JSONObject?, key: String): Long? {

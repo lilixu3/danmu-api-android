@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,6 +9,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.domain.model.LogLevel
@@ -26,6 +28,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@RequiresApi(Build.VERSION_CODES.N)
 @AndroidEntryPoint
 class DanmuQuickSettingsTileService : TileService() {
 
@@ -241,6 +244,7 @@ class DanmuQuickSettingsTileService : TileService() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun openAppFromTile() {
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(

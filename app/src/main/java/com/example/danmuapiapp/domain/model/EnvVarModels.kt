@@ -12,5 +12,13 @@ data class EnvVarDef(
 )
 
 enum class EnvType {
-    TEXT, NUMBER, BOOLEAN, SELECT, MULTI_SELECT, MAP, COLOR_LIST
+    TEXT,
+    NUMBER,
+    BOOLEAN,
+    SELECT,
+    MULTI_SELECT,
+    MAP,
+    COLOR_LIST,
+    CUSTOM_MERGE_RULES,
+    TIMELINE_OFFSET,
 }
