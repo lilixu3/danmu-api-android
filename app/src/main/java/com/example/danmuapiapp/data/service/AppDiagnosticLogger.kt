@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.domain.model.LogTagClassifier
 import java.io.File
 import java.io.FileOutputStream
 import java.time.Instant
@@ -285,12 +286,15 @@ object AppDiagnosticLogger {
             }
         }.ifBlank { obj.toString() }
 
+        val tagInfo = LogTagClassifier.classifyAppEntry(source, tag)
         return LogEntry(
             timestamp = timestamp,
             level = level,
             message = message,
             source = source,
-            tag = tag
+            tag = tag,
+            category = tagInfo.category,
+            tags = tagInfo.tags
         )
     }
 
@@ -373,12 +377,15 @@ object AppDiagnosticLogger {
             val timestamp = parseBootstrapTimestamp(match.groupValues[1]).takeIf { it > 0L }
                 ?: fallbackTimestamp
             val level = parseLevel(match.groupValues[2])
+            val tagInfo = LogTagClassifier.classifyAppEntry(source, tag)
             return LogEntry(
                 timestamp = timestamp,
                 level = level,
                 message = match.groupValues[3].ifBlank { line },
                 source = source,
-                tag = tag
+                tag = tag,
+                category = tagInfo.category,
+                tags = tagInfo.tags
             )
         }
 
@@ -388,12 +395,15 @@ object AppDiagnosticLogger {
             "warn" in lowered -> LogLevel.Warn
             else -> LogLevel.Info
         }
+        val tagInfo = LogTagClassifier.classifyAppEntry(source, tag)
         return LogEntry(
             timestamp = fallbackTimestamp,
             level = level,
             message = line,
             source = source,
-            tag = tag
+            tag = tag,
+            category = tagInfo.category,
+            tags = tagInfo.tags
         )
     }
 

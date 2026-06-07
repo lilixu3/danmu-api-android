@@ -17,6 +17,7 @@ import { clearStartupFailure, recordStartupFailure } from './startup-failure.mjs
 //    - dev    => ./danmu_api_dev
 //    - custom => ./danmu_api_custom
 let handleRequest = null;
+let _directCoreGlobals = null;
 let _activeWorkerState = null;
 let _workerSeq = 1;
 let _workerEnabled = true;
@@ -532,12 +533,27 @@ async function _loadHandleRequestForVariant(options = {}) {
     if (!mod?.handleRequest) {
       throw new Error(`worker.js missing export: handleRequest (variant=${variantKey})`);
     }
-    return { handler: mod.handleRequest, info: i, variantKey };
+    let coreGlobals = null;
+    for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
+      try {
+        const globalsUrl = new URL(`./${i.dir}/${globalsRel}`, import.meta.url);
+        if (forceReload) {
+          globalsUrl.searchParams.set('v', String(reloadTag));
+        }
+        const globalsMod = await import(globalsUrl.href);
+        coreGlobals = globalsMod?.globals || globalsMod?.Globals || null;
+        if (coreGlobals) break;
+      } catch {
+        // try next layout
+      }
+    }
+    return { handler: mod.handleRequest, info: i, variantKey, coreGlobals };
   };
 
   try {
     const loaded = await tryLoad(v);
     handleRequest = loaded.handler;
+    _directCoreGlobals = loaded.coreGlobals || null;
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -550,6 +566,7 @@ async function _loadHandleRequestForVariant(options = {}) {
         console.log('[danmu_api]', 'Attempting fallback to stable...');
         const loaded = await tryLoad('stable');
         handleRequest = loaded.handler;
+        _directCoreGlobals = loaded.coreGlobals || null;
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;
@@ -1706,6 +1723,108 @@ function _isLoopbackIp(ip) {
   return false;
 }
 
+const QUIET_CORE_LOG_PATH_RE = /(^|\/)api\/(?:logs|reqrecords|cache\/animes)(?=(["'\s?#]|$))/i;
+
+function _stripLikelyTokenPrefix(pathname) {
+  const parts = String(pathname || '/').split('/').filter(Boolean);
+  if (parts.length > 1 && parts[0] !== 'api') {
+    return '/' + parts.slice(1).join('/');
+  }
+  return String(pathname || '/');
+}
+
+function _isQuietCoreLogRequest(urlObj, clientIp) {
+  if (!_isLoopbackIp(clientIp)) return false;
+  try {
+    const pathname = _stripLikelyTokenPrefix(urlObj?.pathname || '/');
+    return QUIET_CORE_LOG_PATH_RE.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function _coreLogMessage(entry) {
+  return String(entry && typeof entry === 'object' ? (entry.message ?? '') : entry ?? '');
+}
+
+function _referencesQuietCorePath(message) {
+  return QUIET_CORE_LOG_PATH_RE.test(String(message || ''));
+}
+
+function _isQuietRequestUrl(entry) {
+  const message = _coreLogMessage(entry);
+  return /\[Server\]\s+request url:/i.test(message) && _referencesQuietCorePath(message);
+}
+
+function _isQuietRequestPath(entry) {
+  const message = _coreLogMessage(entry);
+  return /\[Server\]\s+request path:/i.test(message) && _referencesQuietCorePath(message);
+}
+
+function _isServerClientIpLog(entry) {
+  return /\[Server\]\s+client ip:/i.test(_coreLogMessage(entry));
+}
+
+function _isQuietSummary(entry) {
+  const message = _coreLogMessage(entry);
+  return /\[Server\]/i.test(message) &&
+    _referencesQuietCorePath(message) &&
+    !/request url:/i.test(message) &&
+    !/request path:/i.test(message);
+}
+
+function _isLocalCacheInitInfo(entry) {
+  const message = _coreLogMessage(entry);
+  return /\[Cache\]\s+getLocalCaches start\./i.test(message) ||
+    /\[Cache\]\s+Restored lastSelectMap from local cache/i.test(message) ||
+    /\[Cache\]\s+getLocalCaches completed successfully\./i.test(message);
+}
+
+function _quietGroupSize(buffer, index) {
+  if (index + 3 > buffer.length) return 0;
+  if (!_isQuietRequestUrl(buffer[index]) ||
+      !_isQuietRequestPath(buffer[index + 1]) ||
+      !_isServerClientIpLog(buffer[index + 2])) {
+    return 0;
+  }
+  return index + 3 < buffer.length && _isQuietSummary(buffer[index + 3]) ? 4 : 3;
+}
+
+function _quietLogScanStartHint() {
+  const buffer = _directCoreGlobals?.logBuffer;
+  if (!Array.isArray(buffer)) return 0;
+  return Math.max(0, buffer.length - 8);
+}
+
+function _removeQuietCoreLogNoise(startHint = 0) {
+  const buffer = _directCoreGlobals?.logBuffer;
+  if (!Array.isArray(buffer) || buffer.length === 0) return;
+  const start = Math.max(0, Math.min(buffer.length, Number(startHint) || 0));
+  const head = buffer.slice(0, start);
+  const tail = buffer.slice(start);
+  const out = [];
+  let changed = false;
+  for (let i = 0; i < tail.length;) {
+    const groupSize = _quietGroupSize(tail, i);
+    if (groupSize > 0) {
+      changed = true;
+      i += groupSize;
+      while (i < tail.length && _isLocalCacheInitInfo(tail[i])) i++;
+      continue;
+    }
+    if (_isQuietRequestUrl(tail[i]) || _isQuietRequestPath(tail[i]) || _isQuietSummary(tail[i])) {
+      changed = true;
+      i++;
+      continue;
+    }
+    out.push(tail[i]);
+    i++;
+  }
+  if (changed) {
+    _directCoreGlobals.logBuffer = head.concat(out);
+  }
+}
+
 function _isAdminAuthorized(req, urlObj, clientIp) {
   if (_isLoopbackIp(clientIp)) return true;
 
@@ -1981,6 +2100,8 @@ function createMainServer() {
         if (Number.isFinite(fs) && fs > 0) fontSize = fs;
       }
 
+      const shouldQuietCoreLogs = _isQuietCoreLogRequest(fullUrl, clientIp);
+      const quietLogStart = shouldQuietCoreLogs ? _quietLogScanStartHint() : 0;
       const wantsOverride = strippedPathname.startsWith('/api/v2/comment/') &&
         (Math.abs(offsetSec) > 1e-6 || fontSize !== null);
 
@@ -1997,7 +2118,14 @@ function createMainServer() {
           body,
         });
 
-        const coreRes = await handleRequest(coreReq, process.env, 'node', clientIp);
+        let coreRes;
+        try {
+          coreRes = await handleRequest(coreReq, process.env, 'node', clientIp);
+        } finally {
+          if (shouldQuietCoreLogs) {
+            _removeQuietCoreLogNoise(quietLogStart);
+          }
+        }
         const ct = String(coreRes.headers.get('content-type') || '').toLowerCase();
         const rawText = await coreRes.text();
 
@@ -2026,7 +2154,14 @@ function createMainServer() {
         body,
       });
 
-      const webRes = await handleRequest(webReq, process.env, 'node', clientIp);
+      let webRes;
+      try {
+        webRes = await handleRequest(webReq, process.env, 'node', clientIp);
+      } finally {
+        if (shouldQuietCoreLogs) {
+          _removeQuietCoreLogNoise(quietLogStart);
+        }
+      }
       await toNodeResponse(webRes, res);
     } catch (e) {
       res.statusCode = 500;

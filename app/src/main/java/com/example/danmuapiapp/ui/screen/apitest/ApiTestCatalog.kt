@@ -105,6 +105,48 @@ object ApiTestCatalog {
                     helper = "可选：json 或 xml"
                 ),
                 ApiParamConfig(
+                    name = "duration",
+                    label = "返回时长",
+                    inputType = ApiParamInputType.Select,
+                    options = listOf("true", "false"),
+                    helper = "可选：true 时返回 videoDuration"
+                ),
+                ApiParamConfig(
+                    name = "segmentflag",
+                    label = "分片标志",
+                    inputType = ApiParamInputType.Select,
+                    options = listOf("true", "false"),
+                    helper = "可选：true 或 false"
+                )
+            )
+        ),
+        ApiEndpointConfig(
+            key = "getCommentByUrl",
+            title = "URL解析弹幕",
+            method = "GET",
+            pathTemplate = "/api/v2/comment",
+            params = listOf(
+                ApiParamConfig(
+                    name = "url",
+                    label = "视频 URL",
+                    required = true,
+                    placeholder = "示例：https://v.qq.com/x/cover/..."
+                ),
+                ApiParamConfig(
+                    name = "format",
+                    label = "格式",
+                    inputType = ApiParamInputType.Select,
+                    options = listOf("json", "xml"),
+                    helper = "可选：json 或 xml"
+                ),
+                ApiParamConfig(
+                    name = "duration",
+                    label = "返回时长",
+                    inputType = ApiParamInputType.Select,
+                    options = listOf("true", "false"),
+                    helper = "可选：true 时返回 videoDuration"
+                ),
+                ApiParamConfig(
                     name = "segmentflag",
                     label = "分片标志",
                     inputType = ApiParamInputType.Select,

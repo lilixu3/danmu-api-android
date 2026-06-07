@@ -335,6 +335,26 @@ internal fun CacheQuickDialog(
                         )
                         CacheStatBadge(
                             modifier = Modifier.weight(1f),
+                            label = "番剧缓存",
+                            value = "${cacheStats.animeCacheCount}"
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CacheStatBadge(
+                            modifier = Modifier.weight(1f),
+                            label = "被合并源",
+                            value = "${cacheStats.mergedSourceCount}"
+                        )
+                        CacheStatBadge(
+                            modifier = Modifier.weight(1f),
+                            label = "剧集映射",
+                            value = "${cacheStats.episodeLinkCount}"
+                        )
+                        CacheStatBadge(
+                            modifier = Modifier.weight(1f),
                             label = "上次清理",
                             value = cacheStats.lastClearedAt?.let {
                                 dateFormat.format(Date(it))
@@ -468,11 +488,17 @@ internal fun CacheEntryPreviewRow(entry: CacheEntry) {
         "POST" -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val statusCode = entry.hitCount.takeIf { it in 100..599 }
+    val statusCode = entry.statusCode ?: entry.hitCount.takeIf { it in 100..599 }
     val statusColor = when {
         statusCode != null && statusCode in 200..299 -> MaterialTheme.colorScheme.primary
         statusCode != null && statusCode >= 400 -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val inputLine = when {
+        entry.requestUrl.isNotBlank() -> "URL：${entry.requestUrl}"
+        entry.fileName.isNotBlank() -> "文件名：${entry.fileName}"
+        entry.keyword.isNotBlank() -> "关键词：${entry.keyword}"
+        else -> ""
     }
 
     Surface(
@@ -480,57 +506,71 @@ internal fun CacheEntryPreviewRow(entry: CacheEntry) {
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (entry.type.isNotBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = methodColor.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        entry.type.uppercase(),
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = methodColor,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (entry.type.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = methodColor.copy(alpha = 0.12f)
+                    ) {
+                        Text(
+                            entry.type.uppercase(),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = methodColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
-            }
-            Text(
-                entry.key.ifBlank { "未知接口" },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (statusCode != null) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = statusColor.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        "$statusCode",
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor
-                    )
+                Text(
+                    entry.key.ifBlank { "未知接口" },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (statusCode != null) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = statusColor.copy(alpha = 0.12f)
+                    ) {
+                        Text(
+                            "$statusCode",
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor
+                        )
+                    }
                 }
+                Text(
+                    dateFormat.format(Date(entry.createdAt)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
-            Text(
-                dateFormat.format(Date(entry.createdAt)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
+            if (inputLine.isNotBlank()) {
+                Text(
+                    inputLine,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -658,6 +698,16 @@ internal fun QuickPortDialog(
     )
 }
 
+private fun maskDialogToken(token: String): String {
+    val normalized = RuntimeTokenNormalizer.normalizeInput(token)
+    if (normalized.isBlank()) return "空（默认）"
+    return when {
+        normalized.length <= 4 -> "****"
+        normalized.length <= 8 -> "${normalized.take(2)}****${normalized.takeLast(1)}"
+        else -> "${normalized.take(4)}****${normalized.takeLast(2)}"
+    }
+}
+
 @Composable
 internal fun QuickTokenDialog(
     isBusy: Boolean,
@@ -675,11 +725,8 @@ internal fun QuickTokenDialog(
     } else {
         "保存后会写入运行配置"
     }
-    val preview = when {
-        quickTokenText.isBlank() -> "空（将恢复核心默认 Token）"
-        quickTokenText.length <= 8 -> quickTokenText
-        else -> "${quickTokenText.take(4)}****${quickTokenText.takeLast(2)}"
-    }
+    val currentPreview = maskDialogToken(currentToken)
+    val preview = maskDialogToken(quickTokenText)
 
     HomePanelDialog(
         onDismissRequest = onDismiss,
@@ -702,7 +749,7 @@ internal fun QuickTokenDialog(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = "当前：${if (currentToken.isBlank()) "空（默认）" else currentToken}",
+                        text = "当前：$currentPreview",
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

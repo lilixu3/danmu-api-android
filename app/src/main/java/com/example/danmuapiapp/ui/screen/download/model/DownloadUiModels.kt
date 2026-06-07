@@ -6,14 +6,23 @@ data class DownloadAnimeCandidate(
     val animeId: Long,
     val title: String,
     val episodeCount: Int,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val sourceLabel: String = "",
+    val year: String = "",
+    val episodeLabel: String = "",
+    val directUrl: String = "",
+    val resolvedEpisodeTitle: String = ""
 )
 
 data class DownloadEpisodeCandidate(
     val episodeId: Long,
     val episodeNumber: Int,
     val title: String,
-    val source: String
+    val source: String,
+    val directUrl: String = "",
+    val posterUrl: String = "",
+    val year: String = "",
+    val resolvedEpisodeLabel: String = ""
 )
 
 enum class EpisodeDownloadState {
