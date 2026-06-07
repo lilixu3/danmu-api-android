@@ -84,7 +84,11 @@ data class LogEntry(
     val level: LogLevel = LogLevel.Info,
     val message: String = "",
     val source: AppLogSource = AppLogSource.App,
-    val tag: String = ""
+    val tag: String = "",
+    /** Primary filter tag/category, aligned with stable core logview.js semantics. */
+    val category: String = "",
+    /** Normalized tags available for dynamic filtering. */
+    val tags: List<String> = emptyList()
 )
 
 enum class LogLevel { Info, Warn, Error }

@@ -247,18 +247,31 @@ private fun CacheStatsRow(stats: CacheStats) {
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatCell(label = "请求记录", value = "${stats.reqRecordsCount}")
-            StatCell(label = "今日请求", value = "${stats.todayReqNum}")
-            StatCell(
-                label = "上次清理",
-                value = stats.lastClearedAt?.let { dateFormat.format(Date(it)) } ?: "从未"
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                StatCell(label = "请求记录", value = "${stats.reqRecordsCount}")
+                StatCell(label = "今日请求", value = "${stats.todayReqNum}")
+                StatCell(label = "番剧缓存", value = "${stats.animeCacheCount}")
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                StatCell(label = "被合并源", value = "${stats.mergedSourceCount}")
+                StatCell(label = "剧集映射", value = "${stats.episodeLinkCount}")
+                StatCell(
+                    label = "上次清理",
+                    value = stats.lastClearedAt?.let { dateFormat.format(Date(it)) } ?: "从未"
+                )
+            }
         }
     }
 }
@@ -290,11 +303,17 @@ private fun CacheEntryCard(entry: CacheEntry) {
         "POST" -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val statusCode = entry.hitCount.takeIf { it in 100..599 }
+    val statusCode = entry.statusCode ?: entry.hitCount.takeIf { it in 100..599 }
     val statusColor = when {
         statusCode != null && statusCode in 200..299 -> MaterialTheme.colorScheme.primary
         statusCode != null && statusCode >= 400 -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val inputLine = when {
+        entry.requestUrl.isNotBlank() -> "URL：${entry.requestUrl}"
+        entry.fileName.isNotBlank() -> "文件名：${entry.fileName}"
+        entry.keyword.isNotBlank() -> "关键词：${entry.keyword}"
+        else -> ""
     }
 
     Surface(
@@ -303,53 +322,84 @@ private fun CacheEntryCard(entry: CacheEntry) {
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            if (entry.type.isNotBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = methodColor.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        entry.type.uppercase(),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = methodColor,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (entry.type.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = methodColor.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                entry.type.uppercase(),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = methodColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    if (statusCode != null) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = statusColor.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                "$statusCode",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = statusColor
+                            )
+                        }
+                    }
+                    if (entry.clientIp.isNotBlank()) {
+                        Text(
+                            entry.clientIp,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+                Text(
+                    dateFormat.format(Date(entry.createdAt)),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
             Text(
-                entry.key.ifBlank { "未知接口" },
-                modifier = Modifier.weight(1f),
+                text = "真实 API：${entry.key.ifBlank { "未知接口" }}",
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            if (statusCode != null) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = statusColor.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        "$statusCode",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor
-                    )
-                }
+            if (inputLine.isNotBlank()) {
+                Text(
+                    text = inputLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Text(
-                dateFormat.format(Date(entry.createdAt)),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
+            if (entry.paramsText.isNotBlank() && inputLine.isBlank()) {
+                Text(
+                    text = "参数：${entry.paramsText}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

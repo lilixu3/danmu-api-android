@@ -311,7 +311,7 @@ object RootRuntimeController {
 
         val envSyncResult = syncRuntimeEnvToRootFromPrefs(context)
         if (!envSyncResult.ok) return envSyncResult
-        val normalize = normalizeRootProjectPermissions(context)
+        val normalize = normalizeRootProjectPermissions(context, fullScan = false)
         if (!normalize.ok) return normalize
         return OpResult(true, "Root 环境同步完成")
     }
@@ -334,7 +334,7 @@ object RootRuntimeController {
                 val depsSyncResult = syncRootNodeModulesIfNeeded(context, normalProject)
                 if (!depsSyncResult.ok) return depsSyncResult
 
-                val projectSyncResult = syncProjectToRoot(context, normalProject)
+                val projectSyncResult = syncProjectToRoot(context, normalProject, bootstrap = false)
                 if (!projectSyncResult.ok) return projectSyncResult
 
                 val coreReady = ensureSelectedCoreReady(context, normalProject)
@@ -358,13 +358,15 @@ object RootRuntimeController {
         }.getOrElse {
             return OpResult(false, "运行时准备失败", it.message ?: "无法初始化工作目录")
         }
-        val syncResult = syncProjectToRoot(context, project)
+        val syncResult = syncProjectToRoot(context, project, bootstrap = true)
         if (!syncResult.ok) return syncResult
+        val depsSyncResult = syncRootNodeModulesIfNeeded(context, project)
+        if (!depsSyncResult.ok) return depsSyncResult
         val envSyncResult = syncRuntimeEnvToRoot(context, project)
         if (!envSyncResult.ok) return envSyncResult
         val coreReady = ensureSelectedCoreReady(context, project)
         if (!coreReady.ok) return coreReady
-        val normalize = normalizeRootProjectPermissions(context)
+        val normalize = normalizeRootProjectPermissions(context, fullScan = true)
         if (!normalize.ok) return normalize
         return OpResult(true, "同步完成")
     }
@@ -463,10 +465,31 @@ object RootRuntimeController {
         )
     }
 
-    private fun syncProjectToRoot(context: Context, srcProjectDir: File): OpResult {
+    internal fun buildRootProjectIncrementalSyncShell(srcProjectPath: String, dstProjectPath: String): String {
+        return """
+            SRC=${shellQuote(srcProjectPath)}
+            DST=${shellQuote(dstProjectPath)}
+            mkdir -p "${'$'}DST" "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
+
+            # 热启动只需要同步 App 托管的顶层包装文件；不要递归复制 node_modules/core/cache。
+            # 使用普通 glob 兼容 Android toybox/mksh，避免依赖 find/rsync。
+            for FILE in "${'$'}SRC"/* "${'$'}SRC"/.[!.]* "${'$'}SRC"/..?*; do
+              [ -f "${'$'}FILE" ] || continue
+              NAME="${'$'}{FILE##*/}"
+              cp -f "${'$'}FILE" "${'$'}DST/${'$'}NAME" 2>/dev/null || cat "${'$'}FILE" > "${'$'}DST/${'$'}NAME"
+            done
+
+            test -f "${'$'}DST/main.js"
+        """.trimIndent()
+    }
+
+    private fun syncProjectToRoot(
+        context: Context,
+        srcProjectDir: File,
+        bootstrap: Boolean = !rootProjectMainJsExists(context)
+    ): OpResult {
         val src = srcProjectDir.absolutePath
         val dst = rootProjectDir(context)
-        val bootstrap = !rootProjectMainJsExists(context)
 
         val script = if (bootstrap) {
             // 首次引导：复制运行时文件，但不继承普通模式缓存。
@@ -481,22 +504,9 @@ object RootRuntimeController {
                 test -f "${'$'}DST/main.js"
             """.trimIndent()
         } else {
-            // 增量同步：仅同步 App 托管包装层与清单文件，保留 Root 工作目录中的
-            // config、danmu_api_*、node_modules 与 .cache。
-            // 注意：config/.env 会在 syncRuntimeEnvToRoot 中单独同步，确保运行时关键变量生效。
-            """
-                SRC=${shellQuote(src)}
-                DST=${shellQuote(dst)}
-                TMP="${'$'}DST/.tmp_app_sync"
-                mkdir -p "${'$'}DST" "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
-                rm -rf "${'$'}TMP" 2>/dev/null || true
-                mkdir -p "${'$'}TMP" 2>/dev/null || true
-                cp -a "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || true
-                rm -rf "${'$'}TMP/config" "${'$'}TMP/logs" "${'$'}TMP/.cache" "${'$'}TMP/node_modules" "${'$'}TMP"/danmu_api_* 2>/dev/null || true
-                cp -a "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}TMP/." "${'$'}DST/" 2>/dev/null || true
-                rm -rf "${'$'}TMP" 2>/dev/null || true
-                test -f "${'$'}DST/main.js"
-            """.trimIndent()
+            // 增量同步：只同步 App 托管的顶层包装文件，保留 Root 工作目录中的
+            // config、danmu_api_*、node_modules 与 .cache。避免每次启动都复制整个 core/node_modules 到临时目录。
+            buildRootProjectIncrementalSyncShell(srcProjectPath = src, dstProjectPath = dst)
         }
 
         val result = RootShell.exec(script, timeoutMs = 25000L)
@@ -528,22 +538,50 @@ object RootRuntimeController {
         return OpResult(true, "Root 环境同步完成")
     }
 
-    private fun normalizeRootProjectPermissions(context: Context): OpResult {
-        val rootProjectPath = rootProjectDir(context)
-        val script = """
-            DST=${shellQuote(rootProjectPath)}
-            [ -d "${'$'}DST" ] || exit 0
-
-            # 关键修复：统一 Root 运行目录权限，避免 system 进程发起 su 时出现 Permission denied。
-            chown -R 0:0 "${'$'}DST" 2>/dev/null || true
-            chmod -R u+rwX,go+rX "${'$'}DST" 2>/dev/null || true
-
+    internal fun buildRootProjectPermissionNormalizeShell(
+        rootProjectPath: String,
+        fullScan: Boolean
+    ): String {
+        val commonTail = """
             [ -d "${'$'}DST/config" ] && chmod 0755 "${'$'}DST/config" 2>/dev/null || true
             [ -f "${'$'}DST/config/.env" ] && chmod 0640 "${'$'}DST/config/.env" 2>/dev/null || true
             [ -d "${'$'}DST/logs" ] && chmod 0775 "${'$'}DST/logs" 2>/dev/null || true
             exit 0
         """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 15_000L)
+
+        return if (fullScan) {
+            """
+                DST=${shellQuote(rootProjectPath)}
+                [ -d "${'$'}DST" ] || exit 0
+
+                # 首次引导/大同步后才做递归权限归一，避免每次热启动扫描整个 core/node_modules。
+                chown -R 0:0 "${'$'}DST" 2>/dev/null || true
+                chmod -R u+rwX,go+rX "${'$'}DST" 2>/dev/null || true
+
+                $commonTail
+            """.trimIndent()
+        } else {
+            """
+                DST=${shellQuote(rootProjectPath)}
+                [ -d "${'$'}DST" ] || exit 0
+                mkdir -p "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
+
+                # 热启动只修正启动必需的浅层文件和配置/日志目录。
+                for NAME in main.js android-server.mjs worker-proxy.mjs startup-failure.mjs package.json package-lock.json .app_version; do
+                  [ -f "${'$'}DST/${'$'}NAME" ] && chmod 0644 "${'$'}DST/${'$'}NAME" 2>/dev/null || true
+                done
+
+                $commonTail
+            """.trimIndent()
+        }
+    }
+
+    private fun normalizeRootProjectPermissions(context: Context, fullScan: Boolean): OpResult {
+        val script = buildRootProjectPermissionNormalizeShell(
+            rootProjectPath = rootProjectDir(context),
+            fullScan = fullScan
+        )
+        val result = RootShell.exec(script, timeoutMs = if (fullScan) 15_000L else 5_000L)
         if (!result.ok) {
             val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
             return OpResult(false, "Root 目录权限修复失败", if (err.isBlank()) "未知错误" else err)
@@ -577,6 +615,7 @@ object RootRuntimeController {
             rm -rf "${'$'}DST" 2>/dev/null || true
             mkdir -p "${'$'}DST" 2>/dev/null || true
             cp -a "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || true
+            chmod -R u+rwX,go+rX "${'$'}DST" 2>/dev/null || true
             [ -f "${'$'}DST/worker.js" ] || [ -f "${'$'}DST/danmu_api/worker.js" ] || [ -f "${'$'}DST/danmu-api/worker.js" ]
         """.trimIndent()
         val result = RootShell.exec(script, timeoutMs = 25_000L)
@@ -600,57 +639,114 @@ object RootRuntimeController {
         return RootShell.exec(script, timeoutMs = 3000L).ok
     }
 
+    internal fun buildNodeModuleIntegrityProbeShell(
+        srcNodeModulesVar: String,
+        dstNodeModulesVar: String
+    ): String {
+        return buildNodeModulePackageVisitShell(
+            srcNodeModulesVar = srcNodeModulesVar,
+            dstNodeModulesVar = dstNodeModulesVar,
+            actionOnMismatch = "NEED_SYNC=1"
+        )
+    }
+
+    internal fun buildNodeModulePackageRepairShell(
+        srcNodeModulesVar: String,
+        dstNodeModulesVar: String
+    ): String {
+        return buildNodeModulePackageVisitShell(
+            srcNodeModulesVar = srcNodeModulesVar,
+            dstNodeModulesVar = dstNodeModulesVar,
+            actionOnMismatch = """
+                DST_PACKAGE_DIR="${'$'}DST_ROOT/${'$'}PKG"
+                rm -rf "${'$'}DST_PACKAGE_DIR" 2>/dev/null || true
+                mkdir -p "${'$'}(dirname "${'$'}DST_PACKAGE_DIR")" 2>/dev/null || true
+                cp -a "${'$'}SRC_ROOT/${'$'}PKG" "${'$'}DST_PACKAGE_DIR" 2>/dev/null || cp -r "${'$'}SRC_ROOT/${'$'}PKG" "${'$'}DST_PACKAGE_DIR" 2>/dev/null || true
+                chmod -R u+rwX,go+rX "${'$'}DST_PACKAGE_DIR" 2>/dev/null || true
+            """.trimIndent()
+        )
+    }
+
+    internal fun buildNodeModuleIntegrityVerifyShell(
+        srcNodeModulesVar: String,
+        dstNodeModulesVar: String
+    ): String {
+        return buildNodeModulePackageVisitShell(
+            srcNodeModulesVar = srcNodeModulesVar,
+            dstNodeModulesVar = dstNodeModulesVar,
+            actionOnMismatch = "exit 2"
+        )
+    }
+
+    private fun buildNodeModulePackageVisitShell(
+        srcNodeModulesVar: String,
+        dstNodeModulesVar: String,
+        actionOnMismatch: String
+    ): String {
+        val indentedAction = actionOnMismatch.prependIndent("      ")
+        return """
+            SRC_ROOT="${'$'}$srcNodeModulesVar"
+            DST_ROOT="${'$'}$dstNodeModulesVar"
+
+            check_node_package() {
+              PKG="${'$'}1"
+              SRC_DEP="${'$'}SRC_ROOT/${'$'}PKG/package.json"
+              DST_DEP="${'$'}DST_ROOT/${'$'}PKG/package.json"
+              if [ -f "${'$'}SRC_DEP" ]; then
+                SRC_DEP_SUM="${'$'}(cksum "${'$'}SRC_DEP" 2>/dev/null | tr ' ' ':' | cut -d: -f1-2)"
+                DST_DEP_SUM="${'$'}(cksum "${'$'}DST_DEP" 2>/dev/null | tr ' ' ':' | cut -d: -f1-2)"
+                if [ -n "${'$'}SRC_DEP_SUM" ] && [ "${'$'}SRC_DEP_SUM" != "${'$'}DST_DEP_SUM" ]; then
+$indentedAction
+                fi
+              fi
+            }
+
+            [ -d "${'$'}SRC_ROOT" ] || exit 0
+            mkdir -p "${'$'}DST_ROOT" 2>/dev/null || true
+            for ENTRY in "${'$'}SRC_ROOT"/*; do
+              [ -d "${'$'}ENTRY" ] || continue
+              BASE="${'$'}{ENTRY##*/}"
+              case "${'$'}BASE" in
+                .* ) continue ;;
+                @* )
+                  for SCOPED_ENTRY in "${'$'}ENTRY"/*; do
+                    [ -d "${'$'}SCOPED_ENTRY" ] || continue
+                    SCOPED_NAME="${'$'}{SCOPED_ENTRY##*/}"
+                    [ -n "${'$'}SCOPED_NAME" ] && check_node_package "${'$'}BASE/${'$'}SCOPED_NAME"
+                  done
+                  ;;
+                * )
+                  check_node_package "${'$'}BASE"
+                  ;;
+              esac
+            done
+        """.trimIndent()
+    }
+
     private fun syncRootNodeModulesIfNeeded(context: Context, normalProjectDir: File): OpResult {
         val srcProjectPath = normalProjectDir.absolutePath
         val dstProjectPath = rootProjectDir(context)
+        val packageRepair = buildNodeModulePackageRepairShell(
+            srcNodeModulesVar = "SRC_NM",
+            dstNodeModulesVar = "DST_NM"
+        ).prependIndent("            ")
+        val integrityVerify = buildNodeModuleIntegrityVerifyShell(
+            srcNodeModulesVar = "SRC_NM",
+            dstNodeModulesVar = "DST_NM"
+        ).prependIndent("            ")
 
         val script = """
             SRC=${shellQuote(srcProjectPath)}
             DST=${shellQuote(dstProjectPath)}
             SRC_NM="${'$'}SRC/node_modules"
             DST_NM="${'$'}DST/node_modules"
-            SRC_LOCK="${'$'}SRC/package-lock.json"
-            DST_LOCK="${'$'}DST/package-lock.json"
-            SRC_PKG="${'$'}SRC/package.json"
-            DST_PKG="${'$'}DST/package.json"
-            SRC_REDIS="${'$'}SRC_NM/redis/package.json"
-            DST_REDIS="${'$'}DST_NM/redis/package.json"
-            NEED_SYNC=0
 
             [ -d "${'$'}SRC_NM" ] || exit 0
-            [ -d "${'$'}DST_NM" ] || NEED_SYNC=1
 
-            if [ -f "${'$'}SRC_LOCK" ]; then
-              SRC_SUM="${'$'}(cksum "${'$'}SRC_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_SUM="${'$'}(cksum "${'$'}DST_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
-            elif [ -f "${'$'}SRC_PKG" ]; then
-              SRC_SUM="${'$'}(cksum "${'$'}SRC_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_SUM="${'$'}(cksum "${'$'}DST_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
-            fi
+$packageRepair
 
-            if [ -f "${'$'}SRC_REDIS" ]; then
-              SRC_REDIS_SUM="${'$'}(cksum "${'$'}SRC_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_REDIS_SUM="${'$'}(cksum "${'$'}DST_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ -n "${'$'}SRC_REDIS_SUM" ] && [ "${'$'}SRC_REDIS_SUM" != "${'$'}DST_REDIS_SUM" ] && NEED_SYNC=1
-            elif [ -f "${'$'}DST_REDIS" ]; then
-              NEED_SYNC=1
-            fi
+$integrityVerify
 
-            if [ "${'$'}NEED_SYNC" -eq 1 ]; then
-              rm -rf "${'$'}DST_NM" 2>/dev/null || true
-              mkdir -p "${'$'}DST_NM" 2>/dev/null || true
-              cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
-            fi
-
-            if [ -f "${'$'}SRC_REDIS" ]; then
-              SRC_REDIS_SUM="${'$'}(cksum "${'$'}SRC_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_REDIS_SUM="${'$'}(cksum "${'$'}DST_REDIS" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ "${'$'}SRC_REDIS_SUM" = "${'$'}DST_REDIS_SUM" ] || exit 2
-            elif [ -f "${'$'}DST_REDIS" ]; then
-              exit 2
-            fi
             exit 0
         """.trimIndent()
 
@@ -666,38 +762,28 @@ object RootRuntimeController {
     private fun syncRootCoreNodeModulesIfNeeded(normalCoreDir: File, rootCoreDirPath: String): OpResult {
         val srcCorePath = normalCoreDir.absolutePath
         val dstCorePath = rootCoreDirPath
+        val packageRepair = buildNodeModulePackageRepairShell(
+            srcNodeModulesVar = "SRC_NM",
+            dstNodeModulesVar = "DST_NM"
+        ).prependIndent("            ")
+        val integrityVerify = buildNodeModuleIntegrityVerifyShell(
+            srcNodeModulesVar = "SRC_NM",
+            dstNodeModulesVar = "DST_NM"
+        ).prependIndent("            ")
 
         val script = """
             SRC=${shellQuote(srcCorePath)}
             DST=${shellQuote(dstCorePath)}
             SRC_NM="${'$'}SRC/node_modules"
             DST_NM="${'$'}DST/node_modules"
-            SRC_LOCK="${'$'}SRC/package-lock.json"
-            DST_LOCK="${'$'}DST/package-lock.json"
-            SRC_PKG="${'$'}SRC/package.json"
-            DST_PKG="${'$'}DST/package.json"
-            NEED_SYNC=0
 
             [ -d "${'$'}SRC" ] || exit 0
             [ -d "${'$'}DST" ] || exit 0
             [ -d "${'$'}SRC_NM" ] || exit 0
-            [ -d "${'$'}DST_NM" ] || NEED_SYNC=1
 
-            if [ -f "${'$'}SRC_LOCK" ]; then
-              SRC_SUM="${'$'}(cksum "${'$'}SRC_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_SUM="${'$'}(cksum "${'$'}DST_LOCK" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
-            elif [ -f "${'$'}SRC_PKG" ]; then
-              SRC_SUM="${'$'}(cksum "${'$'}SRC_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              DST_SUM="${'$'}(cksum "${'$'}DST_PKG" 2>/dev/null | awk '{print "${'$'}1":"${'$'}2"}')"
-              [ -n "${'$'}SRC_SUM" ] && [ "${'$'}SRC_SUM" != "${'$'}DST_SUM" ] && NEED_SYNC=1
-            fi
+$packageRepair
 
-            if [ "${'$'}NEED_SYNC" -eq 1 ]; then
-              rm -rf "${'$'}DST_NM" 2>/dev/null || true
-              mkdir -p "${'$'}DST_NM" 2>/dev/null || true
-              cp -a "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || cp -r "${'$'}SRC_NM/." "${'$'}DST_NM/" 2>/dev/null || true
-            fi
+$integrityVerify
 
             exit 0
         """.trimIndent()

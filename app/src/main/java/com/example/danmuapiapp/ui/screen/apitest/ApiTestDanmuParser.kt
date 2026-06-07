@@ -68,7 +68,11 @@ internal fun parseDanmuInsight(
     source: String,
     pathLabel: String,
     matchedAtMillis: Long,
-    requestDurationMs: Long?
+    requestDurationMs: Long?,
+    requestTrace: List<DanmuRequestTrace> = emptyList(),
+    posterUrl: String = "",
+    year: String = "",
+    resolvedEpisodeLabel: String = ""
 ): DanmuInsight? {
     val root = parseJsonNode(raw) ?: return null
     val comments = extractCommentItems(root)
@@ -91,7 +95,11 @@ internal fun parseDanmuInsight(
         rawPreviewTruncated = preview.isTruncated,
         heatBuckets = heatBuckets,
         highMoments = highMoments,
-        comments = comments
+        comments = comments,
+        requestTrace = requestTrace,
+        posterUrl = posterUrl,
+        year = year,
+        resolvedEpisodeLabel = resolvedEpisodeLabel
     )
 }
 
