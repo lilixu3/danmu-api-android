@@ -5,6 +5,7 @@ import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.RuntimeApiAccess
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
+import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.DeviceAccessConfig
 import com.example.danmuapiapp.domain.model.DeviceAccessDevice
@@ -12,6 +13,7 @@ import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.model.DeviceAccessSource
 import com.example.danmuapiapp.domain.repository.AccessControlRepository
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -40,7 +42,8 @@ import javax.inject.Singleton
 @Singleton
 class AccessControlRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val adminSessionRepository: AdminSessionRepository
 ) : AccessControlRepository {
 
     companion object {
@@ -173,10 +176,10 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     private fun controlUrls(runtime: RuntimeApiAccess): List<String> {
         val urls = linkedSetOf<String>()
-        urls += controlUrl(runtime.port)
-        runtime.tokenPaths
+        recordTokenPaths(runtime)
             .filter { it.isNotBlank() }
             .forEach { tokenPath -> urls += controlUrlWithToken(runtime.port, tokenPath) }
+        urls += controlUrl(runtime.port)
         return urls.toList()
     }
 
@@ -185,7 +188,12 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private fun recordTokenPaths(runtime: RuntimeApiAccess): List<String> {
-        return runtime.tokenPaths
+        val adminState = adminSessionRepository.sessionState.value
+        return RuntimeManagementPaths.tokenPaths(
+            runtimeTokenPaths = runtime.tokenPaths,
+            adminMode = adminState.isAdminMode,
+            adminToken = adminSessionRepository.currentAdminTokenOrNull()
+        )
     }
 
     private fun fetchControlSnapshot(runtime: RuntimeApiAccess): DeviceAccessSnapshot {

@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.domain.model.LogTagClassifier
 import com.example.danmuapiapp.ui.component.AppPanelDialog
 import java.text.SimpleDateFormat
 import java.util.*
@@ -50,6 +51,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val clipboardManager = LocalClipboard.current
     var filterLevel by remember { mutableStateOf<LogLevel?>(null) }
     var filterSource by remember { mutableStateOf<AppLogSource?>(null) }
+    var filterTag by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
@@ -57,16 +59,37 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val chipErrorColor = if (dark) Color(0xFFF87171) else Color(0xFFE53935)
     val chipWarnColor  = if (dark) Color(0xFFFBBF24) else Color(0xFFFFC107)
 
+    val availableTags = remember(logs) {
+        LogTagClassifier.sortTags(logs.flatMap { entry -> entry.filterableTags() })
+    }
+    val tagCounts = remember(logs) {
+        availableTags.associateWith { tag ->
+            logs.count { entry -> LogTagClassifier.matches(entry, tag) }
+        }
+    }
+
+    LaunchedEffect(availableTags) {
+        val selected = filterTag
+        if (selected != null && !availableTags.contains(selected)) {
+            filterTag = null
+        }
+    }
+
     val filteredLogs = logs
         .let { list -> if (filterLevel != null) list.filter { it.level == filterLevel } else list }
         .let { list -> if (filterSource != null) list.filter { it.source == filterSource } else list }
+        .let { list -> if (filterTag != null) list.filter { LogTagClassifier.matches(it, filterTag!!) } else list }
         .let { list ->
             if (searchQuery.isNotBlank()) list.filter {
                 it.message.contains(searchQuery, ignoreCase = true) ||
                     it.tag.contains(searchQuery, ignoreCase = true) ||
+                    it.category.contains(searchQuery, ignoreCase = true) ||
+                    it.tags.any { tag -> tag.contains(searchQuery, ignoreCase = true) } ||
+                    LogTagClassifier.labelFor(it.category).contains(searchQuery, ignoreCase = true) ||
                     it.source.label.contains(searchQuery, ignoreCase = true)
             } else list
         }
+    val hasActiveFilters = filterLevel != null || filterSource != null || filterTag != null || searchQuery.isNotBlank()
 
     val errorCount = logs.count { it.level == LogLevel.Error }
     val warnCount = logs.count { it.level == LogLevel.Warn }
@@ -176,9 +199,15 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
             Column {
                 Text("运行日志", style = MaterialTheme.typography.headlineLarge)
                 Text(
-                    "${logs.size} 条日志" +
-                        (if (errorCount > 0) " / $errorCount 错误" else "") +
-                        (if (warnCount > 0) " / $warnCount 警告" else ""),
+                    buildString {
+                        if (hasActiveFilters) {
+                            append("${filteredLogs.size}/${logs.size} 条日志")
+                        } else {
+                            append("${logs.size} 条日志")
+                        }
+                        if (errorCount > 0) append(" / $errorCount 错误")
+                        if (warnCount > 0) append(" / $warnCount 警告")
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -202,35 +231,18 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 ) {
                     Icon(Icons.Rounded.Refresh, "刷新日志", Modifier.size(18.dp))
                 }
-                // Copy all logs
+                // Copy visible logs after current filters/search.
                 FilledTonalIconButton(
                     onClick = {
-                        val text = logs.joinToString("\n") {
-                            buildString {
-                                append('[')
-                                append(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(it.timestamp)))
-                                append("][")
-                                append(it.source.label)
-                                append(']')
-                                if (it.tag.isNotBlank()) {
-                                    append('[')
-                                    append(it.tag)
-                                    append(']')
-                                }
-                                append('[')
-                                append(it.level.name)
-                                append("] ")
-                                append(it.message)
-                            }
-                        }
+                        val text = filteredLogs.toClipboardText()
                         clipboardManager.nativeClipboard.setPrimaryClip(
-                            android.content.ClipData.newPlainText("日志", text)
+                            android.content.ClipData.newPlainText("当前筛选日志", text)
                         )
                     },
-                    enabled = logs.isNotEmpty(),
+                    enabled = filteredLogs.isNotEmpty(),
                     modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(Icons.Rounded.ContentCopy, "复制日志", Modifier.size(18.dp))
+                    Icon(Icons.Rounded.ContentCopy, "复制当前筛选日志", Modifier.size(18.dp))
                 }
                 FilledTonalIconButton(
                     onClick = viewModel::clearLogs,
@@ -310,6 +322,16 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
+            FilterChip(
+                selected = filterLevel == LogLevel.Info,
+                onClick = {
+                    filterLevel = if (filterLevel == LogLevel.Info) null else LogLevel.Info
+                },
+                label = { Text("信息") },
+                leadingIcon = if (filterLevel == LogLevel.Info) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
         }
 
         Row(
@@ -358,6 +380,48 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
+            FilterChip(
+                selected = filterSource == AppLogSource.NormalBootstrap,
+                onClick = {
+                    filterSource =
+                        if (filterSource == AppLogSource.NormalBootstrap) null else AppLogSource.NormalBootstrap
+                },
+                label = { Text(AppLogSource.NormalBootstrap.label) },
+                leadingIcon = if (filterSource == AppLogSource.NormalBootstrap) {
+                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                } else null
+            )
+        }
+
+        if (availableTags.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = filterTag == null,
+                    onClick = { filterTag = null },
+                    label = { Text("全部标签") },
+                    leadingIcon = if (filterTag == null) {
+                        { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                    } else null
+                )
+                availableTags.forEach { tag ->
+                    FilterChip(
+                        selected = filterTag == tag,
+                        onClick = { filterTag = if (filterTag == tag) null else tag },
+                        label = {
+                            Text("${LogTagClassifier.labelFor(tag)} ${tagCounts[tag] ?: 0}")
+                        },
+                        leadingIcon = if (filterTag == tag) {
+                            { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+            }
         }
 
         // Log list or disabled state
@@ -423,7 +487,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                             Text(
                                 when {
                                     searchQuery.isNotBlank() -> "没有匹配的日志"
-                                    filterLevel != null || filterSource != null -> "没有匹配的日志"
+                                    filterLevel != null || filterSource != null || filterTag != null -> "没有匹配的日志"
                                     else -> "暂无日志"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
@@ -502,7 +566,19 @@ private fun LogEntryRow(entry: LogEntry) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (entry.tag.isNotBlank()) {
+                val categoryLabel = entry.category
+                    .takeIf { it.isNotBlank() }
+                    ?.let(LogTagClassifier::labelFor)
+                if (categoryLabel != null) {
+                    Text(
+                        text = categoryLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (entry.tag.isNotBlank() && !entry.tag.equals(entry.category, ignoreCase = true)) {
                     Text(
                         text = entry.tag,
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -520,6 +596,41 @@ private fun LogEntryRow(entry: LogEntry) {
                 ),
                 color = color
             )
+        }
+    }
+}
+
+private fun LogEntry.filterableTags(): List<String> {
+    return (listOf(category) + tags)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+}
+
+private fun List<LogEntry>.toClipboardText(): String {
+    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    return joinToString("\n") { entry ->
+        buildString {
+            append('[')
+            append(timeFormat.format(Date(entry.timestamp)))
+            append("][")
+            append(entry.source.label)
+            append(']')
+            val category = entry.category.takeIf { it.isNotBlank() }
+            if (category != null) {
+                append('[')
+                append(LogTagClassifier.labelFor(category))
+                append(']')
+            }
+            if (entry.tag.isNotBlank() && !entry.tag.equals(entry.category, ignoreCase = true)) {
+                append('[')
+                append(entry.tag)
+                append(']')
+            }
+            append('[')
+            append(entry.level.name)
+            append("] ")
+            append(entry.message)
         }
     }
 }

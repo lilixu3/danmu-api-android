@@ -679,12 +679,15 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun addLog(level: LogLevel, message: String) {
+        val tagInfo = LogTagClassifier.classifyAppEntry(AppLogSource.App, "Runtime")
         _eventLogs.update { current ->
             (current + LogEntry(
                 level = level,
                 message = message,
                 source = AppLogSource.App,
-                tag = "Runtime"
+                tag = "Runtime",
+                category = tagInfo.category,
+                tags = tagInfo.tags
             )).takeLast(settingsRepository.logMaxCount.value)
         }
         publishMergedLogs()
@@ -1393,7 +1396,8 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun collectAppLogsOnce(): List<LogEntry> {
         val limit = settingsRepository.logMaxCount.value.coerceAtLeast(100)
         return (AppDiagnosticLogger.readAppEntries(context, limit) +
-            AppDiagnosticLogger.readRootBootstrapEntries(context, limit))
+            AppDiagnosticLogger.readRootBootstrapEntries(context, limit) +
+            AppDiagnosticLogger.readNormalBootstrapEntries(context, limit))
             .sortedBy { it.timestamp }
             .takeLast(limit)
     }
@@ -1476,18 +1480,24 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun parseLogLines(raw: String): List<LogEntry> {
-        val blocks = splitLogBlocks(raw)
+        val blocks = CoreLogNoiseFilter.removeLogEndpointPollingBlocks(splitLogBlocks(raw))
         if (blocks.isEmpty()) return emptyList()
 
         return blocks.map { block ->
             val entry = parseStructuredLogLine(block)
-            entry ?: LogEntry(
-                timestamp = System.currentTimeMillis(),
-                level = LogLevel.Info,
-                message = normalizeCoreMessage(block),
-                source = AppLogSource.Core,
-                tag = "Core"
-            )
+            entry ?: run {
+                val normalized = normalizeCoreMessage(block)
+                val tagInfo = LogTagClassifier.classifyCoreMessage(normalized)
+                LogEntry(
+                    timestamp = System.currentTimeMillis(),
+                    level = LogLevel.Info,
+                    message = normalized,
+                    source = AppLogSource.Core,
+                    tag = tagInfo.category.ifBlank { "Core" },
+                    category = tagInfo.category,
+                    tags = tagInfo.tags
+                )
+            }
         }.takeLast(settingsRepository.logMaxCount.value)
     }
 
@@ -1547,12 +1557,16 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
         }.ifBlank { lines.first() }
 
+        val normalizedMessage = normalizeCoreMessage(message)
+        val tagInfo = LogTagClassifier.classifyCoreMessage(normalizedMessage, header.tag)
         return LogEntry(
             timestamp = header.timestamp,
             level = header.level,
-            message = normalizeCoreMessage(message),
+            message = normalizedMessage,
             source = AppLogSource.Core,
-            tag = header.tag
+            tag = tagInfo.category.ifBlank { header.tag },
+            category = tagInfo.category,
+            tags = tagInfo.tags
         )
     }
 

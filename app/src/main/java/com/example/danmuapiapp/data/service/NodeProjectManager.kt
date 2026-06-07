@@ -32,7 +32,6 @@ object NodeProjectManager {
     private const val BUNDLED_PACKAGE_JSON_ASSET = "nodejs-project/package.json"
     private const val OPTIONAL_REDIS_ENV_KEY = "LOCAL_REDIS_URL"
     private const val OPTIONAL_REDIS_ASSET_BASE = "nodejs-optional/redis/node_modules"
-    private const val OPTIONAL_REDIS_ASSET_PACKAGE = "$OPTIONAL_REDIS_ASSET_BASE/redis/package.json"
     private val runtimeBundledDependencyVersions = linkedMapOf(
         "https-proxy-agent" to "7.0.6",
         "agent-base" to "7.1.4",
@@ -48,6 +47,56 @@ object NodeProjectManager {
     )
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    fun bundledRuntimeDependencyNames(): List<String> = runtimeBundledDependencyVersions.keys.toList()
+
+    private fun listAssetNodeModulePackageNames(
+        context: Context,
+        assetBasePath: String
+    ): List<String> {
+        val assetManager = context.assets
+        val topLevel = runCatching { assetManager.list(assetBasePath) }
+            .getOrNull()
+            .orEmpty()
+        return buildList {
+            topLevel.sorted().forEach { name ->
+                if (name.isBlank() || name.startsWith('.')) return@forEach
+                val packagePath = "$assetBasePath/$name/package.json"
+                if (assetSha256(context, packagePath) != null) {
+                    add(name)
+                    return@forEach
+                }
+                if (!name.startsWith('@')) return@forEach
+                val scoped = runCatching { assetManager.list("$assetBasePath/$name") }
+                    .getOrNull()
+                    .orEmpty()
+                scoped.sorted().forEach { child ->
+                    if (child.isBlank() || child.startsWith('.')) return@forEach
+                    val scopedName = "$name/$child"
+                    val scopedPackagePath = "$assetBasePath/$scopedName/package.json"
+                    if (assetSha256(context, scopedPackagePath) != null) {
+                        add(scopedName)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun copyAssetNodeModulePackage(
+        context: Context,
+        assetBasePath: String,
+        targetNodeModulesDir: File,
+        packageName: String
+    ) {
+        val packageDir = File(targetNodeModulesDir, packageName)
+        runCatching { packageDir.deleteRecursively() }
+        packageDir.parentFile?.mkdirs()
+        copyAssetFolder(
+            context = context,
+            assetPath = "$assetBasePath/$packageName",
+            targetDir = packageDir
+        )
+    }
     private val coreDirNameRegex = Regex("^danmu[-_]api$", RegexOption.IGNORE_CASE)
     private val projectDirLocks = ConcurrentHashMap<String, Any>()
     private val coreLayoutLocks = ConcurrentHashMap<String, Any>()
@@ -518,29 +567,27 @@ object NodeProjectManager {
     private fun ensureOptionalRedisDependency(context: Context, targetProjectDir: File) {
         if (!hasOptionalRedisConfigured(targetProjectDir)) return
 
-        val assetRedisSignature = assetSha256(context, OPTIONAL_REDIS_ASSET_PACKAGE) ?: return
-        val runtimeRedisSignature = fileSha256(File(targetProjectDir, "node_modules/redis/package.json"))
-        val runtimeRedisClient = File(targetProjectDir, "node_modules/@redis/client/package.json")
-        val runtimeClusterKeySlot = File(targetProjectDir, "node_modules/cluster-key-slot/package.json")
-
-        if (
-            runtimeRedisSignature == assetRedisSignature &&
-            runtimeRedisClient.exists() &&
-            runtimeClusterKeySlot.exists()
-        ) {
-            return
-        }
+        val optionalPackages = listAssetNodeModulePackageNames(context, OPTIONAL_REDIS_ASSET_BASE)
+        if (optionalPackages.isEmpty()) return
 
         val nodeModulesDir = File(targetProjectDir, "node_modules")
         nodeModulesDir.mkdirs()
-        runCatching { File(nodeModulesDir, "redis").deleteRecursively() }
-        runCatching { File(nodeModulesDir, "@redis").deleteRecursively() }
-        runCatching { File(nodeModulesDir, "cluster-key-slot").deleteRecursively() }
-        copyAssetFolder(
-            context = context,
-            assetPath = OPTIONAL_REDIS_ASSET_BASE,
-            targetDir = nodeModulesDir
-        )
+        val missingPackages = optionalPackages.filter { name ->
+            val assetPkg = "$OPTIONAL_REDIS_ASSET_BASE/$name/package.json"
+            val assetSignature = assetSha256(context, assetPkg) ?: return@filter false
+            val runtimeSignature = fileSha256(File(nodeModulesDir, "$name/package.json"))
+            runtimeSignature != assetSignature
+        }
+        if (missingPackages.isEmpty()) return
+
+        missingPackages.forEach { name ->
+            copyAssetNodeModulePackage(
+                context = context,
+                assetBasePath = OPTIONAL_REDIS_ASSET_BASE,
+                targetNodeModulesDir = nodeModulesDir,
+                packageName = name
+            )
+        }
     }
 
     private fun shouldPreserveBundledNodeModules(context: Context, targetDir: File): Boolean {
@@ -607,7 +654,8 @@ object NodeProjectManager {
         val nodeModulesDir = File(targetProjectDir, "node_modules")
         nodeModulesDir.mkdirs()
 
-        val missingBasePackages = runtimeBundledDependencyVersions.keys.filter { name ->
+        val bundledPackages = listAssetNodeModulePackageNames(context, "nodejs-project/node_modules")
+        val missingBasePackages = bundledPackages.filter { name ->
             val assetPkg = "nodejs-project/node_modules/$name/package.json"
             val assetSignature = assetSha256(context, assetPkg) ?: return@filter false
             val runtimeSignature = fileSha256(File(nodeModulesDir, "$name/package.json"))
@@ -616,12 +664,11 @@ object NodeProjectManager {
         if (missingBasePackages.isEmpty()) return
 
         missingBasePackages.forEach { name ->
-            val packageDir = File(nodeModulesDir, name)
-            runCatching { packageDir.deleteRecursively() }
-            copyAssetFolder(
+            copyAssetNodeModulePackage(
                 context = context,
-                assetPath = "nodejs-project/node_modules/$name",
-                targetDir = packageDir
+                assetBasePath = "nodejs-project/node_modules",
+                targetNodeModulesDir = nodeModulesDir,
+                packageName = name
             )
         }
     }

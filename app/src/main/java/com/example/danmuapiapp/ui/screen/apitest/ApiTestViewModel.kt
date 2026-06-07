@@ -25,6 +25,7 @@ import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltViewModel
@@ -87,6 +88,9 @@ class ApiTestViewModel @Inject constructor(
 
     var loadingAnimeId by mutableStateOf<Long?>(null)
         private set
+
+    private var manualRequestTrace: List<DanmuRequestTrace> = emptyList()
+    private var manualOriginalInput: String = ""
 
     fun dismissError() {
         errorMessage = null
@@ -201,6 +205,18 @@ class ApiTestViewModel @Inject constructor(
             return
         }
 
+        val inputUrl = ApiTestInputResolver.extractHttpUrl(trimmedFileName)
+        if (inputUrl != null) {
+            runDirectUrlDanmu(
+                base = base,
+                inputUrl = inputUrl,
+                target = DirectDanmuTarget.Auto,
+                tracePrefix = emptyList(),
+                inputLabel = "URL"
+            )
+            return
+        }
+
         val matchUrl = "$base/api/v2/match"
         val matchBody = JSONObject().put("fileName", trimmedFileName).toString()
 
@@ -258,7 +274,7 @@ class ApiTestViewModel @Inject constructor(
                 return@launch
             }
 
-            val commentUrl = "$base/api/v2/comment/${selection.commentId}?format=json"
+            val commentUrl = "$base/api/v2/comment/${selection.commentId}?format=json&duration=true"
             val commentStartedAt = System.currentTimeMillis()
             val commentResult = executeGet(commentUrl)
             val commentElapsed = (System.currentTimeMillis() - commentStartedAt).coerceAtLeast(0L)
@@ -285,7 +301,23 @@ class ApiTestViewModel @Inject constructor(
                                 episodeTitle = selection.episodeTitle.ifBlank { trimmedFileName },
                                 source = selection.source,
                                 pathLabel = "自动匹配",
-                                requestDurationMs = totalElapsed
+                                requestDurationMs = totalElapsed,
+                                requestTrace = listOf(
+                                    DanmuRequestTrace(
+                                        label = "匹配",
+                                        method = "POST",
+                                        url = matchUrl,
+                                        inputLabel = "文件名",
+                                        inputValue = trimmedFileName
+                                    ),
+                                    DanmuRequestTrace(
+                                        label = "弹幕",
+                                        method = "GET",
+                                        url = commentUrl,
+                                        inputLabel = "commentId",
+                                        inputValue = selection.commentId.toString()
+                                    )
+                                )
                             )
                         }
                     }
@@ -318,7 +350,13 @@ class ApiTestViewModel @Inject constructor(
 
         val query = keyword.trim()
         if (query.isBlank()) {
-            errorMessage = "请输入搜索关键词"
+            errorMessage = "请输入搜索关键词或视频 URL"
+            return
+        }
+
+        val inputUrl = ApiTestInputResolver.extractHttpUrl(query)
+        if (inputUrl != null) {
+            searchManualUrlCandidate(inputUrl)
             return
         }
 
@@ -332,6 +370,16 @@ class ApiTestViewModel @Inject constructor(
             val result = executeGet(url)
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
             manualHasSearched = true
+            manualOriginalInput = query
+            manualRequestTrace = listOf(
+                DanmuRequestTrace(
+                    label = "搜索",
+                    method = "GET",
+                    url = url,
+                    inputLabel = "关键词",
+                    inputValue = query
+                )
+            )
 
             result.fold(
                 onSuccess = { (code, body) ->
@@ -376,8 +424,57 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
+    private fun searchManualUrlCandidate(inputUrl: String) {
+        if (isSearchingAnime || isLoadingEpisodes) return
+
+        viewModelScope.launch {
+            isSearchingAnime = true
+            errorMessage = null
+            manualResult = null
+            manualHasSearched = false
+            manualAnimeCandidates = emptyList()
+            manualCurrentAnime = null
+            manualEpisodeCandidates = emptyList()
+            manualOriginalInput = inputUrl
+
+            val metadata = fetchUrlMetadata(inputUrl)
+            val trace = listOf(
+                DanmuRequestTrace(
+                    label = if (metadata != null) "页面元数据" else "页面元数据(未取到)",
+                    method = "GET",
+                    url = inputUrl,
+                    inputLabel = "URL",
+                    inputValue = inputUrl
+                )
+            )
+            val selection = withContext(Dispatchers.Default) {
+                buildManualUrlDanmuSelection(
+                    inputUrl = inputUrl,
+                    metadata = metadata,
+                    metadataTrace = trace
+                )
+            }
+            manualAnimeCandidates = listOf(selection.anime)
+            manualCurrentAnime = null
+            manualEpisodeCandidates = emptyList()
+            manualRequestTrace = selection.metadataTrace
+            manualHasSearched = true
+            isSearchingAnime = false
+        }
+    }
+
     fun openManualAnimeDetail(baseUrl: String, anime: DownloadAnimeCandidate) {
         if (isSearchingAnime || isLoadingEpisodes) return
+
+        if (anime.directUrl.isNotBlank()) {
+            val episode = buildManualUrlEpisodeCandidate(anime)
+            if (episode == null) {
+                errorMessage = "URL 解析结果缺少直达地址"
+                return
+            }
+            loadManualDanmu(baseUrl = baseUrl, anime = anime, episode = episode)
+            return
+        }
 
         val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
@@ -386,6 +483,7 @@ class ApiTestViewModel @Inject constructor(
         }
 
         val url = "$base/api/v2/bangumi/${anime.animeId}"
+        val traceBeforeDetail = manualRequestTrace
 
         viewModelScope.launch {
             isLoadingEpisodes = true
@@ -412,6 +510,13 @@ class ApiTestViewModel @Inject constructor(
                         }
                         manualCurrentAnime = anime
                         manualEpisodeCandidates = episodes
+                        manualRequestTrace = traceBeforeDetail + DanmuRequestTrace(
+                            label = "番剧详情",
+                            method = "GET",
+                            url = url,
+                            inputLabel = "animeId",
+                            inputValue = anime.animeId.toString()
+                        )
                     } else {
                         errorMessage = "加载剧集失败：HTTP $code"
                     }
@@ -447,7 +552,13 @@ class ApiTestViewModel @Inject constructor(
             return
         }
 
-        val url = "$base/api/v2/comment/${episode.episodeId}?format=json"
+        val isDirectUrlEpisode = episode.directUrl.isNotBlank()
+        val url = if (isDirectUrlEpisode) {
+            "$base/api/v2/comment?url=${urlEncode(episode.directUrl)}&format=json&duration=true"
+        } else {
+            "$base/api/v2/comment/${episode.episodeId}?format=json&duration=true"
+        }
+        val traceBeforeComment = manualRequestTrace
 
         viewModelScope.launch {
             isLoadingManualDanmu = true
@@ -460,7 +571,7 @@ class ApiTestViewModel @Inject constructor(
             result.fold(
                 onSuccess = { (code, body) ->
                     recordSuccess(
-                        scene = "弹幕测试/手动获取弹幕",
+                        scene = if (isDirectUrlEpisode) "弹幕测试/手动URL解析" else "弹幕测试/手动获取弹幕",
                         method = "GET",
                         url = url,
                         statusCode = code,
@@ -473,12 +584,22 @@ class ApiTestViewModel @Inject constructor(
                         manualResult = withContext(Dispatchers.Default) {
                             buildDanmuInsightOrFallback(
                                 raw = body,
-                                commentId = episode.episodeId,
+                                commentId = if (isDirectUrlEpisode) null else episode.episodeId,
                                 animeTitle = anime.title,
                                 episodeTitle = episode.title,
                                 source = episode.source,
-                                pathLabel = "手动匹配",
-                                requestDurationMs = elapsed
+                                pathLabel = if (isDirectUrlEpisode) "手动URL解析" else "手动匹配",
+                                requestDurationMs = elapsed,
+                                requestTrace = traceBeforeComment + DanmuRequestTrace(
+                                    label = if (isDirectUrlEpisode) "URL弹幕" else "弹幕",
+                                    method = "GET",
+                                    url = url,
+                                    inputLabel = if (isDirectUrlEpisode) "URL" else "episodeId",
+                                    inputValue = if (isDirectUrlEpisode) episode.directUrl else episode.episodeId.toString()
+                                ),
+                                posterUrl = episode.posterUrl.ifBlank { anime.imageUrl },
+                                year = episode.year.ifBlank { anime.year },
+                                resolvedEpisodeLabel = episode.resolvedEpisodeLabel.ifBlank { anime.episodeLabel }
                             )
                         }
                     }
@@ -487,7 +608,7 @@ class ApiTestViewModel @Inject constructor(
                     val message = throwable.message ?: "获取弹幕失败"
                     errorMessage = message
                     recordFailure(
-                        scene = "弹幕测试/手动获取弹幕",
+                        scene = if (isDirectUrlEpisode) "弹幕测试/手动URL解析" else "弹幕测试/手动获取弹幕",
                         method = "GET",
                         url = url,
                         durationMs = elapsed,
@@ -498,6 +619,147 @@ class ApiTestViewModel @Inject constructor(
 
             isLoadingManualDanmu = false
             loadingEpisodeId = null
+        }
+    }
+
+    private enum class DirectDanmuTarget { Auto, Manual }
+
+    private fun runDirectUrlDanmu(
+        base: String,
+        inputUrl: String,
+        target: DirectDanmuTarget,
+        tracePrefix: List<DanmuRequestTrace>,
+        inputLabel: String
+    ) {
+        val commentUrl = "$base/api/v2/comment?url=${urlEncode(inputUrl)}&format=json&duration=true"
+
+        viewModelScope.launch {
+            when (target) {
+                DirectDanmuTarget.Auto -> {
+                    isAutoMatching = true
+                    autoMatchResult = null
+                }
+                DirectDanmuTarget.Manual -> {
+                    isSearchingAnime = true
+                    isLoadingManualDanmu = true
+                    manualHasSearched = false
+                    manualResult = null
+                }
+            }
+            errorMessage = null
+            val metadata = fetchUrlMetadata(inputUrl)
+            val trace = tracePrefix + listOf(
+                DanmuRequestTrace(
+                    label = if (metadata != null) "页面元数据" else "页面元数据(未取到)",
+                    method = "GET",
+                    url = inputUrl,
+                    inputLabel = inputLabel,
+                    inputValue = inputUrl
+                ),
+                DanmuRequestTrace(
+                    label = "URL弹幕",
+                    method = "GET",
+                    url = commentUrl,
+                    inputLabel = inputLabel,
+                    inputValue = inputUrl
+                )
+            )
+            val startedAt = System.currentTimeMillis()
+            val result = executeGet(commentUrl)
+            val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+
+            result.fold(
+                onSuccess = { (code, body) ->
+                    recordSuccess(
+                        scene = when (target) {
+                            DirectDanmuTarget.Auto -> "弹幕测试/自动URL解析"
+                            DirectDanmuTarget.Manual -> "弹幕测试/手动URL解析"
+                        },
+                        method = "GET",
+                        url = commentUrl,
+                        statusCode = code,
+                        durationMs = elapsed,
+                        body = body
+                    )
+                    if (code !in 200..299) {
+                        errorMessage = "URL 弹幕解析失败：HTTP $code"
+                    } else {
+                        val insight = withContext(Dispatchers.Default) {
+                            buildDanmuInsightOrFallback(
+                                raw = body,
+                                commentId = null,
+                                animeTitle = metadata?.title?.ifBlank { null } ?: inputUrl,
+                                episodeTitle = metadata?.episodeTitle?.ifBlank { null } ?: metadata?.title?.ifBlank { null } ?: inputUrl,
+                                source = metadata?.platformLabel?.ifBlank { null } ?: "URL",
+                                pathLabel = if (target == DirectDanmuTarget.Auto) "自动URL解析" else "手动URL解析",
+                                requestDurationMs = elapsed,
+                                requestTrace = trace,
+                                posterUrl = metadata?.posterUrl.orEmpty(),
+                                year = metadata?.year.orEmpty(),
+                                resolvedEpisodeLabel = metadata?.episodeLabel.orEmpty()
+                            )
+                        }
+                        when (target) {
+                            DirectDanmuTarget.Auto -> autoMatchResult = insight
+                            DirectDanmuTarget.Manual -> manualResult = insight
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    val message = throwable.message ?: "URL 弹幕解析失败"
+                    errorMessage = message
+                    recordFailure(
+                        scene = when (target) {
+                            DirectDanmuTarget.Auto -> "弹幕测试/自动URL解析"
+                            DirectDanmuTarget.Manual -> "弹幕测试/手动URL解析"
+                        },
+                        method = "GET",
+                        url = commentUrl,
+                        durationMs = elapsed,
+                        message = message
+                    )
+                }
+            )
+
+            when (target) {
+                DirectDanmuTarget.Auto -> isAutoMatching = false
+                DirectDanmuTarget.Manual -> {
+                    isSearchingAnime = false
+                    isLoadingManualDanmu = false
+                    loadingEpisodeId = null
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchUrlMetadata(inputUrl: String): UrlDanmuMetadata? {
+        if (!inputUrl.startsWith("http", ignoreCase = true)) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val request = Request.Builder()
+                    .url(inputUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/125 Mobile Safari/537.36")
+                    .get()
+                    .build()
+                val metadataClient = httpClient.newBuilder()
+                    .callTimeout(6, TimeUnit.SECONDS)
+                    .build()
+                metadataClient.newCall(request).execute().use { response ->
+                    if (response.code !in 200..299) return@use null
+                    val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.getDefault())
+                    if (contentType.isNotBlank() &&
+                        !contentType.contains("text/html") &&
+                        !contentType.contains("application/xhtml") &&
+                        !contentType.contains("text/plain")
+                    ) {
+                        return@use null
+                    }
+                    val contentLength = response.body.contentLength()
+                    if (contentLength > 768 * 1024) return@use null
+                    val html = response.peekBody(512L * 1024L).string()
+                    parseUrlDanmuMetadata(inputUrl, html)
+                }
+            }.getOrNull()
         }
     }
 
@@ -532,7 +794,7 @@ class ApiTestViewModel @Inject constructor(
     }
 
     private fun shouldCollapseDebugResponse(endpoint: ApiEndpointConfig): Boolean {
-        return endpoint.key == "getComment" || endpoint.key == "getSegmentComment"
+        return endpoint.key == "getComment" || endpoint.key == "getCommentByUrl" || endpoint.key == "getSegmentComment"
     }
 
     private fun buildDanmuInsightOrFallback(
@@ -542,7 +804,11 @@ class ApiTestViewModel @Inject constructor(
         episodeTitle: String,
         source: String,
         pathLabel: String,
-        requestDurationMs: Long?
+        requestDurationMs: Long?,
+        requestTrace: List<DanmuRequestTrace> = emptyList(),
+        posterUrl: String = "",
+        year: String = "",
+        resolvedEpisodeLabel: String = ""
     ): DanmuInsight {
         return parseDanmuInsight(
             raw = raw,
@@ -552,7 +818,11 @@ class ApiTestViewModel @Inject constructor(
             source = source,
             pathLabel = pathLabel,
             matchedAtMillis = System.currentTimeMillis(),
-            requestDurationMs = requestDurationMs
+            requestDurationMs = requestDurationMs,
+            requestTrace = requestTrace,
+            posterUrl = posterUrl,
+            year = year,
+            resolvedEpisodeLabel = resolvedEpisodeLabel
         ) ?: run {
             val preview = buildTextPreview(raw, 4_000)
             DanmuInsight(
@@ -570,7 +840,11 @@ class ApiTestViewModel @Inject constructor(
                 rawPreviewTruncated = preview.isTruncated,
                 heatBuckets = emptyList(),
                 highMoments = emptyList(),
-                comments = emptyList()
+                comments = emptyList(),
+                requestTrace = requestTrace,
+                posterUrl = posterUrl,
+                year = year,
+                resolvedEpisodeLabel = resolvedEpisodeLabel
             )
         }
     }
