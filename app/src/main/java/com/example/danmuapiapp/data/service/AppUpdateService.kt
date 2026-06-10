@@ -52,6 +52,10 @@ class AppUpdateService @Inject constructor(
         private const val KEY_PENDING_INSTALL_PATH = "pending_install_path"
         private const val KEY_PENDING_INSTALL_TS = "pending_install_ts"
         private const val PENDING_INSTALL_MAX_AGE_MS = 12 * 60 * 60 * 1000L
+        private const val MIN_VALID_APK_BYTES = 1024 * 1024L
+        private const val APK_DOWNLOAD_CONNECT_TIMEOUT_SEC = 15L
+        private const val APK_DOWNLOAD_READ_TIMEOUT_SEC = 60L
+        private const val APK_DOWNLOAD_CALL_TIMEOUT_MIN = 5L
     }
 
     data class ApkAsset(
@@ -107,6 +111,12 @@ class AppUpdateService @Inject constructor(
         }.getOrElse { "未知" }
     }
 
+    fun buildDownloadUrls(asset: ApkAsset?): List<String> {
+        val original = asset?.url?.trim().orEmpty()
+        if (original.isBlank()) return emptyList()
+        return githubProxyService.buildUrlCandidates(original).plus(original).distinct()
+    }
+
     suspend fun checkLatestRelease(): Result<CheckResult> = withContext(Dispatchers.IO) {
         runCatching {
             val currentVersion = currentVersionName()
@@ -122,9 +132,7 @@ class AppUpdateService @Inject constructor(
                 .distinct()
                 .firstOrNull()
                 .orEmpty()
-            val downloadCandidates = bestAsset?.url?.let { original ->
-                githubProxyService.buildUrlCandidates(original).plus(original).distinct()
-            } ?: emptyList()
+            val downloadCandidates = buildDownloadUrls(bestAsset)
 
             CheckResult(
                 currentVersion = currentVersion,
@@ -147,13 +155,13 @@ class AppUpdateService @Inject constructor(
             val target = prepareDownloadTarget(version) ?: error("无法创建下载目录")
             clearPendingInstall(context)
 
-            var timeoutLike = false
+            var downloadFailed = false
             val candidates = urls.distinct()
             if (candidates.isEmpty()) error("下载地址为空")
 
             for (url in candidates) {
                 val ok = downloadOnce(url, target, onProgress)
-                timeoutLike = timeoutLike || !ok
+                downloadFailed = downloadFailed || !ok
                 if (ok) {
                     target.finalizeWrite(context)
                     val uri = target.toInstallUri(context)
@@ -170,7 +178,7 @@ class AppUpdateService @Inject constructor(
             }
 
             target.cleanup(context)
-            if (timeoutLike) error("下载超时，请切换 GitHub 线路后重试")
+            if (downloadFailed) error("下载失败：线路超时、代理拒绝，或返回内容不是安装包，请切换 GitHub 线路后重试")
             error("下载失败，请稍后重试")
         }
     }
@@ -676,9 +684,9 @@ class AppUpdateService @Inject constructor(
         output.use { out ->
             return runCatching {
                 httpClient.newBuilder()
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
-                    .callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(APK_DOWNLOAD_CONNECT_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(APK_DOWNLOAD_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                    .callTimeout(APK_DOWNLOAD_CALL_TIMEOUT_MIN, java.util.concurrent.TimeUnit.MINUTES)
                     .build()
                     .newCall(request)
                     .execute()
@@ -687,8 +695,19 @@ class AppUpdateService @Inject constructor(
                         val body = response.body
                         val total = body.contentLength().coerceAtLeast(-1L)
                         body.byteStream().use { input ->
-                            val buf = ByteArray(16 * 1024)
-                            var soFar = 0L
+                            val first = ByteArray(4)
+                            var firstLen = 0
+                            while (firstLen < first.size) {
+                                val read = input.read(first, firstLen, first.size - firstLen)
+                                if (read <= 0) break
+                                firstLen += read
+                            }
+                            if (!looksLikeApk(first, firstLen)) return@use false
+
+                            val buf = ByteArray(32 * 1024)
+                            var soFar = firstLen.toLong()
+                            out.write(first, 0, firstLen)
+                            onProgress(soFar, total)
                             while (true) {
                                 val len = input.read(buf)
                                 if (len <= 0) break
@@ -697,11 +716,20 @@ class AppUpdateService @Inject constructor(
                                 onProgress(soFar, total)
                             }
                             out.flush()
+                            if (total > 0L && soFar != total) return@use false
+                            soFar >= MIN_VALID_APK_BYTES
                         }
-                        true
                     }
             }.getOrDefault(false)
         }
+    }
+
+    private fun looksLikeApk(prefix: ByteArray, length: Int): Boolean {
+        return length >= 4 &&
+            prefix[0] == 'P'.code.toByte() &&
+            prefix[1] == 'K'.code.toByte() &&
+            prefix[2] == 3.toByte() &&
+            prefix[3] == 4.toByte()
     }
 
     private fun resolveTargetSize(target: DownloadTarget): Long {
@@ -799,14 +827,16 @@ class AppUpdateService @Inject constructor(
     }
 
     private fun launchInstaller(activity: Activity, apkUri: Uri): InstallResult {
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(apkUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            clipData = ClipData.newUri(activity.contentResolver, "apk", apkUri)
+        val intents = listOf(Intent.ACTION_VIEW, Intent.ACTION_INSTALL_PACKAGE).map { action ->
+            Intent(action).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                clipData = ClipData.newUri(activity.contentResolver, "apk", apkUri)
+            }
         }
         val pm = activity.packageManager
-        val target = installIntent.takeIf { it.resolveActivity(pm) != null }
+        val target = intents.firstOrNull { it.resolveActivity(pm) != null }
             ?: return InstallResult.Failed("未找到可用的安装器")
 
         return runCatching {

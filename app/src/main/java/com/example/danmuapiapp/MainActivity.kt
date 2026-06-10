@@ -70,8 +70,10 @@ class MainActivity : ComponentActivity() {
         }
 
         val splashScreen = installSplashScreen()
+        val splashStartedAt = System.currentTimeMillis()
         splashScreen.setKeepOnScreenCondition {
-            runtimeWarmupCoordinator.uiState.value is RuntimeWarmupCoordinator.UiState.NotStarted
+            runtimeWarmupCoordinator.uiState.value is RuntimeWarmupCoordinator.UiState.NotStarted &&
+                System.currentTimeMillis() - splashStartedAt < 1_500L
         }
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
@@ -62,6 +63,7 @@ fun SettingsHubScreen(
     onOpenWorkDir: () -> Unit,
     onOpenServiceConfig: () -> Unit,
     onOpenDanmuDownload: () -> Unit,
+    onOpenVideoShellInjection: () -> Unit,
     onOpenNetwork: () -> Unit,
     onOpenBackupRestore: () -> Unit,
     onOpenGithubToken: () -> Unit,
@@ -203,6 +205,19 @@ fun SettingsHubScreen(
                             } else {
                                 "手动添加"
                             },
+                            accent = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "影视壳注入",
+                    subtitle = "利用 LSPosed 注入 FongMi/ok影视播放页，实现自动推送弹幕和搜索按钮",
+                    icon = Icons.Rounded.Search,
+                    onClick = onOpenVideoShellInjection,
+                    trailing = {
+                        SettingsStatusBadge(
+                            text = "LSPosed",
                             accent = MaterialTheme.colorScheme.primary
                         )
                     }

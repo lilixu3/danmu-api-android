@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.39"
+    ?: "1.0.5.40"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 120
+    ?: 121
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -199,6 +199,8 @@ android {
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // LSPosed API 101 现代模块入口文件位于 META-INF/xposed/*，必须随 APK 打包。
+            merges += "META-INF/xposed/*"
         }
     }
 
@@ -281,6 +283,11 @@ dependencies {
     // Network
     implementation(libs.okhttp)
 
+    // LSPosed / libxposed API 101: hook API compileOnly，运行时由 LSPosed 注入环境提供；
+    // service 用于模块 App 侧按官方 XposedServiceHelper 获取真实 API/作用域/RemotePreferences。
+    compileOnly("io.github.libxposed:api:101.0.1")
+    implementation("io.github.libxposed:service:101.0.0")
+
     // Image loading
     implementation(libs.coil.compose)
 
@@ -294,6 +301,7 @@ dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 
 }
 

@@ -22,3 +22,7 @@
 # OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+# LSPosed / libxposed 入口由 META-INF/xposed/java_init.list 反射加载，R8 不能移除或改名。
+-keep class com.example.danmuapiapp.xposed.DanmuXposedModule { *; }
+-dontwarn io.github.libxposed.**

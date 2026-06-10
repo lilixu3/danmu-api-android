@@ -45,6 +45,7 @@ import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
 import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
 import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
+import com.example.danmuapiapp.ui.screen.settings.VideoShellInjectionSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
@@ -253,6 +254,7 @@ private fun DanmuApiMainContent() {
                     onOpenWorkDir = { navController.navigate(SettingsRoute.WorkDir) },
                     onOpenServiceConfig = { navController.navigate(SettingsRoute.ServiceConfig) },
                     onOpenDanmuDownload = { navController.navigate(SettingsRoute.DanmuDownload) },
+                    onOpenVideoShellInjection = { navController.navigate(SettingsRoute.VideoShellInjection) },
                     onOpenNetwork = { navController.navigate(SettingsRoute.Network) },
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
                     onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
@@ -279,6 +281,9 @@ private fun DanmuApiMainContent() {
             }
             composable(SettingsRoute.DanmuDownload) {
                 DownloadSettingsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(SettingsRoute.VideoShellInjection) {
+                VideoShellInjectionSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.Network) {
                 NetworkSettingsScreen(onBack = { navController.popBackStack() })

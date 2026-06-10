@@ -59,7 +59,8 @@ object CompatRuntimeGraph {
             settingsRepository = settingsRepository,
             runtimeRepository = runtimeRepository,
             coreRepository = coreRepository,
-            appUpdateService = appUpdateService
+            appUpdateService = appUpdateService,
+            githubProxyService = githubProxyService
         )
     }
 
@@ -68,7 +69,8 @@ object CompatRuntimeGraph {
         val settingsRepository: SettingsRepositoryImpl,
         val runtimeRepository: RuntimeRepositoryImpl,
         val coreRepository: CoreRepositoryImpl,
-        val appUpdateService: AppUpdateService
+        val appUpdateService: AppUpdateService,
+        val githubProxyService: GithubProxyService
     ) {
         val envConfigRepository: EnvConfigRepositoryImpl by lazy {
             EnvConfigRepositoryImpl(context)
