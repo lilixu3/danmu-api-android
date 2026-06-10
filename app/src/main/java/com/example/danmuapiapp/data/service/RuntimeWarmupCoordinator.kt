@@ -48,69 +48,75 @@ class RuntimeWarmupCoordinator @Inject constructor(
         if (!started.compareAndSet(false, true)) return
 
         scope.launch {
-            RuntimeWarmupManager.ensurePendingFlagForCurrentVersion(context)
-            if (!RuntimeWarmupManager.needsForegroundWarmup(context)) {
-                _uiState.value = UiState.Ready
-                return@launch
-            }
+            runCatching {
+                RuntimeWarmupManager.ensurePendingFlagForCurrentVersion(context)
+                if (!RuntimeWarmupManager.needsForegroundWarmup(context)) {
+                    _uiState.value = UiState.Ready
+                    return@launch
+                }
 
-            val latestUiState = AtomicReference<UiState.Running>(
-                UiState.Running(
-                    title = "正在检查运行环境",
-                    detail = "更新后首次启动会进行一次依赖校验"
+                val latestUiState = AtomicReference<UiState.Running>(
+                    UiState.Running(
+                        title = "正在检查运行环境",
+                        detail = "更新后首次启动会进行一次依赖校验"
+                    )
                 )
-            )
-            val warmupFinished = AtomicBoolean(false)
-            val overlayJob: Job = scope.launch {
-                delay(WARMUP_UI_DELAY_MS)
-                if (!warmupFinished.get()) {
-                    _uiState.value = latestUiState.get()
-                }
-            }
-
-            val warmupDeferred = scope.async {
-                RuntimeWarmupManager.runWarmup(context) { step ->
-                    val nextUiState = when (step) {
-                        RuntimeWarmupManager.Step.Checking -> UiState.Running(
-                            title = "正在检查运行环境",
-                            detail = "正在确认目录与版本信息"
-                        )
-
-                        RuntimeWarmupManager.Step.Extracting -> UiState.Running(
-                            title = "正在加载依赖",
-                            detail = "首次加载会稍慢，后续启动将恢复正常"
-                        )
-
-                        RuntimeWarmupManager.Step.Syncing -> UiState.Running(
-                            title = "正在同步配置",
-                            detail = "即将进入首页"
-                        )
-                    }
-                    latestUiState.set(nextUiState)
-                    if (_uiState.value is UiState.Running) {
-                        _uiState.value = nextUiState
+                val warmupFinished = AtomicBoolean(false)
+                val overlayJob: Job = scope.launch {
+                    delay(WARMUP_UI_DELAY_MS)
+                    if (!warmupFinished.get()) {
+                        _uiState.value = latestUiState.get()
                     }
                 }
-            }
-            val completed = withTimeoutOrNull<Boolean>(WARMUP_TIMEOUT_MS) {
-                warmupDeferred.await().isSuccess
-            }
-            warmupFinished.set(true)
-            overlayJob.cancel()
 
-            if (completed == true) {
+                val warmupDeferred = scope.async {
+                    RuntimeWarmupManager.runWarmup(context) { step ->
+                        val nextUiState = when (step) {
+                            RuntimeWarmupManager.Step.Checking -> UiState.Running(
+                                title = "正在检查运行环境",
+                                detail = "正在确认目录与版本信息"
+                            )
+
+                            RuntimeWarmupManager.Step.Extracting -> UiState.Running(
+                                title = "正在加载依赖",
+                                detail = "首次加载会稍慢，后续启动将恢复正常"
+                            )
+
+                            RuntimeWarmupManager.Step.Syncing -> UiState.Running(
+                                title = "正在同步配置",
+                                detail = "即将进入首页"
+                            )
+                        }
+                        latestUiState.set(nextUiState)
+                        if (_uiState.value is UiState.Running) {
+                            _uiState.value = nextUiState
+                        }
+                    }
+                }
+                val completed = withTimeoutOrNull<Boolean>(WARMUP_TIMEOUT_MS) {
+                    warmupDeferred.await().isSuccess
+                }
+                warmupFinished.set(true)
+                overlayJob.cancel()
+
+                if (completed == true) {
+                    _uiState.value = UiState.Ready
+                    return@launch
+                }
+
+                val reason = if (completed == null) {
+                    "预热超时，已跳过"
+                } else {
+                    "预热失败，已跳过"
+                }
+                AppDiagnosticLogger.w(context, TAG, reason)
+                RuntimeWarmupManager.skipPendingForCurrentVersion(context, reason)
                 _uiState.value = UiState.Ready
-                return@launch
+            }.onFailure { throwable ->
+                AppDiagnosticLogger.w(context, TAG, "预热异常，已跳过：${throwable::class.java.simpleName}")
+                RuntimeWarmupManager.skipPendingForCurrentVersion(context, "预热异常，已跳过")
+                _uiState.value = UiState.Ready
             }
-
-            val reason = if (completed == null) {
-                "预热超时，已跳过"
-            } else {
-                "预热失败，已跳过"
-            }
-            AppDiagnosticLogger.w(context, TAG, reason)
-            RuntimeWarmupManager.skipPendingForCurrentVersion(context, reason)
-            _uiState.value = UiState.Ready
         }
     }
 }

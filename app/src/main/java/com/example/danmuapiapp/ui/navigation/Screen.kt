@@ -35,6 +35,7 @@ object SettingsRoute {
     const val WorkDir = "settings_work_dir"
     const val ServiceConfig = "settings_service_config"
     const val DanmuDownload = "settings_danmu_download"
+    const val VideoShellInjection = "settings_video_shell_injection"
     const val Network = "settings_network"
     const val GithubToken = "settings_github_token"
     const val BackupRestore = "settings_backup_restore"

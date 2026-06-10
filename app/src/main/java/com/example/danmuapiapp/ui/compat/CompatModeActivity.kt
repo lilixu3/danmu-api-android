@@ -56,7 +56,8 @@ class CompatModeActivity : AppCompatActivity() {
             envConfigRepository = graph.envConfigRepository,
             runtimeRepository = graph.runtimeRepository,
             settingsRepository = graph.settingsRepository,
-            coreRepository = graph.coreRepository
+            coreRepository = graph.coreRepository,
+            githubProxyService = graph.githubProxyService
         )
     }
 
@@ -1172,6 +1173,8 @@ class CompatModeActivity : AppCompatActivity() {
             result.onSuccess { info ->
                 appCheckResult = info
                 renderAppUpdateCard()
+            }.onFailure {
+                toast("检查 App 更新失败：${it.message ?: "未知错误"}")
             }
         }
     }
@@ -1191,8 +1194,11 @@ class CompatModeActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val downloadResult = withContext(Dispatchers.IO) {
+                val downloadUrls = graph.appUpdateService
+                    .buildDownloadUrls(result.bestAsset)
+                    .ifEmpty { result.downloadUrls }
                 graph.appUpdateService.downloadApk(
-                    urls = result.downloadUrls,
+                    urls = downloadUrls,
                     version = result.latestVersion
                 ) { soFar, total ->
                     runOnUiThread {
