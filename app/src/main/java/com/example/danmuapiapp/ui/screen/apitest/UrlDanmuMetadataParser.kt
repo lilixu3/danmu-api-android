@@ -25,7 +25,16 @@ internal fun parseUrlDanmuMetadata(inputUrl: String, html: String): UrlDanmuMeta
             add(pageTitle)
         }
     )
-    val year = findYear(rawTitle, normalizedHtml)
+    val year = findYear(
+        candidates = buildList {
+            add(findMetaContent(normalizedHtml, "video:release_date"))
+            add(findMetaContent(normalizedHtml, "op:video:release_date"))
+            add(findMetaContent(normalizedHtml, "datePublished"))
+            add(rawTitle)
+        },
+        html = normalizedHtml
+    )
+
     val poster = choosePosterUrl(
         pageUrl = inputUrl,
         candidates = buildList {
@@ -176,14 +185,18 @@ private fun findStringValues(html: String, key: String): List<String> {
         .toList()
 }
 
-private fun findYear(title: String, html: String): String {
-    val titleYear = Regex("""(?:19|20)\d{2}""").find(title)?.value
-    if (!titleYear.isNullOrBlank()) return titleYear
+private fun findYear(candidates: List<String>, html: String): String {
+    candidates.forEach { candidate ->
+        val year = Regex("""(?:19|20)\d{2}""").find(candidate)?.value
+        if (!year.isNullOrBlank()) return year
+    }
     val patterns = listOf(
         Regex("""[\"']?\b(?:year|publish_year|video_year)\b[\"']?\s*[:=]\s*[\"']?((?:19|20)\d{2})[\"']?""", RegexOption.IGNORE_CASE),
-        Regex("""(?:年份|datePublished|publish_date|pub_time)[\"']?\s*[:=：]\s*[\"']?((?:19|20)\d{2})""", RegexOption.IGNORE_CASE)
+        Regex("""\b(?:datePublished|publish_date|pub_time|publish_time|release_date)\b[\"']?\s*[:=：]\s*[\"']?((?:19|20)\d{2})""", RegexOption.IGNORE_CASE)
     )
-    return patterns.firstNotNullOfOrNull { it.find(html)?.groupValues?.getOrNull(1) }.orEmpty()
+    return patterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(html)?.groupValues?.getOrNull(1)
+    }.orEmpty()
 }
 
 private fun findEpisodeNumber(vararg sources: String): Int? {

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.compat
 
 import android.os.Build
+import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.TvConfigSyncPayload
 import com.example.danmuapiapp.data.service.TvConfigSyncResponse
@@ -42,7 +43,8 @@ class CompatTvConfigSyncServer(
     private val envConfigRepository: EnvConfigRepository,
     private val runtimeRepository: RuntimeRepository,
     private val settingsRepository: SettingsRepository,
-    private val coreRepository: CoreRepository
+    private val coreRepository: CoreRepository,
+    private val githubProxyService: GithubProxyService
 ) {
 
     data class UiState(
@@ -226,6 +228,7 @@ class CompatTvConfigSyncServer(
         val token = RuntimeTokenNormalizer.normalizeInput(payload.runtime.token)
 
         settingsRepository.setGithubProxy(payload.settings.githubProxy)
+        githubProxyService.setSelectedProxy(payload.settings.githubProxy)
         settingsRepository.setGithubToken(payload.settings.githubToken)
         if (payload.version >= 2) {
             settingsRepository.setVariantDisplayName(ApiVariant.Stable, payload.settings.stableRepoDisplayName)

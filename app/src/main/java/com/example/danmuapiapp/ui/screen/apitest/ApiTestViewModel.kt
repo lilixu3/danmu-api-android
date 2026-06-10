@@ -15,8 +15,10 @@ import com.example.danmuapiapp.ui.screen.download.parseAnimeCandidates
 import com.example.danmuapiapp.ui.screen.download.parseEpisodeCandidates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -25,7 +27,6 @@ import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltViewModel
@@ -437,21 +438,12 @@ class ApiTestViewModel @Inject constructor(
             manualEpisodeCandidates = emptyList()
             manualOriginalInput = inputUrl
 
-            val metadata = fetchUrlMetadata(inputUrl)
-            val trace = listOf(
-                DanmuRequestTrace(
-                    label = if (metadata != null) "页面元数据" else "页面元数据(未取到)",
-                    method = "GET",
-                    url = inputUrl,
-                    inputLabel = "URL",
-                    inputValue = inputUrl
-                )
-            )
+            val metadataResult = fetchUrlMetadata(inputUrl)
             val selection = withContext(Dispatchers.Default) {
                 buildManualUrlDanmuSelection(
                     inputUrl = inputUrl,
-                    metadata = metadata,
-                    metadataTrace = trace
+                    metadata = metadataResult.metadata,
+                    metadataTrace = metadataResult.trace
                 )
             }
             manualAnimeCandidates = listOf(selection.anime)
@@ -647,26 +639,35 @@ class ApiTestViewModel @Inject constructor(
                 }
             }
             errorMessage = null
-            val metadata = fetchUrlMetadata(inputUrl)
-            val trace = tracePrefix + listOf(
-                DanmuRequestTrace(
-                    label = if (metadata != null) "页面元数据" else "页面元数据(未取到)",
-                    method = "GET",
-                    url = inputUrl,
-                    inputLabel = inputLabel,
-                    inputValue = inputUrl
-                ),
-                DanmuRequestTrace(
-                    label = "URL弹幕",
-                    method = "GET",
-                    url = commentUrl,
-                    inputLabel = inputLabel,
-                    inputValue = inputUrl
-                )
-            )
             val startedAt = System.currentTimeMillis()
-            val result = executeGet(commentUrl)
+            val metadataDeferred = async(Dispatchers.IO) { fetchUrlMetadata(inputUrl) }
+            val commentDeferred = async(Dispatchers.IO) { executeGet(commentUrl) }
+            val result = commentDeferred.await()
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+            val metadataResult = withTimeoutOrNull(700L) { metadataDeferred.await() }
+                ?: run {
+                    metadataDeferred.cancel()
+                    UrlDanmuMetadataResult(
+                        metadata = null,
+                        trace = listOf(
+                            DanmuRequestTrace(
+                                label = "URL元数据(超时跳过)",
+                                method = "GET",
+                                url = inputUrl,
+                                inputLabel = inputLabel,
+                                inputValue = inputUrl
+                            )
+                        )
+                    )
+                }
+            val metadata = metadataResult.metadata
+            val trace = tracePrefix + metadataResult.trace + DanmuRequestTrace(
+                label = "URL弹幕",
+                method = "GET",
+                url = commentUrl,
+                inputLabel = inputLabel,
+                inputValue = inputUrl
+            )
 
             result.fold(
                 onSuccess = { (code, body) ->
@@ -732,35 +733,8 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
-    private suspend fun fetchUrlMetadata(inputUrl: String): UrlDanmuMetadata? {
-        if (!inputUrl.startsWith("http", ignoreCase = true)) return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val request = Request.Builder()
-                    .url(inputUrl)
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/125 Mobile Safari/537.36")
-                    .get()
-                    .build()
-                val metadataClient = httpClient.newBuilder()
-                    .callTimeout(6, TimeUnit.SECONDS)
-                    .build()
-                metadataClient.newCall(request).execute().use { response ->
-                    if (response.code !in 200..299) return@use null
-                    val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.getDefault())
-                    if (contentType.isNotBlank() &&
-                        !contentType.contains("text/html") &&
-                        !contentType.contains("application/xhtml") &&
-                        !contentType.contains("text/plain")
-                    ) {
-                        return@use null
-                    }
-                    val contentLength = response.body.contentLength()
-                    if (contentLength > 768 * 1024) return@use null
-                    val html = response.peekBody(512L * 1024L).string()
-                    parseUrlDanmuMetadata(inputUrl, html)
-                }
-            }.getOrNull()
-        }
+    private suspend fun fetchUrlMetadata(inputUrl: String): UrlDanmuMetadataResult {
+        return UrlDanmuMetadataResolver(httpClient).resolve(inputUrl)
     }
 
     private data class BuiltRequest(

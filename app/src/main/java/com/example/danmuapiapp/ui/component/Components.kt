@@ -440,6 +440,8 @@ fun SettingsSwitchItem(
     icon: ImageVector? = null,
     iconTint: Color = MaterialTheme.colorScheme.primary,
     checked: Boolean,
+    enabled: Boolean = true,
+    disabledOnClick: (() -> Unit)? = null,
     onCheckedChange: (Boolean) -> Unit
 ) {
     SettingsItem(
@@ -447,10 +449,13 @@ fun SettingsSwitchItem(
         subtitle = subtitle,
         icon = icon,
         iconTint = iconTint,
-        onClick = { onCheckedChange(!checked) },
+        onClick = {
+            if (enabled) onCheckedChange(!checked) else disabledOnClick?.invoke()
+        },
         trailing = {
             Switch(
                 checked = checked,
+                enabled = enabled,
                 onCheckedChange = onCheckedChange,
                 modifier = Modifier.height(24.dp),
                 colors = SwitchDefaults.colors(
