@@ -52,4 +52,47 @@ class LogTagClassifierTest {
 
         assertEquals(listOf("system", "merge", "bilibili", "youku"), sorted)
     }
+
+    @Test
+    fun `app entries do not synthesize a source tag`() {
+        val info = LogTagClassifier.classifyAppEntry(AppLogSource.App, "Runtime")
+
+        assertEquals("", info.category)
+        assertEquals(emptyList<String>(), info.tags)
+        assertEquals("", LogTagClassifier.sourceFilterFor(LogEntry(source = AppLogSource.App)))
+    }
+
+    @Test
+    fun `source filter uses primary category only`() {
+        val entry = LogEntry(
+            source = AppLogSource.Core,
+            category = "system",
+            tags = listOf("system", "server")
+        )
+
+        assertTrue(LogTagClassifier.matchesSource(entry, "system"))
+        assertEquals("system", LogTagClassifier.sourceFilterFor(entry))
+    }
+
+    @Test
+    fun `source filter falls back to leading core tag in message`() {
+        val entry = LogEntry(
+            source = AppLogSource.Core,
+            message = "[system] [Server] request path: /api/logs"
+        )
+
+        assertEquals("system", LogTagClassifier.sourceFilterFor(entry))
+        assertTrue(LogTagClassifier.matchesSource(entry, "system"))
+    }
+
+    @Test
+    fun `source filter reads leading core tag from bootstrap-collected logs`() {
+        val entry = LogEntry(
+            source = AppLogSource.NormalBootstrap,
+            message = "[Utils] [Danmu] 去重分钟数: 1"
+        )
+
+        assertEquals("utils", LogTagClassifier.sourceFilterFor(entry))
+        assertTrue(LogTagClassifier.matchesSource(entry, "utils"))
+    }
 }

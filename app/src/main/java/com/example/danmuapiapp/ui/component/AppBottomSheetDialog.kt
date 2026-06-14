@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 
 /**
@@ -145,11 +146,13 @@ fun AppBottomSheetDialog(
     presentation: DialogPresentationPreference? = null,
     bottomSheetGesturesEnabled: Boolean? = null,
     sheetGesturesEnabled: Boolean? = null,
+    minHeight: Dp = Dp.Unspecified,
     icon: (@Composable () -> Unit)? = null,
     title: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null,
+    fillBody: Boolean = false,
 ) {
     val dialogPreferences = LocalDialogPreferences.current
     val resolvedPresentation = resolveDialogPresentation(
@@ -168,11 +171,13 @@ fun AppBottomSheetDialog(
             modifier = modifier,
             style = style,
             tone = tone,
+            minHeight = minHeight,
             icon = icon,
             title = title,
             text = text,
             confirmButton = confirmButton,
-            dismissButton = dismissButton
+            dismissButton = dismissButton,
+            fillBody = fillBody || minHeight.isSpecified
         )
 
         DialogPresentationPreference.BottomSheet -> AppBottomSheetDialogContent(
@@ -180,12 +185,14 @@ fun AppBottomSheetDialog(
             modifier = modifier,
             style = style,
             tone = tone,
+            minHeight = minHeight,
             sheetGesturesEnabled = resolvedSheetGesturesEnabled,
             icon = icon,
             title = title,
             text = text,
             confirmButton = confirmButton,
-            dismissButton = dismissButton
+            dismissButton = dismissButton,
+            fillBody = fillBody || minHeight.isSpecified
         )
     }
 }
@@ -252,7 +259,7 @@ fun AppPanelDialog(
                     Column(
                         modifier = modifier
                             .fillMaxWidth()
-                            .heightIn(max = dialogMaxHeight)
+                            .heightIn(min = minHeight, max = dialogMaxHeight)
                             .imePadding()
                             .padding(horizontal = horizontalPadding, vertical = popupVerticalPadding),
                         verticalArrangement = verticalArrangement,
@@ -287,7 +294,7 @@ fun AppPanelDialog(
                 Column(
                     modifier = modifier
                         .fillMaxWidth()
-                        .heightIn(max = sheetMaxHeight)
+                        .heightIn(min = minHeight, max = sheetMaxHeight)
                         .imePadding()
                         .navigationBarsPadding()
                         .padding(horizontal = horizontalPadding)
@@ -308,12 +315,14 @@ private fun AppBottomSheetDialogContent(
     modifier: Modifier = Modifier,
     style: AppBottomSheetStyle = AppBottomSheetStyle.Form,
     tone: AppBottomSheetTone = AppBottomSheetTone.Brand,
+    minHeight: Dp = Dp.Unspecified,
     sheetGesturesEnabled: Boolean,
     icon: (@Composable () -> Unit)? = null,
     title: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null,
+    fillBody: Boolean = false,
 ) {
     val tonePalette = rememberSheetTonePalette(tone)
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
@@ -343,7 +352,7 @@ private fun AppBottomSheetDialogContent(
         AppDialogScaffoldContent(
             modifier = modifier
                 .fillMaxWidth()
-                .heightIn(max = sheetMaxHeight)
+                .heightIn(min = minHeight, max = sheetMaxHeight)
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
@@ -355,7 +364,8 @@ private fun AppBottomSheetDialogContent(
             title = title,
             text = text,
             confirmButton = confirmButton,
-            dismissButton = dismissButton
+            dismissButton = dismissButton,
+            fillBody = fillBody || minHeight.isSpecified
         )
     }
 }
@@ -367,11 +377,13 @@ private fun AppPopupDialogContent(
     modifier: Modifier = Modifier,
     style: AppBottomSheetStyle = AppBottomSheetStyle.Form,
     tone: AppBottomSheetTone = AppBottomSheetTone.Brand,
+    minHeight: Dp = Dp.Unspecified,
     icon: (@Composable () -> Unit)? = null,
     title: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null,
+    fillBody: Boolean = false,
 ) {
     val tonePalette = rememberSheetTonePalette(tone)
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
@@ -401,7 +413,7 @@ private fun AppPopupDialogContent(
             AppDialogScaffoldContent(
                 modifier = modifier
                     .fillMaxWidth()
-                    .heightIn(max = dialogMaxHeight)
+                    .heightIn(min = minHeight, max = dialogMaxHeight)
                     .imePadding()
                     .padding(horizontal = 20.dp, vertical = 18.dp),
                 style = style,
@@ -411,7 +423,8 @@ private fun AppPopupDialogContent(
                 title = title,
                 text = text,
                 confirmButton = confirmButton,
-                dismissButton = dismissButton
+                dismissButton = dismissButton,
+                fillBody = fillBody
             )
         }
     }
@@ -427,7 +440,8 @@ private fun AppDialogScaffoldContent(
     title: (@Composable () -> Unit)?,
     text: (@Composable () -> Unit)?,
     confirmButton: (@Composable () -> Unit)?,
-    dismissButton: (@Composable () -> Unit)?
+    dismissButton: (@Composable () -> Unit)?,
+    fillBody: Boolean = false
 ) {
     Column(
         modifier = modifier,
@@ -473,7 +487,7 @@ private fun AppDialogScaffoldContent(
         if (text != null) {
             val contentModifier = Modifier
                 .fillMaxWidth()
-                .weight(1f, fill = false)
+                .weight(1f, fill = fillBody)
                 .heightIn(max = bodyMaxHeight)
 
             when (style) {

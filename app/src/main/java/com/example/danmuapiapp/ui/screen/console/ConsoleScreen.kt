@@ -28,7 +28,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.LogTagClassifier
@@ -50,8 +49,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboard.current
     var filterLevel by remember { mutableStateOf<LogLevel?>(null) }
-    var filterSource by remember { mutableStateOf<AppLogSource?>(null) }
-    var filterTag by remember { mutableStateOf<String?>(null) }
+    var filterSource by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
@@ -59,26 +57,25 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val chipErrorColor = if (dark) Color(0xFFF87171) else Color(0xFFE53935)
     val chipWarnColor  = if (dark) Color(0xFFFBBF24) else Color(0xFFFFC107)
 
-    val availableTags = remember(logs) {
-        LogTagClassifier.sortTags(logs.flatMap { entry -> entry.filterableTags() })
+    val availableSources = remember(logs) {
+        LogTagClassifier.sortTags(logs.map { entry -> LogTagClassifier.sourceFilterFor(entry) })
     }
-    val tagCounts = remember(logs) {
-        availableTags.associateWith { tag ->
-            logs.count { entry -> LogTagClassifier.matches(entry, tag) }
+    val sourceCounts = remember(logs, availableSources) {
+        availableSources.associateWith { source ->
+            logs.count { entry -> LogTagClassifier.matchesSource(entry, source) }
         }
     }
 
-    LaunchedEffect(availableTags) {
-        val selected = filterTag
-        if (selected != null && !availableTags.contains(selected)) {
-            filterTag = null
+    LaunchedEffect(availableSources) {
+        val selected = filterSource
+        if (selected != null && !availableSources.contains(selected)) {
+            filterSource = null
         }
     }
 
     val filteredLogs = logs
         .let { list -> if (filterLevel != null) list.filter { it.level == filterLevel } else list }
-        .let { list -> if (filterSource != null) list.filter { it.source == filterSource } else list }
-        .let { list -> if (filterTag != null) list.filter { LogTagClassifier.matches(it, filterTag!!) } else list }
+        .let { list -> if (filterSource != null) list.filter { LogTagClassifier.matchesSource(it, filterSource!!) } else list }
         .let { list ->
             if (searchQuery.isNotBlank()) list.filter {
                 it.message.contains(searchQuery, ignoreCase = true) ||
@@ -89,7 +86,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     it.source.label.contains(searchQuery, ignoreCase = true)
             } else list
         }
-    val hasActiveFilters = filterLevel != null || filterSource != null || filterTag != null || searchQuery.isNotBlank()
+    val hasActiveFilters = filterLevel != null || filterSource != null || searchQuery.isNotBlank()
 
     val errorCount = logs.count { it.level == LogLevel.Error }
     val warnCount = logs.count { it.level == LogLevel.Warn }
@@ -334,66 +331,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
             )
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = filterSource == null,
-                onClick = { filterSource = null },
-                label = { Text("全部来源") },
-                leadingIcon = if (filterSource == null) {
-                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                } else null
-            )
-            FilterChip(
-                selected = filterSource == AppLogSource.Core,
-                onClick = {
-                    filterSource = if (filterSource == AppLogSource.Core) null else AppLogSource.Core
-                },
-                label = { Text(AppLogSource.Core.label) },
-                leadingIcon = if (filterSource == AppLogSource.Core) {
-                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                } else null
-            )
-            FilterChip(
-                selected = filterSource == AppLogSource.App,
-                onClick = {
-                    filterSource = if (filterSource == AppLogSource.App) null else AppLogSource.App
-                },
-                label = { Text(AppLogSource.App.label) },
-                leadingIcon = if (filterSource == AppLogSource.App) {
-                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                } else null
-            )
-            FilterChip(
-                selected = filterSource == AppLogSource.RootBootstrap,
-                onClick = {
-                    filterSource =
-                        if (filterSource == AppLogSource.RootBootstrap) null else AppLogSource.RootBootstrap
-                },
-                label = { Text(AppLogSource.RootBootstrap.label) },
-                leadingIcon = if (filterSource == AppLogSource.RootBootstrap) {
-                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                } else null
-            )
-            FilterChip(
-                selected = filterSource == AppLogSource.NormalBootstrap,
-                onClick = {
-                    filterSource =
-                        if (filterSource == AppLogSource.NormalBootstrap) null else AppLogSource.NormalBootstrap
-                },
-                label = { Text(AppLogSource.NormalBootstrap.label) },
-                leadingIcon = if (filterSource == AppLogSource.NormalBootstrap) {
-                    { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
-                } else null
-            )
-        }
-
-        if (availableTags.isNotEmpty()) {
+        if (availableSources.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -402,21 +340,21 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
-                    selected = filterTag == null,
-                    onClick = { filterTag = null },
-                    label = { Text("全部标签") },
-                    leadingIcon = if (filterTag == null) {
+                    selected = filterSource == null,
+                    onClick = { filterSource = null },
+                    label = { Text("全部来源") },
+                    leadingIcon = if (filterSource == null) {
                         { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                     } else null
                 )
-                availableTags.forEach { tag ->
+                availableSources.forEach { source ->
                     FilterChip(
-                        selected = filterTag == tag,
-                        onClick = { filterTag = if (filterTag == tag) null else tag },
+                        selected = filterSource == source,
+                        onClick = { filterSource = if (filterSource == source) null else source },
                         label = {
-                            Text("${LogTagClassifier.labelFor(tag)} ${tagCounts[tag] ?: 0}")
+                            Text("${LogTagClassifier.labelFor(source)} ${sourceCounts[source] ?: 0}")
                         },
-                        leadingIcon = if (filterTag == tag) {
+                        leadingIcon = if (filterSource == source) {
                             { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                         } else null
                     )
@@ -487,7 +425,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                             Text(
                                 when {
                                     searchQuery.isNotBlank() -> "没有匹配的日志"
-                                    filterLevel != null || filterSource != null || filterTag != null -> "没有匹配的日志"
+                                    filterLevel != null || filterSource != null -> "没有匹配的日志"
                                     else -> "暂无日志"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
@@ -561,32 +499,6 @@ private fun LogEntryRow(entry: LogEntry) {
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 )
-                Text(
-                    text = entry.source.label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                val categoryLabel = entry.category
-                    .takeIf { it.isNotBlank() }
-                    ?.let(LogTagClassifier::labelFor)
-                if (categoryLabel != null) {
-                    Text(
-                        text = categoryLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                if (entry.tag.isNotBlank() && !entry.tag.equals(entry.category, ignoreCase = true)) {
-                    Text(
-                        text = entry.tag,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Text(
                 text = entry.message,
@@ -600,33 +512,13 @@ private fun LogEntryRow(entry: LogEntry) {
     }
 }
 
-private fun LogEntry.filterableTags(): List<String> {
-    return (listOf(category) + tags)
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinct()
-}
-
 private fun List<LogEntry>.toClipboardText(): String {
     val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     return joinToString("\n") { entry ->
         buildString {
             append('[')
             append(timeFormat.format(Date(entry.timestamp)))
-            append("][")
-            append(entry.source.label)
             append(']')
-            val category = entry.category.takeIf { it.isNotBlank() }
-            if (category != null) {
-                append('[')
-                append(LogTagClassifier.labelFor(category))
-                append(']')
-            }
-            if (entry.tag.isNotBlank() && !entry.tag.equals(entry.category, ignoreCase = true)) {
-                append('[')
-                append(entry.tag)
-                append(']')
-            }
             append('[')
             append(entry.level.name)
             append("] ")
