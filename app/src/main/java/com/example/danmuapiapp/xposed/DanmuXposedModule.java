@@ -2,22 +2,30 @@ package com.example.danmuapiapp.xposed;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
@@ -27,8 +35,11 @@ import android.widget.EditText;
 import android.widget.GridView;
 import android.widget.GridLayout;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -45,6 +56,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +75,13 @@ public class DanmuXposedModule extends XposedModule {
     private static final String TAG = "DanmuAppXposed";
     private static final String MODULE_PACKAGE = "com.example.danmuapiapp";
     private static final String BUTTON_TAG = "com.example.danmuapiapp.APP_DANMU_BUTTON";
+    private static final String SETTINGS_ROW_TAG = "com.example.danmuapiapp.APP_DANMU_SETTINGS_ROW";
+    private static final String SETTINGS_OVERLAY_TAG = "com.example.danmuapiapp.APP_DANMU_SETTINGS_OVERLAY";
+    private static final long SETTINGS_OVERLAY_NAV_GUARD_INTERVAL_MS = 80L;
+
+    // 设置面板里"播放设置"行容器的资源 id（OK影视/FongMi）；id 命中优先，文字兜底。
+    private static final String[] SETTINGS_ROW_ANCHOR_IDS = {"player"};
+    private static final String[] SETTINGS_ROW_ANCHOR_TEXTS = {"播放设置"};
     private static final String PREFS_INJECTION = "app_danmu_injection";
     private static final String KEY_INJECTION_ENABLED = "injection_enabled";
     private static final String KEY_AUTO_PUSH_ENABLED = "auto_push_enabled";
@@ -72,6 +91,10 @@ public class DanmuXposedModule extends XposedModule {
     private static final String KEY_FONT_SIZE = "font_size";
     private static final String KEY_SHELL_PORT = "shell_port";
     private static final String KEY_UI_DARK_THEME = "ui_dark_theme";
+    private static final String KEY_EPISODE_SHOW_TITLES = "episode_show_titles";
+    private static final String KEY_DIALOG_STYLE = "dialog_style";
+    private static final int DIALOG_STYLE_CENTER = 0;
+    private static final int DIALOG_STYLE_BOTTOM_SHEET = 1;
     private static final int MODE_ANIME = 1;
     private static final int MODE_EPISODE = 2;
     private static final String STATUS_NOT_READY = "not_ready";
@@ -83,6 +106,7 @@ public class DanmuXposedModule extends XposedModule {
     private static final Pattern PATTERN_NOISE_WORDS = Pattern.compile("(?i)(全\\s*\\d+\\s*[集期话]|全集|全季|完结|更新至|更至|第\\s*\\d+\\s*[集期话]|s\\s*\\d+\\s*e\\s*\\d+|episode\\s*\\d+|ep\\s*\\d+|e\\s*\\d+|4k|8k|1080p|720p|2160p|hdr|h265|h264|x264|x265|web[- ]?dl|bluray|webrip|国语|国剧|国产|内地|大陆|电视剧|连续剧|剧集|电影|综艺|动漫|动画|中字|字幕|高清|超清|蓝光|资源|网盘|阿里云盘|夸克|百度云|腾讯|爱奇艺|优酷|mkv|mp4|avi)");
     private static final Pattern PATTERN_LEADING_FILE_SIZE = Pattern.compile("^\\s*[\\[【(（]\\s*[0-9]+(?:\\.[0-9]+)?\\s*(?:gb|g|mb|m|kb|k|tb|t)\\s*[\\]】)）]\\s*", Pattern.CASE_INSENSITIVE);
     private static final Pattern PATTERN_LEADING_EPISODE_FILE = Pattern.compile("^\\s*0*(\\d{1,3})(?=\\s*(?:4k|8k|1080p|720p|2160p|hdr|hevc|h265|h264|x264|x265|\\.|-|_|$))", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PATTERN_SOURCE_FROM_TITLE = Pattern.compile("(?i)\\bfrom\\s+([a-zA-Z0-9&]+)\\s*$");
 
     private static final String[] ACTIVITY_HINTS = {
         "video", "player", "playback", "vod"
@@ -124,6 +148,10 @@ public class DanmuXposedModule extends XposedModule {
     private volatile String lastPushInfo = "";
     private volatile String lastPushUrl = "";
     private volatile long lastPushAtMs = 0L;
+    private volatile long lastViewedPushAtMs = 0L;
+    private final java.util.LinkedList<String> pushHistory = new java.util.LinkedList<>();
+    private static final int MAX_PUSH_HISTORY = 6;
+    private volatile String lastPushSummary = "";
     private final Object pushGuardLock = new Object();
     private final Map<String, AnimeRef> animeRefs = new ConcurrentHashMap<>();
     private final Map<String, EpisodeCandidate> episodeCandidates = new ConcurrentHashMap<>();
@@ -225,7 +253,10 @@ public class DanmuXposedModule extends XposedModule {
             if (window == null) return;
             View decor = window.getDecorView();
             if (decor == null) return;
-            decor.post(() -> injectButton(activity));
+            decor.post(() -> {
+                injectButton(activity);
+                injectSettingsRow(activity);
+            });
         } catch (Throwable throwable) {
             log(Log.WARN, TAG, "schedule inject failed: " + throwable.getMessage());
         }
@@ -261,6 +292,7 @@ public class DanmuXposedModule extends XposedModule {
                             return;
                         }
                         injectButton(activity);
+                        injectSettingsRow(activity);
                         if (findTaggedButton(currentGroup) != null) {
                             startAutoPushLoopOnce(activity);
                             clearInjectionWatch(activity);
@@ -352,183 +384,537 @@ public class DanmuXposedModule extends XposedModule {
         }
     }
 
+    // 把"APP弹幕设置"作为一行注入到宿主设置面板（HomeActivity 里"播放设置"行后面）。
+    // 识别：先按行容器资源 id 命中，兜底按文字"播放设置"上溯到可点击行；两条都要求该行含锚点文字。
+    // 样式：直接克隆"播放设置"行的真实背景 Drawable（渐变一起带过来），不自己调色。
+    private void injectSettingsRow(Activity activity) {
+        try {
+            if (!isActivityActiveForInjection(activity)) return;
+            Window window = activity.getWindow();
+            if (window == null) return;
+            View decorView = window.getDecorView();
+            if (!(decorView instanceof ViewGroup)) return;
+            ViewGroup decor = (ViewGroup) decorView;
+
+            InjectionSettings injectSettings = readInjectionSettings(activity, 9978);
+            View existing = findTaggedView(decor, SETTINGS_ROW_TAG);
+            if (!injectSettings.injectionEnabled) {
+                if (existing != null && existing.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) existing.getParent()).removeView(existing);
+                }
+                return;
+            }
+            if (existing != null) return;
+
+            View anchorRow = findSettingsAnchorRow(decor);
+            if (anchorRow == null || !(anchorRow.getParent() instanceof ViewGroup)) return;
+            ViewGroup parent = (ViewGroup) anchorRow.getParent();
+
+            View newRow = createSettingsRow(activity, anchorRow);
+            int index = parent.indexOfChild(anchorRow);
+            parent.addView(newRow, index >= 0 ? Math.min(index + 1, parent.getChildCount()) : parent.getChildCount());
+            log(Log.INFO, TAG, "APP danmu settings row injected into " + activity.getClass().getName());
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "inject settings row failed: " + throwable.getMessage());
+        }
+    }
+
+    private View findSettingsAnchorRow(ViewGroup decor) {
+        Context ctx = decor.getContext();
+        String pkg = ctx == null ? "" : ctx.getPackageName();
+        for (String name : SETTINGS_ROW_ANCHOR_IDS) {
+            try {
+                int id = decor.getResources().getIdentifier(name, "id", pkg);
+                if (id == 0) continue;
+                View found = decor.findViewById(id);
+                if (found == null || found.getVisibility() != View.VISIBLE || !found.isShown()) continue;
+                if (rowContainsAnchorText(found)) return found;
+            } catch (Throwable ignored) {
+            }
+        }
+        TextView label = findVisibleAnchorTextView(decor);
+        if (label != null) {
+            View row = climbToClickableRow(label);
+            if (row != null) return row;
+        }
+        return null;
+    }
+
+    private boolean matchesSettingsAnchorText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (String anchor : SETTINGS_ROW_ANCHOR_TEXTS) {
+            if (anchor.equals(text)) return true;
+        }
+        return false;
+    }
+
+    private boolean rowContainsAnchorText(View view) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return false;
+        if (view instanceof TextView && matchesSettingsAnchorText(readViewText(view))) return true;
+        if (view instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) view;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                if (rowContainsAnchorText(g.getChildAt(i))) return true;
+            }
+        }
+        return false;
+    }
+
+    private TextView findVisibleAnchorTextView(View root) {
+        if (root == null || root.getVisibility() != View.VISIBLE || !root.isShown()) return null;
+        if (root instanceof TextView) {
+            return matchesSettingsAnchorText(readViewText(root)) ? (TextView) root : null;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                TextView found = findVisibleAnchorTextView(g.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private View climbToClickableRow(View label) {
+        View current = label;
+        for (int depth = 0; depth < 6 && current != null; depth++) {
+            if (current.isClickable() && current instanceof ViewGroup && current.getParent() instanceof ViewGroup) {
+                return current;
+            }
+            ViewParent p = current.getParent();
+            current = (p instanceof View) ? (View) p : null;
+        }
+        if (label.getParent() instanceof View && ((View) label.getParent()).getParent() instanceof ViewGroup) {
+            return (View) label.getParent();
+        }
+        return null;
+    }
+
+    private View createSettingsRow(Activity activity, View anchorRow) {
+        TextView anchorLabel = findFirstTextView(anchorRow);
+
+        LinearLayout row = new LinearLayout(activity);
+        row.setTag(SETTINGS_ROW_TAG);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setPadding(anchorRow.getPaddingLeft(), anchorRow.getPaddingTop(),
+            anchorRow.getPaddingRight(), anchorRow.getPaddingBottom());
+        Drawable clonedBg = cloneDrawable(anchorRow.getBackground());
+        if (clonedBg != null) row.setBackground(clonedBg);
+        int minH = anchorRow.getHeight();
+        if (minH > 0) row.setMinimumHeight(minH);
+
+        TextView label = new TextView(activity);
+        label.setText("APP弹幕");
+        label.setSingleLine(true);
+        if (anchorLabel != null) {
+            label.setTextSize(TypedValue.COMPLEX_UNIT_PX, anchorLabel.getTextSize());
+            label.setTextColor(anchorLabel.getTextColors());
+            label.setTypeface(anchorLabel.getTypeface());
+            label.setGravity(anchorLabel.getGravity());
+            label.setIncludeFontPadding(anchorLabel.getIncludeFontPadding());
+            label.setPadding(anchorLabel.getPaddingLeft(), anchorLabel.getPaddingTop(),
+                anchorLabel.getPaddingRight(), anchorLabel.getPaddingBottom());
+        }
+        ViewGroup.LayoutParams labelLp = anchorLabel != null && anchorLabel.getLayoutParams() != null
+            ? cloneRowLayoutParams(anchorLabel.getLayoutParams())
+            : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        row.addView(label, labelLp);
+
+        ViewGroup.LayoutParams rowLp = anchorRow.getLayoutParams() != null
+            ? cloneRowLayoutParams(anchorRow.getLayoutParams())
+            : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        row.setLayoutParams(rowLp);
+
+        int port = readInjectionSettings(activity, 9978).shellPort;
+        row.setOnClickListener(v -> showInjectionSettingsDialog(activity, anchorRow, new int[]{port}));
+        return row;
+    }
+
+    private Drawable cloneDrawable(Drawable src) {
+        if (src == null) return null;
+        Drawable.ConstantState state = src.getConstantState();
+        if (state == null) return null;
+        return state.newDrawable().mutate();
+    }
+
+    private TextView findFirstTextView(View root) {
+        if (root instanceof TextView) return (TextView) root;
+        if (root instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                TextView found = findFirstTextView(g.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private ViewGroup.LayoutParams cloneRowLayoutParams(ViewGroup.LayoutParams source) {
+        if (source instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams src = (LinearLayout.LayoutParams) source;
+            LinearLayout.LayoutParams out = new LinearLayout.LayoutParams(src.width, src.height);
+            out.setMargins(src.leftMargin, src.topMargin, src.rightMargin, src.bottomMargin);
+            out.gravity = src.gravity;
+            out.weight = src.weight;
+            return out;
+        }
+        if (source instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams src = (FrameLayout.LayoutParams) source;
+            FrameLayout.LayoutParams out = new FrameLayout.LayoutParams(src.width, src.height);
+            out.gravity = src.gravity;
+            out.setMargins(src.leftMargin, src.topMargin, src.rightMargin, src.bottomMargin);
+            return out;
+        }
+        if (source instanceof ViewGroup.MarginLayoutParams) {
+            ViewGroup.MarginLayoutParams src = (ViewGroup.MarginLayoutParams) source;
+            ViewGroup.MarginLayoutParams out = new ViewGroup.MarginLayoutParams(src.width, src.height);
+            out.setMargins(src.leftMargin, src.topMargin, src.rightMargin, src.bottomMargin);
+            return out;
+        }
+        return new ViewGroup.LayoutParams(source.width, source.height);
+    }
+
+    private View findTaggedView(View root, String tag) {
+        if (root == null) return null;
+        if (tag.equals(root.getTag())) return root;
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findTaggedView(group.getChildAt(i), tag);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    // Search stage indices for the segmented navigation.
+    private static final int STAGE_SEARCH = 0;
+    private static final int STAGE_DRAMA = 1;
+    private static final int STAGE_EPISODE = 2;
+
     private void showManualSearchDialog(Activity activity) {
         try {
             InjectionSettings bootSettings = readInjectionSettings(activity, 9978);
             final int[] shellPort = new int[]{bootSettings.shellPort};
-            final boolean[] darkTheme = new boolean[]{bootSettings.darkTheme};
-            final UiPalette palette = resolveUiPalette(darkTheme[0]);
+            final DanmuTheme t = DanmuTheme.of(bootSettings.darkTheme);
+            final boolean isCenter = bootSettings.dialogStyle == DIALOG_STYLE_CENTER;
 
+            // ---- Sheet surface ----
             LinearLayout root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(activity, 12);
-            root.setPadding(pad, dp(activity, 10), pad, dp(activity, 10));
-            root.setBackground(makeRoundRect(palette.rootBg, 24f, 1, palette.panelStroke));
+            int padH = dp(activity, DanmuTheme.SPACE_4);
+            int padTop = isCenter ? dp(activity, DanmuTheme.SPACE_4) : dp(activity, DanmuTheme.SPACE_3);
+            int padBottom = dp(activity, DanmuTheme.SPACE_4);
+            root.setPadding(padH, padTop, padH, padBottom);
+            if (isCenter) {
+                root.setBackground(t.roundRect(t.sheetBg, DanmuTheme.RADIUS_SHEET, activity));
+            } else {
+                root.setBackground(t.topRoundedSheet(activity));
+            }
+
+            if (!isCenter) {
+                root.addView(DanmuUi.dragHandle(activity, t), DanmuUi.dragHandleLp(activity, t));
+            }
+
+            // ---- Header: compact single-line top bar ----
+            final int[] stage = new int[]{STAGE_SEARCH};
+            final int[] reachable = new int[]{STAGE_SEARCH};
+            final Runnable[] renderContent = new Runnable[1];
+            final Runnable[] applyStageStatus = new Runnable[1];
+            final String[] searchMessage = new String[]{""};
+            final String[] episodeMessage = new String[]{""};
+            final String[] currentDramaTitle = new String[]{""};
 
             LinearLayout header = new LinearLayout(activity);
             header.setOrientation(LinearLayout.HORIZONTAL);
             header.setGravity(Gravity.CENTER_VERTICAL);
-            TextView title = createStyledText(activity, "APP弹幕", 17f, palette.text, true);
-            TextView badge = createInfoChip(activity, "播放页工具", palette.chipBg, palette.chipText, palette.chipStroke);
-            Button closeButton = createActionButton(activity, "关闭", false, darkTheme[0]);
-            header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            header.addView(badge);
-            LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(activity, 58), dp(activity, 30));
-            closeLp.setMargins(dp(activity, 6), 0, 0, 0);
-            header.addView(closeButton, closeLp);
-            root.addView(header, matchWrapWithBottom(activity, 8));
+            header.setPadding(dp(activity, DanmuTheme.SPACE_2), dp(activity, 4), dp(activity, 6), dp(activity, 4));
+            header.setBackground(t.roundRect(t.surface, DanmuTheme.RADIUS_LG, t.stroke, 1, activity));
 
+            TextView brandMark = DanmuUi.text(activity, t, "弹幕", DanmuTheme.TEXT_CAPTION, t.accentSoftText, true);
+            brandMark.setGravity(Gravity.CENTER);
+            brandMark.setPadding(dp(activity, DanmuTheme.SPACE_2), 0, dp(activity, DanmuTheme.SPACE_2), 0);
+            brandMark.setBackground(t.roundRect(t.accentSoft, DanmuTheme.RADIUS_PILL, activity));
+            LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 28));
+            brandLp.setMargins(0, 0, dp(activity, DanmuTheme.SPACE_2), 0);
+            header.addView(brandMark, brandLp);
+
+            TextView headerTitleText = DanmuUi.text(activity, t, headerStageTitle(STAGE_SEARCH), DanmuTheme.TEXT_LABEL, t.textPrimary, true);
+            headerTitleText.setSingleLine(true);
+            headerTitleText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            header.addView(headerTitleText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView pushSummaryText = DanmuUi.text(activity, t, formatPushTimeChip(), DanmuTheme.TEXT_CAPTION, t.textMuted, false);
+            pushSummaryText.setSingleLine(true);
+            pushSummaryText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            pushSummaryText.setGravity(Gravity.CENTER);
+            pushSummaryText.setPadding(dp(activity, DanmuTheme.SPACE_2), 0, dp(activity, DanmuTheme.SPACE_2), 0);
+            pushSummaryText.setBackground(t.roundRect(t.surfaceAlt, DanmuTheme.RADIUS_PILL, t.stroke, 1, activity));
+            LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 28));
+            summaryLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
+            header.addView(pushSummaryText, summaryLp);
+
+            Button notifyButton = DanmuUi.ghostButton(activity, t, "↺");
+            notifyButton.setTextSize(DanmuTheme.TEXT_LABEL);
+            LinearLayout.LayoutParams notifyLp = new LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 32));
+            notifyLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
+            final TextView[] notifyDot = new TextView[1];
+            notifyDot[0] = new TextView(activity);
+            notifyDot[0].setText("");
+            notifyDot[0].setGravity(Gravity.CENTER);
+            notifyDot[0].setBackground(t.roundRect(t.danger, DanmuTheme.RADIUS_PILL, activity));
+
+            final Runnable updateNotifyDot = () -> {
+                if (lastPushAtMs > lastViewedPushAtMs && lastPushAtMs > 0L) {
+                    notifyDot[0].setVisibility(View.VISIBLE);
+                } else {
+                    notifyDot[0].setVisibility(View.GONE);
+                }
+            };
+            updateNotifyDot.run();
+
+            FrameLayout notifyWrapper = new FrameLayout(activity);
+            notifyWrapper.addView(notifyButton, new FrameLayout.LayoutParams(
+                dp(activity, 32), dp(activity, 32), Gravity.CENTER));
+            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(
+                dp(activity, 7), dp(activity, 7), Gravity.TOP | Gravity.END);
+            dotLp.topMargin = dp(activity, 5);
+            dotLp.rightMargin = dp(activity, 5);
+            notifyWrapper.addView(notifyDot[0], dotLp);
+            notifyButton.setOnClickListener(v -> showPushHistoryDialog(activity, t, notifyButton, notifyDot[0]));
+
+            Button closeButton = DanmuUi.ghostButton(activity, t, "×");
+            closeButton.setTextSize(DanmuTheme.TEXT_TITLE);
+            LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 32));
+            closeLp.setMargins(dp(activity, DanmuTheme.SPACE_1), 0, 0, 0);
+            header.addView(notifyWrapper, notifyLp);
+            header.addView(closeButton, closeLp);
+            root.addView(header, matchWrapWithBottom(activity, DanmuTheme.SPACE_2));
+
+            // ---- Search row: keyword + 搜索 + 推送 ----
             LinearLayout searchRow = new LinearLayout(activity);
             searchRow.setOrientation(LinearLayout.HORIZONTAL);
             searchRow.setGravity(Gravity.CENTER_VERTICAL);
-            EditText keywordInput = createCompactInput(activity, "输入剧名 / 自动读取", "", darkTheme[0]);
-            Button searchButton = createActionButton(activity, "搜索", true, darkTheme[0]);
-            searchRow.addView(keywordInput, new LinearLayout.LayoutParams(0, dp(activity, 42), 1f));
-            LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(dp(activity, 72), dp(activity, 42));
-            searchLp.setMargins(dp(activity, 8), 0, 0, 0);
+            EditText keywordInput = DanmuUi.textField(activity, t, "输入剧名 / 自动读取当前播放", "");
+            Button searchButton = DanmuUi.primaryButton(activity, t, "搜索");
+            Button actionButton = DanmuUi.primaryButton(activity, t, "推送");
+            searchRow.addView(keywordInput, new LinearLayout.LayoutParams(0, dp(activity, 44), 1f));
+            LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 44));
+            searchLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
             searchRow.addView(searchButton, searchLp);
-            root.addView(searchRow, matchWrapWithBottom(activity, 7));
+            LinearLayout.LayoutParams pushLp = new LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 44));
+            pushLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
+            searchRow.addView(actionButton, pushLp);
+            root.addView(searchRow, matchWrapWithBottom(activity, DanmuTheme.SPACE_2));
 
-            LinearLayout chipRow = new LinearLayout(activity);
-            chipRow.setOrientation(LinearLayout.HORIZONTAL);
-            chipRow.setGravity(Gravity.CENTER_VERTICAL);
-            TextView episodeText = createInfoChip(activity, "", palette.secondaryBg, palette.muted, palette.panelStroke);
-            episodeText.setVisibility(View.GONE);
-            TextView pushInfoText = createInfoChip(activity, formatLastPushInfo(activity), palette.successBg, palette.successText, palette.successStroke);
-            chipRow.addView(pushInfoText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 32)));
-            root.addView(chipRow, matchWrapWithBottom(activity, 6));
+            // pushInfoText 保留为隐藏引用，用于接收推送更新
+            TextView pushInfoText = DanmuUi.chip(activity, t, "", true);
+            pushInfoText.setVisibility(View.GONE);
 
-            LinearLayout actions = new LinearLayout(activity);
-            actions.setOrientation(LinearLayout.HORIZONTAL);
-            actions.setGravity(Gravity.CENTER_VERTICAL);
-            Button backButton = createActionButton(activity, "返回", false, darkTheme[0]);
-            backButton.setVisibility(View.GONE);
-            Button actionButton = createActionButton(activity, "自动推送", true, darkTheme[0]);
-            Button settingsButton = createActionButton(activity, "设置", false, darkTheme[0]);
-            actions.addView(backButton, compactMainButtonLp(activity, 0.65f));
-            actions.addView(actionButton, compactMainButtonLp(activity, 1.05f));
-            actions.addView(settingsButton, compactMainButtonLp(activity, 0.65f));
-            root.addView(actions, matchWrapWithBottom(activity, 6));
+            // ---- Content area: keep the newer taller sheet, but compute chrome for the compact
+            // one-line header so the inner result ScrollView owns overflow instead of the window. ---
+            int screenH = activity.getResources().getDisplayMetrics().heightPixels;
+            int sheetTarget = (int) (screenH * (isCenter ? 0.88f : 0.90f));
+            int searchChrome = dp(activity, 28 + 16 + 50 + 52 + 12 + 24);
+            int contentHeightPx = clamp(sheetTarget - searchChrome, dp(activity, 260), dp(activity, 900));
+            FrameLayout contentFrame = new FrameLayout(activity);
+            LinearLayout.LayoutParams contentLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, contentHeightPx);
+            contentLp.setMargins(0, 0, 0, dp(activity, DanmuTheme.SPACE_3));
+            root.addView(contentFrame, contentLp);
 
-            TextView statusText = createStyledText(activity, "待搜索", 11.5f, palette.muted, false);
-            statusText.setSingleLine(true);
-            statusText.setPadding(dp(activity, 2), 0, 0, dp(activity, 3));
-            root.addView(statusText);
+            // stage 0: search prompt / empty state
+            FrameLayout promptHolder = new FrameLayout(activity);
+            promptHolder.addView(DanmuUi.emptyState(activity, t, "输入剧名后开始搜索",
+                "也可直接打开，会自动读取当前播放并预填"),
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+            contentFrame.addView(promptHolder, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-            ScrollView resultsScroll = new ScrollView(activity);
-            resultsScroll.setFillViewport(false);
-            resultsScroll.setVerticalScrollBarEnabled(true);
-            resultsScroll.setScrollbarFadingEnabled(false);
-            resultsScroll.setSmoothScrollingEnabled(true);
-            resultsScroll.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
-            resultsScroll.setBackground(makeRoundRect(palette.panelBg, 14f, 1, palette.panelStroke));
-            resultsScroll.setPadding(dp(activity, 6), dp(activity, 6), dp(activity, 6), 0);
-            resultsScroll.setOnTouchListener((v, event) -> {
-                ViewParent parent = v.getParent();
-                if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
-                return false;
-            });
+            // stage 1: drama list + source filters. Keep filters outside the vertical list so they
+            // stay above results, and use a horizontal scroller instead of wrapping chips.
+            LinearLayout resultsSection = new LinearLayout(activity);
+            resultsSection.setOrientation(LinearLayout.VERTICAL);
+            HorizontalScrollView platformFilterScroll = buildHorizontalChipScroll(activity);
+            LinearLayout platformFilterRow = new LinearLayout(activity);
+            platformFilterRow.setOrientation(LinearLayout.HORIZONTAL);
+            platformFilterRow.setGravity(Gravity.CENTER_VERTICAL);
+            platformFilterScroll.addView(platformFilterRow, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            resultsSection.addView(platformFilterScroll, matchWrapWithBottom(activity, DanmuTheme.SPACE_2));
+
+            ScrollView resultsScroll = buildSheetScroll(activity);
             LinearLayout resultsContainer = new LinearLayout(activity);
             resultsContainer.setOrientation(LinearLayout.VERTICAL);
-            resultsContainer.setPadding(0, 0, 0, dp(activity, 48));
             resultsScroll.addView(resultsContainer, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ));
-            root.addView(resultsScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                clamp((int) (activity.getResources().getDisplayMetrics().heightPixels * 0.50f), dp(activity, 300), dp(activity, 560))
-            ));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            resultsSection.addView(resultsScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            contentFrame.addView(resultsSection, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-            ScrollView episodeScroll = new ScrollView(activity);
-            episodeScroll.setVisibility(View.GONE);
-            episodeScroll.setFillViewport(false);
-            episodeScroll.setVerticalScrollBarEnabled(true);
-            episodeScroll.setScrollbarFadingEnabled(false);
-            episodeScroll.setSmoothScrollingEnabled(true);
-            episodeScroll.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
-            episodeScroll.setBackground(makeRoundRect(palette.panelBg, 14f, 1, palette.panelStroke));
-            episodeScroll.setPadding(dp(activity, 6), dp(activity, 6), dp(activity, 6), 0);
-            episodeScroll.setOnTouchListener((v, event) -> {
-                ViewParent parent = v.getParent();
-                if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
-                return false;
-            });
+            // stage 2: episode section (toolbar + grid)
+            LinearLayout episodeSection = new LinearLayout(activity);
+            episodeSection.setOrientation(LinearLayout.VERTICAL);
+
+            final boolean[] showTitles = new boolean[]{readEpisodeShowTitles(activity)};
+            final ArrayList<TextView> episodeItemViews = new ArrayList<>();
+            final int[] gridMetrics = new int[]{9, 40};
+
+            LinearLayout episodeToolbar = new LinearLayout(activity);
+            episodeToolbar.setOrientation(LinearLayout.HORIZONTAL);
+            episodeToolbar.setGravity(Gravity.CENTER_VERTICAL);
+            TextView episodeCountText = DanmuUi.text(activity, t, "", DanmuTheme.TEXT_BODY, t.textSecondary, true);
+            episodeCountText.setSingleLine(true);
+            episodeCountText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            Button numberModeButton = DanmuUi.toggleChip(activity, t, "数字", !showTitles[0]);
+            Button titleModeButton = DanmuUi.toggleChip(activity, t, "标题", showTitles[0]);
+            Button episodeBackButton = DanmuUi.ghostButton(activity, t, "返回");
+            episodeToolbar.addView(episodeCountText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            LinearLayout.LayoutParams numLp = new LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 32));
+            episodeToolbar.addView(numberModeButton, numLp);
+            LinearLayout.LayoutParams titLp = new LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 32));
+            titLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
+            episodeToolbar.addView(titleModeButton, titLp);
+            LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 32));
+            backLp.setMargins(dp(activity, DanmuTheme.SPACE_2), 0, 0, 0);
+            episodeToolbar.addView(episodeBackButton, backLp);
+            episodeSection.addView(episodeToolbar, matchWrapWithBottom(activity, DanmuTheme.SPACE_2));
+
+            ScrollView episodeScroll = buildSheetScroll(activity);
             GridLayout episodeGrid = new GridLayout(activity);
             episodeGrid.setColumnCount(9);
             episodeGrid.setUseDefaultMargins(false);
             episodeGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-            episodeGrid.setPadding(0, 0, 0, dp(activity, 48));
             ArrayList<CandidateHandle> compactHandles = new ArrayList<>();
             episodeScroll.addView(episodeGrid, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ));
-            root.addView(episodeScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                clamp((int) (activity.getResources().getDisplayMetrics().heightPixels * 0.26f), dp(activity, 160), dp(activity, 240))
-            ));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            episodeSection.addView(episodeScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            contentFrame.addView(episodeSection, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-            ArrayList<String> labels = new ArrayList<>();
-            ArrayList<CandidateHandle> handles = new ArrayList<>();
-            ArrayList<String> animeLabels = new ArrayList<>();
-            ArrayList<CandidateHandle> animeHandles = new ArrayList<>();
+            // statusText 保留为隐藏引用，部分方法需要写入状态信息
+            TextView statusText = new TextView(activity);
+            statusText.setVisibility(View.GONE);
+
+            final ArrayList<String> animeLabels = new ArrayList<>();
+            final ArrayList<CandidateHandle> animeHandles = new ArrayList<>();
+            final ArrayList<SourceFilter> sourceFilters = new ArrayList<>();
+            final String[] selectedSource = new String[]{""};
+            final boolean[] searching = new boolean[]{false};
             final int[] mode = new int[]{MODE_ANIME};
             final String[] currentEpisode = new String[]{""};
             final int[] selectedEpisodeIndex = new int[]{0};
-            TextView settingsText = new TextView(activity);
-            settingsText.setVisibility(View.GONE);
-            settingsText.setText(formatInjectionSettings(readInjectionSettings(activity, shellPort[0])));
-            final Runnable[] renderAnimeResults = new Runnable[1];
-            renderAnimeResults[0] = () -> {
-                resultsContainer.removeAllViews();
-                ArrayList<String> sourceLabels = !animeLabels.isEmpty() ? animeLabels : labels;
-                ArrayList<CandidateHandle> sourceHandles = !animeHandles.isEmpty() ? animeHandles : handles;
-                if (sourceLabels.isEmpty()) {
-                    TextView empty = createStyledText(activity, "无剧名结果，可换关键词再搜", 12f, palette.muted, false);
-                    empty.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
-                    empty.setBackground(makeRoundRect(palette.secondaryBg, 12f, 1, palette.secondaryStroke));
-                    resultsContainer.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            final Runnable refreshEpisodeHeader = () -> {
+                if (compactHandles.isEmpty()) {
+                    episodeCountText.setText("");
                     return;
                 }
-                for (int i = 0; i < sourceLabels.size(); i++) {
-                    final CandidateHandle candidate = i < sourceHandles.size() ? sourceHandles.get(i) : null;
-                    final String label = sourceLabels.get(i);
-                    TextView row = createStyledText(activity, (i + 1) + ". " + label, 12.5f, palette.text, false);
-                    row.setSingleLine(false);
-                    row.setMinHeight(dp(activity, 36));
-                    row.setPadding(dp(activity, 12), dp(activity, 8), dp(activity, 12), dp(activity, 8));
-                    row.setBackground(makeRoundRect(palette.secondaryBg, 12f, 1, palette.secondaryStroke));
-                    row.setOnClickListener(v -> {
-                        if (candidate == null) return;
-                        if (mode[0] == MODE_ANIME) {
-                            loadAnimeDetail(activity, candidate, currentEpisode[0], resultsScroll, resultsContainer, episodeScroll, episodeGrid, compactHandles, selectedEpisodeIndex, shellPort[0], mode, backButton, actionButton, searchButton, statusText, pushInfoText, darkTheme[0]);
-                        } else {
-                            int index = handles.indexOf(candidate);
-                            if (index >= 0) selectedEpisodeIndex[0] = index;
-                            pushCandidate(activity, candidate, shellPort[0], statusText, pushInfoText);
-                        }
-                    });
-                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    lp.bottomMargin = dp(activity, 6);
-                    resultsContainer.addView(row, lp);
-                }
-                resultsScroll.post(() -> resultsScroll.scrollTo(0, 0));
+                int sel = clamp(selectedEpisodeIndex[0], 0, compactHandles.size() - 1);
+                String dramaTitle = currentDramaTitle[0];
+                String count = compactHandles.size() + " 集";
+                String display = dramaTitle.isEmpty() ? "共 " + count : dramaTitle + "  共" + count;
+                episodeCountText.setText(display);
             };
 
-            Runnable restoreAnimeList = () -> {
-                mode[0] = MODE_ANIME;
-                compactHandles.clear();
-                selectedEpisodeIndex[0] = 0;
-                episodeGrid.removeAllViews();
-                episodeScroll.setVisibility(View.GONE);
-                resultsScroll.setVisibility(View.VISIBLE);
-                backButton.setVisibility(View.GONE);
-                searchButton.setText("搜索");
-                actionButton.setText("自动推送");
-                pushInfoText.setText(formatLastPushInfo(activity));
-                statusText.setText(animeLabels.isEmpty() ? "待搜索" : "点剧名展开集数");
-                renderAnimeResults[0].run();
+            final Runnable renderEpisodeGrid = () -> {
+                renderEpisodeGrid(activity, t, episodeGrid, compactHandles, episodeItemViews, selectedEpisodeIndex,
+                    showTitles[0], shellPort[0], statusText, actionButton, pushInfoText, gridMetrics, refreshEpisodeHeader);
+                refreshEpisodeHeader.run();
+            };
+
+            // Single source of truth: shows the right stage view + refreshes compact header copy.
+            renderContent[0] = () -> {
+                reachable[0] = Math.max(reachable[0], stage[0]);
+                if (!animeLabels.isEmpty()) reachable[0] = Math.max(reachable[0], STAGE_DRAMA);
+                if (!compactHandles.isEmpty()) reachable[0] = Math.max(reachable[0], STAGE_EPISODE);
+                headerTitleText.setText(headerStageTitle(stage[0]));
+                pushSummaryText.setText(formatPushTimeChip());
+                promptHolder.setVisibility(stage[0] == STAGE_SEARCH ? View.VISIBLE : View.GONE);
+                resultsSection.setVisibility(stage[0] == STAGE_DRAMA ? View.VISIBLE : View.GONE);
+                episodeSection.setVisibility(stage[0] == STAGE_EPISODE ? View.VISIBLE : View.GONE);
+                actionButton.setText("推送");
+            };
+
+            applyStageStatus[0] = () -> {
+                if (stage[0] == STAGE_EPISODE) {
+                    statusText.setText(episodeMessage[0]);
+                } else {
+                    statusText.setText(searchMessage[0]);
+                }
+            };
+
+            View.OnClickListener modeToggle = v -> {
+                boolean wantTitles = v == titleModeButton;
+                if (wantTitles == showTitles[0]) return;
+                showTitles[0] = wantTitles;
+                saveEpisodeShowTitles(activity, wantTitles);
+                DanmuUi.styleToggleChip(activity, t, numberModeButton, !wantTitles);
+                DanmuUi.styleToggleChip(activity, t, titleModeButton, wantTitles);
+                renderEpisodeGrid.run();
+                scrollEpisodeGridToIndex(activity, episodeScroll, selectedEpisodeIndex[0], gridMetrics[0], gridMetrics[1]);
+            };
+            numberModeButton.setOnClickListener(modeToggle);
+            titleModeButton.setOnClickListener(modeToggle);
+            episodeBackButton.setOnClickListener(v -> {
+                stage[0] = STAGE_DRAMA;
+                renderContent[0].run();
+                applyStageStatus[0].run();
+            });
+
+            final Runnable[] renderDramaList = new Runnable[1];
+            renderDramaList[0] = () -> {
+                resultsContainer.removeAllViews();
+                renderPlatformFilters(activity, t, platformFilterRow, sourceFilters, selectedSource[0], source -> {
+                    selectedSource[0] = source == null ? "" : source;
+                    renderDramaList[0].run();
+                    platformFilterScroll.post(() -> {
+                        if (selectedSource[0].isEmpty()) platformFilterScroll.smoothScrollTo(0, 0);
+                    });
+                });
+                platformFilterScroll.setVisibility(sourceFilters.isEmpty() ? View.GONE : View.VISIBLE);
+                if (searching[0]) {
+                    resultsContainer.addView(DanmuUi.emptyState(activity, t, "搜索中…", "正在向弹幕核心查询，请稍候"),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                    return;
+                }
+                if (animeLabels.isEmpty()) {
+                    resultsContainer.addView(DanmuUi.emptyState(activity, t, "无剧名结果", "换个关键词再搜一次"),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                    return;
+                }
+                int visibleIndex = 0;
+                for (int i = 0; i < animeLabels.size(); i++) {
+                    final CandidateHandle candidate = i < animeHandles.size() ? animeHandles.get(i) : null;
+                    if (candidate != null && !selectedSource[0].isEmpty() && !selectedSource[0].equals(candidate.source)) {
+                        continue;
+                    }
+                    visibleIndex++;
+                    String[] parts = splitDramaLabel(animeLabels.get(i));
+                    LinearLayout row = DanmuUi.listRow(activity, t, String.valueOf(visibleIndex), parts[0], parts[1]);
+                    row.setOnClickListener(v -> {
+                        if (candidate == null) return;
+                        currentDramaTitle[0] = parts[0];
+                        loadAnimeDetailIntoSheet(activity, candidate, currentEpisode[0], episodeScroll,
+                            compactHandles, selectedEpisodeIndex, mode, searchButton, statusText, pushInfoText,
+                            renderEpisodeGrid, gridMetrics, stage, renderContent[0], episodeMessage,
+                            currentDramaTitle);
+                    });
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    lp.bottomMargin = dp(activity, DanmuTheme.SPACE_2);
+                    resultsContainer.addView(row, lp);
+                }
+                if (visibleIndex == 0) {
+                    selectedSource[0] = "";
+                    renderDramaList[0].run();
+                    return;
+                }
+                resultsScroll.post(() -> resultsScroll.scrollTo(0, 0));
             };
 
             AlertDialog dialog = new AlertDialog.Builder(activity)
@@ -536,7 +922,7 @@ public class DanmuXposedModule extends XposedModule {
                 .create();
             closeButton.setOnClickListener(v -> dialog.dismiss());
 
-            Runnable searchAction = () -> {
+            final Runnable searchAction = () -> {
                 String keyword = keywordInput.getText() == null ? "" : keywordInput.getText().toString().trim();
                 if (keyword.isEmpty()) {
                     Toast.makeText(activity, "先输入剧名", Toast.LENGTH_SHORT).show();
@@ -544,39 +930,44 @@ public class DanmuXposedModule extends XposedModule {
                 }
                 mode[0] = MODE_ANIME;
                 compactHandles.clear();
+                episodeItemViews.clear();
                 selectedEpisodeIndex[0] = 0;
                 episodeGrid.removeAllViews();
-                episodeScroll.setVisibility(View.GONE);
-                resultsScroll.setVisibility(View.VISIBLE);
-                backButton.setVisibility(View.GONE);
+                animeLabels.clear();
+                animeHandles.clear();
+                sourceFilters.clear();
+                selectedSource[0] = "";
+                stage[0] = STAGE_DRAMA;
+                searching[0] = true;
+                searchMessage[0] = "搜索中…";
                 statusText.setText("搜索中…");
                 searchButton.setEnabled(false);
-                actionButton.setText("自动推送");
+                renderDramaList[0].run();
+                renderContent[0].run();
                 new Thread(() -> {
                     BridgeResult result = queryBridgeAnimeSearch(activity, keyword);
                     activity.runOnUiThread(() -> {
+                        searching[0] = false;
                         searchButton.setEnabled(true);
-                        statusText.setText(result.message);
-                        labels.clear();
-                        handles.clear();
+                        searchMessage[0] = result.message;
+                        if (stage[0] != STAGE_EPISODE) statusText.setText(result.message);
                         animeLabels.clear();
                         animeHandles.clear();
+                        sourceFilters.clear();
                         if (result.ok) {
-                            handles.addAll(result.candidates);
                             animeHandles.addAll(result.candidates);
+                            sourceFilters.addAll(result.filters);
                             for (CandidateHandle candidate : result.candidates) {
-                                labels.add(candidate.label);
                                 animeLabels.add(candidate.label);
                             }
                         }
-                        renderAnimeResults[0].run();
+                        renderDramaList[0].run();
+                        renderContent[0].run();
                     });
                 }, "DanmuSearchAnime").start();
             };
 
-            backButton.setOnClickListener(v -> restoreAnimeList.run());
             searchButton.setOnClickListener(v -> searchAction.run());
-            settingsButton.setOnClickListener(v -> showInjectionSettingsDialog(activity, shellPort, settingsText));
             actionButton.setOnClickListener(v -> {
                 if (mode[0] == MODE_EPISODE && !compactHandles.isEmpty()) {
                     int index = clamp(selectedEpisodeIndex[0], 0, compactHandles.size() - 1);
@@ -590,22 +981,33 @@ public class DanmuXposedModule extends XposedModule {
                 Window window = dialog.getWindow();
                 if (window != null) {
                     int width = activity.getResources().getDisplayMetrics().widthPixels;
-                    int height = activity.getResources().getDisplayMetrics().heightPixels;
-                    window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                    window.setLayout((int) (width * 0.82f), (int) (height * 0.92f));
+                    window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                    if (isCenter) {
+                        window.setGravity(Gravity.CENTER);
+                    } else {
+                        window.setGravity(Gravity.BOTTOM);
+                    }
+                    window.setLayout((int) (width * 0.82f), ViewGroup.LayoutParams.WRAP_CONTENT);
                 }
+                // Opening the player popup means the latest push has been seen; refresh the
+                // relative-time label and clear stale notification state immediately.
+                lastViewedPushAtMs = System.currentTimeMillis();
+                renderContent[0].run();
+                pushSummaryText.setText(formatPushTimeChip());
+                updateNotifyDot.run();
                 pushInfoText.setText(formatLastPushInfo(activity));
                 new Thread(() -> {
                     ShellMedia media = readShellMedia(shellPort[0]);
                     activity.runOnUiThread(() -> {
+                        pushSummaryText.setText(formatPushTimeChip());
+                        updateNotifyDot.run();
                         pushInfoText.setText(formatLastPushInfo(activity));
                         if (media != null) {
                             shellPort[0] = media.port;
-                            settingsText.setText(formatInjectionSettings(readInjectionSettings(activity, shellPort[0])));
                             currentEpisode[0] = media.displayEpisode();
-                            int currentNo = extractEpisodeNumber(currentEpisode[0]);
                             if (keywordInput.getText() == null || keywordInput.getText().toString().trim().isEmpty()) {
-                                keywordInput.setText(normalizeDisplayTitle(media.title).isEmpty() ? media.title : normalizeDisplayTitle(media.title));
+                                String filled = normalizeDisplayTitle(media.title).isEmpty() ? media.title : normalizeDisplayTitle(media.title);
+                                keywordInput.setText(filled);
                                 keywordInput.setSelection(keywordInput.getText().length());
                             }
                             if (!media.title.isEmpty()) searchAction.run();
@@ -618,6 +1020,67 @@ public class DanmuXposedModule extends XposedModule {
             Toast.makeText(activity, "打开 APP弹幕 搜索失败：" + throwable.getClass().getSimpleName(), Toast.LENGTH_SHORT).show();
             log(Log.ERROR, TAG, "show manual search dialog failed", throwable);
         }
+    }
+
+    /** A scroll container styled as a sheet panel surface. */
+    private ScrollView buildSheetScroll(Activity activity) {
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setScrollbarFadingEnabled(false);
+        scroll.setSmoothScrollingEnabled(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+        scroll.setOnTouchListener((v, event) -> {
+            ViewParent parent = v.getParent();
+            if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
+            return false;
+        });
+        return scroll;
+    }
+
+    /** Splits a joined drama label ("title · count · source · type") into title + meta line. */
+    private String[] splitDramaLabel(String label) {
+        String value = label == null ? "" : label.trim();
+        int sep = value.indexOf(" · ");
+        if (sep < 0) return new String[]{value, ""};
+        return new String[]{value.substring(0, sep), value.substring(sep + 3)};
+    }
+
+    private void loadAnimeDetailIntoSheet(
+        Activity activity, CandidateHandle anime, String episodeHint, ScrollView episodeScroll,
+        ArrayList<CandidateHandle> compactHandles, final int[] selectedEpisodeIndex, int[] mode,
+        Button searchButton, TextView statusText, TextView pushInfoText, Runnable renderEpisodeGrid,
+        int[] gridMetrics, final int[] stage, Runnable renderContent, String[] episodeMessage,
+        String[] currentDramaTitle
+    ) {
+        statusText.setText("正在加载剧集：" + anime.label);
+        searchButton.setEnabled(false);
+        new Thread(() -> {
+            BridgeResult result = loadAnimeDetailDirect(anime.handle, episodeHint);
+            activity.runOnUiThread(() -> {
+                searchButton.setEnabled(true);
+                statusText.setText(result.message);
+                if (result.ok && !result.candidates.isEmpty()) {
+                    episodeMessage[0] = result.message;
+                    mode[0] = MODE_EPISODE;
+                    compactHandles.clear();
+                    compactHandles.addAll(result.candidates);
+                    int targetIndex = clamp(result.selectedIndex, 0, result.candidates.size() - 1);
+                    selectedEpisodeIndex[0] = targetIndex;
+                    pushInfoText.setText(formatLastPushInfo(activity));
+                    renderEpisodeGrid.run();
+                    stage[0] = STAGE_EPISODE;
+                    renderContent.run();
+                    scrollEpisodeGridToIndex(activity, episodeScroll, targetIndex, gridMetrics[0], gridMetrics[1]);
+                } else {
+                    mode[0] = MODE_ANIME;
+                    selectedEpisodeIndex[0] = 0;
+                    compactHandles.clear();
+                    renderEpisodeGrid.run();
+                    renderContent.run();
+                }
+            });
+        }, "DanmuAnimeDetail").start();
     }
 
     private BridgeResult queryBridgeAnimeSearch(Activity activity, String title) {
@@ -641,68 +1104,19 @@ public class DanmuXposedModule extends XposedModule {
                 String handle = UUID.randomUUID().toString();
                 animeRefs.put(handle, anime);
                 String countLabel = anime.episodeCount > 0 ? "共" + anime.episodeCount + "集" : "";
-                String label = joinNonBlank(anime.title, countLabel, anime.source, anime.type);
+                String sourceLabel = displaySourceName(anime.source);
+                String titleLabel = normalizeDisplayTitle(anime.title);
+                if (titleLabel.isEmpty()) titleLabel = anime.title;
+                String label = joinNonBlank(titleLabel, countLabel, sourceLabel, anime.type);
                 if (label.isEmpty()) label = "剧名 " + (result.candidates.size() + 1);
-                result.candidates.add(new CandidateHandle(MODE_ANIME, handle, label));
+                result.candidates.add(new CandidateHandle(MODE_ANIME, handle, label, anime.source));
             }
+            result.filters.addAll(buildSourceFilters(result.candidates));
         } catch (Throwable throwable) {
             result.ok = false;
             result.message = "弹幕 API 核心搜索失败：" + formatError(throwable);
         }
         return result;
-    }
-
-    private void loadAnimeDetail(
-        Activity activity,
-        CandidateHandle anime,
-        String episodeHint,
-        ScrollView resultsScroll,
-        LinearLayout resultsContainer,
-        ScrollView episodeScroll,
-        GridLayout episodeGrid,
-        ArrayList<CandidateHandle> compactHandles,
-        final int[] selectedEpisodeIndex,
-        int shellPort,
-        int[] mode,
-        Button backButton,
-        Button actionButton,
-        Button searchButton,
-        TextView statusText,
-        TextView pushInfoText,
-        boolean darkTheme
-    ) {
-        statusText.setText("正在加载剧集：" + anime.label);
-        searchButton.setEnabled(false);
-        new Thread(() -> {
-            BridgeResult result = loadAnimeDetailDirect(anime.handle, episodeHint);
-            activity.runOnUiThread(() -> {
-                searchButton.setEnabled(true);
-                statusText.setText(result.message);
-                if (result.ok && !result.candidates.isEmpty()) {
-                    mode[0] = MODE_EPISODE;
-                    compactHandles.clear();
-                    compactHandles.addAll(result.candidates);
-                    int targetIndex = clamp(result.selectedIndex, 0, result.candidates.size() - 1);
-                    selectedEpisodeIndex[0] = targetIndex;
-                    backButton.setVisibility(View.VISIBLE);
-                    actionButton.setText("推送" + shortEpisodeLabel(compactHandles.get(targetIndex), targetIndex));
-                    pushInfoText.setText(formatLastPushInfo(activity));
-                    renderEpisodeGrid(activity, episodeGrid, compactHandles, selectedEpisodeIndex, shellPort, statusText, pushInfoText, actionButton, darkTheme);
-                    episodeScroll.setVisibility(View.VISIBLE);
-                    resultsScroll.setVisibility(View.GONE);
-                    scrollEpisodeGridToIndex(activity, episodeScroll, targetIndex);
-                } else {
-                    mode[0] = MODE_ANIME;
-                    selectedEpisodeIndex[0] = 0;
-                    compactHandles.clear();
-                    episodeGrid.removeAllViews();
-                    episodeScroll.setVisibility(View.GONE);
-                    resultsScroll.setVisibility(View.VISIBLE);
-                    backButton.setVisibility(View.GONE);
-                    actionButton.setText("自动推送");
-                }
-            });
-        }, "DanmuAnimeDetail").start();
     }
 
     private BridgeResult loadAnimeDetailDirect(String animeHandle, String episodeHint) {
@@ -777,7 +1191,6 @@ public class DanmuXposedModule extends XposedModule {
             finishPushGuard(guard, true);
             String label = buildPushLabel(candidate);
             String message = buildPushPendingMessage(prefix, label);
-            recordLastPush(context, message, danmakuUrl);
             scheduleDanmakuCountUpdate(context, candidate, danmakuUrl);
             return new BridgeRow("ok", message, danmakuUrl);
         } catch (Throwable throwable) {
@@ -890,7 +1303,7 @@ public class DanmuXposedModule extends XposedModule {
             for (String searchKey : keywords) {
                 try {
                     String url = coreBase + "/api/v2/search/anime?keyword=" + urlEncode(searchKey);
-                    List<AnimeRef> animes = parseAnimeSearch(coreBase, httpGet(url, 1800, 12000));
+                    List<AnimeRef> animes = parseAnimeSearch(coreBase, httpGet(url, 1800, 20000));
                     if (!animes.isEmpty()) {
                         cachedCoreBase = coreBase;
                         return new DirectSearch(coreBase, animes);
@@ -946,7 +1359,7 @@ public class DanmuXposedModule extends XposedModule {
     private List<EpisodeCandidate> loadEpisodesForAnime(AnimeRef anime, int targetEpisodeNumber) throws Exception {
         String id = anime.animeId.isEmpty() ? anime.bangumiId : anime.animeId;
         if (id.isEmpty()) return new ArrayList<>();
-        String raw = httpGet(anime.coreBase + "/api/v2/bangumi/" + urlEncode(id), 1800, 12000);
+        String raw = httpGet(anime.coreBase + "/api/v2/bangumi/" + urlEncode(id), 1800, 20000);
         return parseBangumiCandidates(anime.coreBase, raw, anime, targetEpisodeNumber);
     }
 
@@ -974,7 +1387,9 @@ public class DanmuXposedModule extends XposedModule {
             if (animeId.isEmpty() && bangumiId.isEmpty()) continue;
             String name = readString(item, "animeTitle", "title", "name", "anime", "vod_name");
             if (name.isEmpty()) name = "候选 " + (result.size() + 1);
-            String source = readString(item, "source", "sourceName", "provider", "api", "from");
+            String sourceRaw = extractSourceFromTitle(name);
+            if (sourceRaw.isEmpty()) sourceRaw = readString(item, "source", "sourceName", "provider", "api", "from");
+            String source = normalizeSourceKey(sourceRaw);
             String type = readString(item, "typeDescription", "type");
             int episodeCount = Math.max(0, readInt(item, "episodeCount", "totalEpisodes", "count"));
             result.add(new AnimeRef(coreBase, animeId, bangumiId, name, episodeCount, source, type));
@@ -1284,6 +1699,134 @@ public class DanmuXposedModule extends XposedModule {
         return collapsed;
     }
 
+    private String extractSourceFromTitle(String title) {
+        if (title == null || title.trim().isEmpty()) return "";
+        Matcher matcher = PATTERN_SOURCE_FROM_TITLE.matcher(title.trim());
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private String normalizeSourceKey(String raw) {
+        if (raw == null) return "";
+        String value = raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isEmpty()) return "";
+        if (value.contains("&")) {
+            LinkedHashSet<String> parts = new LinkedHashSet<>();
+            for (String part : value.split("&")) {
+                String canonical = canonicalSingleSource(part);
+                if (!canonical.isEmpty()) parts.add(canonical);
+            }
+            return joinAmp(parts);
+        }
+        return canonicalSingleSource(value);
+    }
+
+    private String canonicalSingleSource(String raw) {
+        if (raw == null) return "";
+        String source = raw.trim().toLowerCase(Locale.ROOT);
+        if (source.isEmpty()) return "";
+        if ("qq".equals(source)) return "tencent";
+        if ("qiyi".equals(source)) return "iqiyi";
+        if ("bilibili1".equals(source) || "bili".equals(source)) return "bilibili";
+        if ("mango".equals(source) || "mgtv".equals(source)) return "imgo";
+        if ("360kan".equals(source) || "kan360".equals(source)) return "360";
+        switch (source) {
+            case "360":
+            case "vod":
+            case "tmdb":
+            case "douban":
+            case "tencent":
+            case "youku":
+            case "iqiyi":
+            case "imgo":
+            case "bilibili":
+            case "migu":
+            case "renren":
+            case "hanjutv":
+            case "bahamut":
+            case "dandan":
+            case "sohu":
+            case "leshi":
+            case "xigua":
+            case "maiduidui":
+            case "aiyifan":
+            case "animeko":
+            case "custom":
+                return source;
+            default:
+                return "";
+        }
+    }
+
+    private String joinAmp(LinkedHashSet<String> parts) {
+        StringBuilder sb = new StringBuilder();
+        if (parts == null) return "";
+        for (String part : parts) {
+            if (part == null || part.trim().isEmpty()) continue;
+            if (sb.length() > 0) sb.append('&');
+            sb.append(part.trim());
+        }
+        return sb.toString();
+    }
+
+    private String displaySourceName(String source) {
+        String key = normalizeSourceKey(source);
+        if (key.isEmpty()) return "";
+        if (key.contains("&")) {
+            ArrayList<String> labels = new ArrayList<>();
+            for (String part : key.split("&")) {
+                String label = displaySingleSourceName(part);
+                if (!label.isEmpty() && !labels.contains(label)) labels.add(label);
+            }
+            return joinNonBlank(labels.toArray(new String[0])).replace(" · ", "/");
+        }
+        return displaySingleSourceName(key);
+    }
+
+    private String displaySingleSourceName(String source) {
+        String key = source == null ? "" : source.trim().toLowerCase(Locale.ROOT);
+        switch (key) {
+            case "360": return "360";
+            case "vod": return "VOD";
+            case "tmdb": return "TMDB";
+            case "douban": return "豆瓣";
+            case "tencent": return "腾讯";
+            case "youku": return "优酷";
+            case "iqiyi": return "爱奇艺";
+            case "imgo": return "芒果TV";
+            case "bilibili": return "哔哩哔哩";
+            case "migu": return "咪咕";
+            case "renren": return "人人";
+            case "hanjutv": return "韩剧TV";
+            case "bahamut": return "巴哈姆特";
+            case "dandan": return "弹弹Play";
+            case "sohu": return "搜狐";
+            case "leshi": return "乐视";
+            case "xigua": return "西瓜";
+            case "maiduidui": return "埋堆堆";
+            case "aiyifan": return "爱壹帆";
+            case "animeko": return "Animeko";
+            case "custom": return "自定义源";
+            default: return "";
+        }
+    }
+
+    private List<SourceFilter> buildSourceFilters(List<CandidateHandle> candidates) {
+        LinkedHashMap<String, SourceFilter> map = new LinkedHashMap<>();
+        if (candidates == null) return new ArrayList<>();
+        for (CandidateHandle candidate : candidates) {
+            if (candidate == null) continue;
+            String source = normalizeSourceKey(candidate.source);
+            if (source.isEmpty()) continue;
+            SourceFilter existing = map.get(source);
+            if (existing == null) {
+                map.put(source, new SourceFilter(source, displaySourceName(source), 1));
+            } else {
+                existing.count += 1;
+            }
+        }
+        return new ArrayList<>(map.values());
+    }
+
     private boolean isTrailerText(String text) {
         if (text == null) return false;
         String lower = text.toLowerCase(Locale.ROOT);
@@ -1299,123 +1842,6 @@ public class DanmuXposedModule extends XposedModule {
         }
     }
 
-
-    private LinearLayout createCard(Activity activity, int color, float radiusDp, int strokeWidthDp, int strokeColor, int horizontalPad, int verticalPad) {
-        LinearLayout card = new LinearLayout(activity);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(makeRoundRect(color, radiusDp, strokeWidthDp, strokeColor));
-        card.setPadding(horizontalPad, verticalPad, horizontalPad, verticalPad);
-        return card;
-    }
-
-    private TextView createStyledText(Activity activity, String text, float sizeSp, int color, boolean bold) {
-        TextView tv = new TextView(activity);
-        tv.setText(text == null ? "" : text);
-        tv.setTextSize(sizeSp);
-        tv.setTextColor(color);
-        tv.setSingleLine(false);
-        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
-        return tv;
-    }
-
-    private Button createActionButton(Activity activity, String text, boolean primary) {
-        return createActionButton(activity, text, primary, false);
-    }
-
-    private Button createActionButton(Activity activity, String text, boolean primary, boolean darkTheme) {
-        Button button = new Button(activity);
-        button.setText(text);
-        button.setTextSize(12.5f);
-        button.setTextColor(primary ? 0xFFFFFFFF : (darkTheme ? 0xFFD9E8FF : 0xFF374151));
-        button.setAllCaps(false);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            button.setStateListAnimator(null);
-            button.setElevation(0f);
-        }
-        button.setPadding(dp(activity, 8), 0, dp(activity, 8), 0);
-        if (darkTheme) {
-            button.setBackground(makeRoundRect(primary ? 0xFF2E7D32 : 0xFF1B2028, 999f, 2, primary ? 0xFF8BF7A5 : 0xAA8CA3B8));
-        } else {
-            button.setBackground(makeRoundRect(primary ? 0xFF2563EB : 0xFFFFFFFF, 999f, primary ? 1 : 2, primary ? 0xFF60A5FA : 0xFFD1D5DB));
-        }
-        return button;
-    }
-
-    private Button createPillButton(Activity activity, String text, boolean selected) {
-        return createPillButton(activity, text, selected, false);
-    }
-
-    private Button createPillButton(Activity activity, String text, boolean selected, boolean darkTheme) {
-        Button button = new Button(activity);
-        button.setText(text);
-        button.setTextSize(11.5f);
-        button.setTextColor(selected ? 0xFFFFFFFF : (darkTheme ? 0xFFD9E8FF : 0xFF374151));
-        button.setAllCaps(false);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            button.setStateListAnimator(null);
-            button.setElevation(0f);
-        }
-        button.setPadding(dp(activity, 4), 0, dp(activity, 4), 0);
-        if (darkTheme) {
-            button.setBackground(makeRoundRect(selected ? 0xFF2E7D32 : 0xFF1B2028, 999f, 2, selected ? 0xFF8BF7A5 : 0xAA8CA3B8));
-        } else {
-            button.setBackground(makeRoundRect(selected ? 0xFF2563EB : 0xFFFFFFFF, 999f, selected ? 2 : 2, selected ? 0xFF60A5FA : 0xFFD1D5DB));
-        }
-        return button;
-    }
-
-    private void applyThemeChoiceVisual(Activity activity, Button lightButton, Button darkButton, boolean darkSelected, boolean darkUi) {
-        if (lightButton != null) {
-            lightButton.setTextColor(darkSelected ? (darkUi ? 0xFFD9E8FF : 0xFF374151) : 0xFF111827);
-            lightButton.setBackground(makeRoundRect(darkSelected ? (darkUi ? 0xFF171A20 : 0xFFFFFFFF) : 0xFFFFFFFF, 999f, darkSelected ? 1 : 2, darkSelected ? (darkUi ? 0xAA8CA3B8 : 0xFFD1D5DB) : 0xFF111827));
-            lightButton.setAlpha(darkSelected ? 0.72f : 1f);
-        }
-        if (darkButton != null) {
-            darkButton.setTextColor(darkSelected ? 0xFFFFFFFF : (darkUi ? 0xFFD9E8FF : 0xFF374151));
-            darkButton.setBackground(makeRoundRect(darkSelected ? 0xFF111827 : (darkUi ? 0xFF171A20 : 0xFFFFFFFF), 999f, darkSelected ? 2 : 2, darkSelected ? 0xFF8CA3B8 : (darkUi ? 0xAA8CA3B8 : 0xFFD1D5DB)));
-            darkButton.setAlpha(darkSelected ? 1f : 0.72f);
-        }
-    }
-
-    private TextView createInfoChip(Activity activity, String text, int bgColor, int textColor, int strokeColor) {
-        TextView chip = new TextView(activity);
-        chip.setText(text == null ? "" : text);
-        chip.setTextSize(11f);
-        chip.setTextColor(textColor);
-        chip.setSingleLine(true);
-        chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setPadding(dp(activity, 10), 0, dp(activity, 10), 0);
-        chip.setBackground(makeRoundRect(bgColor, 999f, 1, strokeColor));
-        return chip;
-    }
-
-    private EditText createCompactInput(Activity activity, String hint, String value) {
-        return createCompactInput(activity, hint, value, false);
-    }
-
-    private EditText createCompactInput(Activity activity, String hint, String value, boolean darkTheme) {
-        EditText input = new EditText(activity);
-        input.setSingleLine(true);
-        input.setHint(hint == null ? "" : hint);
-        input.setText(value == null ? "" : value);
-        input.setTextSize(14.5f);
-        input.setTextColor(darkTheme ? 0xFFF9F9F9 : 0xFF111827);
-        input.setHintTextColor(darkTheme ? 0xFF7F8792 : 0xFF9CA3AF);
-        input.setGravity(Gravity.CENTER_VERTICAL);
-        input.setSelectAllOnFocus(true);
-        input.setMinHeight(dp(activity, 38));
-        input.setBackground(makeRoundRect(darkTheme ? 0xFF101111 : 0xFFFFFFFF, 12f, 2, darkTheme ? 0x6655B3FF : 0xFF3B82F6));
-        input.setPadding(dp(activity, 12), dp(activity, 5), dp(activity, 12), dp(activity, 5));
-        return input;
-    }
 
     private LinearLayout.LayoutParams matchWrapWithBottom(Activity activity, int bottomDp) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -1435,16 +1861,76 @@ public class DanmuXposedModule extends XposedModule {
         return lp;
     }
 
-    private LinearLayout.LayoutParams buttonRowLp(Activity activity, float weight) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(activity, 34), weight);
-        lp.setMargins(dp(activity, 2), 0, dp(activity, 2), 0);
+    private LinearLayout.LayoutParams withBottomMargin(LinearLayout.LayoutParams lp, int bottomPx) {
+        lp.setMargins(0, 0, 0, bottomPx);
         return lp;
     }
 
-    private LinearLayout.LayoutParams compactMainButtonLp(Activity activity, float weight) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(activity, 34), weight);
-        lp.setMargins(dp(activity, 2), 0, dp(activity, 2), 0);
-        return lp;
+    private HorizontalScrollView buildHorizontalChipScroll(Activity activity) {
+        HorizontalScrollView scroll = new HorizontalScrollView(activity);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setScrollbarFadingEnabled(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.setFillViewport(false);
+        scroll.setOnTouchListener((v, event) -> {
+            ViewParent parent = v.getParent();
+            if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
+            return false;
+        });
+        return scroll;
+    }
+
+    private TextView platformChip(Activity activity, DanmuTheme t, String label, boolean selected) {
+        TextView chip = new TextView(activity);
+        chip.setText(label == null ? "" : label);
+        chip.setTextSize(DanmuTheme.TEXT_CAPTION);
+        chip.setSingleLine(true);
+        chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        chip.setGravity(Gravity.CENTER);
+        chip.setIncludeFontPadding(false);
+        chip.setClickable(true);
+        chip.setFocusable(true);
+        chip.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        chip.setTextColor(selected ? t.accentText : t.textSecondary);
+        int fill = selected ? t.accent : t.surfaceAlt;
+        int stroke = selected ? t.accentStrong : t.stroke;
+        chip.setBackground(t.roundRect(fill, DanmuTheme.RADIUS_PILL, stroke, selected ? 2 : 1, activity));
+        chip.setPadding(dp(activity, DanmuTheme.SPACE_3), 0, dp(activity, DanmuTheme.SPACE_3), 0);
+        return chip;
+    }
+
+    private void renderPlatformFilters(Activity activity, DanmuTheme t, LinearLayout chipsRow,
+                                       List<SourceFilter> filters, String selectedSource,
+                                       FilterSelectListener listener) {
+        chipsRow.removeAllViews();
+        TextView allChip = platformChip(activity, t, "全部 " + countAllFilters(filters), selectedSource == null || selectedSource.trim().isEmpty());
+        allChip.setOnClickListener(v -> {
+            if (listener != null) listener.onSelect("");
+        });
+        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 30));
+        allLp.rightMargin = dp(activity, DanmuTheme.SPACE_2);
+        chipsRow.addView(allChip, allLp);
+
+        for (SourceFilter filter : filters) {
+            if (filter == null || filter.source.isEmpty() || filter.count <= 0) continue;
+            boolean selected = filter.source.equals(selectedSource == null ? "" : selectedSource.trim());
+            TextView chip = platformChip(activity, t, filter.displayName() + " " + filter.count, selected);
+            chip.setOnClickListener(v -> {
+                if (listener != null) listener.onSelect(filter.source);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 30));
+            lp.rightMargin = dp(activity, DanmuTheme.SPACE_2);
+            chipsRow.addView(chip, lp);
+        }
+    }
+
+    private int countAllFilters(List<SourceFilter> filters) {
+        int count = 0;
+        if (filters == null) return 0;
+        for (SourceFilter filter : filters) {
+            if (filter != null) count += Math.max(0, filter.count);
+        }
+        return count;
     }
 
     private GradientDrawable makeRoundRect(int color, float radiusDp, int strokeWidthDp, int strokeColor) {
@@ -1455,92 +1941,6 @@ public class DanmuXposedModule extends XposedModule {
         return bg;
     }
 
-    private UiPalette resolveUiPalette(boolean darkTheme) {
-        return darkTheme
-            ? new UiPalette(
-                0xFF07080A,
-                0xFF101111,
-                0xFF171A20,
-                0x668CA3B8,
-                0xFFF9F9F9,
-                0xFF9C9C9D,
-                0xFF2E7D32,
-                0xFF6DDC88,
-                0xFFFFFFFF,
-                0xFF171A20,
-                0x668CA3B8,
-                0xFFD9E8FF,
-                0xFF171A20,
-                0x668CA3B8,
-                0xFFD9E8FF,
-                0x1A22C55E,
-                0xFF86EFAC,
-                0x334ADE80
-            )
-            : new UiPalette(
-                0xFFF8FAFC,
-                0xFFFFFFFF,
-                0xFFF8FAFC,
-                0xFFE5E7EB,
-                0xFF111827,
-                0xFF4B5563,
-                0xFF2563EB,
-                0xFF60A5FA,
-                0xFFFFFFFF,
-                0xFFF8FAFC,
-                0xFFE5E7EB,
-                0xFF111827,
-                0xFFFFFFFF,
-                0xFFD1D5DB,
-                0xFF374151,
-                0xFFF0FDF4,
-                0xFF166534,
-                0xFFBBF7D0
-            );
-    }
-
-    private static final class UiPalette {
-        final int windowBg;
-        final int rootBg;
-        final int panelBg;
-        final int panelStroke;
-        final int text;
-        final int muted;
-        final int primary;
-        final int primaryStroke;
-        final int primaryText;
-        final int secondaryBg;
-        final int secondaryStroke;
-        final int secondaryText;
-        final int chipBg;
-        final int chipStroke;
-        final int chipText;
-        final int successBg;
-        final int successText;
-        final int successStroke;
-
-        UiPalette(int windowBg, int rootBg, int panelBg, int panelStroke, int text, int muted, int primary, int primaryStroke, int primaryText, int secondaryBg, int secondaryStroke, int secondaryText, int chipBg, int chipStroke, int chipText, int successBg, int successText, int successStroke) {
-            this.windowBg = windowBg;
-            this.rootBg = rootBg;
-            this.panelBg = panelBg;
-            this.panelStroke = panelStroke;
-            this.text = text;
-            this.muted = muted;
-            this.primary = primary;
-            this.primaryStroke = primaryStroke;
-            this.primaryText = primaryText;
-            this.secondaryBg = secondaryBg;
-            this.secondaryStroke = secondaryStroke;
-            this.secondaryText = secondaryText;
-            this.chipBg = chipBg;
-            this.chipStroke = chipStroke;
-            this.chipText = chipText;
-            this.successBg = successBg;
-            this.successText = successText;
-            this.successStroke = successStroke;
-        }
-    }
-
     private void adjustNumericInput(EditText input, double delta) {
         if (input == null) return;
         String raw = input.getText() == null ? "" : input.getText().toString().trim();
@@ -1549,89 +1949,97 @@ public class DanmuXposedModule extends XposedModule {
         input.setSelection(input.getText().length());
     }
 
-    private void renderEpisodeGrid(Activity activity, GridLayout episodeGrid, ArrayList<CandidateHandle> compactHandles, final int[] selectedEpisodeIndex, int shellPort, TextView statusText, TextView pushInfoText, Button actionButton, boolean darkTheme) {
+    private void renderEpisodeGrid(Activity activity, DanmuTheme t, GridLayout episodeGrid, ArrayList<CandidateHandle> compactHandles,
+                                   ArrayList<TextView> itemViews, final int[] selectedEpisodeIndex, boolean showTitles,
+                                   int shellPort, TextView statusText, Button actionButton, TextView pushInfoText, int[] gridMetrics,
+                                   Runnable onSelectionChanged) {
         episodeGrid.removeAllViews();
-        int columns = 9;
-        episodeGrid.setColumnCount(columns);
-        int marginPx = dp(activity, 2);
-        int containerWidth = episodeGrid.getWidth();
-        View parent = null;
-        if (episodeGrid.getParent() instanceof View) parent = (View) episodeGrid.getParent();
-        if (containerWidth <= 0 && parent != null) containerWidth = parent.getWidth();
-        if (containerWidth <= 0) {
-            int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
-            containerWidth = (int) (screenWidth * 0.82f) - dp(activity, 36);
+        itemViews.clear();
+        if (compactHandles.isEmpty()) {
+            gridMetrics[0] = 1;
+            gridMetrics[1] = 40;
+            return;
         }
-        int horizontalPadding = episodeGrid.getPaddingLeft() + episodeGrid.getPaddingRight();
-        if (parent != null) horizontalPadding += parent.getPaddingLeft() + parent.getPaddingRight();
-        int usableWidth = Math.max(dp(activity, 240), containerWidth - horizontalPadding - dp(activity, 4));
-        int totalMargins = marginPx * 2 * columns;
-        int chipWidth = Math.max(dp(activity, 30), (usableWidth - totalMargins) / columns);
-        int gridWidth = (chipWidth + marginPx * 2) * columns;
+        int columns = showTitles ? 1 : computeEpisodeColumns(activity);
+        int rowHeightDp = showTitles ? 44 : 38;
+        gridMetrics[0] = columns;
+        gridMetrics[1] = rowHeightDp;
+        episodeGrid.setColumnCount(columns);
         episodeGrid.setMinimumWidth(0);
         episodeGrid.setClipToPadding(false);
-        int selected = compactHandles.isEmpty() ? 0 : clamp(selectedEpisodeIndex[0], 0, compactHandles.size() - 1);
+        int marginPx = dp(activity, DanmuTheme.SPACE_1);
+        int selected = clamp(selectedEpisodeIndex[0], 0, compactHandles.size() - 1);
         selectedEpisodeIndex[0] = selected;
         for (int i = 0; i < compactHandles.size(); i++) {
-            CandidateHandle candidate = compactHandles.get(i);
+            final CandidateHandle candidate = compactHandles.get(i);
             final int index = i;
-            TextView chip = createEpisodeChip(activity, shortEpisodeLabel(candidate, i), i == selected, darkTheme);
-            chip.setContentDescription(i == selected ? "当前播放集 " + shortEpisodeLabel(candidate, i) : shortEpisodeLabel(candidate, i));
-            chip.setOnClickListener(v -> {
+            TextView cell = DanmuUi.episodeCell(activity, t);
+            DanmuUi.styleEpisodeCell(activity, t, cell, episodeCellLabel(candidate, index, showTitles), index == selected, showTitles);
+            cell.setOnClickListener(v -> {
+                int prev = selectedEpisodeIndex[0];
+                if (prev == index) {
+                    // re-click an already-selected episode pushes it directly
+                    pushCandidate(activity, candidate, shellPort, statusText, pushInfoText);
+                    return;
+                }
                 selectedEpisodeIndex[0] = index;
-                if (actionButton != null) actionButton.setText("推送" + shortEpisodeLabel(candidate, index));
-                statusText.setText("已选中" + shortEpisodeLabel(candidate, index) + "，点推送执行");
-                renderEpisodeGrid(activity, episodeGrid, compactHandles, selectedEpisodeIndex, shellPort, statusText, pushInfoText, actionButton, darkTheme);
+                if (prev >= 0 && prev < itemViews.size()) {
+                    DanmuUi.styleEpisodeCell(activity, t, itemViews.get(prev), episodeCellLabel(compactHandles.get(prev), prev, showTitles), false, showTitles);
+                }
+                DanmuUi.styleEpisodeCell(activity, t, cell, episodeCellLabel(candidate, index, showTitles), true, showTitles);
+                if (actionButton != null) actionButton.setText("推送");
+                statusText.setText("已选中第" + shortEpisodeLabel(candidate, index) + "集，再点一次或按推送执行");
+                if (onSelectionChanged != null) onSelectionChanged.run();
             });
             GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-            lp.width = chipWidth;
-            lp.height = dp(activity, 36);
+            lp.width = 0;
+            lp.height = dp(activity, showTitles ? 40 : 36);
+            lp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1, 1f);
             lp.setMargins(marginPx, marginPx, marginPx, marginPx);
-            episodeGrid.addView(chip, lp);
+            episodeGrid.addView(cell, lp);
+            itemViews.add(cell);
         }
         ViewGroup.LayoutParams existing = episodeGrid.getLayoutParams();
         if (existing != null) {
-            existing.width = Math.min(usableWidth, gridWidth);
+            existing.width = ViewGroup.LayoutParams.MATCH_PARENT;
             existing.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             episodeGrid.setLayoutParams(existing);
         }
     }
 
-    private void scrollEpisodeGridToIndex(Activity activity, ScrollView episodeScroll, int index) {
+    private String episodeCellLabel(CandidateHandle candidate, int index, boolean showTitles) {
+        if (showTitles) {
+            return buildEpisodeTitleLabel(candidate, index);
+        }
+        return shortEpisodeLabel(candidate, index);
+    }
+
+    private String buildEpisodeTitleLabel(CandidateHandle candidate, int index) {
+        int number = candidate == null ? 0 : extractEpisodeNumber(candidate.label);
+        String head = number > 0 ? "第" + number + "集" : "第" + (index + 1) + "集";
+        EpisodeCandidate episode = candidate == null ? null : episodeCandidates.get(candidate.handle);
+        String title = episode == null ? "" : episode.name.trim();
+        if (!title.isEmpty() && !title.equals(String.valueOf(number)) && !title.equals(head)) {
+            return head + " · " + title;
+        }
+        return head;
+    }
+
+    private int computeEpisodeColumns(Activity activity) {
+        int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
+        int dialogWidth = (int) (screenWidth * 0.86f) - dp(activity, 36);
+        int perItem = dp(activity, 52);
+        int columns = Math.max(1, dialogWidth / perItem);
+        return clamp(columns, 5, 9);
+    }
+
+    private void scrollEpisodeGridToIndex(Activity activity, ScrollView episodeScroll, int index, int columns, int rowHeightDp) {
         episodeScroll.post(() -> {
-            int columns = 9;
-            int row = Math.max(0, index) / columns;
-            int y = Math.max(0, row * dp(activity, 40) - dp(activity, 24));
+            int safeColumns = Math.max(1, columns);
+            int row = Math.max(0, index) / safeColumns;
+            int y = Math.max(0, row * dp(activity, rowHeightDp) - dp(activity, 24));
             episodeScroll.smoothScrollTo(0, y);
         });
-    }
-
-    private TextView createEpisodeChip(Activity activity, String label, boolean primary, boolean darkTheme) {
-        TextView chip = new TextView(activity);
-        chip.setText(label);
-        chip.setTextSize(12f);
-        chip.setGravity(Gravity.CENTER);
-        chip.setSingleLine(true);
-        chip.setTextColor(primary ? 0xFFFFFFFF : (darkTheme ? 0xFFDADDE3 : 0xFF374151));
-        chip.setFocusable(true);
-        chip.setClickable(true);
-        chip.setSoundEffectsEnabled(true);
-        chip.setBackground(makeChipBackground(primary, darkTheme));
-        chip.setPadding(dp(activity, 4), dp(activity, 3), dp(activity, 4), dp(activity, 3));
-        return chip;
-    }
-
-    private GradientDrawable makeChipBackground(boolean primary, boolean darkTheme) {
-        GradientDrawable bg = new GradientDrawable();
-        if (darkTheme) {
-            bg.setColor(primary ? 0xFF2E7D32 : 0xFF171A20);
-            bg.setStroke(primary ? 2 : 1, primary ? 0xFF6DDC88 : 0x88FFFFFF);
-        } else {
-            bg.setColor(primary ? 0xFF2563EB : 0xFFFFFFFF);
-            bg.setStroke(primary ? 2 : 2, primary ? 0xFF60A5FA : 0xFFD1D5DB);
-        }
-        bg.setCornerRadius(18f);
-        return bg;
     }
 
     private String shortEpisodeLabel(CandidateHandle candidate, int index) {
@@ -1698,7 +2106,7 @@ public class DanmuXposedModule extends XposedModule {
 
     private InjectionSettings readInjectionSettings(Context context, int fallbackPort) {
         int normalizedFallbackPort = fallbackPort > 0 && fallbackPort <= 65535 ? fallbackPort : 9978;
-        if (context == null) return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "");
+        if (context == null) return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "", DIALOG_STYLE_CENTER);
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE);
             boolean injectionEnabled = true;
@@ -1707,6 +2115,7 @@ public class DanmuXposedModule extends XposedModule {
             int fontSize = safeParseInt(prefs.getString(KEY_FONT_SIZE, ""));
             int storedPort = prefs.getInt(KEY_SHELL_PORT, normalizedFallbackPort);
             boolean darkTheme = prefs.getBoolean(KEY_UI_DARK_THEME, false);
+            int dialogStyle = prefs.getInt(KEY_DIALOG_STYLE, DIALOG_STYLE_CENTER);
             int corePort = 0;
             String coreToken = "";
             SharedPreferences remotePrefs = getRemotePreferencesOrNull();
@@ -1717,211 +2126,1062 @@ public class DanmuXposedModule extends XposedModule {
                 fontSize = safeParseInt(remotePrefs.getString(KEY_FONT_SIZE, fontSize > 0 ? String.valueOf(fontSize) : ""));
                 storedPort = remotePrefs.getInt(KEY_SHELL_PORT, storedPort);
                 darkTheme = remotePrefs.getBoolean(KEY_UI_DARK_THEME, darkTheme);
+                dialogStyle = remotePrefs.getInt(KEY_DIALOG_STYLE, dialogStyle);
                 corePort = remotePrefs.getInt(KEY_CORE_PORT, 0);
                 coreToken = normalizeToken(remotePrefs.getString(KEY_CORE_TOKEN, ""));
             }
             int port = storedPort > 0 && storedPort <= 65535 ? storedPort : normalizedFallbackPort;
-            return new InjectionSettings(injectionEnabled, autoPush, offset, fontSize > 0 ? fontSize : -1, port, darkTheme, corePort, coreToken);
+            return new InjectionSettings(injectionEnabled, autoPush, offset, fontSize > 0 ? fontSize : -1, port, darkTheme, corePort, coreToken, dialogStyle);
         } catch (Throwable throwable) {
-            return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "");
+            return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "", DIALOG_STYLE_CENTER);
         }
     }
 
-    private void saveInjectionSettings(Context context, InjectionSettings settings) {
-        if (context == null || settings == null) return;
+    private boolean saveInjectionSettings(Context context, InjectionSettings settings) {
+        if (context == null || settings == null) return false;
         try {
             String formattedOffset = formatOffsetSeconds(settings.offsetSec);
             String formattedFontSize = settings.fontSize > 0 ? String.valueOf(settings.fontSize) : "";
-            context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_OFFSET_SEC, formattedOffset)
-                .putString(KEY_FONT_SIZE, formattedFontSize)
-                .putInt(KEY_SHELL_PORT, settings.shellPort)
-                .putBoolean(KEY_UI_DARK_THEME, settings.darkTheme)
-                .apply();
+            SharedPreferences localPrefs = context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE);
+            boolean localOk = commitInjectionSettings(localPrefs, formattedOffset, formattedFontSize, settings);
+            boolean remoteAttempted = false;
+            boolean remoteOk = false;
+            SharedPreferences remotePrefs = null;
+            try {
+                remotePrefs = getRemotePreferencesOrNull();
+            } catch (Throwable remoteEx) {
+                log(Log.WARN, TAG, "save injection settings remote prefs unavailable: " + remoteEx.getMessage());
+            }
+            if (remotePrefs != null) {
+                remoteAttempted = true;
+                try {
+                    remoteOk = commitInjectionSettings(remotePrefs, formattedOffset, formattedFontSize, settings);
+                    if (!remoteOk) log(Log.WARN, TAG, "save injection settings failed: remote commit returned false");
+                } catch (Throwable remoteEx) {
+                    log(Log.WARN, TAG, "save injection settings remote write failed: " + remoteEx.getMessage());
+                }
+            }
+            if (!localOk) log(Log.WARN, TAG, "save injection settings failed: local commit returned false");
+            if (localOk) return true;
+            return remoteAttempted && remoteOk;
         } catch (Throwable throwable) {
             log(Log.WARN, TAG, "save injection settings failed: " + throwable.getMessage());
+            return false;
         }
     }
 
-    private void showInjectionSettingsDialog(Activity activity, int[] shellPortRef, TextView settingsText) {
+    private boolean readEpisodeShowTitles(Context context) {
+        if (context == null) return false;
         try {
+            SharedPreferences remotePrefs = getRemotePreferencesOrNull();
+            if (remotePrefs != null && remotePrefs.contains(KEY_EPISODE_SHOW_TITLES)) {
+                return remotePrefs.getBoolean(KEY_EPISODE_SHOW_TITLES, false);
+            }
+            return context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE)
+                .getBoolean(KEY_EPISODE_SHOW_TITLES, false);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean saveEpisodeShowTitles(Context context, boolean showTitles) {
+        if (context == null) return false;
+        try {
+            SharedPreferences localPrefs = context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE);
+            boolean localOk = commitEpisodeShowTitles(localPrefs, showTitles);
+            boolean remoteAttempted = false;
+            boolean remoteOk = false;
+            SharedPreferences remotePrefs = null;
+            try {
+                remotePrefs = getRemotePreferencesOrNull();
+            } catch (Throwable remoteEx) {
+                log(Log.WARN, TAG, "save episode show titles remote prefs unavailable: " + remoteEx.getMessage());
+            }
+            if (remotePrefs != null) {
+                remoteAttempted = true;
+                try {
+                    remoteOk = commitEpisodeShowTitles(remotePrefs, showTitles);
+                    if (!remoteOk) log(Log.WARN, TAG, "save episode show titles failed: remote commit returned false");
+                } catch (Throwable remoteEx) {
+                    log(Log.WARN, TAG, "save episode show titles remote write failed: " + remoteEx.getMessage());
+                }
+            }
+            if (!localOk) log(Log.WARN, TAG, "save episode show titles failed: local commit returned false");
+            if (localOk) return true;
+            return remoteAttempted && remoteOk;
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "save episode show titles failed: " + throwable.getMessage());
+            return false;
+        }
+    }
+
+    private boolean commitInjectionSettings(SharedPreferences prefs, String formattedOffset, String formattedFontSize, InjectionSettings settings) {
+        if (prefs == null || settings == null) return false;
+        return prefs.edit()
+            .putString(KEY_OFFSET_SEC, formattedOffset)
+            .putString(KEY_FONT_SIZE, formattedFontSize)
+            .putInt(KEY_SHELL_PORT, settings.shellPort)
+            .putBoolean(KEY_UI_DARK_THEME, settings.darkTheme)
+            .putInt(KEY_DIALOG_STYLE, settings.dialogStyle)
+            .commit();
+    }
+
+    private boolean commitEpisodeShowTitles(SharedPreferences prefs, boolean showTitles) {
+        if (prefs == null) return false;
+        return prefs.edit()
+            .putBoolean(KEY_EPISODE_SHOW_TITLES, showTitles)
+            .commit();
+    }
+
+    private void showInjectionSettingsDialog(Activity activity, View backgroundAnchor, int[] shellPortRef) {
+        showInjectionSettingsOverlay(activity, backgroundAnchor, shellPortRef);
+    }
+
+    private void showInjectionSettingsOverlay(Activity activity, View backgroundAnchor, int[] shellPortRef) {
+
+        try {
+            ViewGroup hostContent = findHostContentRoot(activity);
+            if (hostContent == null) {
+                Toast.makeText(activity, "打开设置失败：找不到宿主容器", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            removeExistingSettingsOverlay(hostContent);
+
             int fallbackPort = shellPortRef != null && shellPortRef.length > 0 ? shellPortRef[0] : 9978;
             InjectionSettings current = readInjectionSettings(activity, fallbackPort);
             final boolean[] darkTheme = new boolean[]{current.darkTheme};
-            UiPalette palette = resolveUiPalette(darkTheme[0]);
+            final boolean[] showTitles = new boolean[]{readEpisodeShowTitles(activity)};
+            final double[] offset = new double[]{current.offsetSec};
+            final int[] fontSize = new int[]{current.fontSize};
+            final int[] shellPort = new int[]{current.shellPort};
+            final int[] dialogStyle = new int[]{current.dialogStyle};
 
-            ScrollView settingsScroll = new ScrollView(activity);
-            settingsScroll.setFillViewport(false);
-            settingsScroll.setVerticalScrollBarEnabled(true);
-            settingsScroll.setScrollbarFadingEnabled(false);
+            TextView templateText = findFirstTextView(backgroundAnchor);
+            Drawable rowTemplateBackground = resolveRowTemplateBackground(backgroundAnchor);
+            View hostPageContainer = findHostPageContainer(backgroundAnchor, hostContent);
+            View hostPageRoot = findHostPageRootForOverlay(backgroundAnchor, hostContent);
+            Drawable pageBackground = resolveHostPageBackground(activity, backgroundAnchor, hostPageContainer);
 
-            LinearLayout root = new LinearLayout(activity);
-            root.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(activity, 12);
-            root.setPadding(pad, dp(activity, 10), pad, dp(activity, 10));
-            root.setBackground(makeRoundRect(palette.rootBg, 24f, 1, palette.panelStroke));
-            settingsScroll.addView(root, new ScrollView.LayoutParams(
+            FrameLayout root = new FrameLayout(activity);
+            SettingsOverlayState overlayState = new SettingsOverlayState(hostPageContainer, hostPageRoot, backgroundAnchor);
+            root.setTag(overlayState);
+            root.setClickable(true);
+            root.setFocusable(true);
+            root.setFocusableInTouchMode(true);
+            if (pageBackground != null) {
+                root.setBackground(pageBackground);
+            } else {
+                root.setBackgroundColor(Color.TRANSPARENT);
+            }
+            root.setOnKeyListener((view, keyCode, event) -> {
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                    closeSettingsOverlay(view);
+                    return true;
+                }
+                return false;
+            });
+
+            ScrollView scroll = new ScrollView(activity);
+            scroll.setFillViewport(true);
+            scroll.setVerticalScrollBarEnabled(true);
+            scroll.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+            scroll.setBackgroundColor(Color.TRANSPARENT);
+
+            LinearLayout content = new LinearLayout(activity);
+            content.setOrientation(LinearLayout.VERTICAL);
+            int padH = dp(activity, 16);
+            int padTop = dp(activity, 12);
+            int navSafeBottom = hostPageContainer != null ? 0 : getNavigationBarSafeInset(activity);
+            content.setPadding(padH, padTop, padH, dp(activity, 24) + navSafeBottom);
+            scroll.addView(content, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ));
+            root.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ));
 
-            LinearLayout header = new LinearLayout(activity);
-            header.setOrientation(LinearLayout.HORIZONTAL);
-            header.setGravity(Gravity.CENTER_VERTICAL);
-            header.addView(createStyledText(activity, "APP弹幕设置", 17f, palette.text, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            header.addView(createInfoChip(activity, "仅当前壳", palette.chipBg, palette.chipText, palette.chipStroke));
-            root.addView(header, matchWrapWithBottom(activity, 8));
-
-            LinearLayout themeCard = createCard(activity, palette.panelBg, 16f, 1, palette.panelStroke, dp(activity, 10), dp(activity, 8));
-            themeCard.addView(createStyledText(activity, "界面主题", 12.5f, palette.muted, true));
-            LinearLayout themeRow = new LinearLayout(activity);
-            themeRow.setOrientation(LinearLayout.HORIZONTAL);
-            themeRow.setGravity(Gravity.CENTER_VERTICAL);
-            Button lightButton = createPillButton(activity, "白色", !darkTheme[0], darkTheme[0]);
-            Button darkButton = createPillButton(activity, "黑色", darkTheme[0], darkTheme[0]);
-            TextView themeHint = createStyledText(activity, darkTheme[0] ? "当前：深色" : "当前：白色", 11f, palette.muted, false);
-            LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            themeRow.addView(lightButton, buttonRowLp(activity, 1f));
-            themeRow.addView(darkButton, buttonRowLp(activity, 1f));
-            themeRow.addView(themeHint, hintLp);
-            themeCard.addView(themeRow, matchWrapWithTop(activity, 6));
-            Runnable refreshThemeState = () -> {
-                applyThemeChoiceVisual(activity, lightButton, darkButton, darkTheme[0], current.darkTheme);
-                themeHint.setText(darkTheme[0] ? "当前：深色" : "当前：白色");
-            };
-            lightButton.setOnClickListener(v -> {
-                darkTheme[0] = false;
-                refreshThemeState.run();
-            });
-            darkButton.setOnClickListener(v -> {
-                darkTheme[0] = true;
-                refreshThemeState.run();
-            });
-            refreshThemeState.run();
-            root.addView(themeCard, matchWrapWithBottom(activity, 7));
-
-            LinearLayout autoCard = createCard(activity, palette.panelBg, 16f, 1, palette.panelStroke, dp(activity, 10), dp(activity, 6));
-            autoCard.addView(createStyledText(activity, "自动推送：" + (current.autoPushEnabled ? "开" : "关") + "（仅 App 侧可改）", 13.5f, palette.text, true));
-            autoCard.addView(createStyledText(activity, "播放器内只调整弹幕参数；注入和自动匹配开关请回 App 设置页修改", 10.5f, palette.muted, false), matchWrapWithTop(activity, 4));
-            root.addView(autoCard, matchWrapWithBottom(activity, 7));
-
-            LinearLayout offsetCard = createCard(activity, palette.panelBg, 16f, 1, palette.panelStroke, dp(activity, 10), dp(activity, 8));
-            LinearLayout offsetTitle = new LinearLayout(activity);
-            offsetTitle.setGravity(Gravity.CENTER_VERTICAL);
-            offsetTitle.addView(createStyledText(activity, "时间轴偏移", 12.5f, palette.muted, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            offsetTitle.addView(createInfoChip(activity, "秒", palette.chipBg, palette.chipText, palette.chipStroke));
-            offsetCard.addView(offsetTitle);
-            LinearLayout offsetRow = new LinearLayout(activity);
-            offsetRow.setOrientation(LinearLayout.HORIZONTAL);
-            offsetRow.setGravity(Gravity.CENTER_VERTICAL);
-            Button minusButton = createPillButton(activity, "-0.5", false, darkTheme[0]);
-            Button resetOffsetButton = createPillButton(activity, "0", false, darkTheme[0]);
-            Button plusButton = createPillButton(activity, "+0.5", false, darkTheme[0]);
-            EditText offsetInput = createCompactInput(activity, "0", formatOffsetSeconds(current.offsetSec), darkTheme[0]);
-            offsetRow.addView(minusButton, buttonRowLp(activity, 0.65f));
-            offsetRow.addView(offsetInput, buttonRowLp(activity, 1.2f));
-            offsetRow.addView(plusButton, buttonRowLp(activity, 0.65f));
-            offsetRow.addView(resetOffsetButton, buttonRowLp(activity, 0.5f));
-            offsetCard.addView(offsetRow, matchWrapWithTop(activity, 6));
-            minusButton.setOnClickListener(v -> adjustNumericInput(offsetInput, -0.5d));
-            plusButton.setOnClickListener(v -> adjustNumericInput(offsetInput, 0.5d));
-            resetOffsetButton.setOnClickListener(v -> offsetInput.setText("0"));
-            root.addView(offsetCard, matchWrapWithBottom(activity, 7));
-
-            LinearLayout fontCard = createCard(activity, palette.panelBg, 16f, 1, palette.panelStroke, dp(activity, 10), dp(activity, 8));
-            fontCard.addView(createStyledText(activity, "弹幕大小", 12.5f, palette.muted, true));
-            EditText fontInput = createCompactInput(activity, "默认", current.fontSize > 0 ? String.valueOf(current.fontSize) : "", darkTheme[0]);
-            LinearLayout presetRow = new LinearLayout(activity);
-            presetRow.setOrientation(LinearLayout.HORIZONTAL);
-            String[] presets = new String[]{"默认", "20", "24", "28", "32"};
-            for (String preset : presets) {
-                Button chip = createPillButton(activity, preset, preset.equals(String.valueOf(current.fontSize)) || (preset.equals("默认") && current.fontSize <= 0), darkTheme[0]);
-                chip.setOnClickListener(v -> fontInput.setText("默认".equals(preset) ? "" : preset));
-                presetRow.addView(chip, buttonRowLp(activity, 1f));
+            TextView title = new TextView(activity);
+            if (templateText != null) {
+                copyTextStyle(title, templateText, true, true);
+            } else {
+                copyTextStyle(title, null, true, true);
             }
-            fontCard.addView(presetRow, matchWrapWithTop(activity, 6));
-            fontCard.addView(fontInput, matchWrapWithTop(activity, 6));
-            root.addView(fontCard, matchWrapWithBottom(activity, 7));
+            title.setText("APP弹幕");
+            title.setSingleLine(true);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            if (templateText != null) {
+                float hostSizePx = templateText.getTextSize();
+                float scaled = hostSizePx * 1.25f;
+                float minSp = dp(activity, 14);
+                if (scaled < minSp) scaled = minSp;
+                title.setTextSize(TypedValue.COMPLEX_UNIT_PX, scaled);
+            } else {
+                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+            }
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            final int rowGap = resolveSettingsRowGap(backgroundAnchor, dp(activity, 16));
+            // 标题和第一项之间只保留一份官方 row 间距：第一项自身会在 addSettingsRow() 中应用 topMargin。
+            titleLp.bottomMargin = 0;
+            content.addView(title, titleLp);
 
-            LinearLayout portCard = createCard(activity, palette.panelBg, 16f, 1, palette.panelStroke, dp(activity, 10), dp(activity, 8));
-            LinearLayout portTitleRow = new LinearLayout(activity);
-            portTitleRow.setOrientation(LinearLayout.HORIZONTAL);
-            portTitleRow.setGravity(Gravity.CENTER_VERTICAL);
-            portTitleRow.addView(createStyledText(activity, "影视壳端口", 12.5f, palette.muted, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            portTitleRow.addView(createInfoChip(activity, "自动识别", palette.chipBg, palette.chipText, palette.chipStroke));
-            portCard.addView(portTitleRow);
-            EditText portInput = createCompactInput(activity, "9978", String.valueOf(current.shellPort), darkTheme[0]);
-            portCard.addView(portInput, matchWrapWithTop(activity, 6));
-            root.addView(portCard, matchWrapWithBottom(activity, 5));
+            final InjectionSettings base = current;
 
-            TextView note = createStyledText(activity, "参数随弹幕 URL 推送，不改弹幕文件", 11f, palette.muted, false);
-            note.setPadding(dp(activity, 2), 0, 0, dp(activity, 8));
-            root.addView(note);
+            SettingsRowViews themeRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "界面主题", darkTheme[0] ? "黑色" : "白色");
+            themeRow.row.setOnClickListener(v -> {
+                boolean next = !darkTheme[0];
+                InjectionSettings updated = new InjectionSettings(
+                    base.injectionEnabled,
+                    base.autoPushEnabled,
+                    offset[0],
+                    fontSize[0],
+                    shellPort[0],
+                    next,
+                    base.corePort,
+                    base.coreToken,
+                    dialogStyle[0]
+                );
+                if (saveInjectionSettings(activity, updated)) {
+                    darkTheme[0] = next;
+                    themeRow.value.setText(next ? "黑色" : "白色");
+                    Toast.makeText(activity, "已保存界面主题", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "保存界面主题失败", Toast.LENGTH_SHORT).show();
+                }
+            });
+            addSettingsRow(content, themeRow.row, backgroundAnchor, rowGap);
 
-            LinearLayout footer = new LinearLayout(activity);
-            footer.setOrientation(LinearLayout.HORIZONTAL);
-            footer.setGravity(Gravity.CENTER_VERTICAL);
-            Button cancelButton = createActionButton(activity, "取消", false, darkTheme[0]);
-            Button saveButton = createActionButton(activity, "保存", true, darkTheme[0]);
-            footer.addView(cancelButton, buttonRowLp(activity, 1f));
-            footer.addView(saveButton, buttonRowLp(activity, 1f));
-            root.addView(footer, matchWrapWithTop(activity, 4));
+            SettingsRowViews titleModeRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "集详情显示", showTitles[0] ? "带标题" : "数字格");
+            titleModeRow.row.setOnClickListener(v -> {
+                boolean next = !showTitles[0];
+                if (saveEpisodeShowTitles(activity, next)) {
+                    showTitles[0] = next;
+                    titleModeRow.value.setText(next ? "带标题" : "数字格");
+                    Toast.makeText(activity, "已保存集详情显示", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "保存集详情显示失败", Toast.LENGTH_SHORT).show();
+                }
+            });
+            addSettingsRow(content, titleModeRow.row, backgroundAnchor, rowGap);
 
-            AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setView(settingsScroll)
-                .create();
-            cancelButton.setOnClickListener(v -> dialog.dismiss());
-            saveButton.setOnClickListener(v -> {
-                String offsetRaw = offsetInput.getText() == null ? "" : offsetInput.getText().toString().trim();
-                String fontRaw = fontInput.getText() == null ? "" : fontInput.getText().toString().trim();
-                String portRaw = portInput.getText() == null ? "" : portInput.getText().toString().trim();
-                Double offset = parseNullableDouble(offsetRaw);
-                if (offset == null) {
+            SettingsRowViews offsetRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "时间轴偏移", formatOffsetSeconds(offset[0]));
+            offsetRow.row.setOnClickListener(v -> showOffsetInputDialog(activity, offset[0], value -> {
+                Double parsed = parseNullableDouble(value);
+                if (parsed == null) {
                     Toast.makeText(activity, "时间轴偏移请输入数字，可为负", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                int fontSize = fontRaw.isEmpty() ? -1 : safeParseInt(fontRaw);
-                if (!fontRaw.isEmpty() && fontSize <= 0) {
-                    Toast.makeText(activity, "弹幕大小请输入正整数，或留空", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                int port = portRaw.isEmpty() ? current.shellPort : safeParseInt(portRaw);
-                if (port <= 0 || port > 65535) {
-                    Toast.makeText(activity, "影视壳端口范围应为 1-65535", Toast.LENGTH_SHORT).show();
-                    return;
-                }
+                double next = parsed;
                 InjectionSettings updated = new InjectionSettings(
-                    current.injectionEnabled,
-                    current.autoPushEnabled,
-                    offset,
-                    fontSize,
-                    port,
+                    base.injectionEnabled,
+                    base.autoPushEnabled,
+                    next,
+                    fontSize[0],
+                    shellPort[0],
                     darkTheme[0],
-                    current.corePort,
-                    current.coreToken
+                    base.corePort,
+                    base.coreToken,
+                    dialogStyle[0]
                 );
-                saveInjectionSettings(activity, updated);
-                if (shellPortRef != null && shellPortRef.length > 0) shellPortRef[0] = updated.shellPort;
-                if (settingsText != null) settingsText.setText(formatInjectionSettings(updated));
-                Toast.makeText(activity, "APP弹幕设置已保存", Toast.LENGTH_SHORT).show();
-                dialog.dismiss();
-            });
-            dialog.setOnShowListener(d -> {
-                Window window = dialog.getWindow();
-                if (window != null) {
-                    int width = activity.getResources().getDisplayMetrics().widthPixels;
-                    int height = activity.getResources().getDisplayMetrics().heightPixels;
-                    window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                    window.setLayout((int) (width * 0.72f), (int) (height * 0.80f));
+                if (saveInjectionSettings(activity, updated)) {
+                    offset[0] = next;
+                    offsetRow.value.setText(formatOffsetSeconds(next));
+                    Toast.makeText(activity, "已保存时间轴偏移", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "保存时间轴偏移失败", Toast.LENGTH_SHORT).show();
+                }
+            }));
+            addSettingsRow(content, offsetRow.row, backgroundAnchor, rowGap);
+
+            SettingsRowViews fontRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "弹幕大小", fontSize[0] > 0 ? String.valueOf(fontSize[0]) : "默认");
+            fontRow.row.setOnClickListener(v -> showFontSizeChooser(activity, fontSize[0], value -> {
+                int next = value;
+                InjectionSettings updated = new InjectionSettings(
+                    base.injectionEnabled,
+                    base.autoPushEnabled,
+                    offset[0],
+                    next,
+                    shellPort[0],
+                    darkTheme[0],
+                    base.corePort,
+                    base.coreToken,
+                    dialogStyle[0]
+                );
+                if (saveInjectionSettings(activity, updated)) {
+                    fontSize[0] = next;
+                    fontRow.value.setText(next > 0 ? String.valueOf(next) : "默认");
+                    Toast.makeText(activity, "已保存弹幕大小", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "保存弹幕大小失败", Toast.LENGTH_SHORT).show();
+                }
+            }));
+            addSettingsRow(content, fontRow.row, backgroundAnchor, rowGap);
+
+            SettingsRowViews portRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "影视壳端口", String.valueOf(shellPort[0]));
+            portRow.row.setOnClickListener(v -> showIntegerInputDialog(activity, "影视壳端口",
+                "请输入 1-65535", String.valueOf(shellPort[0]), value -> {
+                    int parsed = safeParseInt(value);
+                    if (parsed <= 0 || parsed > 65535) {
+                        Toast.makeText(activity, "影视壳端口范围应为 1-65535", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    int next = parsed;
+                    InjectionSettings updated = new InjectionSettings(
+                        base.injectionEnabled,
+                        base.autoPushEnabled,
+                        offset[0],
+                        fontSize[0],
+                        next,
+                        darkTheme[0],
+                        base.corePort,
+                        base.coreToken,
+                        dialogStyle[0]
+                    );
+                    if (saveInjectionSettings(activity, updated)) {
+                        shellPort[0] = next;
+                        if (shellPortRef != null && shellPortRef.length > 0) shellPortRef[0] = next;
+                        portRow.value.setText(String.valueOf(next));
+                        Toast.makeText(activity, "已保存影视壳端口", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(activity, "保存影视壳端口失败", Toast.LENGTH_SHORT).show();
+                    }
+                }));
+            addSettingsRow(content, portRow.row, backgroundAnchor, rowGap);
+
+            SettingsRowViews dialogStyleRow = createSettingsRow(activity, backgroundAnchor, rowTemplateBackground, templateText,
+                "弹窗样式", dialogStyle[0] == DIALOG_STYLE_CENTER ? "居中" : "底部抽屉");
+            dialogStyleRow.row.setOnClickListener(v -> {
+                int next = dialogStyle[0] == DIALOG_STYLE_CENTER ? DIALOG_STYLE_BOTTOM_SHEET : DIALOG_STYLE_CENTER;
+                InjectionSettings updated = new InjectionSettings(
+                    base.injectionEnabled,
+                    base.autoPushEnabled,
+                    offset[0],
+                    fontSize[0],
+                    shellPort[0],
+                    darkTheme[0],
+                    base.corePort,
+                    base.coreToken,
+                    next
+                );
+                if (saveInjectionSettings(activity, updated)) {
+                    dialogStyle[0] = next;
+                    dialogStyleRow.value.setText(next == DIALOG_STYLE_CENTER ? "居中" : "底部抽屉");
+                    Toast.makeText(activity, "已保存弹窗样式", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "保存弹窗样式失败", Toast.LENGTH_SHORT).show();
                 }
             });
-            dialog.show();
+            addSettingsRow(content, dialogStyleRow.row, backgroundAnchor, rowGap);
+
+            hostContent.addView(root, buildSettingsOverlayLayoutParams(hostContent, hostPageContainer));
+            root.bringToFront();
+            root.requestFocus();
+            attachHostNavigationCloseGuard(root, overlayState);
         } catch (Throwable throwable) {
             Toast.makeText(activity, "打开设置失败：" + throwable.getClass().getSimpleName(), Toast.LENGTH_SHORT).show();
             log(Log.WARN, TAG, "show injection settings failed: " + throwable.getMessage());
         }
     }
+
+    private ViewGroup findHostContentRoot(Activity activity) {
+        if (activity == null) return null;
+        View content = activity.findViewById(android.R.id.content);
+        return content instanceof ViewGroup ? (ViewGroup) content : null;
+    }
+
+    private View findHostPageContainer(View backgroundAnchor, ViewGroup hostContent) {
+        if (backgroundAnchor == null || hostContent == null) return null;
+        View current = backgroundAnchor;
+        while (current != null) {
+            ViewParent parent = current.getParent();
+            if (!(parent instanceof View)) return null;
+            View parentView = (View) parent;
+            if (isHostFragmentContainer(parentView)) return parentView;
+            if (parentView == hostContent) return null;
+            current = parentView;
+        }
+        return null;
+    }
+
+    private View findHostPageRootForOverlay(View backgroundAnchor, ViewGroup hostContent) {
+        if (backgroundAnchor == null || hostContent == null) return null;
+        View current = backgroundAnchor;
+        while (current != null) {
+            ViewParent parent = current.getParent();
+            if (!(parent instanceof View)) return null;
+            View parentView = (View) parent;
+            if (isHostFragmentContainer(parentView)) return current;
+            if (parentView == hostContent) return null;
+            current = parentView;
+        }
+        return null;
+    }
+
+    private boolean isHostFragmentContainer(View view) {
+        if (view == null) return false;
+        String className = view.getClass().getName();
+        if (className != null && className.contains("FragmentContainerView")) return true;
+        String entryName = safeResourceEntryName(view);
+        return "container".equals(entryName);
+    }
+
+    private String safeResourceEntryName(View view) {
+        if (view == null || view.getId() == View.NO_ID) return "";
+        try {
+            return view.getResources().getResourceEntryName(view.getId());
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private void removeExistingSettingsOverlay(ViewGroup hostContent) {
+        if (hostContent == null) return;
+        for (int i = hostContent.getChildCount() - 1; i >= 0; i--) {
+            View child = hostContent.getChildAt(i);
+            if (child == null) continue;
+            Object tag = child.getTag();
+            if (tag instanceof SettingsOverlayState) {
+                SettingsOverlayState state = (SettingsOverlayState) tag;
+                detachHostNavigationCloseGuard(child, state);
+                hostContent.removeViewAt(i);
+            } else if (SETTINGS_OVERLAY_TAG.equals(tag)) {
+                hostContent.removeViewAt(i);
+            }
+        }
+    }
+
+    private void closeSettingsOverlay(View view) {
+        if (view == null) return;
+        Object tag = view.getTag();
+        if (tag instanceof SettingsOverlayState) {
+            SettingsOverlayState state = (SettingsOverlayState) tag;
+            detachHostNavigationCloseGuard(view, state);
+        }
+        removeViewFromParent(view);
+    }
+
+    private void removeViewFromParent(View view) {
+        if (view == null) return;
+        ViewParent parent = view.getParent();
+        if (parent instanceof ViewGroup) {
+            ((ViewGroup) parent).removeView(view);
+        }
+    }
+
+    private ViewGroup.LayoutParams buildSettingsOverlayLayoutParams(ViewGroup hostContent, View hostPageContainer) {
+        if (hostContent instanceof FrameLayout) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            );
+            if (hostPageContainer != null && hostPageContainer.getWidth() > 0 && hostPageContainer.getHeight() > 0) {
+                int[] hostLoc = new int[2];
+                int[] containerLoc = new int[2];
+                hostContent.getLocationOnScreen(hostLoc);
+                hostPageContainer.getLocationOnScreen(containerLoc);
+                lp.width = hostPageContainer.getWidth();
+                lp.height = hostPageContainer.getHeight();
+                lp.leftMargin = containerLoc[0] - hostLoc[0];
+                lp.topMargin = containerLoc[1] - hostLoc[1];
+                return lp;
+            }
+            lp.bottomMargin = findBottomNavigationHeight(hostContent);
+            return lp;
+        }
+        return new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        );
+    }
+
+    private int findBottomNavigationHeight(View root) {
+        View nav = findBottomNavigationView(root);
+        return nav != null && nav.getVisibility() == View.VISIBLE ? Math.max(0, nav.getHeight()) : 0;
+    }
+
+    private View findBottomNavigationView(View root) {
+        if (root == null) return null;
+        ArrayList<View> stack = new ArrayList<>();
+        stack.add(root);
+        while (!stack.isEmpty()) {
+            View view = stack.remove(stack.size() - 1);
+            if (view == null || view.getVisibility() != View.VISIBLE) continue;
+            String className = view.getClass().getName();
+            String entryName = safeResourceEntryName(view);
+            if ((className != null && className.contains("BottomNavigationView")) || "navigation".equals(entryName)) {
+                return view;
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    stack.add(group.getChildAt(i));
+                }
+            }
+        }
+        return null;
+    }
+
+    private void attachHostNavigationCloseGuard(FrameLayout overlayRoot, SettingsOverlayState state) {
+        if (overlayRoot == null || state == null) return;
+        ViewTreeObserver observer = overlayRoot.getViewTreeObserver();
+        ViewTreeObserver.OnPreDrawListener preDrawGuard = () -> {
+            if (overlayRoot.getParent() == null) return true;
+            if (shouldCloseSettingsOverlayForHostChange(state)) {
+                closeSettingsOverlay(overlayRoot);
+            }
+            return true;
+        };
+        state.preDrawGuard = preDrawGuard;
+        if (observer != null && observer.isAlive()) {
+            observer.addOnPreDrawListener(preDrawGuard);
+        }
+        Runnable guard = new Runnable() {
+            @Override
+            public void run() {
+                if (overlayRoot.getParent() == null) return;
+                if (shouldCloseSettingsOverlayForHostChange(state)) {
+                    closeSettingsOverlay(overlayRoot);
+                    return;
+                }
+                overlayRoot.postDelayed(this, SETTINGS_OVERLAY_NAV_GUARD_INTERVAL_MS);
+            }
+        };
+        state.hostChangeGuard = guard;
+        overlayRoot.post(guard);
+    }
+
+    private void detachHostNavigationCloseGuard(View overlayRoot, SettingsOverlayState state) {
+        if (overlayRoot == null || state == null) return;
+        if (state.hostChangeGuard != null) {
+            overlayRoot.removeCallbacks(state.hostChangeGuard);
+            state.hostChangeGuard = null;
+        }
+        if (state.preDrawGuard != null) {
+            ViewTreeObserver observer = overlayRoot.getViewTreeObserver();
+            if (observer != null && observer.isAlive()) {
+                observer.removeOnPreDrawListener(state.preDrawGuard);
+            }
+            state.preDrawGuard = null;
+        }
+    }
+
+    private boolean shouldCloseSettingsOverlayForHostChange(SettingsOverlayState state) {
+        if (state == null) return false;
+        View pageRoot = state.hostPageRoot;
+        View container = state.hostPageContainer;
+        if (container != null && !container.isAttachedToWindow()) return true;
+        if (pageRoot == null) return false;
+        if (!pageRoot.isAttachedToWindow()) return true;
+        if (pageRoot.getVisibility() != View.VISIBLE || !pageRoot.isShown()) return true;
+        if (container != null && !isDescendantOf(pageRoot, container)) return true;
+        if (state.backgroundAnchor != null) {
+            if (!state.backgroundAnchor.isAttachedToWindow()) return true;
+            if (!isDescendantOf(state.backgroundAnchor, pageRoot)) return true;
+            if (state.backgroundAnchor.getVisibility() != View.VISIBLE || !state.backgroundAnchor.isShown()) return true;
+        }
+        if (container instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) container;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child != null && child != pageRoot && child.getVisibility() == View.VISIBLE && child.isShown()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isDescendantOf(View child, View ancestor) {
+        if (child == null || ancestor == null) return false;
+        View current = child;
+        while (current != null) {
+            if (current == ancestor) return true;
+            ViewParent parent = current.getParent();
+            if (!(parent instanceof View)) return false;
+            current = (View) parent;
+        }
+        return false;
+    }
+
+    private int getNavigationBarSafeInset(Activity activity) {
+        if (activity == null) return 0;
+        int orientation = activity.getResources().getConfiguration().orientation;
+        if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) return 0;
+        int resourceId = activity.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+        return resourceId > 0 ? activity.getResources().getDimensionPixelSize(resourceId) : 0;
+    }
+
+    private void addSettingsRow(LinearLayout content, View row, View rowTemplateAnchor, int fallbackTopMarginPx) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        int topMargin = resolveSettingsRowGap(rowTemplateAnchor, fallbackTopMarginPx);
+        lp.topMargin = topMargin;
+        content.addView(row, lp);
+    }
+
+    private int resolveSettingsRowGap(View rowTemplateAnchor, int fallbackPx) {
+        int gap = fallbackPx;
+        if (rowTemplateAnchor != null) {
+            ViewGroup.LayoutParams source = rowTemplateAnchor.getLayoutParams();
+            if (source instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams src = (ViewGroup.MarginLayoutParams) source;
+                if (src.topMargin > 0) {
+                    gap = src.topMargin;
+                } else if (src.bottomMargin > 0) {
+                    gap = src.bottomMargin;
+                }
+            }
+        }
+        return gap;
+    }
+
+    private SettingsRowViews createSettingsRow(Activity activity, View rowTemplateAnchor, Drawable rowTemplateBackground, TextView textTemplate, String title, String value) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setClickable(true);
+        row.setFocusable(true);
+        Drawable clonedBg = cloneDrawable(rowTemplateBackground);
+        if (clonedBg != null) row.setBackground(clonedBg);
+
+        int padLeft = rowTemplateAnchor != null ? rowTemplateAnchor.getPaddingLeft() : 0;
+        int padTop = rowTemplateAnchor != null ? rowTemplateAnchor.getPaddingTop() : 0;
+        int padRight = rowTemplateAnchor != null ? rowTemplateAnchor.getPaddingRight() : 0;
+        int padBottom = rowTemplateAnchor != null ? rowTemplateAnchor.getPaddingBottom() : 0;
+        if (padLeft <= 0 && textTemplate != null) padLeft = textTemplate.getPaddingLeft();
+        if (padTop <= 0 && textTemplate != null) padTop = textTemplate.getPaddingTop();
+        if (padRight <= 0 && textTemplate != null) padRight = textTemplate.getPaddingRight();
+        if (padBottom <= 0 && textTemplate != null) padBottom = textTemplate.getPaddingBottom();
+        if (padLeft <= 0) padLeft = dp(activity, 16);
+        if (padTop <= 0) padTop = dp(activity, 8);
+        if (padRight <= 0) padRight = dp(activity, 16);
+        if (padBottom <= 0) padBottom = dp(activity, 8);
+        row.setPadding(padLeft, padTop, padRight, padBottom);
+
+        int minHeight = rowTemplateAnchor != null ? rowTemplateAnchor.getHeight() : 0;
+        if (minHeight <= 0 && rowTemplateAnchor != null) {
+            ViewGroup.LayoutParams source = rowTemplateAnchor.getLayoutParams();
+            if (source != null && source.height > 0) {
+                minHeight = source.height;
+            }
+        }
+        if (minHeight <= 0 && textTemplate != null) minHeight = textTemplate.getHeight();
+        if (minHeight <= 0) minHeight = dp(activity, 48);
+        row.setMinimumHeight(minHeight);
+
+        TextView label = new TextView(activity);
+        copyTextStyle(label, textTemplate, false, false);
+        label.setText(title);
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(label, labelLp);
+
+        TextView valueView = new TextView(activity);
+        copyTextStyle(valueView, textTemplate, false, true);
+        valueView.setText(value);
+        valueView.setSingleLine(true);
+        valueView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        valueView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        row.addView(valueView, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        return new SettingsRowViews(row, valueView);
+    }
+
+    private void copyTextStyle(TextView target, TextView template, boolean bold, boolean alignEnd) {
+        if (target == null) return;
+        if (template != null) {
+            target.setTextSize(TypedValue.COMPLEX_UNIT_PX, template.getTextSize());
+            target.setTextColor(template.getTextColors());
+            target.setTypeface(template.getTypeface());
+            target.setIncludeFontPadding(template.getIncludeFontPadding());
+            target.setLetterSpacing(template.getLetterSpacing());
+        } else {
+            target.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+            target.setTextColor(Color.WHITE);
+        }
+        if (bold) target.setTypeface(Typeface.DEFAULT_BOLD);
+        target.setGravity((alignEnd ? Gravity.END : Gravity.START) | Gravity.CENTER_VERTICAL);
+        target.setSingleLine(true);
+    }
+
+    private Drawable resolveHostPageBackground(Activity activity, View backgroundAnchor, View cropAnchor) {
+        Drawable wall = captureHostWallpaperBackground(activity, cropAnchor);
+        if (wall != null) return wall;
+        Drawable resourceWall = captureHostWallpaperResourceBackground(activity, cropAnchor);
+        if (resourceWall != null) return resourceWall;
+        Drawable fromTree = findMeaningfulAncestorBackgroundDrawable(backgroundAnchor);
+        if (fromTree != null) return fromTree;
+        return buildFallbackHostBackground(activity);
+    }
+
+    private Drawable resolveRowTemplateBackground(View backgroundAnchor) {
+        Drawable background = backgroundAnchor == null ? null : backgroundAnchor.getBackground();
+        if (background != null) {
+            Drawable cloned = cloneDrawable(background);
+            if (cloned != null) return cloned;
+        }
+        return buildFallbackRowBackground(backgroundAnchor == null ? null : backgroundAnchor.getContext());
+    }
+
+    private Drawable findMeaningfulAncestorBackgroundDrawable(View backgroundAnchor) {
+        ViewParent parent = backgroundAnchor == null ? null : backgroundAnchor.getParent();
+        while (parent instanceof View) {
+            View view = (View) parent;
+            Drawable background = view.getBackground();
+            int w = view.getWidth();
+            int h = view.getHeight();
+            if (background != null && w > 0 && h > 0 && HostBackgroundColorPolicy.isMeaningfulDrawable(background)) {
+                Drawable cloned = cloneDrawable(background);
+                if (cloned != null) return cloned;
+            }
+            parent = view.getParent();
+        }
+        return null;
+    }
+
+    private Drawable captureHostWallpaperBackground(Activity activity, View cropAnchor) {
+        try {
+            if (activity == null) return null;
+            View target = resolveBackgroundCaptureTarget(activity, cropAnchor);
+            if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
+            View wall = findHostWallpaperView(activity);
+            if (wall == null || wall.getWidth() <= 0 || wall.getHeight() <= 0) {
+                return captureWindowBackground(activity, target);
+            }
+            Bitmap bitmap = Bitmap.createBitmap(target.getWidth(), target.getHeight(), Bitmap.Config.ARGB_8888);
+            bitmap.setDensity(activity.getResources().getDisplayMetrics().densityDpi);
+            Canvas canvas = new Canvas(bitmap);
+            if (target != wall) {
+                int[] wallLoc = new int[2];
+                int[] targetLoc = new int[2];
+                wall.getLocationOnScreen(wallLoc);
+                target.getLocationOnScreen(targetLoc);
+                canvas.translate(wallLoc[0] - targetLoc[0], wallLoc[1] - targetLoc[1]);
+            }
+            wall.draw(canvas);
+            BitmapDrawable drawable = new BitmapDrawable(activity.getResources(), bitmap);
+            drawable.setTargetDensity(activity.getResources().getDisplayMetrics());
+            drawable.setGravity(Gravity.FILL);
+            return drawable;
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "capture host wallpaper failed: " + throwable.getMessage());
+            return null;
+        }
+    }
+
+    private View resolveBackgroundCaptureTarget(Activity activity, View cropAnchor) {
+        if (cropAnchor != null && cropAnchor.getWidth() > 0 && cropAnchor.getHeight() > 0) return cropAnchor;
+        View content = activity == null ? null : activity.findViewById(android.R.id.content);
+        if (content != null && content.getWidth() > 0 && content.getHeight() > 0) return content;
+        Window window = activity == null ? null : activity.getWindow();
+        View decor = window == null ? null : window.getDecorView();
+        return decor != null && decor.getWidth() > 0 && decor.getHeight() > 0 ? decor : null;
+    }
+
+    private Drawable captureWindowBackground(Activity activity, View target) {
+        try {
+            if (activity == null || target == null || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
+            Window window = activity.getWindow();
+            View decor = window == null ? null : window.getDecorView();
+            if (decor == null || decor.getWidth() <= 0 || decor.getHeight() <= 0) return null;
+            Drawable background = decor.getBackground();
+            if (background == null || !HostBackgroundColorPolicy.isMeaningfulDrawable(background)) {
+                background = findMeaningfulWindowBackgroundDrawable(decor);
+            }
+            if (background == null || !HostBackgroundColorPolicy.isMeaningfulDrawable(background)) return null;
+            return captureScreenAlignedDrawable(activity, background, decor, target);
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "capture window background failed: " + throwable.getMessage());
+            return null;
+        }
+    }
+
+    private Drawable findMeaningfulWindowBackgroundDrawable(View root) {
+        if (root == null) return null;
+        ArrayList<View> stack = new ArrayList<>();
+        stack.add(root);
+        while (!stack.isEmpty()) {
+            View view = stack.remove(stack.size() - 1);
+            if (view == null || view.getVisibility() != View.VISIBLE) continue;
+            if (SETTINGS_OVERLAY_TAG.equals(view.getTag()) || view.getTag() instanceof SettingsOverlayState) continue;
+            Drawable background = view.getBackground();
+            if (background != null && view.getWidth() > 0 && view.getHeight() > 0 && HostBackgroundColorPolicy.isMeaningfulDrawable(background)) {
+                return background;
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                    stack.add(group.getChildAt(i));
+                }
+            }
+        }
+        return null;
+    }
+
+    private Drawable captureHostWallpaperResourceBackground(Activity activity, View cropAnchor) {
+        try {
+            if (activity == null) return null;
+            Drawable resourceWall = loadHostWallpaperResource(activity);
+            if (resourceWall == null) return null;
+            View target = resolveBackgroundCaptureTarget(activity, cropAnchor);
+            if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
+            Window window = activity.getWindow();
+            View decor = window == null ? null : window.getDecorView();
+            View boundsAnchor = decor != null && decor.getWidth() > 0 && decor.getHeight() > 0 ? decor : target;
+            return captureScreenAlignedDrawable(activity, resourceWall, boundsAnchor, target);
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "capture wallpaper resource failed: " + throwable.getMessage());
+            return null;
+        }
+    }
+
+    private Drawable captureScreenAlignedDrawable(Activity activity, Drawable source, View boundsAnchor, View target) {
+        if (activity == null || source == null || boundsAnchor == null || target == null) return null;
+        if (boundsAnchor.getWidth() <= 0 || boundsAnchor.getHeight() <= 0 || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
+        Bitmap bitmap = Bitmap.createBitmap(target.getWidth(), target.getHeight(), Bitmap.Config.ARGB_8888);
+        bitmap.setDensity(activity.getResources().getDisplayMetrics().densityDpi);
+        Canvas canvas = new Canvas(bitmap);
+        int[] boundsLoc = new int[2];
+        int[] targetLoc = new int[2];
+        boundsAnchor.getLocationOnScreen(boundsLoc);
+        target.getLocationOnScreen(targetLoc);
+        canvas.translate(boundsLoc[0] - targetLoc[0], boundsLoc[1] - targetLoc[1]);
+
+        Drawable drawable = cloneDrawable(source);
+        boolean drawingOriginal = drawable == null;
+        if (drawingOriginal) drawable = source;
+        Rect oldBounds = drawingOriginal ? drawable.copyBounds() : null;
+        try {
+            drawable.setBounds(0, 0, boundsAnchor.getWidth(), boundsAnchor.getHeight());
+            drawable.draw(canvas);
+        } finally {
+            if (drawingOriginal && oldBounds != null) {
+                drawable.setBounds(oldBounds);
+            }
+        }
+        BitmapDrawable bitmapDrawable = new BitmapDrawable(activity.getResources(), bitmap);
+        bitmapDrawable.setTargetDensity(activity.getResources().getDisplayMetrics());
+        bitmapDrawable.setGravity(Gravity.FILL);
+        return bitmapDrawable;
+    }
+
+    private View findHostWallpaperView(Activity activity) {
+        try {
+            ViewGroup content = activity == null ? null : activity.findViewById(android.R.id.content);
+            View directLayer = findDirectHostWallpaperLayer(content);
+            if (directLayer != null) return directLayer;
+            return findHostWallpaperView(content);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private View findDirectHostWallpaperLayer(ViewGroup content) {
+        if (content == null) return null;
+        for (int i = 0; i < content.getChildCount(); i++) {
+            View child = content.getChildAt(i);
+            if (!looksLikeHostWallpaperLayer(child)) continue;
+            return child;
+        }
+        return null;
+    }
+
+    private View findHostWallpaperView(View view) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return null;
+        String className = view.getClass().getName();
+        if (className.endsWith("CustomWallView") || className.contains(".CustomWallView") || looksLikeHostWallpaperLayer(view)) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = findHostWallpaperView(group.getChildAt(i));
+                if (child != null) return child;
+            }
+        }
+        return null;
+    }
+
+    private boolean looksLikeHostWallpaperLayer(View view) {
+        if (!(view instanceof ViewGroup) || view.getVisibility() != View.VISIBLE) return false;
+        if (SETTINGS_OVERLAY_TAG.equals(view.getTag()) || view.getTag() instanceof SettingsOverlayState) return false;
+        String entryName = safeResourceEntryName(view);
+        if ("container".equals(entryName) || "navigation".equals(entryName)) return false;
+        String className = view.getClass().getName();
+        if (className.endsWith(".s30") || className.endsWith("s30")) return true;
+        if (className.toLowerCase(Locale.ROOT).contains("wall")) return true;
+        return hasWallpaperImageSignature((ViewGroup) view);
+    }
+
+    private boolean hasWallpaperImageSignature(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof ImageView && "image".equals(safeResourceEntryName(child))) return true;
+            if (child instanceof ViewGroup && hasWallpaperImageSignature((ViewGroup) child)) return true;
+        }
+        return false;
+    }
+
+    private Drawable loadHostWallpaperResource(Activity activity) {
+        if (activity == null) return null;
+        try {
+            String pkg = activity.getPackageName();
+            int id = activity.getResources().getIdentifier("wallpaper_1", "drawable", pkg);
+            if (id == 0) return null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                return activity.getResources().getDrawable(id, activity.getTheme());
+            }
+            return activity.getResources().getDrawable(id);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private Drawable buildFallbackHostBackground(Context context) {
+        GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{0xFFD8F7F1, 0xFFA7E4E0, 0xFF7DCBC1, 0xFF45CFA4}
+        );
+        d.setShape(GradientDrawable.RECTANGLE);
+        return d;
+    }
+
+    private Drawable buildFallbackRowBackground(Context context) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(0x4DFFFFFF);
+        if (context != null) {
+            float density = context.getResources().getDisplayMetrics().density;
+            d.setCornerRadius(16f * density);
+        } else {
+            d.setCornerRadius(16f);
+        }
+        d.setStroke(1, 0x22FFFFFF);
+        return d;
+    }
+
+    private void showOffsetInputDialog(Activity activity, double currentValue, StringValueCallback callback) {
+        showTextInputDialog(activity, "时间轴偏移", "可输入正负小数，例如 -0.5", formatOffsetSeconds(currentValue),
+            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED,
+            callback);
+    }
+
+    private void showIntegerInputDialog(Activity activity, String title, String hint, String initialValue, StringValueCallback callback) {
+        showTextInputDialog(activity, title, hint, initialValue, InputType.TYPE_CLASS_NUMBER, callback);
+    }
+
+    private void showTextInputDialog(Activity activity, String title, String hint, String initialValue, int inputType, StringValueCallback callback) {
+        if (activity == null || callback == null) return;
+        EditText input = new EditText(activity);
+        input.setText(initialValue == null ? "" : initialValue);
+        input.setHint(hint == null ? "" : hint);
+        input.setSingleLine(true);
+        input.setInputType(inputType);
+        input.setSelectAllOnFocus(true);
+        int pad = dp(activity, 16);
+        input.setPadding(pad, pad, pad, pad);
+        new AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setView(input)
+            .setNegativeButton("取消", (dialog, which) -> dialog.dismiss())
+            .setPositiveButton("保存", (dialog, which) -> {
+                String value = input.getText() == null ? "" : input.getText().toString().trim();
+                callback.onValue(value);
+            })
+            .show();
+    }
+
+    private void showFontSizeChooser(Activity activity, int currentFontSize, IntValueCallback callback) {
+        if (activity == null || callback == null) return;
+        final String[] labels = new String[]{"默认", "20", "24", "28", "32", "自定义"};
+        int checked = 0;
+        for (int i = 1; i < labels.length - 1; i++) {
+            if (currentFontSize == safeParseInt(labels[i])) {
+                checked = i;
+                break;
+            }
+        }
+        final int initialChecked = checked;
+        new AlertDialog.Builder(activity)
+            .setTitle("弹幕大小")
+            .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                dialog.dismiss();
+                if (which == labels.length - 1) {
+                    showCustomFontSizeInput(activity, currentFontSize, callback);
+                } else {
+                    int value = which == 0 ? -1 : safeParseInt(labels[which]);
+                    callback.onValue(value);
+                }
+            })
+            .setNegativeButton("取消", (dialog, which) -> dialog.dismiss())
+            .show();
+    }
+
+    private void showCustomFontSizeInput(Activity activity, int currentFontSize, IntValueCallback callback) {
+        if (activity == null || callback == null) return;
+        String initial = currentFontSize > 0 ? String.valueOf(currentFontSize) : "";
+        showTextInputDialog(activity, "自定义弹幕大小", "请输入 8-80 之间的整数", initial,
+            InputType.TYPE_CLASS_NUMBER, value -> {
+                int parsed = safeParseInt(value);
+                if (parsed < 8 || parsed > 80) {
+                    Toast.makeText(activity, "弹幕大小范围应为 8-80", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                callback.onValue(parsed);
+            });
+    }
+
+    private interface StringValueCallback {
+        void onValue(String value);
+    }
+
+    private interface IntValueCallback {
+        void onValue(int value);
+    }
+
+    private interface FilterSelectListener {
+        void onSelect(String source);
+    }
+
+    private static final class SettingsOverlayState {
+        final View hostPageContainer;
+        final View hostPageRoot;
+        final View backgroundAnchor;
+        Runnable hostChangeGuard;
+        ViewTreeObserver.OnPreDrawListener preDrawGuard;
+
+        SettingsOverlayState(View hostPageContainer, View hostPageRoot, View backgroundAnchor) {
+            this.hostPageContainer = hostPageContainer;
+            this.hostPageRoot = hostPageRoot;
+            this.backgroundAnchor = backgroundAnchor;
+        }
+    }
+
+    private static final class SettingsRowViews {
+        final LinearLayout row;
+        final TextView value;
+
+        SettingsRowViews(LinearLayout row, TextView value) {
+            this.row = row;
+            this.value = value;
+        }
+    }
+
 
     private String formatInjectionSettings(InjectionSettings settings) {
         if (settings == null) settings = new InjectionSettings(true, true, 0.0d, -1, 9978, false, 0, "");
@@ -2323,6 +3583,84 @@ public class DanmuXposedModule extends XposedModule {
         lastPushInfo = message == null ? "" : message;
         lastPushUrl = url == null ? "" : url;
         lastPushAtMs = System.currentTimeMillis();
+        lastPushSummary = buildPushSummary(message);
+        synchronized (pushHistory) {
+            pushHistory.addFirst(message == null ? "" : message);
+            while (pushHistory.size() > MAX_PUSH_HISTORY) pushHistory.removeLast();
+        }
+    }
+
+    private String buildPushSummary(String message) {
+        if (message == null || message.trim().isEmpty()) return "";
+        String msg = message.trim();
+        int colonIdx = msg.indexOf("：");
+        if (colonIdx > 0 && colonIdx < msg.length() - 1) {
+            String label = msg.substring(colonIdx + 1).trim();
+            int parenIdx = label.indexOf("（");
+            if (parenIdx > 0) {
+                return label.substring(0, parenIdx) + label.substring(parenIdx);
+            }
+            return label;
+        }
+        return msg;
+    }
+
+    private String headerStageTitle(int stage) {
+        switch (stage) {
+            case STAGE_DRAMA:
+                return "选择匹配来源";
+            case STAGE_EPISODE:
+                return "选择剧集推送";
+            case STAGE_SEARCH:
+            default:
+                return "搜索当前播放";
+        }
+    }
+
+    private String formatPushSummary() {
+        if (lastPushAtMs <= 0L || lastPushSummary.isEmpty()) return "";
+        long agoMs = System.currentTimeMillis() - lastPushAtMs;
+        long agoSec = agoMs / 1000L;
+        String ago;
+        if (agoSec < 60L) ago = "刚刚";
+        else if (agoSec < 3600L) ago = (agoSec / 60L) + "分钟前";
+        else ago = (agoSec / 3600L) + "小时前";
+        return ago + " " + lastPushSummary;
+    }
+
+    private String formatPushTimeChip() {
+        if (lastPushAtMs <= 0L || lastPushSummary.isEmpty()) return "暂无推送";
+        long agoMs = Math.max(0L, System.currentTimeMillis() - lastPushAtMs);
+        long agoSec = agoMs / 1000L;
+        if (agoSec < 60L) return "刚刚";
+        if (agoSec < 3600L) return (agoSec / 60L) + "分钟前";
+        return (agoSec / 3600L) + "小时前";
+    }
+
+    private String formatPushSummaryCompact() {
+        if (lastPushAtMs <= 0L || lastPushSummary.isEmpty()) return "暂无推送记录";
+        long agoMs = Math.max(0L, System.currentTimeMillis() - lastPushAtMs);
+        long agoSec = agoMs / 1000L;
+        String ago;
+        if (agoSec < 60L) ago = "刚刚";
+        else if (agoSec < 3600L) ago = (agoSec / 60L) + "分钟前";
+        else ago = (agoSec / 3600L) + "小时前";
+
+        String summary = lastPushSummary == null ? "" : lastPushSummary.trim();
+        summary = summary.replaceFirst("^已匹配", "").trim();
+        String countText = "";
+        Matcher countMatcher = Pattern.compile("（([^（）]*弹幕[^（）]*)）").matcher(summary);
+        if (countMatcher.find()) {
+            countText = countMatcher.group(1).replace("弹幕数", "弹幕").trim();
+            summary = countMatcher.replaceFirst("").trim();
+        }
+        int sourceDetail = summary.indexOf("·【");
+        if (sourceDetail < 0) sourceDetail = summary.indexOf(" · 【");
+        if (sourceDetail > 0) summary = summary.substring(0, sourceDetail).trim();
+        summary = summary.replaceAll("\\s*·\\s*", " · ").trim();
+        if (summary.isEmpty()) summary = "已推送";
+        if (!countText.isEmpty()) summary = summary + " · " + countText;
+        return ago + "  " + summary;
     }
 
     private String formatLastPushInfo() {
@@ -2340,6 +3678,80 @@ public class DanmuXposedModule extends XposedModule {
         else if (agoSec < 60L) ago = agoSec + "秒前";
         else ago = Math.min(99L, agoSec / 60L) + "分钟前";
         return "最近(" + ago + ")：" + info;
+    }
+
+    private void showPushHistoryDialog(Activity activity, DanmuTheme t, View notifyButton, TextView notifyDot) {
+        lastViewedPushAtMs = System.currentTimeMillis();
+        notifyDot.setVisibility(View.GONE);
+
+        Dialog dlg = new Dialog(activity);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(activity, DanmuTheme.SPACE_5), dp(activity, DanmuTheme.SPACE_4),
+            dp(activity, DanmuTheme.SPACE_5), dp(activity, DanmuTheme.SPACE_4));
+        root.setBackground(t.roundRect(t.sheetBg, DanmuTheme.RADIUS_LG, t.stroke, 1, activity));
+
+        TextView title = DanmuUi.text(activity, t, "推送历史", DanmuTheme.TEXT_TITLE, t.textPrimary, true);
+        root.addView(title, matchWrapWithBottom(activity, DanmuTheme.SPACE_4));
+
+        List<String> entries;
+        synchronized (pushHistory) {
+            entries = new ArrayList<>(pushHistory);
+        }
+        if (entries.isEmpty()) {
+            LinearLayout empty = DanmuUi.emptyState(activity, t, "暂无推送", "收到推送后会记录在这里");
+            root.addView(empty, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        } else {
+            for (int i = 0; i < entries.size(); i++) {
+                String entry = entries.get(i);
+                if (entry == null || entry.trim().isEmpty()) continue;
+
+                LinearLayout row = new LinearLayout(activity);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setBackground(t.roundRect(t.surfaceAlt, DanmuTheme.RADIUS_SM, t.stroke, 1, activity));
+                row.setPadding(dp(activity, DanmuTheme.SPACE_3), dp(activity, DanmuTheme.SPACE_3),
+                    dp(activity, DanmuTheme.SPACE_3), dp(activity, DanmuTheme.SPACE_3));
+
+                TextView badge = DanmuUi.text(activity, t, String.valueOf(i + 1),
+                    DanmuTheme.TEXT_CAPTION, t.accentSoftText, true);
+                badge.setBackground(t.roundRect(t.accentSoft, DanmuTheme.RADIUS_SM, activity));
+                int badgeSize = dp(activity, 22);
+                LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(badgeSize, badgeSize);
+                badgeLp.rightMargin = dp(activity, DanmuTheme.SPACE_3);
+                badge.setGravity(Gravity.CENTER);
+                row.addView(badge, badgeLp);
+
+                TextView tv = DanmuUi.text(activity, t, entry, DanmuTheme.TEXT_BODY, t.textPrimary, false);
+                row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rowLp.bottomMargin = dp(activity, DanmuTheme.SPACE_2);
+                root.addView(row, rowLp);
+            }
+        }
+
+        Button closeBtn = DanmuUi.ghostButton(activity, t, "关闭");
+        LinearLayout.LayoutParams closeBtnLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 36));
+        closeBtnLp.topMargin = dp(activity, DanmuTheme.SPACE_4);
+        closeBtnLp.gravity = Gravity.END;
+        root.addView(closeBtn, closeBtnLp);
+        closeBtn.setOnClickListener(v -> dlg.dismiss());
+
+        dlg.setContentView(root);
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            int width = activity.getResources().getDisplayMetrics().widthPixels;
+            w.setLayout((int) (width * 0.80f), WindowManager.LayoutParams.WRAP_CONTENT);
+            w.setGravity(Gravity.CENTER);
+        }
+        dlg.show();
     }
 
     private void notifyAutoPush(String message) {
@@ -2958,11 +4370,33 @@ public class DanmuXposedModule extends XposedModule {
         final int type;
         final String handle;
         final String label;
+        final String source;
 
         CandidateHandle(int type, String handle, String label) {
+            this(type, handle, label, "");
+        }
+
+        CandidateHandle(int type, String handle, String label, String source) {
             this.type = type;
             this.handle = handle;
             this.label = label;
+            this.source = source == null ? "" : source;
+        }
+    }
+
+    private static final class SourceFilter {
+        final String source;
+        final String label;
+        int count;
+
+        SourceFilter(String source, String label, int count) {
+            this.source = source == null ? "" : source;
+            this.label = label == null ? "" : label;
+            this.count = count;
+        }
+
+        String displayName() {
+            return label.isEmpty() ? source : label;
         }
     }
 
@@ -3049,12 +4483,17 @@ public class DanmuXposedModule extends XposedModule {
         final boolean darkTheme;
         final int corePort;
         final String coreToken;
+        final int dialogStyle;
 
         InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme) {
-            this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, 0, "");
+            this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, 0, "", DIALOG_STYLE_CENTER);
         }
 
         InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme, int corePort, String coreToken) {
+            this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, corePort, coreToken, DIALOG_STYLE_CENTER);
+        }
+
+        InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme, int corePort, String coreToken, int dialogStyle) {
             this.injectionEnabled = injectionEnabled;
             this.autoPushEnabled = autoPushEnabled;
             this.offsetSec = Math.abs(offsetSec) < 1e-6 ? 0.0d : offsetSec;
@@ -3063,6 +4502,7 @@ public class DanmuXposedModule extends XposedModule {
             this.darkTheme = darkTheme;
             this.corePort = corePort > 0 && corePort <= 65535 ? corePort : 0;
             this.coreToken = coreToken == null ? "" : coreToken.trim();
+            this.dialogStyle = dialogStyle == DIALOG_STYLE_BOTTOM_SHEET ? DIALOG_STYLE_BOTTOM_SHEET : DIALOG_STYLE_CENTER;
         }
 
         String pushParamHint() {
@@ -3103,5 +4543,6 @@ public class DanmuXposedModule extends XposedModule {
         String message = "";
         int selectedIndex = 0;
         final List<CandidateHandle> candidates = new ArrayList<>();
+        final List<SourceFilter> filters = new ArrayList<>();
     }
 }
