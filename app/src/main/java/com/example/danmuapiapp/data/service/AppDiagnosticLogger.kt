@@ -389,12 +389,7 @@ object AppDiagnosticLogger {
             )
         }
 
-        val lowered = line.lowercase()
-        val level = when {
-            "error" in lowered || "failed" in lowered || "exception" in lowered -> LogLevel.Error
-            "warn" in lowered -> LogLevel.Warn
-            else -> LogLevel.Info
-        }
+        val level = BootstrapLogLevelClassifier.infer(line)
         val tagInfo = LogTagClassifier.classifyAppEntry(source, tag)
         return LogEntry(
             timestamp = fallbackTimestamp,

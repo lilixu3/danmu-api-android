@@ -3,8 +3,8 @@ package com.example.danmuapiapp.domain.model
 import java.util.Locale
 
 /**
- * Mirrors the stable core web UI log tag classification rules so the Android log screen can
- * filter by the same business tags exposed by /api/logs messages.
+ * Mirrors the stable core web UI log category rules so the Android log screen filters by
+ * source/category instead of exposing every low-level bracket tag as a separate chip.
  */
 data class LogTagInfo(
     val category: String = "",
@@ -32,18 +32,12 @@ object LogTagClassifier {
     )
 
     private val categoryLabels = mapOf(
-        "all" to "全部标签",
+        "all" to "全部来源",
         "system" to "系统",
         "ai" to "AI",
         "utils" to "工具",
         "cache" to "缓存",
         "merge" to "合并",
-        "app" to "App",
-        "runtime" to "Runtime",
-        "normalbootstrap" to "普通启动",
-        "rootbootstrap" to "Root启动",
-        "normal-bootstrap" to "普通启动",
-        "root-bootstrap" to "Root启动",
         "360kan" to "360kan",
         "aiyifan" to "爱壹帆",
         "animeko" to "Animeko",
@@ -75,8 +69,7 @@ object LogTagClassifier {
             "360kan", "aiyifan", "animeko", "bahamut", "bilibili", "custom",
             "dandan", "douban", "hanjutv", "iqiyi", "leshi", "maiduidui", "mango",
             "migu", "other", "renren", "sohu", "tencent", "tmdb", "vod", "xigua", "youku"
-        ),
-        listOf("app", "runtime", "normalbootstrap", "rootbootstrap", "normal-bootstrap", "root-bootstrap")
+        )
     ).flatMapIndexed { groupIndex, group ->
         group.mapIndexed { itemIndex, tag -> tag to (groupIndex * 1000 + itemIndex) }
     }.toMap()
@@ -101,17 +94,11 @@ object LogTagClassifier {
     }
 
     fun classifyAppEntry(source: AppLogSource, tag: String = ""): LogTagInfo {
-        val category = when (source) {
-            AppLogSource.Core -> classifyCoreMessage("", tag).category
-            AppLogSource.App -> normalizeTag(tag).takeIf { it.isNotBlank() && it != "app" } ?: "app"
-            AppLogSource.NormalBootstrap -> "normal-bootstrap"
-            AppLogSource.RootBootstrap -> "root-bootstrap"
+        if (source != AppLogSource.Core) {
+            return LogTagInfo()
         }
-        val rawTags = listOfNotNull(tag.takeIf { it.isNotBlank() })
-        return LogTagInfo(
-            category = category,
-            tags = normalizeTags(category, rawTags)
-        )
+
+        return classifyCoreMessage("", tag)
     }
 
     fun extractLeadingTags(message: String): List<String> {
@@ -140,11 +127,18 @@ object LogTagClassifier {
             .sortedWith(compareBy<String> { tagOrderMap[it] ?: 99_999 }.thenBy { it })
     }
 
-    fun matches(entry: LogEntry, tag: String): Boolean {
-        val normalized = normalizeTag(tag)
+    fun sourceFilterFor(entry: LogEntry): String {
+        if (entry.source == AppLogSource.Core) {
+            val category = normalizeTag(entry.category)
+            if (category.isNotBlank()) return category
+        }
+        return classifyLeadingMessageSource(entry.message)
+    }
+
+    fun matchesSource(entry: LogEntry, source: String): Boolean {
+        val normalized = normalizeTag(source)
         if (normalized.isBlank()) return true
-        return entry.category.equals(normalized, ignoreCase = true) ||
-            entry.tags.any { it.equals(normalized, ignoreCase = true) }
+        return sourceFilterFor(entry) == normalized
     }
 
     private fun normalizeTags(category: String, rawTags: List<String>): List<String> {
@@ -156,6 +150,15 @@ object LogTagClassifier {
             .filter { it.isNotBlank() && !isGenericHeaderTag(it) }
             .forEach(out::add)
         return out.toList()
+    }
+
+    private fun classifyLeadingMessageSource(message: String): String {
+        val rawTags = extractLeadingTags(message)
+        if (rawTags.isEmpty()) return ""
+        return when {
+            rawTags.any(::isMergeTag) -> "merge"
+            else -> rawTags.firstOrNull { !isNoiseTag(it) }?.let(::normalizeTag)
+        }.orEmpty()
     }
 
     private fun isMergeTag(tag: String): Boolean {
