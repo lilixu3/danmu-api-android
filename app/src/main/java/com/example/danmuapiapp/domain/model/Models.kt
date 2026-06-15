@@ -85,9 +85,9 @@ data class LogEntry(
     val message: String = "",
     val source: AppLogSource = AppLogSource.App,
     val tag: String = "",
-    /** Primary filter tag/category, aligned with stable core logview.js semantics. */
+    /** Primary source/category, aligned with stable core logview.js semantics. */
     val category: String = "",
-    /** Normalized tags available for dynamic filtering. */
+    /** Normalized raw tags retained for search/debug context; not exposed as filter chips. */
     val tags: List<String> = emptyList()
 )
 
