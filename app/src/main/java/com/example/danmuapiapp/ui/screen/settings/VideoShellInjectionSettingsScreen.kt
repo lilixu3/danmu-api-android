@@ -57,7 +57,8 @@ private const val KEY_AUTO_PUSH_ENABLED = "auto_push_enabled"
 private const val KEY_CORE_PORT = "core_port"
 private const val KEY_CORE_TOKEN = "core_token"
 private const val RUNTIME_PREF_GROUP = "runtime"
-private const val TARGET_API_VERSION = 101
+private const val MIN_SUPPORTED_API_VERSION = 101
+private const val API_102_VERSION = 102
 private val TARGET_PACKAGES = setOf("com.fongmi.android.tv", "com.github.tvbox.osc")
 
 private data class VideoShellInjectionState(
@@ -67,13 +68,17 @@ private data class VideoShellInjectionState(
     val frameworkName: String = "",
     val frameworkVersion: String = "",
     val scopePackages: Set<String> = emptySet(),
+    val remotePreferencesAvailable: Boolean = false,
+    val remotePreferencesError: String = "",
+    val api102FeaturesAvailable: Boolean = false,
+    val api102FeatureMessage: String = "",
     val injectionEnabled: Boolean = false,
     val autoPushEnabled: Boolean = false,
     val message: String = "正在检查 LSPosed Service"
 ) {
-    val apiSupported: Boolean get() = apiVersion == TARGET_API_VERSION
+    val apiSupported: Boolean get() = (apiVersion ?: 0) >= MIN_SUPPORTED_API_VERSION
     val scopeReady: Boolean get() = scopePackages.any { it in TARGET_PACKAGES }
-    val environmentReady: Boolean get() = serviceConnected && apiSupported && scopeReady
+    val environmentReady: Boolean get() = serviceConnected && apiSupported && scopeReady && remotePreferencesAvailable
 }
 
 @Composable
@@ -148,14 +153,14 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                         state.loading -> "正在读取官方 getApiVersion()"
                         !state.serviceConnected -> "未收到 LSPosed Service，无法确认 API"
                         state.apiSupported -> "官方 Service 返回 API ${state.apiVersion}：${state.frameworkName.ifBlank { "Xposed" }} ${state.frameworkVersion}"
-                        else -> "当前 API ${state.apiVersion ?: "未知"}，本注入只允许 API $TARGET_API_VERSION"
+                        else -> "当前 API ${state.apiVersion ?: "未知"}，最低需要 API $MIN_SUPPORTED_API_VERSION"
                     },
                     icon = Icons.Rounded.Movie,
                     trailing = {
                         StatusChip(
                             when {
                                 state.loading -> "检查中"
-                                state.apiSupported -> "API 101"
+                                state.apiSupported -> "API ${state.apiVersion}"
                                 state.serviceConnected -> "API ${state.apiVersion ?: "?"}"
                                 else -> "未激活"
                             }
@@ -167,7 +172,34 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                     title = "作用域 / Remote Preferences",
                     subtitle = scopeStatusSubtitle(state),
                     icon = Icons.Rounded.Search,
-                    trailing = { StatusChip(if (state.scopeReady) "已勾选" else "未勾选") }
+                    trailing = {
+                        StatusChip(
+                            when {
+                                state.loading -> "检查中"
+                                !state.serviceConnected -> "未连接"
+                                !state.scopeReady -> "未勾选"
+                                state.remotePreferencesAvailable -> "配置可用"
+                                else -> "配置不可用"
+                            }
+                        )
+                    }
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "API 102 扩展能力",
+                    subtitle = api102StatusSubtitle(state),
+                    icon = Icons.Rounded.Autorenew,
+                    trailing = {
+                        StatusChip(
+                            when {
+                                state.loading -> "检查中"
+                                !state.serviceConnected -> "未连接"
+                                (state.apiVersion ?: 0) < API_102_VERSION -> "101 兼容"
+                                state.api102FeaturesAvailable -> "102 可用"
+                                else -> "受限"
+                            }
+                        )
+                    }
                 )
             }
 
@@ -179,7 +211,7 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                 SettingsSwitchItem(
                     title = "启用影视壳播放页注入",
                     subtitle = if (state.environmentReady) {
-                        if (injectionChecked) "LSPosed API/作用域正常，播放页注入处于开启状态" else "已关闭：播放页不会插入 APP弹幕按钮"
+                        if (injectionChecked) "LSPosed API 101+ / 作用域 / Remote Preferences 正常，播放页注入处于开启状态" else "已关闭：播放页不会插入 APP弹幕按钮"
                     } else missingEnvironment,
                     icon = Icons.Rounded.Search,
                     checked = injectionChecked,
@@ -306,15 +338,30 @@ private fun loadVideoShellInjectionState(context: android.content.Context): Vide
         val frameworkName = runCatching { service.frameworkName }.getOrDefault("")
         val frameworkVersion = runCatching { service.frameworkVersion }.getOrDefault("")
         val scopePackages = runCatching { service.scope.toSet() }.getOrDefault(emptySet())
-        val serviceReady = apiVersion == TARGET_API_VERSION && scopePackages.any { it in TARGET_PACKAGES }
-        val remotePrefs = if (serviceReady) service.getRemotePreferences(REMOTE_PREF_GROUP) else null
-        if (remotePrefs != null) syncRuntimeAccessToRemotePreferences(context, remotePrefs)
-        val injectionEnabled = if (serviceReady && remotePrefs != null) {
-            remotePrefs.getBoolean(KEY_INJECTION_ENABLED, true)
-        } else false
-        val autoPushEnabled = if (serviceReady && injectionEnabled && remotePrefs != null) {
-            remotePrefs.getBoolean(KEY_AUTO_PUSH_ENABLED, true)
-        } else false
+        val apiSupported = apiVersion >= MIN_SUPPORTED_API_VERSION
+        val scopeReady = scopePackages.any { it in TARGET_PACKAGES }
+        val remotePreferencesCapable = hasRemotePreferencesCapability(service)
+        val remotePrefsResult = if (apiSupported && scopeReady && remotePreferencesCapable) {
+            runCatching { service.getRemotePreferences(REMOTE_PREF_GROUP) }
+        } else null
+        val remotePrefs = remotePrefsResult?.getOrNull()
+        val remotePrefsError = when {
+            apiSupported && scopeReady && !remotePreferencesCapable -> "框架未声明 Remote Preferences 能力"
+            else -> remotePrefsResult?.exceptionOrNull()?.message.orEmpty()
+        }
+        val api102Probe = probeApi102Features(service, apiVersion)
+        val injectionEnabled: Boolean
+        val autoPushEnabled: Boolean
+        if (apiSupported && scopeReady && remotePrefs != null) {
+            syncRuntimeAccessToRemotePreferences(context, remotePrefs)
+            injectionEnabled = remotePrefs.getBoolean(KEY_INJECTION_ENABLED, true)
+            autoPushEnabled = if (injectionEnabled) {
+                remotePrefs.getBoolean(KEY_AUTO_PUSH_ENABLED, true)
+            } else false
+        } else {
+            injectionEnabled = false
+            autoPushEnabled = false
+        }
         VideoShellInjectionState(
             loading = false,
             serviceConnected = true,
@@ -322,12 +369,17 @@ private fun loadVideoShellInjectionState(context: android.content.Context): Vide
             frameworkName = frameworkName,
             frameworkVersion = frameworkVersion,
             scopePackages = scopePackages,
+            remotePreferencesAvailable = remotePrefs != null,
+            remotePreferencesError = remotePrefsError,
+            api102FeaturesAvailable = api102Probe.available,
+            api102FeatureMessage = api102Probe.message,
             injectionEnabled = injectionEnabled,
             autoPushEnabled = autoPushEnabled,
             message = when {
-                apiVersion != TARGET_API_VERSION -> "当前 LSPosed API $apiVersion，不是 API $TARGET_API_VERSION"
-                !scopePackages.any { it in TARGET_PACKAGES } -> "LSPosed 作用域未勾选推荐影视壳"
-                else -> "LSPosed API 101 和作用域正常"
+                !apiSupported -> "当前 LSPosed API $apiVersion，低于最低 API $MIN_SUPPORTED_API_VERSION"
+                !scopeReady -> "LSPosed 作用域未勾选推荐影视壳"
+                remotePrefs == null -> remotePreferencesUnavailableText(remotePrefsError)
+                else -> "LSPosed API $apiVersion、作用域和 Remote Preferences 正常"
             }
         )
     } catch (throwable: Throwable) {
@@ -344,9 +396,10 @@ private fun stateStatusSubtitle(state: VideoShellInjectionState): String {
         state.loading -> "正在等待官方 XposedServiceHelper 回调"
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O -> "当前系统版本低于 libxposed Service 要求"
         !state.serviceConnected -> "未收到 LSPosed Service：模块未启用、LSPosed 未激活，或本 App 需重启"
-        !state.apiSupported -> "已连接 Service，但 API 不是 $TARGET_API_VERSION"
+        !state.apiSupported -> "已连接 Service，但 API 低于 $MIN_SUPPORTED_API_VERSION"
         !state.scopeReady -> "已连接 Service，但模块作用域未勾选推荐影视壳"
-        else -> "官方 Service 已连接，API 与作用域均满足"
+        !state.remotePreferencesAvailable -> "已连接 Service，但 ${remotePreferencesUnavailableText(state.remotePreferencesError)}"
+        else -> "官方 Service 已连接，API、作用域与 Remote Preferences 均满足"
     }
 }
 
@@ -354,8 +407,19 @@ private fun scopeStatusSubtitle(state: VideoShellInjectionState): String {
     return when {
         state.loading -> "正在读取官方 getScope() 和 Remote Preferences"
         !state.serviceConnected -> "未连接 Service，无法读取作用域和远程配置"
+        !state.apiSupported -> "当前 API 低于 $MIN_SUPPORTED_API_VERSION，无法使用本注入所需的现代 Remote Preferences"
         !state.scopeReady -> "推荐在 LSPosed 作用域中勾选正在使用的影视壳：${TARGET_PACKAGES.joinToString(" / ")}"
+        !state.remotePreferencesAvailable -> "作用域已勾选，但 ${remotePreferencesUnavailableText(state.remotePreferencesError)}"
         else -> "已勾选推荐影视壳之一；开关状态来自 LSPosed Remote Preferences"
+    }
+}
+
+private fun api102StatusSubtitle(state: VideoShellInjectionState): String {
+    return when {
+        state.loading -> "正在检测 API 102 运行目标 / 热重载扩展"
+        !state.serviceConnected -> "未连接 Service，无法检测 API 102 扩展"
+        (state.apiVersion ?: 0) < API_102_VERSION -> "当前 API ${state.apiVersion ?: "未知"}：保持 API 101 兼容模式，不调用 102-only 接口"
+        else -> state.api102FeatureMessage.ifBlank { "API 102 扩展状态未知" }
     }
 }
 
@@ -363,9 +427,18 @@ private fun missingEnvironmentMessage(state: VideoShellInjectionState): String {
     return when {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O -> "缺少环境：libxposed Service 需要 Android 8.0+"
         !state.serviceConnected -> "缺少环境：LSPosed Service 未连接，请在 LSPosed 启用模块并重启本 App"
-        !state.apiSupported -> "缺少环境：当前 API ${state.apiVersion ?: "未知"}，需要 API $TARGET_API_VERSION"
+        !state.apiSupported -> "缺少环境：当前 API ${state.apiVersion ?: "未知"}，最低需要 API $MIN_SUPPORTED_API_VERSION"
         !state.scopeReady -> "缺少环境：LSPosed 作用域未勾选推荐影视壳"
+        !state.remotePreferencesAvailable -> "缺少环境：${remotePreferencesUnavailableText(state.remotePreferencesError)}"
         else -> "环境可用"
+    }
+}
+
+private fun remotePreferencesUnavailableText(error: String): String {
+    return if (error.isBlank()) {
+        "Remote Preferences 不可用"
+    } else {
+        "Remote Preferences 不可用：$error"
     }
 }
 
@@ -378,14 +451,21 @@ private fun saveVideoShellInjectionSwitches(
         ?: return SaveResult(false, "缺少环境：LSPosed Service 未连接")
     return try {
         val apiVersion = service.apiVersion
-        if (apiVersion != TARGET_API_VERSION) {
-            return SaveResult(false, "缺少环境：当前 API $apiVersion，需要 API $TARGET_API_VERSION")
+        if (apiVersion < MIN_SUPPORTED_API_VERSION) {
+            return SaveResult(false, "缺少环境：当前 API $apiVersion，最低需要 API $MIN_SUPPORTED_API_VERSION")
         }
         val scopeReady = service.scope.any { it in TARGET_PACKAGES }
         if (!scopeReady) {
             return SaveResult(false, "缺少环境：LSPosed 作用域未勾选推荐影视壳")
         }
-        val remotePrefs = service.getRemotePreferences(REMOTE_PREF_GROUP)
+        if (!hasRemotePreferencesCapability(service)) {
+            return SaveResult(false, "缺少环境：${remotePreferencesUnavailableText("框架未声明 Remote Preferences 能力")}")
+        }
+        val remotePrefs = try {
+            service.getRemotePreferences(REMOTE_PREF_GROUP)
+        } catch (throwable: Throwable) {
+            return SaveResult(false, "缺少环境：${remotePreferencesUnavailableText(throwable.message.orEmpty())}")
+        }
         val access = resolveRuntimeAccess(context)
         val ok = remotePrefs
             .edit()
@@ -416,6 +496,32 @@ private fun syncRuntimeAccessToRemotePreferences(
         .putString(KEY_CORE_TOKEN, access.runtimeToken)
         .apply()
 }
+
+private fun hasRemotePreferencesCapability(service: XposedService): Boolean {
+    return runCatching {
+        (service.frameworkProperties and XposedService.PROP_CAP_REMOTE) != 0L
+    }.getOrDefault(false)
+}
+
+private fun probeApi102Features(service: XposedService, apiVersion: Int): Api102Probe {
+    if (apiVersion < API_102_VERSION) {
+        return Api102Probe(false, "当前 API $apiVersion：保持 API 101 兼容模式")
+    }
+    return runCatching {
+        val targets = service.runningTargets
+        Api102Probe(
+            available = true,
+            message = "API 102 扩展可用；当前运行目标 ${targets.size} 个，支持 App 侧运行目标检测/热重载触发"
+        )
+    }.getOrElse { throwable ->
+        Api102Probe(false, "API 102 扩展调用失败：${throwable.message ?: throwable.javaClass.simpleName}")
+    }
+}
+
+private data class Api102Probe(
+    val available: Boolean,
+    val message: String
+)
 
 private data class SaveResult(
     val ok: Boolean,
@@ -470,11 +576,16 @@ private object VideoShellXposedServiceRegistry {
     private fun serviceScore(service: XposedService): Int {
         var score = 0
         val apiVersion = runCatching { service.apiVersion }.getOrDefault(-1)
-        if (apiVersion == TARGET_API_VERSION) score += 100
+        if (apiVersion >= MIN_SUPPORTED_API_VERSION) {
+            score += 1_000 + apiVersion.coerceAtMost(999)
+        } else if (apiVersion > 0) {
+            score += apiVersion
+        }
         val scopeReady = runCatching { service.scope.any { it in TARGET_PACKAGES } }.getOrDefault(false)
-        if (scopeReady) score += 50
-        val prefsReady = runCatching { service.getRemotePreferences(REMOTE_PREF_GROUP) }.isSuccess
-        if (prefsReady) score += 10
+        if (scopeReady) score += 200
+        val prefsReady = apiVersion >= MIN_SUPPORTED_API_VERSION && scopeReady && hasRemotePreferencesCapability(service) &&
+            runCatching { service.getRemotePreferences(REMOTE_PREF_GROUP) }.isSuccess
+        if (prefsReady) score += 50
         return score
     }
 
