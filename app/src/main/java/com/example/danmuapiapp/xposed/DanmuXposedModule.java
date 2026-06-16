@@ -17,6 +17,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Bundle;
 import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
@@ -54,6 +55,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -64,14 +66,22 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
+import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam;
+import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam;
 
 /**
- * LSPosed API 101 entry point. It runs inside the hooked OK影视/FongMi process.
+ * LSPosed API 102 target / API 101+ compatible entry point. It runs inside the hooked OK影视/FongMi process.
  */
 public class DanmuXposedModule extends XposedModule {
     private static final String TAG = "DanmuAppXposed";
     private static final String MODULE_PACKAGE = "com.example.danmuapiapp";
+    private static final int API_102_VERSION = 102;
+    private static final String HOOK_ID_ON_RESUME = "danmuapi.activity.onResume";
+    private static final String HOOK_ID_ON_WINDOW_FOCUS_CHANGED = "danmuapi.activity.onWindowFocusChanged";
+    private static final String HOOK_ID_ON_PAUSE = "danmuapi.activity.onPause";
+    private static final String HOOK_ID_ON_DESTROY = "danmuapi.activity.onDestroy";
     private static final String BUTTON_TAG = "com.example.danmuapiapp.APP_DANMU_BUTTON";
     private static final String SETTINGS_ROW_TAG = "com.example.danmuapiapp.APP_DANMU_SETTINGS_ROW";
     private static final String SETTINGS_OVERLAY_TAG = "com.example.danmuapiapp.APP_DANMU_SETTINGS_OVERLAY";
@@ -126,6 +136,7 @@ public class DanmuXposedModule extends XposedModule {
     private String packageName = "";
     private boolean lifecycleHooked = false;
     private volatile boolean autoLoopStarted = false;
+    private volatile boolean moduleGenerationActive = true;
     private volatile boolean playbackActivityVisible = false;
     private volatile int foregroundActivityIdentity = 0;
     private volatile long autoLoopFastUntilMs = 0L;
@@ -141,6 +152,7 @@ public class DanmuXposedModule extends XposedModule {
     private volatile WeakReference<Activity> autoLoopActivity = null;
     private volatile PendingAutoPush pendingAutoPush = null;
     private final Object autoPlanLock = new Object();
+    private final List<XposedInterface.HookHandle> activityHookHandles = Collections.synchronizedList(new ArrayList<>());
     private final Map<Integer, android.view.ViewTreeObserver.OnGlobalLayoutListener> injectionWatchers = new ConcurrentHashMap<>();
     private final Map<String, Boolean> settingsOverlayBackHooks = new ConcurrentHashMap<>();
     private volatile String cachedCoreBase = "";
@@ -178,6 +190,51 @@ public class DanmuXposedModule extends XposedModule {
     }
 
     @Override
+    public boolean onHotReloading(HotReloadingParam param) {
+        try {
+            moduleGenerationActive = false;
+            Activity currentActivity = null;
+            WeakReference<Activity> activityRef = autoLoopActivity;
+            if (activityRef != null) currentActivity = activityRef.get();
+            if (currentActivity != null) clearInjectionWatch(currentActivity);
+            playbackActivityVisible = false;
+            autoLoopActivity = null;
+            wakeAutoLoop();
+            Bundle outState = new Bundle();
+            outState.putString("packageName", packageName == null ? "" : packageName);
+            outState.putString("lastAutoSignature", lastAutoSignature == null ? "" : lastAutoSignature);
+            outState.putString("lastPushInfo", lastPushInfo == null ? "" : lastPushInfo);
+            outState.putLong("lastPushAtMs", lastPushAtMs);
+            outState.putLong("playbackSessionSerial", playbackSessionSerial);
+            param.setSavedInstanceState(outState);
+            log(Log.INFO, TAG, "api102 hot reload accepted; old generation is stopping");
+            return true;
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "api102 hot reload prepare failed: " + throwable.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public void onHotReloaded(HotReloadedParam param) {
+        moduleGenerationActive = true;
+        restoreHotReloadState(param);
+        unhookOldHotReloadHandles(param);
+        if (MODULE_PACKAGE.equals(packageName)) {
+            log(Log.INFO, TAG, "api102 hot reloaded in module app; skip target hooks");
+            return;
+        }
+        lifecycleHooked = false;
+        try {
+            hookActivityLifecycle();
+            lifecycleHooked = true;
+            log(Log.INFO, TAG, "api102 hot reloaded in " + param.getProcessName() + "; activity lifecycle re-hooked");
+        } catch (Throwable throwable) {
+            log(Log.ERROR, TAG, "api102 hot reload re-hook failed", throwable);
+        }
+    }
+
+    @Override
     public void onPackageLoaded(PackageLoadedParam param) {
         packageName = param.getPackageName();
         if (!MODULE_PACKAGE.equals(packageName)) {
@@ -200,8 +257,9 @@ public class DanmuXposedModule extends XposedModule {
     }
 
     private void hookActivityLifecycle() throws NoSuchMethodException {
+        activityHookHandles.clear();
         Method onResume = Activity.class.getDeclaredMethod("onResume");
-        hook(onResume).intercept(chain -> {
+        installActivityHook(onResume, HOOK_ID_ON_RESUME, chain -> {
             Object result = chain.proceed();
             Object thisObject = chain.getThisObject();
             if (thisObject instanceof Activity) {
@@ -212,7 +270,7 @@ public class DanmuXposedModule extends XposedModule {
         });
 
         Method onWindowFocusChanged = Activity.class.getDeclaredMethod("onWindowFocusChanged", boolean.class);
-        hook(onWindowFocusChanged).intercept(chain -> {
+        installActivityHook(onWindowFocusChanged, HOOK_ID_ON_WINDOW_FOCUS_CHANGED, chain -> {
             Object result = chain.proceed();
             Object thisObject = chain.getThisObject();
             Object hasFocus = chain.getArg(0);
@@ -224,7 +282,7 @@ public class DanmuXposedModule extends XposedModule {
         });
 
         Method onPause = Activity.class.getDeclaredMethod("onPause");
-        hook(onPause).intercept(chain -> {
+        installActivityHook(onPause, HOOK_ID_ON_PAUSE, chain -> {
             Object result = chain.proceed();
             Object thisObject = chain.getThisObject();
             if (thisObject instanceof Activity) {
@@ -234,7 +292,7 @@ public class DanmuXposedModule extends XposedModule {
         });
 
         Method onDestroy = Activity.class.getDeclaredMethod("onDestroy");
-        hook(onDestroy).intercept(chain -> {
+        installActivityHook(onDestroy, HOOK_ID_ON_DESTROY, chain -> {
             Object result = chain.proceed();
             Object thisObject = chain.getThisObject();
             if (thisObject instanceof Activity) {
@@ -242,6 +300,54 @@ public class DanmuXposedModule extends XposedModule {
             }
             return result;
         });
+    }
+
+    private XposedInterface.HookHandle installActivityHook(Method method, String hookId, XposedInterface.Hooker hooker) {
+        XposedInterface.HookBuilder builder = hook(method);
+        if (getApiVersion() >= API_102_VERSION) {
+            try {
+                builder.setId(hookId);
+            } catch (Throwable throwable) {
+                log(Log.WARN, TAG, "api102 hook id unavailable for " + hookId + ": " + throwable.getMessage());
+            }
+        }
+        XposedInterface.HookHandle handle = builder.intercept(hooker);
+        activityHookHandles.add(handle);
+        return handle;
+    }
+
+    private void restoreHotReloadState(HotReloadedParam param) {
+        try {
+            if (getApiVersion() < API_102_VERSION) return;
+            Object state = param.getSavedInstanceState();
+            if (!(state instanceof Bundle)) return;
+            Bundle bundle = (Bundle) state;
+            packageName = bundle.getString("packageName", packageName == null ? "" : packageName);
+            lastAutoSignature = bundle.getString("lastAutoSignature", "");
+            lastPushInfo = bundle.getString("lastPushInfo", "");
+            lastPushAtMs = bundle.getLong("lastPushAtMs", 0L);
+            playbackSessionSerial = bundle.getLong("playbackSessionSerial", playbackSessionSerial);
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "api102 hot reload state restore failed: " + throwable.getMessage());
+        }
+    }
+
+    private void unhookOldHotReloadHandles(HotReloadedParam param) {
+        try {
+            if (getApiVersion() < API_102_VERSION) return;
+            List<XposedInterface.HookHandle> oldHandles = param.getOldHookHandles();
+            if (oldHandles == null) return;
+            for (XposedInterface.HookHandle handle : oldHandles) {
+                if (handle == null) continue;
+                try {
+                    handle.unhook();
+                } catch (Throwable throwable) {
+                    log(Log.WARN, TAG, "api102 old hook unhook failed: " + throwable.getMessage());
+                }
+            }
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "api102 old hook cleanup failed: " + throwable.getMessage());
+        }
     }
 
     private void scheduleInject(Activity activity) {
@@ -3347,7 +3453,7 @@ public class DanmuXposedModule extends XposedModule {
             autoLoopStarted = true;
         }
         Thread loop = new Thread(() -> {
-            while (true) {
+            while (moduleGenerationActive) {
                 long delayMs = AUTO_POLL_FAST_MS;
                 try {
                     if (!isPlaybackActivityVisible()) {
@@ -3407,6 +3513,10 @@ public class DanmuXposedModule extends XposedModule {
                     sleepAutoLoopQuietly(AUTO_POLL_ERROR_MS);
                 }
             }
+            synchronized (DanmuXposedModule.this) {
+                autoLoopStarted = false;
+            }
+            log(Log.INFO, TAG, "xposed auto push loop stopped");
         }, "DanmuAutoPushLoop");
         loop.setDaemon(true);
         loop.start();

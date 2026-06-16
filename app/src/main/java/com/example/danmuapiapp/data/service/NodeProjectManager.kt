@@ -50,6 +50,17 @@ object NodeProjectManager {
 
     fun bundledRuntimeDependencyNames(): List<String> = runtimeBundledDependencyVersions.keys.toList()
 
+    private fun requiredRuntimeDependencyFiles(): List<String> = listOf(
+        "data-uri-to-buffer/dist/index.js"
+    )
+
+    internal fun hasRequiredRuntimeDependencyFiles(targetNodeModulesDir: File): Boolean {
+        if (!targetNodeModulesDir.exists() || !targetNodeModulesDir.isDirectory) return false
+        return requiredRuntimeDependencyFiles().all { relativePath ->
+            File(targetNodeModulesDir, relativePath).exists()
+        }
+    }
+
     private fun listAssetNodeModulePackageNames(
         context: Context,
         assetBasePath: String
@@ -127,7 +138,13 @@ object NodeProjectManager {
             val preserveBundledNodeModules =
                 projectAlreadyExists && shouldPreserveBundledNodeModules(context, targetDir)
 
-            if (targetDir.exists() && existingVersion == currentVersion && entryFile.exists()) {
+            val nodeModulesDir = File(targetDir, "node_modules")
+            if (
+                targetDir.exists() &&
+                existingVersion == currentVersion &&
+                entryFile.exists() &&
+                hasRequiredRuntimeDependencyFiles(nodeModulesDir)
+            ) {
                 ensureRuntimeDirs(targetDir)
                 ensureOptionalRuntimeDependencies(context, targetDir)
                 migrateAllCoreLayouts(targetDir)
@@ -593,6 +610,7 @@ object NodeProjectManager {
     private fun shouldPreserveBundledNodeModules(context: Context, targetDir: File): Boolean {
         val nodeModulesDir = File(targetDir, "node_modules")
         if (!nodeModulesDir.exists() || !nodeModulesDir.isDirectory) return false
+        if (!hasRequiredRuntimeDependencyFiles(nodeModulesDir)) return false
 
         val assetSignature = assetSha256(context, BUNDLED_PACKAGE_LOCK_ASSET)
             ?: assetSha256(context, BUNDLED_PACKAGE_JSON_ASSET)

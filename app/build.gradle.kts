@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.41"
+    ?: "1.0.5.42"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 122
+    ?: 123
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -123,7 +123,7 @@ val useProjectSigning = resolvedStoreFile != null &&
 
 android {
     namespace = "com.example.danmuapiapp"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.danmuapiapp"
@@ -199,7 +199,7 @@ android {
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // LSPosed API 101 现代模块入口文件位于 META-INF/xposed/*，必须随 APK 打包。
+            // LSPosed API 101+ 现代模块入口文件位于 META-INF/xposed/*，必须随 APK 打包。
             merges += "META-INF/xposed/*"
         }
     }
@@ -283,10 +283,10 @@ dependencies {
     // Network
     implementation(libs.okhttp)
 
-    // LSPosed / libxposed API 101: hook API compileOnly，运行时由 LSPosed 注入环境提供；
+    // LSPosed / libxposed API 102 目标：minApiVersion 仍为 101，运行时通过能力检测兼容 101+。
     // service 用于模块 App 侧按官方 XposedServiceHelper 获取真实 API/作用域/RemotePreferences。
-    compileOnly("io.github.libxposed:api:101.0.1")
-    implementation("io.github.libxposed:service:101.0.0")
+    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
 
     // Image loading
     implementation(libs.coil.compose)
@@ -610,7 +610,8 @@ tasks.register("verifyPackagedNodeModulesDebug") {
         if (!file.exists()) throw GradleException("未找到 debug APK：${file.absolutePath}")
         val requiredEntries = listOf(
             "assets/nodejs-project/node_modules/node-fetch/package.json",
-            "assets/nodejs-project/node_modules/pako/package.json"
+            "assets/nodejs-project/node_modules/pako/package.json",
+            "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js"
         )
         ZipFile(file).use { zip ->
             val missing = requiredEntries.filter { zip.getEntry(it) == null }
@@ -630,7 +631,8 @@ tasks.register("verifyPackagedNodeModulesRelease") {
         if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
         val requiredEntries = listOf(
             "assets/nodejs-project/node_modules/node-fetch/package.json",
-            "assets/nodejs-project/node_modules/pako/package.json"
+            "assets/nodejs-project/node_modules/pako/package.json",
+            "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js"
         )
         ZipFile(file).use { zip ->
             val missing = requiredEntries.filter { zip.getEntry(it) == null }
