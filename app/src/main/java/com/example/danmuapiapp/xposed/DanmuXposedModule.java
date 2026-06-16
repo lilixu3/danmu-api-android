@@ -21,7 +21,6 @@ import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -36,7 +35,6 @@ import android.widget.GridView;
 import android.widget.GridLayout;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 
@@ -109,7 +107,7 @@ public class DanmuXposedModule extends XposedModule {
     private static final Pattern PATTERN_SOURCE_FROM_TITLE = Pattern.compile("(?i)\\bfrom\\s+([a-zA-Z0-9&]+)\\s*$");
 
     private static final String[] ACTIVITY_HINTS = {
-        "video", "player", "playback", "vod"
+        "video", "player", "playback"
     };
     private static final String[] ANCHOR_TEXTS = {
         "片尾", "弹幕", "弹幕搜索", "选集", "更多", "下集"
@@ -119,7 +117,7 @@ public class DanmuXposedModule extends XposedModule {
         "片头", "片尾", "弹幕", "弹幕搜索", "选集", "更多", "下集"
     };
     private static final String[] SHELL_CONTROL_ANCHOR_IDS = {
-        "ending", "danmaku", "opening", "video", "audio", "text"
+        "danmaku", "ending", "episodes", "opening", "video", "audio", "text"
     };
     private static final String[] CONTAINER_ANCHOR_IDS = {
         "bottom"
@@ -144,6 +142,7 @@ public class DanmuXposedModule extends XposedModule {
     private volatile PendingAutoPush pendingAutoPush = null;
     private final Object autoPlanLock = new Object();
     private final Map<Integer, android.view.ViewTreeObserver.OnGlobalLayoutListener> injectionWatchers = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> settingsOverlayBackHooks = new ConcurrentHashMap<>();
     private volatile String cachedCoreBase = "";
     private volatile String lastPushInfo = "";
     private volatile String lastPushUrl = "";
@@ -375,6 +374,7 @@ public class DanmuXposedModule extends XposedModule {
                 return true;
             });
             if (addButtonToDecor(decor, button, anchor)) {
+                attachButtonReinjectGuard(activity, button);
                 log(Log.INFO, TAG, "APP danmu button injected into " + activity.getClass().getName());
                 clearInjectionWatch(activity);
             }
@@ -382,6 +382,30 @@ public class DanmuXposedModule extends XposedModule {
         } catch (Throwable throwable) {
             log(Log.WARN, TAG, "inject button failed: " + throwable.getMessage());
         }
+    }
+
+
+    private void attachButtonReinjectGuard(Activity activity, View button) {
+        if (activity == null || button == null) return;
+        button.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+                try {
+                    if (activity.isFinishing()) return;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return;
+                    Window window = activity.getWindow();
+                    View decor = window == null ? null : window.getDecorView();
+                    if (decor != null) {
+                        decor.postDelayed(() -> scheduleInject(activity), 120L);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        });
     }
 
     // 把"APP弹幕设置"作为一行注入到宿主设置面板（HomeActivity 里"播放设置"行后面）。
@@ -533,12 +557,6 @@ public class DanmuXposedModule extends XposedModule {
         return row;
     }
 
-    private Drawable cloneDrawable(Drawable src) {
-        if (src == null) return null;
-        Drawable.ConstantState state = src.getConstantState();
-        if (state == null) return null;
-        return state.newDrawable().mutate();
-    }
 
     private TextView findFirstTextView(View root) {
         if (root instanceof TextView) return (TextView) root;
@@ -609,11 +627,6 @@ public class DanmuXposedModule extends XposedModule {
             int padTop = isCenter ? dp(activity, DanmuTheme.SPACE_4) : dp(activity, DanmuTheme.SPACE_3);
             int padBottom = dp(activity, DanmuTheme.SPACE_4);
             root.setPadding(padH, padTop, padH, padBottom);
-            if (isCenter) {
-                root.setBackground(t.roundRect(t.sheetBg, DanmuTheme.RADIUS_SHEET, activity));
-            } else {
-                root.setBackground(t.topRoundedSheet(activity));
-            }
 
             if (!isCenter) {
                 root.addView(DanmuUi.dragHandle(activity, t), DanmuUi.dragHandleLp(activity, t));
@@ -917,6 +930,12 @@ public class DanmuXposedModule extends XposedModule {
                 resultsScroll.post(() -> resultsScroll.scrollTo(0, 0));
             };
 
+            if (isCenter) {
+                root.setBackground(t.roundRect(t.sheetBg, DanmuTheme.RADIUS_SHEET, activity));
+            } else {
+                root.setBackground(t.topRoundedSheet(activity));
+            }
+
             AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setView(root)
                 .create();
@@ -1021,6 +1040,7 @@ public class DanmuXposedModule extends XposedModule {
             log(Log.ERROR, TAG, "show manual search dialog failed", throwable);
         }
     }
+
 
     /** A scroll container styled as a sheet panel surface. */
     private ScrollView buildSheetScroll(Activity activity) {
@@ -2245,6 +2265,7 @@ public class DanmuXposedModule extends XposedModule {
                 Toast.makeText(activity, "打开设置失败：找不到宿主容器", Toast.LENGTH_SHORT).show();
                 return;
             }
+            installSettingsOverlayBackInterceptor(activity);
             removeExistingSettingsOverlay(hostContent);
 
             int fallbackPort = shellPortRef != null && shellPortRef.length > 0 ? shellPortRef[0] : 9978;
@@ -2273,13 +2294,6 @@ public class DanmuXposedModule extends XposedModule {
             } else {
                 root.setBackgroundColor(Color.TRANSPARENT);
             }
-            root.setOnKeyListener((view, keyCode, event) -> {
-                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
-                    closeSettingsOverlay(view);
-                    return true;
-                }
-                return false;
-            });
 
             ScrollView scroll = new ScrollView(activity);
             scroll.setFillViewport(true);
@@ -2492,6 +2506,62 @@ public class DanmuXposedModule extends XposedModule {
             Toast.makeText(activity, "打开设置失败：" + throwable.getClass().getSimpleName(), Toast.LENGTH_SHORT).show();
             log(Log.WARN, TAG, "show injection settings failed: " + throwable.getMessage());
         }
+    }
+
+    private void installSettingsOverlayBackInterceptor(Activity activity) {
+        try {
+            if (activity == null) return;
+            Method method = findHostBackHandlerMethod(activity.getClass());
+            if (method == null) return;
+            String key = method.getDeclaringClass().getName() + "#" + method.getName();
+            if (settingsOverlayBackHooks.putIfAbsent(key, Boolean.TRUE) != null) return;
+            hook(method).intercept(chain -> {
+                Object thisObject = chain.getThisObject();
+                if (thisObject instanceof Activity && closeActiveSettingsOverlay((Activity) thisObject)) {
+                    return null;
+                }
+                return chain.proceed();
+            });
+        } catch (Throwable throwable) {
+            log(Log.WARN, TAG, "install settings overlay back interceptor failed: " + throwable.getMessage());
+        }
+    }
+
+    private Method findHostBackHandlerMethod(Class<?> cls) {
+        if (cls == null || !Activity.class.isAssignableFrom(cls)) return null;
+        String[] methodNames = {"p0", "q"};
+        for (String methodName : methodNames) {
+            try {
+                Method method = cls.getDeclaredMethod(methodName);
+                if (method.getParameterTypes().length == 0) {
+                    method.setAccessible(true);
+                    return method;
+                }
+            } catch (NoSuchMethodException ignored) {
+            } catch (Throwable throwable) {
+                log(Log.WARN, TAG, "find host back handler failed: " + throwable.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private boolean closeActiveSettingsOverlay(Activity activity) {
+        ViewGroup content = findHostContentRoot(activity);
+        if (content == null) return false;
+        for (int i = content.getChildCount() - 1; i >= 0; i--) {
+            View child = content.getChildAt(i);
+            if (isSettingsOverlayView(child)) {
+                closeSettingsOverlay(child);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isSettingsOverlayView(View child) {
+        if (child == null) return false;
+        Object tag = child.getTag();
+        return tag instanceof SettingsOverlayState || SETTINGS_OVERLAY_TAG.equals(tag);
     }
 
     private ViewGroup findHostContentRoot(Activity activity) {
@@ -2987,8 +3057,7 @@ public class DanmuXposedModule extends XposedModule {
         try {
             ViewGroup content = activity == null ? null : activity.findViewById(android.R.id.content);
             View directLayer = findDirectHostWallpaperLayer(content);
-            if (directLayer != null) return directLayer;
-            return findHostWallpaperView(content);
+            return directLayer;
         } catch (Throwable ignored) {
             return null;
         }
@@ -2998,44 +3067,15 @@ public class DanmuXposedModule extends XposedModule {
         if (content == null) return null;
         for (int i = 0; i < content.getChildCount(); i++) {
             View child = content.getChildAt(i);
-            if (!looksLikeHostWallpaperLayer(child)) continue;
-            return child;
+            if (child == null || child.getVisibility() != View.VISIBLE) continue;
+            String className = child.getClass().getName();
+            if (isKnownHostWallpaperLayerClass(className)) return child;
         }
         return null;
     }
 
-    private View findHostWallpaperView(View view) {
-        if (view == null || view.getVisibility() != View.VISIBLE) return null;
-        String className = view.getClass().getName();
-        if (className.endsWith("CustomWallView") || className.contains(".CustomWallView") || looksLikeHostWallpaperLayer(view)) return view;
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                View child = findHostWallpaperView(group.getChildAt(i));
-                if (child != null) return child;
-            }
-        }
-        return null;
-    }
-
-    private boolean looksLikeHostWallpaperLayer(View view) {
-        if (!(view instanceof ViewGroup) || view.getVisibility() != View.VISIBLE) return false;
-        if (SETTINGS_OVERLAY_TAG.equals(view.getTag()) || view.getTag() instanceof SettingsOverlayState) return false;
-        String entryName = safeResourceEntryName(view);
-        if ("container".equals(entryName) || "navigation".equals(entryName)) return false;
-        String className = view.getClass().getName();
-        if (className.endsWith(".s30") || className.endsWith("s30")) return true;
-        if (className.toLowerCase(Locale.ROOT).contains("wall")) return true;
-        return hasWallpaperImageSignature((ViewGroup) view);
-    }
-
-    private boolean hasWallpaperImageSignature(ViewGroup group) {
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            if (child instanceof ImageView && "image".equals(safeResourceEntryName(child))) return true;
-            if (child instanceof ViewGroup && hasWallpaperImageSignature((ViewGroup) child)) return true;
-        }
-        return false;
+    private boolean isKnownHostWallpaperLayerClass(String className) {
+        return "s30".equals(className) || "Q3.k".equals(className);
     }
 
     private Drawable loadHostWallpaperResource(Activity activity) {
@@ -3762,10 +3802,6 @@ public class DanmuXposedModule extends XposedModule {
         activity.runOnUiThread(() -> Toast.makeText(activity, message, Toast.LENGTH_LONG).show());
     }
 
-    private ShellMedia readShellMedia() {
-        return readShellMedia(0);
-    }
-
     private ShellMedia readShellMedia(int preferredPort) {
         ArrayList<Integer> ports = new ArrayList<>();
         int preferred = preferredPort > 0 && preferredPort <= 65535 ? preferredPort : -1;
@@ -3849,11 +3885,10 @@ public class DanmuXposedModule extends XposedModule {
     }
 
     private boolean looksLikePlaybackPage(Activity activity, ViewGroup decor, Anchor anchor) {
-        String className = activity.getClass().getName().toLowerCase(Locale.ROOT);
-        for (String hint : ACTIVITY_HINTS) {
-            if (className.contains(hint)) return true;
-        }
-        if (anchor == null) return false;
+        if (anchor == null || anchor.parent == null) return false;
+        String className = activity.getClass().getName();
+        if (isKnownPlaybackActivityName(className)) return true;
+        if (!looksLikeShellControlRow(anchor.parent)) return false;
         if (decor.getWidth() > decor.getHeight() && decor.getWidth() > dp(activity, 560)) return true;
         int orientation = activity.getResources().getConfiguration().orientation;
         if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) return true;
@@ -3863,8 +3898,17 @@ public class DanmuXposedModule extends XposedModule {
             activity.getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
     }
 
+    private boolean isKnownPlaybackActivityName(String className) {
+        if (className == null || className.isEmpty()) return false;
+        if (className.endsWith(".VideoActivity")) return true;
+        String lower = className.toLowerCase(Locale.ROOT);
+        for (String hint : ACTIVITY_HINTS) {
+            if (lower.contains(hint) && lower.contains("activity")) return true;
+        }
+        return false;
+    }
+
     private View createButton(Activity activity, View anchorView) {
-        int textColor = resolveIconColor(anchorView);
         TextView button = new TextView(activity);
         button.setTag(BUTTON_TAG);
         button.setClickable(true);
@@ -3872,19 +3916,9 @@ public class DanmuXposedModule extends XposedModule {
         button.setFocusable(true);
         button.setContentDescription("APP弹幕");
         button.setText("APP弹幕");
-        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, resolveAnchorTextSizePx(activity, anchorView));
-        button.setTextColor(textColor);
         button.setSingleLine(true);
-        if (anchorView instanceof TextView) {
-            TextView anchorText = (TextView) anchorView;
-            button.setIncludeFontPadding(anchorText.getIncludeFontPadding());
-            if (anchorText.getTypeface() != null) button.setTypeface(anchorText.getTypeface());
-        } else {
-            button.setIncludeFontPadding(false);
-        }
-        button.setEllipsize(null);
         button.setGravity(Gravity.CENTER);
-        button.setBackgroundColor(Color.TRANSPARENT);
+        copyHostControlStyle(activity, button, anchorView);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             button.setElevation(0f);
             button.setStateListAnimator(null);
@@ -3895,15 +3929,72 @@ public class DanmuXposedModule extends XposedModule {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
             button.setId(View.generateViewId());
         }
-        int height = dp(activity, 28);
-        if (anchorView != null && anchorView.getLayoutParams() != null && anchorView.getLayoutParams().height > 0) {
-            height = clamp(anchorView.getLayoutParams().height, dp(activity, 24), dp(activity, 34));
-        }
-        button.setMinHeight(height);
-        button.setMinimumHeight(height);
-        button.setPadding(dp(activity, 6), 0, dp(activity, 6), 0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
         button.setTranslationY(0f);
         return button;
+    }
+
+
+    private void copyHostControlStyle(Activity activity, TextView button, View anchorView) {
+        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, resolveAnchorTextSizePx(activity, anchorView));
+        button.setTextColor(resolveIconColor(anchorView));
+        button.setIncludeFontPadding(false);
+        button.setEllipsize(null);
+        int fallbackPadding = dp(activity, 8);
+        button.setPadding(fallbackPadding, fallbackPadding, fallbackPadding, fallbackPadding);
+        if (anchorView != null) {
+            Drawable background = cloneDrawable(anchorView.getBackground());
+            if (background != null) {
+                button.setBackground(background);
+            } else {
+                applyBorderlessControlBackground(activity, button);
+            }
+            button.setPadding(anchorView.getPaddingLeft(), anchorView.getPaddingTop(), anchorView.getPaddingRight(), anchorView.getPaddingBottom());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                button.setTextAlignment(anchorView.getTextAlignment());
+            }
+        } else {
+            applyBorderlessControlBackground(activity, button);
+        }
+        if (anchorView instanceof TextView) {
+            TextView anchorText = (TextView) anchorView;
+            button.setTextSize(TypedValue.COMPLEX_UNIT_PX, anchorText.getTextSize());
+            button.setTextColor(anchorText.getCurrentTextColor());
+            button.setIncludeFontPadding(anchorText.getIncludeFontPadding());
+            if (anchorText.getTypeface() != null) button.setTypeface(anchorText.getTypeface());
+            button.setGravity(anchorText.getGravity());
+            button.setShadowLayer(anchorText.getShadowRadius(), anchorText.getShadowDx(), anchorText.getShadowDy(), anchorText.getShadowColor());
+            int maxLines = anchorText.getMaxLines();
+            if (maxLines > 0 && maxLines < Integer.MAX_VALUE) button.setMaxLines(maxLines);
+            int maxEms = anchorText.getMaxEms();
+            if (maxEms > 0 && maxEms < Integer.MAX_VALUE) button.setMaxEms(maxEms);
+            android.text.TextUtils.TruncateAt ellipsize = anchorText.getEllipsize();
+            if (ellipsize != null) button.setEllipsize(ellipsize);
+        } else {
+            button.setGravity(Gravity.CENTER);
+            button.setSingleLine(true);
+        }
+    }
+
+    private Drawable cloneDrawable(Drawable drawable) {
+        if (drawable == null) return null;
+        try {
+            Drawable.ConstantState state = drawable.getConstantState();
+            if (state != null) return state.newDrawable().mutate();
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private void applyBorderlessControlBackground(Activity activity, View view) {
+        try {
+            TypedValue outValue = new TypedValue();
+            if (activity.getTheme() != null && activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true) && outValue.resourceId != 0) {
+                view.setBackgroundResource(outValue.resourceId);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private int resolveIconColor(View anchorView) {
@@ -3939,18 +4030,22 @@ public class DanmuXposedModule extends XposedModule {
             log(Log.INFO, TAG, "APP danmu button injected near anchor: " + anchor.text);
             return true;
         } else {
-            log(Log.WARN, TAG, "no valid control-bar anchor, skip floating injection");
+            log(Log.WARN, TAG, "no valid control-bar anchor, wait for control row");
             return false;
         }
     }
 
     private ViewGroup.LayoutParams cloneLayoutParamsForInsert(Activity activity, View anchorView, View insertedView) {
         ViewGroup.LayoutParams source = anchorView.getLayoutParams();
-        int height = source != null ? source.height : ViewGroup.LayoutParams.WRAP_CONTENT;
-        if (height <= 0 || height == ViewGroup.LayoutParams.MATCH_PARENT) height = dp(activity, 28);
-        height = clamp(height, dp(activity, 22), dp(activity, 32));
         boolean textButton = insertedView instanceof TextView;
-        int width = textButton ? ViewGroup.LayoutParams.WRAP_CONTENT : height;
+        int width = textButton && source != null ? source.width : ViewGroup.LayoutParams.WRAP_CONTENT;
+        int height = textButton && source != null ? source.height : ViewGroup.LayoutParams.WRAP_CONTENT;
+        if (!textButton) {
+            int fallback = dp(activity, 28);
+            if (source != null && source.height > 0) fallback = clamp(source.height, dp(activity, 22), dp(activity, 32));
+            width = fallback;
+            height = fallback;
+        }
         ViewParent parent = anchorView.getParent();
         ViewGroup.LayoutParams lp;
         if (source instanceof LinearLayout.LayoutParams) {
@@ -4019,7 +4114,7 @@ public class DanmuXposedModule extends XposedModule {
                 found.getGlobalVisibleRect(rect);
                 String text = readViewText(found);
                 if (text.isEmpty()) text = name;
-                return new Anchor(found, parent, rect, text, anchorPriority(text), true);
+                return new Anchor(found, parent, rect, text, anchorPriority(text));
             } catch (Throwable ignored) {
             }
         }
@@ -4083,7 +4178,7 @@ public class DanmuXposedModule extends XposedModule {
                     Rect rect = new Rect();
                     textView.getGlobalVisibleRect(rect);
                     int priority = anchorPriority(text);
-                    Anchor candidate = new Anchor(textView, parent, rect, text, priority, false);
+                    Anchor candidate = new Anchor(textView, parent, rect, text, priority);
                     if (best == null || candidate.priority > best.priority ||
                         (candidate.priority == best.priority && candidate.rect.bottom > best.rect.bottom)) {
                         best = candidate;
@@ -4158,8 +4253,8 @@ public class DanmuXposedModule extends XposedModule {
 
     private int anchorPriority(String text) {
         String value = normalizeControlText(text);
-        if ("片尾".equals(value)) return 5;
-        if ("弹幕".equals(value) || "弹幕搜索".equals(value) || value.startsWith("弹幕(")) return 4;
+        if ("弹幕".equals(value) || "弹幕搜索".equals(value) || value.startsWith("弹幕(")) return 5;
+        if ("片尾".equals(value)) return 4;
         if ("选集".equals(value)) return 3;
         if ("更多".equals(value)) return 2;
         if ("下集".equals(value)) return 1;
@@ -4283,15 +4378,13 @@ public class DanmuXposedModule extends XposedModule {
         final Rect rect;
         final String text;
         final int priority;
-        final boolean fromResource;
 
-        Anchor(View view, ViewGroup parent, Rect rect, String text, int priority, boolean fromResource) {
+        Anchor(View view, ViewGroup parent, Rect rect, String text, int priority) {
             this.view = view;
             this.parent = parent;
             this.rect = rect == null ? new Rect() : rect;
             this.text = text == null ? "" : text;
             this.priority = priority;
-            this.fromResource = fromResource;
         }
     }
 
