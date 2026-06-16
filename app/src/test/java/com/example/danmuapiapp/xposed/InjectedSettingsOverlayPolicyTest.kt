@@ -34,6 +34,37 @@ class InjectedSettingsOverlayPolicyTest {
     }
 
     @Test
+    fun `注入设置子页返回键应拦截影视壳官方返回入口先关闭 overlay`() {
+        val source = readXposedSource()
+        val backHookMethod = source.substringAfter("private void installSettingsOverlayBackInterceptor")
+            .substringBefore("private Method findHostBackHandlerMethod")
+        val findBackMethod = source.substringAfter("private Method findHostBackHandlerMethod")
+            .substringBefore("private boolean closeActiveSettingsOverlay")
+        val closeActiveMethod = source.substringAfter("private boolean closeActiveSettingsOverlay")
+            .substringBefore("private boolean isSettingsOverlayView")
+
+        assertTrue(source.contains("installSettingsOverlayBackInterceptor(activity)"))
+        assertTrue("FongMi/OK Android 13+ 返回链路是 OnBackInvokedCallback -> 官方 HomeActivity 返回方法，不能只 hook onBackPressed",
+            backHookMethod.contains("findHostBackHandlerMethod(activity.getClass())"))
+        assertTrue(backHookMethod.contains("hook(method).intercept"))
+        assertTrue(backHookMethod.contains("closeActiveSettingsOverlay((Activity) thisObject)"))
+        assertTrue("有注入 overlay 时必须直接消费官方返回入口，不能继续 chain.proceed() 触发官方返回到主界面",
+            backHookMethod.contains("return null"))
+        assertTrue(source.contains("private Method findHostBackHandlerMethod(Class<?> cls)"))
+        assertTrue("FongMi 5.5.2 HomeActivity 官方返回入口是 p0()", findBackMethod.contains("\"p0\""))
+        assertTrue("OK影视 5.1.x HomeActivity 官方返回入口是 q()", findBackMethod.contains("\"q\""))
+        assertTrue(findBackMethod.contains("getDeclaredMethod(methodName)"))
+        assertTrue(closeActiveMethod.contains("findHostContentRoot(activity)"))
+        assertTrue(closeActiveMethod.contains("isSettingsOverlayView(child)"))
+        assertTrue(closeActiveMethod.contains("closeSettingsOverlay(child)"))
+
+        assertFalse("不能只靠 onBackPressed；Android 13+ FongMi 返回会绕过它走 OnBackInvokedCallback -> HomeActivity.p0()",
+            source.contains("findActivityOnBackPressedMethod"))
+        assertFalse("不能只靠 OnKeyListener 处理返回；FongMi 官方返回链路会绕过注入 View",
+            source.contains("root.setOnKeyListener"))
+    }
+
+    @Test
     fun `注入设置子页背景应裁剪复用宿主壁纸避免拼接色差`() {
         val source = readXposedSource()
 
@@ -41,8 +72,13 @@ class InjectedSettingsOverlayPolicyTest {
         assertTrue(source.contains("captureHostWallpaperBackground(activity, cropAnchor)"))
         assertTrue(source.contains("canvas.translate(wallLoc[0] - targetLoc[0], wallLoc[1] - targetLoc[1])"))
         assertTrue(source.contains("findDirectHostWallpaperLayer(content)"))
-        assertTrue(source.contains("hasWallpaperImageSignature((ViewGroup) view)"))
-        assertTrue(source.contains("\"image\".equals(safeResourceEntryName(child))"))
+        assertTrue(source.contains("isKnownHostWallpaperLayerClass(className)"))
+        assertTrue(source.contains("\"s30\""))
+        assertTrue(source.contains("\"Q3.k\""))
+        assertFalse("FongMi 5.5.2 dex 描述符是 Ls30;，运行时类名是 s30；不能保留 JADX 反编译目录里的假包名 defpackage.s30",
+            source.contains("\"defpackage.s30\""))
+        assertFalse("普通页面里的 @id/image 不能再作为壁纸发现依据", source.contains("hasWallpaperImageSignature"))
+        assertFalse("普通页面里的 className.contains(\"wall\") 不能再作为壁纸发现依据", source.contains("className.toLowerCase(Locale.ROOT).contains(\"wall\")"))
     }
 
     @Test
