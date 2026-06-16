@@ -161,6 +161,9 @@ object RuntimeWarmupManager {
         val entryFile = File(targetDir, "main.js")
         if (!entryFile.exists()) return false
 
+        val nodeModulesDir = File(targetDir, "node_modules")
+        if (!NodeProjectManager.hasRequiredRuntimeDependencyFiles(nodeModulesDir)) return false
+
         val versionFile = File(targetDir, ".app_version")
         if (!versionFile.exists()) return false
 
