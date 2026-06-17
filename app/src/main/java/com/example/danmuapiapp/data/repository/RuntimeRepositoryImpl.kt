@@ -824,7 +824,10 @@ class RuntimeRepositoryImpl @Inject constructor(
             RunMode.Root -> {
                 val result = RootRuntimeController.start(context, state.port, quickMode = false)
                 if (result.ok) {
-                    markRunning(pid = RootRuntimeController.getPid(context), forceNewStart = true)
+                    markRunning(
+                        pid = RootRuntimeController.getPid(context),
+                        forceNewStart = shouldForceNewRootStartedAt(result.startOutcome)
+                    )
                     addLog(LogLevel.Info, result.message)
                 } else {
                     val detail = result.detail.ifBlank { result.message }
