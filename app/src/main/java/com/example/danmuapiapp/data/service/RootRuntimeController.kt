@@ -19,8 +19,15 @@ object RootRuntimeController {
     data class OpResult(
         val ok: Boolean,
         val message: String,
-        val detail: String = ""
+        val detail: String = "",
+        val startOutcome: StartOutcome = StartOutcome.NotStarted
     )
+
+    enum class StartOutcome {
+        NotStarted,
+        AlreadyRunning,
+        StartedNewProcess
+    }
 
     private const val PROCESS_NAME = "danmuapi_rootnode"
     private const val PID_FILE_NAME = "root_node.pid"
@@ -94,7 +101,11 @@ object RootRuntimeController {
         skipSync: Boolean = false
     ): OpResult {
         if (isRunningFast(port)) {
-            return OpResult(true, "Root 模式已在运行")
+            return OpResult(
+                ok = true,
+                message = "Root 模式已在运行",
+                startOutcome = StartOutcome.AlreadyRunning
+            )
         }
 
         AppDiagnosticLogger.i(context, "RootRuntimeController", "请求启动 Root 模式，端口=$port")
@@ -103,6 +114,14 @@ object RootRuntimeController {
         if (!RootShell.hasRoot(3000L)) {
             AppDiagnosticLogger.e(context, "RootRuntimeController", "Root 授权失败")
             return OpResult(false, "Root 授权失败", "请确认设备已 Root，并允许本应用获取 Root 权限")
+        }
+
+        if (isRunning(context, port)) {
+            return OpResult(
+                ok = true,
+                message = "Root 模式已在运行",
+                startOutcome = StartOutcome.AlreadyRunning
+            )
         }
 
         // Root 与普通模式目录要彻底隔离：
@@ -217,13 +236,21 @@ object RootRuntimeController {
 
         if (quickMode) {
             AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已触发启动")
-            return OpResult(true, "Root 模式已触发启动")
+            return OpResult(
+                ok = true,
+                message = "Root 模式已触发启动",
+                startOutcome = StartOutcome.StartedNewProcess
+            )
         }
 
         val startupWait = waitForReadyOrFailure(context, port, timeoutMs = 12_000L)
         return if (startupWait.ready) {
             AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已启动，端口=$port")
-            OpResult(true, "Root 模式已启动")
+            OpResult(
+                ok = true,
+                message = "Root 模式已启动",
+                startOutcome = StartOutcome.StartedNewProcess
+            )
         } else {
             val detail = mergeRootBootstrapDetail(
                 primary = startupWait.failureDetail
