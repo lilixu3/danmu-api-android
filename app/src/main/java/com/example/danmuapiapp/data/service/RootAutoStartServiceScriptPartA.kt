@@ -188,6 +188,7 @@ object RootAutoStartServiceScriptPartA {
               PROJ="${'$'}RUNTIME/nodejs-project"
               ENTRY="${'$'}PROJ/main.js"
               PIDFILE="${'$'}RUNTIME/root_node.pid"
+              STARTED_AT_FILE="${'$'}RUNTIME/root_node_started_at_ms"
               STAMPFILE="${'$'}RUNTIME/apk_stamp"
 
               ensure_runtime() {
@@ -361,11 +362,11 @@ object RootAutoStartServiceScriptPartA {
               fi
 
               if command -v setsid >/dev/null 2>&1; then
-                setsid "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" >/dev/null 2>&1 < /dev/null &
+                setsid "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" --started-at-file "${'$'}STARTED_AT_FILE" >/dev/null 2>&1 < /dev/null &
               elif command -v nohup >/dev/null 2>&1; then
-                nohup "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" >/dev/null 2>&1 < /dev/null &
+                nohup "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" --started-at-file "${'$'}STARTED_AT_FILE" >/dev/null 2>&1 < /dev/null &
               else
-                "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" >/dev/null 2>&1 < /dev/null &
+                "${'$'}APPPROC" /system/bin --nice-name=danmuapi_rootnode "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PIDFILE" --started-at-file "${'$'}STARTED_AT_FILE" >/dev/null 2>&1 < /dev/null &
               fi
 
               log "start dispatched"

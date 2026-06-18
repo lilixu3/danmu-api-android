@@ -7,6 +7,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
+import com.example.danmuapiapp.data.repository.isRootPassiveLivenessLikely
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.net.URL
@@ -31,6 +32,7 @@ object RootRuntimeController {
 
     private const val PROCESS_NAME = "danmuapi_rootnode"
     private const val PID_FILE_NAME = "root_node.pid"
+    private const val STARTED_AT_FILE_NAME = "root_node_started_at_ms"
     private val mainClassName = RootNodeEntry::class.java.name
 
     private data class RuntimeEnvSnapshot(
@@ -42,6 +44,7 @@ object RootRuntimeController {
     )
 
     private fun pidFile(context: Context): File = File(context.filesDir, PID_FILE_NAME)
+    private fun startedAtFile(context: Context): File = File(context.filesDir, STARTED_AT_FILE_NAME)
 
     private fun rootBaseDir(context: Context): String {
         return RuntimePaths.rootBaseDir(context).absolutePath
@@ -85,6 +88,25 @@ object RootRuntimeController {
 
         runCatching { pidFile(context).delete() }
         return false
+    }
+
+    /**
+     * Passive liveness hint used by UI/state reconciliation paths.
+     *
+     * This deliberately avoids RootShell/su so foreground resume, QS tile listening,
+     * and periodic status reconciliation do not trigger Root manager authorization
+     * notifications. Active start/stop paths still use [isRunning] when they need an
+     * exact answer.
+     */
+    fun isProbablyRunning(context: Context, port: Int): Boolean {
+        val portOpen = isRunningFast(port)
+        if (portOpen) return true
+        return isRootPassiveLivenessLikely(
+            portOpen = false,
+            pidPresent = readPid(context) != null,
+            startedAtMs = getProcessStartedAtMs(context),
+            nowMs = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -144,6 +166,7 @@ object RootRuntimeController {
         val rootProject = rootProjectDir(context)
         val entryPath = "$rootProject/main.js"
         val pidPath = pidFile(context).absolutePath
+        val startedAtPath = startedAtFile(context).absolutePath
         val pkgName = context.packageName
         val apkPathHint = context.applicationInfo.sourceDir
         val libDirHint = context.applicationInfo.nativeLibraryDir
@@ -157,6 +180,7 @@ object RootRuntimeController {
             LIB_DIR_HINT=${shellQuote(libDirHint)}
             ENTRY=${shellQuote(entryPath)}
             PID_FILE=${shellQuote(pidPath)}
+            STARTED_AT_FILE=${shellQuote(startedAtPath)}
             BOOT_LOG=${shellQuote(bootLogPath)}
             MAIN_CLASS=${shellQuote(mainClassName)}
             NICE_NAME=${shellQuote(PROCESS_NAME)}
@@ -211,13 +235,13 @@ object RootRuntimeController {
 
             if command -v setsid >/dev/null 2>&1; then
               printf '%s [INFO] 使用 setsid 拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
-              setsid "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
+              setsid "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" --started-at-file "${'$'}STARTED_AT_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             elif command -v nohup >/dev/null 2>&1; then
               printf '%s [INFO] 使用 nohup 拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
-              nohup "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
+              nohup "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" --started-at-file "${'$'}STARTED_AT_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             else
               printf '%s [INFO] 直接拉起 Root 运行时\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
-              "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
+              "${'$'}APPPROC" /system/bin --nice-name="${'$'}NICE_NAME" "${'$'}MAIN_CLASS" --entry "${'$'}ENTRY" --pidfile "${'$'}PID_FILE" --started-at-file "${'$'}STARTED_AT_FILE" >> "${'$'}BOOT_LOG" 2>&1 < /dev/null &
             fi
             sleep 0.25
             printf '%s [INFO] Root 启动命令已发出\n' "${'$'}(ts)" >> "${'$'}BOOT_LOG" 2>/dev/null || true
@@ -266,12 +290,13 @@ object RootRuntimeController {
         requestShutdown(port)
 
         if (waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 4000L)) {
-            runCatching { pidFile(context).delete() }
+            clearRuntimeMarkers(context)
             return OpResult(true, "已停止")
         }
 
         val pid = readPid(context)
         if (pid == null) {
+            clearRuntimeMarkers(context)
             return OpResult(true, "已停止")
         }
 
@@ -281,13 +306,13 @@ object RootRuntimeController {
 
         RootShell.exec("kill -TERM $pid 2>/dev/null || true", timeoutMs = 5000L)
         if (waitForPidExit(pid, timeoutMs = 3000L) || waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 2500L)) {
-            runCatching { pidFile(context).delete() }
+            clearRuntimeMarkers(context)
             return OpResult(true, "已停止")
         }
 
         RootShell.exec("kill -KILL $pid 2>/dev/null || true", timeoutMs = 5000L)
         val stopped = waitForPidExit(pid, timeoutMs = 1500L) || !isPidAlive(pid)
-        if (stopped) runCatching { pidFile(context).delete() }
+        if (stopped) clearRuntimeMarkers(context)
 
         return if (stopped) {
             OpResult(true, "已停止")
@@ -324,6 +349,26 @@ object RootRuntimeController {
     }
 
     fun getPid(context: Context): Int? = readPid(context)
+    fun getProcessStartedAtMs(context: Context): Long? {
+        val f = startedAtFile(context)
+        if (!f.exists()) return null
+        val raw = runCatching { f.readText(Charsets.UTF_8) }.getOrNull()?.trim() ?: return null
+        return raw.toLongOrNull()?.takeIf { it > 0L }
+    }
+
+    internal fun buildClearRuntimeMarkersShell(pidPath: String, startedAtPath: String): String {
+        return """
+            PID_FILE=${shellQuote(pidPath)}
+            STARTED_AT_FILE=${shellQuote(startedAtPath)}
+            rm -f "${'$'}PID_FILE" "${'$'}STARTED_AT_FILE" 2>/dev/null || true
+        """.trimIndent()
+    }
+
+    private fun clearRuntimeMarkers(context: Context) {
+        runCatching { pidFile(context).delete() }
+        runCatching { startedAtFile(context).delete() }
+    }
+
     fun getPidFileLastModified(context: Context): Long? {
         val f = pidFile(context)
         if (!f.exists()) return null
@@ -444,13 +489,22 @@ object RootRuntimeController {
               ' "${'$'}ENV_FILE" > "${'$'}TMP" && mv "${'$'}TMP" "${'$'}ENV_FILE"
             }
 
+            ensure_env_default() {
+              K="${'$'}1"
+              V="${'$'}2"
+              if grep -Eq "^[[:space:]]*${'$'}K=" "${'$'}ENV_FILE" 2>/dev/null; then
+                return 0
+              fi
+              upsert_env "${'$'}K" "${'$'}V"
+            }
+
             upsert_env "DANMU_API_VARIANT" "${'$'}VARIANT"
             upsert_env "DANMU_API_PORT" "${'$'}PORT"
             upsert_env "LOG_LEVEL" "${'$'}LOG_LEVEL"
-            upsert_env "DANMU_API_LOG_TO_FILE" "0"
-            upsert_env "DANMU_API_LOG_MAX_BYTES" "1048576"
-            upsert_env "APP_LOG_TO_FILE" "0"
-            upsert_env "APP_LOG_MAX_BYTES" "1048576"
+            ensure_env_default "DANMU_API_LOG_TO_FILE" "0"
+            ensure_env_default "DANMU_API_LOG_MAX_BYTES" "1048576"
+            ensure_env_default "APP_LOG_TO_FILE" "0"
+            ensure_env_default "APP_LOG_MAX_BYTES" "1048576"
 
             if [ "${'$'}TOKEN_CONFIGURED" = "1" ]; then
               if [ -n "${'$'}TOKEN_VALUE" ]; then

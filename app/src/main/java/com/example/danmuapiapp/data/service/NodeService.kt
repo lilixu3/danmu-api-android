@@ -52,6 +52,7 @@ class NodeService : Service() {
         const val STATUS_ERROR = "error"
         const val EXTRA_ERROR = "error_message"
         private val runtimeGeneration = AtomicLong(0L)
+        const val RUNTIME_WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
         private const val STOP_SHUTDOWN_ATTEMPTS = 4
         private const val STOP_WAIT_TIMEOUT_MS = 2600L
         private const val START_TIMEOUT_KILL_DELAY_MS = 350L
@@ -266,7 +267,7 @@ class NodeService : Service() {
                 setReferenceCounted(false)
             }
             try {
-                wakeLock.acquire()
+                wakeLock.acquire(RUNTIME_WAKE_LOCK_TIMEOUT_MS)
                 runtimeWakeLock = wakeLock
             } catch (t: Throwable) {
                 runtimeWakeLock = null

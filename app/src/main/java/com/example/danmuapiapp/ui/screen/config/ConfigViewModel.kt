@@ -44,6 +44,10 @@ class ConfigViewModel @Inject constructor(
     val rawContent = envConfigRepo.rawContent
     val adminSessionState = adminSessionRepository.sessionState
 
+    init {
+        envConfigRepo.reload()
+    }
+
     private val _operationMessage = MutableStateFlow<String?>(null)
     val operationMessage: StateFlow<String?> = _operationMessage.asStateFlow()
 

@@ -49,7 +49,13 @@ class EnvConfigRepositoryImpl @Inject constructor(
     private var reloadJob: Job? = null
     private val reloadTicket = AtomicLong(0L)
 
-    init { reload() }
+    init {
+        if (currentRunMode() == RunMode.Normal) {
+            reload()
+        } else {
+            _isCatalogLoading.value = false
+        }
+    }
 
     override fun reload() {
         reloadJob?.cancel()
