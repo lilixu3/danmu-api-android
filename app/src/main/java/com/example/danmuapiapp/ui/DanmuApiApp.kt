@@ -335,7 +335,10 @@ private fun DanmuApiMainContent() {
                 )
             }
             composable(ToolRoute.CacheManagement) {
-                CacheManagementScreen(onBack = { navController.popBackStack() })
+                CacheManagementScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
+                )
             }
         }
     }

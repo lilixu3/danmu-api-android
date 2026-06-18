@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
@@ -41,6 +42,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val uiScalePrefs = context.getSharedPreferences(AppAppearancePrefs.PREFS_UI_SCALE_LEGACY, Context.MODE_PRIVATE)
     private val githubProxyPrefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
     private val githubAuthPrefs = context.getSharedPreferences("github_auth_prefs", Context.MODE_PRIVATE)
+    private val githubTokenStore = SecureStringStore(githubAuthPrefs, "danmuapi_github_auth_v1")
     private val legacyVariantPrefs = context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
 
     private val _githubProxy = MutableStateFlow(
@@ -51,7 +53,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _announcementBaseUrl = MutableStateFlow(DEFAULT_ANNOUNCEMENT_BASE_URL)
     override val announcementBaseUrl: StateFlow<String> = _announcementBaseUrl.asStateFlow()
 
-    private val _githubToken = MutableStateFlow(githubAuthPrefs.safeGetString("github_token"))
+    private val _githubToken = MutableStateFlow(githubTokenStore.get("github_token"))
     override val githubToken: StateFlow<String> = _githubToken.asStateFlow()
 
     private val _autoStart = MutableStateFlow(NormalAutoStartPrefs.isBootAutoStartEnabled(context))
@@ -165,7 +167,7 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun setGithubToken(token: String) {
         val normalized = token.trim()
-        githubAuthPrefs.edit { putString("github_token", normalized) }
+        githubTokenStore.put("github_token", normalized)
         _githubToken.value = normalized
     }
 

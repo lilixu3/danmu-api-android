@@ -2,6 +2,7 @@ package com.example.danmuapiapp.data.service
 
 import android.content.Context
 import androidx.core.content.edit
+import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.GithubProxyOption
@@ -35,6 +36,7 @@ class GithubProxyService @Inject constructor(
 
     private val prefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
     private val githubAuthPrefs = context.getSharedPreferences("github_auth_prefs", Context.MODE_PRIVATE)
+    private val githubTokenStore = SecureStringStore(githubAuthPrefs, "danmuapi_github_auth_v1")
     private val allOptions = listOf(
         GithubProxyOption(PROXY_ID_ORIGINAL, "GitHub 官方（直连）", "", isOriginal = true),
         GithubProxyOption("gh_proxy_org", "GH-Proxy.org", "https://gh-proxy.org"),
@@ -94,7 +96,7 @@ class GithubProxyService @Inject constructor(
 
     private fun authHeaderValue(requestUrl: String): String? {
         if (!isGithubApiRequest(requestUrl)) return null
-        val raw = githubAuthPrefs.safeGetString("github_token").trim()
+        val raw = githubTokenStore.get("github_token").trim()
         if (raw.isBlank()) return null
         if (raw.startsWith("Bearer ", ignoreCase = true) ||
             raw.startsWith("token ", ignoreCase = true)

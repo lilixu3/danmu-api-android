@@ -28,17 +28,22 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
+import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
+import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
 fun CacheManagementScreen(
     onBack: () -> Unit,
+    onOpenAdminMode: () -> Unit,
     viewModel: CacheViewModel = hiltViewModel()
 ) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -189,23 +194,13 @@ fun CacheManagementScreen(
 
 
     if (viewModel.showAdminRequiredDialog) {
-        AppBottomSheetDialog(
-            onDismissRequest = viewModel::dismissAdminRequiredDialog,
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Warning,
-            icon = { Icon(Icons.Rounded.AdminPanelSettings, null) },
-            title = { Text("需要管理员模式") },
-            text = {
-                Text(
-                    viewModel.adminRequiredMessage,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::dismissAdminRequiredDialog) {
-                    Text("知道了")
-                }
-            }
+        AdminModeRequiredDialog(
+            prompt = adminModeRequiredPrompt(
+                target = AdminModeRequiredTarget.ClearCache,
+                hasAdminTokenConfigured = adminState.hasAdminTokenConfigured
+            ),
+            onOpenAdminMode = onOpenAdminMode,
+            onDismiss = viewModel::dismissAdminRequiredDialog
         )
     }
 
