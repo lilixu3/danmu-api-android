@@ -40,6 +40,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
+import com.example.danmuapiapp.ui.component.AdminModeRequiredPrompt
+import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
+import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
 import com.example.danmuapiapp.domain.model.EnvType
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.google.zxing.BarcodeFormat
@@ -118,6 +122,7 @@ fun ConfigScreen(
     val grouped = remember(filteredCatalog) { filteredCatalog.groupBy { it.category } }
     val configuredCount = envVars.size
     val totalCount = filteredCatalog.size
+    var adminRequiredPrompt by remember { mutableStateOf<AdminModeRequiredPrompt?>(null) }
 
     val categoryLabels = mapOf(
         "api" to "API 配置",
@@ -151,6 +156,14 @@ fun ConfigScreen(
             onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) },
             onVerifyAiConnectivity = { apiKey -> viewModel.verifyAiConnectivity(apiKey) },
             onFetchRecentAnimeCache = { viewModel.fetchRecentAnimeCache() }
+        )
+    }
+
+    adminRequiredPrompt?.let { prompt ->
+        AdminModeRequiredDialog(
+            prompt = prompt,
+            onOpenAdminMode = onOpenAdminMode,
+            onDismiss = { adminRequiredPrompt = null }
         )
     }
 
@@ -250,6 +263,12 @@ fun ConfigScreen(
             RawEditMode(
                 rawContent = rawContent,
                 onSave = { viewModel.saveRawContent(it) },
+                onRequireAdminMode = {
+                    adminRequiredPrompt = adminModeRequiredPrompt(
+                        target = AdminModeRequiredTarget.RawConfig,
+                        hasAdminTokenConfigured = adminState.hasAdminTokenConfigured
+                    )
+                },
                 envFilePath = viewModel.getEnvFilePath(),
                 editable = adminState.isAdminMode,
                 modifier = Modifier.weight(1f)
@@ -261,7 +280,16 @@ fun ConfigScreen(
                 envVars = envVars,
                 searchQuery = searchQuery,
                 onSearchChange = { viewModel.setSearch(it) },
-                onEditVar = { viewModel.openEditor(it) },
+                onEditVar = { def ->
+                    if (adminState.isAdminMode) {
+                        viewModel.openEditor(def)
+                    } else {
+                        adminRequiredPrompt = adminModeRequiredPrompt(
+                            target = AdminModeRequiredTarget.ConfigItem(def.key),
+                            hasAdminTokenConfigured = adminState.hasAdminTokenConfigured
+                        )
+                    }
+                },
                 editable = adminState.isAdminMode,
                 isCatalogLoading = isCatalogLoading,
                 catalogEmpty = catalog.isEmpty(),

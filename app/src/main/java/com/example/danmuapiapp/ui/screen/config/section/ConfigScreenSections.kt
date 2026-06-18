@@ -168,6 +168,7 @@ internal fun VisualEditMode(
 internal fun RawEditMode(
     rawContent: String,
     onSave: (String) -> Unit,
+    onRequireAdminMode: () -> Unit,
     envFilePath: String,
     editable: Boolean,
     modifier: Modifier = Modifier
@@ -201,14 +202,16 @@ internal fun RawEditMode(
         )
 
         FilledTonalButton(
-            onClick = { onSave(text) },
-            enabled = hasChanges && editable,
+            onClick = {
+                if (editable) onSave(text) else onRequireAdminMode()
+            },
+            enabled = hasChanges,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp)
         ) {
-            Icon(Icons.Rounded.Save, null, modifier = Modifier.size(18.dp))
+            Icon(if (editable) Icons.Rounded.Save else Icons.Rounded.Lock, null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("保存")
+            Text(if (editable) "保存" else "需要管理员模式")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -225,7 +228,7 @@ internal fun EnvVarCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp,
@@ -275,7 +278,7 @@ internal fun EnvVarCard(
                 }
             }
             Icon(
-                Icons.Rounded.ChevronRight,
+                if (enabled) Icons.Rounded.ChevronRight else Icons.Rounded.Lock,
                 null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)

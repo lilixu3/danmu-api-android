@@ -267,13 +267,7 @@ object NodeProjectManager {
         updates["LOG_LEVEL"] = prefs.safeGetString("log_level", "info").ifBlank { "info" }
         updates["DANMU_API_WORKER"] = if (runtimeProfile.workerEnabled) "1" else "0"
         updates["DANMU_API_HOT_RELOAD"] = if (runtimeProfile.hotReloadEnabled) "1" else "0"
-        // 统一走 /api/logs 内存日志，禁用文件日志落盘。
-        val logSwitch = 0
-        val logMaxBytes = 1048576
-        updates["DANMU_API_LOG_TO_FILE"] = logSwitch.toString()
-        updates["DANMU_API_LOG_MAX_BYTES"] = logMaxBytes.toString()
-        updates["APP_LOG_TO_FILE"] = logSwitch.toString()
-        updates["APP_LOG_MAX_BYTES"] = logMaxBytes.toString()
+        updates.putAll(buildRuntimeEnvLogDefaults(existingEnv))
 
         val touched = linkedSetOf<String>()
         var i = 0
@@ -323,6 +317,23 @@ object NodeProjectManager {
         listOf("stable", "dev", "custom").forEach { key ->
             normalizeCoreLayout(File(projectDir, "danmu_api_$key"))
         }
+    }
+
+    internal fun buildRuntimeEnvLogDefaults(existingEnv: Map<String, String>): Map<String, String> {
+        val defaults = linkedMapOf<String, String>()
+        if (!existingEnv.containsKey("DANMU_API_LOG_TO_FILE")) {
+            defaults["DANMU_API_LOG_TO_FILE"] = "0"
+        }
+        if (!existingEnv.containsKey("DANMU_API_LOG_MAX_BYTES")) {
+            defaults["DANMU_API_LOG_MAX_BYTES"] = "1048576"
+        }
+        if (!existingEnv.containsKey("APP_LOG_TO_FILE")) {
+            defaults["APP_LOG_TO_FILE"] = "0"
+        }
+        if (!existingEnv.containsKey("APP_LOG_MAX_BYTES")) {
+            defaults["APP_LOG_MAX_BYTES"] = "1048576"
+        }
+        return defaults
     }
 
     /**

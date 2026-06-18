@@ -1,8 +1,10 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.domain.model.AdminSessionState
+import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -67,7 +69,11 @@ class AdminSessionRepositoryImpl @Inject constructor(
                 publishState()
             }
         }
-        refresh()
+        if (RuntimeModePrefs.get(context) == RunMode.Normal) {
+            refresh()
+        } else {
+            publishState()
+        }
     }
 
     override fun refresh() {

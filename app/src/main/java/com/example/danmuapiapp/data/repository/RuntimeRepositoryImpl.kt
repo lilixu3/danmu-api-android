@@ -278,7 +278,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         val normalRuntimeAlive = isNormalRuntimeReachable(port)
         val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
         val running = if (mode == RunMode.Root) {
-            portOpen || rootPid != null
+            RootRuntimeController.isProbablyRunning(context, port)
         } else {
             normalRuntimeAlive
         }
@@ -288,7 +288,8 @@ class RuntimeRepositoryImpl @Inject constructor(
             if (startedAt <= 0L) {
                 startedAt = when (mode) {
                     RunMode.Root -> {
-                        RootRuntimeController.getPidFileLastModified(context)
+                        RootRuntimeController.getProcessStartedAtMs(context)
+                            ?: RootRuntimeController.getPidFileLastModified(context)
                             ?: System.currentTimeMillis()
                     }
 
@@ -710,7 +711,16 @@ class RuntimeRepositoryImpl @Inject constructor(
             )
         }
         normalPendingExplicitStart = state.runMode == RunMode.Normal
-        clearRuntimeStartedAt()
+        if (state.runMode == RunMode.Root) {
+            if (shouldClearRootStartedAtBeforeStart(
+                    rootProbablyRunning = RootRuntimeController.isProbablyRunning(context, state.port)
+                )
+            ) {
+                clearRuntimeStartedAt()
+            }
+        } else {
+            clearRuntimeStartedAt()
+        }
         addLog(LogLevel.Info, "正在启动服务...")
         persistSelectedVariant(state.variant, commit = true)
 
@@ -1130,8 +1140,15 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun markError(message: String, statusMessage: String? = message) {
         val state = _runtimeState.value
-        val stillRunning = isPortOpen(state.port)
-        if (!stillRunning) {
+        val portOpen = isPortOpen(state.port)
+        val rootProbablyRunning = state.runMode == RunMode.Root &&
+            RootRuntimeController.isProbablyRunning(context, state.port)
+        val stillRunning = if (state.runMode == RunMode.Root) {
+            portOpen || rootProbablyRunning
+        } else {
+            portOpen
+        }
+        if (shouldClearStartedAtOnError(state.runMode, portOpen, rootProbablyRunning)) {
             clearRuntimeStartedAt()
         }
         if (state.runMode == RunMode.Normal && !stillRunning) {
@@ -1191,7 +1208,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             RunMode.Root -> {
-                if (RootRuntimeController.isRunning(context, state.port)) {
+                if (RootRuntimeController.isProbablyRunning(context, state.port)) {
                     markRunning(
                         pid = RootRuntimeController.getPid(context),
                         forceNewStart = false
@@ -1331,7 +1348,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             return
         }
 
-        val running = RootRuntimeController.isRunning(context, state.port)
+        val running = RootRuntimeController.isProbablyRunning(context, state.port)
         when (state.status) {
             ServiceStatus.Running -> {
                 if (!running) {
@@ -1701,7 +1718,12 @@ class RuntimeRepositoryImpl @Inject constructor(
             RunMode.Root -> {
                 // Root 模式以 Root 工作目录为唯一热更新来源，避免普通目录变更干扰。
                 stopNormalWorkDirWatcher()
-                scheduleRootFingerprintCheck()
+                // 被动运行态刷新不再扫描 Root 工作目录；该扫描需要 su，容易在
+                // 回前台、控制中心监听和周期状态纠正时触发 Root 管理器授权提示。
+                // Root 目录变更改由明确的核心/配置操作负责重启或同步。
+                cancelRootFingerprintCheck()
+                rootWorkDirFingerprint = null
+                lastRootFingerprintCheckAtMs = 0L
             }
         }
     }
@@ -2040,20 +2062,31 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun ensureRuntimeStartedAt(mode: RunMode, forceNew: Boolean): Long {
         val current = readRuntimeStartedAt()
-        if (!forceNew && current > 0L) return current
-
-        val fromNormalHealth = if (!forceNew && mode == RunMode.Normal) {
+        val fromNormalHealth = if (!forceNew) {
             recoverNormalRuntimeStartedAtFromHealth(_runtimeState.value.port)
         } else {
             null
         }
-        val fromRootPidFile = if (!forceNew && mode == RunMode.Root) {
+        val fromRootProcess = if (mode == RunMode.Root) {
+            RootRuntimeController.getProcessStartedAtMs(context)
+        } else {
+            null
+        }
+        val fromRootPidFile = if (mode == RunMode.Root) {
             RootRuntimeController.getPidFileLastModified(context)
         } else {
             null
         }
 
-        val startedAt = fromNormalHealth ?: fromRootPidFile ?: System.currentTimeMillis()
+        val startedAt = selectRuntimeStartedAtAnchor(
+            mode = mode,
+            current = current,
+            forceNew = forceNew,
+            normalHealthStartedAt = fromNormalHealth,
+            rootProcessStartedAt = fromRootProcess,
+            rootPidFileModifiedAt = fromRootPidFile,
+            nowMs = System.currentTimeMillis()
+        )
         saveRuntimeStartedAt(startedAt)
         return startedAt
     }

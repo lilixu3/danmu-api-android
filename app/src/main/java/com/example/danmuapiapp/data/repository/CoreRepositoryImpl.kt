@@ -284,19 +284,17 @@ class CoreRepositoryImpl @Inject constructor(
 
     private fun hasValidCore(variant: ApiVariant, mode: RunMode): Boolean {
         val location = getCoreLocation(variant, mode)
-        return if (mode != RunMode.Normal) {
-            rootHasValidCore(location.rootDirPath)
-        } else {
-            NodeProjectManager.hasValidCore(location.normalDir)
+        return when (corePresenceSourceFor(mode)) {
+            CorePresenceSource.NormalDir -> NodeProjectManager.hasValidCore(location.normalDir)
+            CorePresenceSource.RootDir -> rootHasValidCore(location.rootDirPath)
         }
     }
 
     private fun readLocalCoreVersion(variant: ApiVariant, mode: RunMode): String? {
         val location = getCoreLocation(variant, mode)
-        return if (mode != RunMode.Normal) {
-            rootReadCoreVersion(location.rootDirPath)
-        } else {
-            NodeProjectManager.readCoreVersion(location.normalDir)
+        return when (corePresenceSourceFor(mode)) {
+            CorePresenceSource.NormalDir -> NodeProjectManager.readCoreVersion(location.normalDir)
+            CorePresenceSource.RootDir -> rootReadCoreVersion(location.rootDirPath)
         }
     }
 

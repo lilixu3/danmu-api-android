@@ -3,6 +3,8 @@ package com.example.danmuapiapp.data.util
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.danmuapiapp.data.parser.EnvVarConfigLoader
+import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.domain.model.RunMode
 import java.io.File
 
 /**
@@ -33,10 +35,12 @@ object TokenDefaults {
     }
 
     fun resolveCoreDefaultToken(context: Context): String {
-        val fromCoreConfig = RuntimeTokenNormalizer.normalizeInput(runCatching {
-            EnvVarConfigLoader.loadDefaultValue(context, TOKEN_ENV_KEY).orEmpty().trim()
-        }.getOrNull())
-        if (fromCoreConfig.isNotBlank()) return fromCoreConfig
+        if (RuntimeModePrefs.get(context) == RunMode.Normal) {
+            val fromCoreConfig = RuntimeTokenNormalizer.normalizeInput(runCatching {
+                EnvVarConfigLoader.loadDefaultValue(context, TOKEN_ENV_KEY).orEmpty().trim()
+            }.getOrNull())
+            if (fromCoreConfig.isNotBlank()) return fromCoreConfig
+        }
 
         val fromAssetEnv = RuntimeTokenNormalizer.normalizeInput(runCatching {
             context.assets.open(ASSET_ENV_PATH).bufferedReader(Charsets.UTF_8).useLines { lines ->
