@@ -293,7 +293,7 @@ class NodeService : Service() {
     }
 
     override fun onTimeout(startId: Int) {
-        AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，正在强制停止")
+        AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，已停止前台服务")
         synchronized(stateLock) {
             isRunning = false
             isStopping = false
@@ -308,7 +308,7 @@ class NodeService : Service() {
             message = "前台服务被系统超时限制，已停止",
             error = "前台服务被系统超时限制，已停止"
         )
-        android.os.Process.killProcess(android.os.Process.myPid())
+        stopForegroundAndSelf()
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
@@ -561,7 +561,7 @@ class NodeService : Service() {
             TAG,
             startupFailure?.detail?.takeIf { it.isNotBlank() } ?: resolvedMessage
         )
-        val shouldKillProcess = synchronized(stateLock) {
+        synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
             val threadAlive = nodeThread?.isAlive == true
             isRunning = false
@@ -572,19 +572,17 @@ class NodeService : Service() {
             if (!threadAlive) {
                 nodeThread = null
             }
-            threadAlive
         }
         recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
         updateNotification("启动失败：$resolvedMessage")
         broadcastStatus(STATUS_ERROR, message = resolvedMessage, error = resolvedMessage)
-        if (!shouldKillProcess) {
-            stopForegroundAndSelf()
-            return
-        }
-        delay(START_TIMEOUT_KILL_DELAY_MS)
-        releaseRuntimeWakeLock()
-        android.os.Process.killProcess(android.os.Process.myPid())
+        AppDiagnosticLogger.w(
+            this,
+            TAG,
+            "普通模式启动超时，已停止前台服务；不再强制结束 :node 进程"
+        )
+        stopForegroundAndSelf()
     }
 
     private fun stopNode() {
