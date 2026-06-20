@@ -1261,16 +1261,12 @@ class RuntimeRepositoryImpl @Inject constructor(
                         reconcileConsecutiveDeadCount = 0
                     }
 
-                    !portOpen -> {
+                    !serviceRunning && !processRunning -> {
                         reconcileConsecutiveDeadCount++
                         if (reconcileConsecutiveDeadCount >= 2) {
                             addLog(
                                 LogLevel.Warn,
-                                if (processRunning) {
-                                    "检测到普通模式监听端口不可用，状态已自动重置；下次启动会先回收残留进程"
-                                } else {
-                                    "检测到普通模式进程已退出，状态已自动重置"
-                                }
+                                "检测到普通模式服务进程已退出，状态已自动重置"
                             )
                             markStopped("服务未运行，可重新启动")
                             reconcileConsecutiveDeadCount = 0
