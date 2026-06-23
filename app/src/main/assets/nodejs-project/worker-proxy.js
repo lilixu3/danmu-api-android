@@ -1,7 +1,7 @@
-import { parentPort, workerData } from 'node:worker_threads';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import util from 'node:util';
+const { parentPort, workerData } = require('worker_threads');
+const path = require('path');
+const { pathToFileURL } = require('url');
+const util = require('util');
 
 if (!parentPort) {
   throw new Error('worker missing parentPort');
@@ -211,10 +211,7 @@ async function loadWorker() {
   }
 }
 
-await loadWorker();
-parentPort.postMessage({ type: 'ready' });
-
-parentPort.on('message', async (msg) => {
+async function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
 
   if (msg.type === 'setEnv') {
@@ -277,4 +274,16 @@ parentPort.on('message', async (msg) => {
       error: e?.stack || e?.message || String(e),
     });
   }
+}
+
+async function main() {
+  await loadWorker();
+  parentPort.postMessage({ type: 'ready' });
+  parentPort.on('message', handleMessage);
+}
+
+main().catch((error) => {
+  setImmediate(() => {
+    throw error;
+  });
 });
