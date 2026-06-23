@@ -23,10 +23,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -57,6 +62,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,11 +73,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
@@ -160,7 +169,9 @@ fun CompatModeScreen(
                             horizontalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
                             Column(
-                                modifier = Modifier.weight(1.15f),
+                                modifier = Modifier
+                                    .weight(1.15f)
+                                    .focusGroup(),
                                 verticalArrangement = Arrangement.spacedBy(18.dp)
                             ) {
                                 ServiceHeroCard(uiState, actions)
@@ -169,7 +180,9 @@ fun CompatModeScreen(
                                 KeepAliveCard(uiState, actions)
                             }
                             Column(
-                                modifier = Modifier.weight(0.95f),
+                                modifier = Modifier
+                                    .weight(0.95f)
+                                    .focusGroup(),
                                 verticalArrangement = Arrangement.spacedBy(18.dp)
                             ) {
                                 AppUpdateCard(uiState, actions)
@@ -256,6 +269,10 @@ private fun ServiceHeroCard(
     val statusColor = statusColor(runtime.status)
     val isRunning = runtime.status == ServiceStatus.Running
     val isBusy = uiState.isOperating
+    val primaryActionRequester = remember { FocusRequester() }
+    LaunchedEffect(primaryActionRequester) {
+        primaryActionRequester.requestFocus()
+    }
     val cardTone = when (runtime.status) {
         ServiceStatus.Running -> MaterialTheme.colorScheme.tertiaryContainer
         ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.primaryContainer
@@ -318,14 +335,17 @@ private fun ServiceHeroCard(
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusGroup()
             ) {
                 TvActionButton(
                     text = if (isRunning) "重启服务" else "启动服务",
                     icon = if (isRunning) Icons.Rounded.RestartAlt else Icons.Rounded.PlayArrow,
                     tone = ButtonTone.Primary,
                     enabled = !isBusy,
-                    onClick = if (isRunning) actions.onRestartService else actions.onStartService
+                    onClick = if (isRunning) actions.onRestartService else actions.onStartService,
+                    modifier = Modifier.focusRequester(primaryActionRequester)
                 )
                 TvActionButton(
                     text = "停止服务",
@@ -349,48 +369,208 @@ private fun ServiceHeroCard(
 @Composable
 private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
     val runtime = uiState.runtimeState
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        MetricTile(
-            label = "当前核心",
-            value = resolveVariantLabel(uiState, runtime.variant),
-            icon = Icons.Rounded.Memory,
-            modifier = Modifier.weight(1f)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 680.dp
+            if (compact) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricTile(
+                            label = "当前核心",
+                            value = resolveVariantLabel(uiState, runtime.variant),
+                            icon = Icons.Rounded.Memory,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            label = "核心版本",
+                            value = coreVersionText(
+                                info = uiState.coreInfos.find { it.variant == runtime.variant },
+                                isLoading = uiState.isCoreInfoLoading
+                            ),
+                            icon = Icons.Rounded.Upgrade,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricTile(
+                            label = "运行模式",
+                            value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
+                            icon = Icons.Rounded.Security,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            label = "端口",
+                            value = runtime.port.toString(),
+                            icon = Icons.Rounded.Settings,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MetricTile(
+                        label = "当前核心",
+                        value = resolveVariantLabel(uiState, runtime.variant),
+                        icon = Icons.Rounded.Memory,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricTile(
+                        label = "核心版本",
+                        value = coreVersionText(
+                            info = uiState.coreInfos.find { it.variant == runtime.variant },
+                            isLoading = uiState.isCoreInfoLoading
+                        ),
+                        icon = Icons.Rounded.Upgrade,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricTile(
+                        label = "运行模式",
+                        value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
+                        icon = Icons.Rounded.Security,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricTile(
+                        label = "端口",
+                        value = runtime.port.toString(),
+                        icon = Icons.Rounded.Settings,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+        AccessAddressPanel(
+            localUrl = runtime.localUrl,
+            lanUrl = runtime.lanUrl
         )
-        MetricTile(
-            label = "核心版本",
-            value = coreVersionText(
-                info = uiState.coreInfos.find { it.variant == runtime.variant },
-                isLoading = uiState.isCoreInfoLoading
+    }
+}
+
+@Composable
+private fun AccessAddressPanel(
+    localUrl: String,
+    lanUrl: String
+) {
+    val hasLocal = localUrl.isNotBlank()
+    val hasLan = lanUrl.isNotBlank()
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "访问地址",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 19.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (hasLocal || hasLan) {
+                            "本机和局域网地址都保留完整显示，方便直接输入或扫码。"
+                        } else {
+                            "服务启动后会显示本机与局域网访问地址。"
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = if (hasLan) "已就绪" else "等待启动",
+                    color = if (hasLan) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
+                )
+            }
+
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val compact = maxWidth < 620.dp
+                if (compact) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AddressEntry(
+                            label = "本机访问",
+                            value = localUrl.ifBlank { "等待服务启动后生成" },
+                            icon = Icons.Rounded.Settings,
+                            accent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        AddressEntry(
+                            label = "局域网访问",
+                            value = lanUrl.ifBlank { "等待局域网地址" },
+                            icon = Icons.Rounded.Wifi,
+                            accent = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AddressEntry(
+                            label = "本机访问",
+                            value = localUrl.ifBlank { "等待服务启动后生成" },
+                            icon = Icons.Rounded.Settings,
+                            accent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AddressEntry(
+                            label = "局域网访问",
+                            value = lanUrl.ifBlank { "等待局域网地址" },
+                            icon = Icons.Rounded.Wifi,
+                            accent = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddressEntry(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 20.sp
             ),
-            icon = Icons.Rounded.Upgrade,
-            modifier = Modifier.weight(1f)
-        )
-        MetricTile(
-            label = "运行模式",
-            value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
-            icon = Icons.Rounded.Security,
-            modifier = Modifier.weight(1f)
-        )
-        MetricTile(
-            label = "端口",
-            value = runtime.port.toString(),
-            icon = Icons.Rounded.Settings,
-            modifier = Modifier.weight(1f)
-        )
-        MetricTile(
-            label = "本机地址",
-            value = runtime.localUrl.ifBlank { "--" },
-            icon = Icons.Rounded.Wifi,
-            modifier = Modifier.weight(1f)
-        )
-        MetricTile(
-            label = "局域网地址",
-            value = runtime.lanUrl.ifBlank { "--" },
-            icon = Icons.Rounded.QrCode2,
-            modifier = Modifier.weight(1f)
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 3,
+            overflow = TextOverflow.Clip
         )
     }
 }
@@ -845,6 +1025,8 @@ private fun CustomCoreEditor(
     actions: CompatModeActions
 ) {
     val source = uiState.customCoreSource
+    val focusManager = LocalFocusManager.current
+    var isEditing by rememberSaveable { mutableStateOf(false) }
     var repoText by rememberSaveable(uiState.customRepo) { mutableStateOf(uiState.customRepo) }
     var branchText by rememberSaveable(uiState.customRepoBranch) { mutableStateOf(uiState.customRepoBranch) }
 
@@ -853,48 +1035,152 @@ private fun CustomCoreEditor(
         branchText = uiState.customRepoBranch
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = repoText,
-                onValueChange = { repoText = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("仓库") },
-                placeholder = { Text("owner/repo 或 GitHub 地址") },
-                singleLine = true,
-                maxLines = 1
-            )
-            OutlinedTextField(
-                value = branchText,
-                onValueChange = { branchText = it },
-                modifier = Modifier.widthIn(min = 170.dp).weight(0.55f),
-                label = { Text("分支") },
-                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
-                singleLine = true,
-                maxLines = 1
-            )
+    val saveAction = {
+        actions.onSaveCustomCore(repoText.trim(), branchText.trim())
+        focusManager.clearFocus(force = true)
+        isEditing = false
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                .padding(14.dp)
+        ) {
+            val compact = maxWidth < 540.dp
+            if (compact) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = when {
+                            source.isValidRepo -> "当前来源：${source.sourceText}"
+                            source.isConfigured -> "仓库已配置，等待有效分支"
+                            else -> "未配置自定义仓库"
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TvActionButton(
+                        text = if (isEditing) "收起编辑" else "编辑配置",
+                        icon = if (isEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
+                        tone = ButtonTone.Secondary,
+                        enabled = !uiState.isOperating,
+                        onClick = { isEditing = !isEditing }
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "自定义核心来源",
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = when {
+                                source.isValidRepo -> "当前来源：${source.sourceText}"
+                                source.isConfigured -> "仓库已配置，等待有效分支"
+                                else -> "未配置自定义仓库"
+                            },
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TvActionButton(
+                        text = if (isEditing) "收起编辑" else "编辑配置",
+                        icon = if (isEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
+                        tone = ButtonTone.Secondary,
+                        enabled = !uiState.isOperating,
+                        onClick = { isEditing = !isEditing }
+                    )
+                }
+            }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TvActionButton(
-                text = "保存自定义核心",
-                icon = Icons.Rounded.Settings,
-                tone = ButtonTone.Secondary,
-                enabled = !uiState.isOperating,
-                onClick = {
-                    actions.onSaveCustomCore(repoText.trim(), branchText.trim())
+        AnimatedVisibility(visible = isEditing) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val compact = maxWidth < 560.dp
+                    if (compact) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = repoText,
+                                onValueChange = { repoText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("仓库") },
+                                placeholder = { Text("owner/repo 或 GitHub 地址") },
+                                singleLine = true,
+                                maxLines = 1,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                keyboardActions = KeyboardActions(onDone = { saveAction() })
+                            )
+                            OutlinedTextField(
+                                value = branchText,
+                                onValueChange = { branchText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("分支") },
+                                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
+                                singleLine = true,
+                                maxLines = 1,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { saveAction() })
+                            )
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = repoText,
+                                onValueChange = { repoText = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("仓库") },
+                                placeholder = { Text("owner/repo 或 GitHub 地址") },
+                                singleLine = true,
+                                maxLines = 1,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                keyboardActions = KeyboardActions(onDone = { saveAction() })
+                            )
+                            OutlinedTextField(
+                                value = branchText,
+                                onValueChange = { branchText = it },
+                                modifier = Modifier.widthIn(min = 170.dp).weight(0.55f),
+                                label = { Text("分支") },
+                                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
+                                singleLine = true,
+                                maxLines = 1,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { saveAction() })
+                            )
+                        }
+                    }
                 }
-            )
-            Text(
-                text = when {
-                    source.isValidRepo -> "当前来源：${source.sourceText}"
-                    source.isConfigured -> "仓库已配置，等待有效分支"
-                    else -> "未配置自定义仓库"
-                },
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.alignByBaseline()
-            )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvActionButton(
+                        text = "保存自定义核心",
+                        icon = Icons.Rounded.Settings,
+                        tone = ButtonTone.Primary,
+                        enabled = !uiState.isOperating,
+                        onClick = saveAction
+                    )
+                    TvActionButton(
+                        text = "取消编辑",
+                        icon = Icons.Rounded.ExpandLess,
+                        tone = ButtonTone.Secondary,
+                        enabled = !uiState.isOperating,
+                        onClick = {
+                            repoText = uiState.customRepo
+                            branchText = uiState.customRepoBranch
+                            focusManager.clearFocus(force = true)
+                            isEditing = false
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -1077,7 +1363,7 @@ private fun MetricTile(
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-        modifier = modifier
+        modifier = modifier.heightIn(min = 112.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1103,7 +1389,8 @@ private fun MetricTile(
                     fontWeight = FontWeight.SemiBold
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = 2,
+                lineHeight = 19.sp,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -1137,7 +1424,7 @@ private fun TvActionButton(
     }
     var focused by remember { mutableStateOf(false) }
     val focusedScale by animateFloatAsState(
-        targetValue = if (enabled && focused) 1.04f else 1f,
+        targetValue = if (enabled && focused) 1.05f else 1f,
         label = "tv_button_scale"
     )
     val shape = RoundedCornerShape(18.dp)
@@ -1173,12 +1460,13 @@ private fun TvActionButton(
             }
         ),
         modifier = modifier
-            .heightIn(min = 50.dp)
+            .widthIn(min = 118.dp)
+            .heightIn(min = 54.dp)
             .graphicsLayer {
                 scaleX = if (enabled) focusedScale else 1f
                 scaleY = if (enabled) focusedScale else 1f
             }
-            .shadow(if (enabled) 6.dp else 0.dp, shape = shape, clip = false)
+            .shadow(if (focused && enabled) 10.dp else 2.dp, shape = shape, clip = false)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 enabled = enabled,
