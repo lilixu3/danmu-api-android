@@ -196,8 +196,8 @@ object RootAutoStartServiceScriptPartA {
 
                 wrapper_ready() {
                   [ -f "${'$'}PROJ/main.js" ] &&
-                  [ -f "${'$'}PROJ/android-server.mjs" ] &&
-                  [ -f "${'$'}PROJ/worker-proxy.mjs" ] &&
+                  [ -f "${'$'}PROJ/android-server.js" ] &&
+                  [ -f "${'$'}PROJ/worker-proxy.js" ] &&
                   [ -f "${'$'}PROJ/package.json" ]
                 }
 
@@ -330,8 +330,8 @@ object RootAutoStartServiceScriptPartA {
               ensure_runtime
 
               [ -f "${'$'}ENTRY" ] || { log "entry missing: ${'$'}ENTRY"; return 1; }
-              [ -f "${'$'}PROJ/android-server.mjs" ] || { log "wrapper missing: android-server.mjs"; return 1; }
-              [ -f "${'$'}PROJ/worker-proxy.mjs" ] || { log "wrapper missing: worker-proxy.mjs"; return 1; }
+              [ -f "${'$'}PROJ/android-server.js" ] || { log "wrapper missing: android-server.js"; return 1; }
+              [ -f "${'$'}PROJ/worker-proxy.js" ] || { log "wrapper missing: worker-proxy.js"; return 1; }
               [ -f "${'$'}PROJ/package.json" ] || { log "wrapper missing: package.json"; return 1; }
               SELECTED_VARIANT=$(read_selected_variant)
               CORE_DIR="${'$'}PROJ/danmu_api_${'$'}SELECTED_VARIANT"

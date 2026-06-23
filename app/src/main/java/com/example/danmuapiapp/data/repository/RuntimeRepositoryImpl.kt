@@ -80,8 +80,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
         private val NORMAL_RESTART_CRITICAL_FILES = setOf(
             "main.js",
-            "android-server.mjs",
-            "worker-proxy.mjs"
+            "android-server.js",
+            "worker-proxy.js"
         )
         private val NORMAL_RESTART_SKIP_PREFIXES = listOf(
             "config/",
