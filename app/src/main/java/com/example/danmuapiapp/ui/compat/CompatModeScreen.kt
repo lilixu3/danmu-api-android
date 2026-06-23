@@ -72,6 +72,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -492,19 +493,22 @@ private fun CompatHeader(
             )
             NightModeButton(
                 label = nightModeLabel(uiState.nightMode),
-                onClick = actions.onToggleNightMode
+                onClick = actions.onToggleNightMode,
+                focusEnabled = false
             )
             TvActionButton(
                 text = if (currentPage == CompatPage.Settings) "首页" else "设置",
                 icon = if (currentPage == CompatPage.Settings) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Settings,
                 tone = ButtonTone.Secondary,
-                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings
+                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings,
+                focusEnabled = false
             )
             TvActionButton(
                 text = "刷新",
                 icon = Icons.Rounded.Refresh,
                 tone = ButtonTone.Secondary,
-                onClick = actions.onRefreshCoreInfo
+                onClick = actions.onRefreshCoreInfo,
+                focusEnabled = false
             )
         }
     }
@@ -1727,12 +1731,17 @@ private fun StatusChip(text: String, color: Color) {
 }
 
 @Composable
-private fun NightModeButton(label: String, onClick: () -> Unit) {
+private fun NightModeButton(
+    label: String,
+    onClick: () -> Unit,
+    focusEnabled: Boolean = true
+) {
     TvActionButton(
         text = label,
         icon = if (label.contains("浅")) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
         tone = ButtonTone.Secondary,
-        onClick = onClick
+        onClick = onClick,
+        focusEnabled = focusEnabled
     )
 }
 
@@ -1794,7 +1803,8 @@ private fun TvActionButton(
     tone: ButtonTone,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    focusEnabled: Boolean = true
 ) {
     val baseColor = when (tone) {
         ButtonTone.Primary -> MaterialTheme.colorScheme.primary
@@ -1859,6 +1869,7 @@ private fun TvActionButton(
                 scaleY = if (enabled) focusedScale else 1f
             }
             .shadow(if (focused && enabled) 10.dp else if (enabled) 2.dp else 0.dp, shape = shape, clip = false)
+            .focusProperties { canFocus = enabled && focusEnabled }
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 enabled = enabled,
@@ -1866,7 +1877,7 @@ private fun TvActionButton(
                 indication = null,
                 onClick = onClick
             )
-            .focusable(enabled)
+            .focusable(enabled && focusEnabled)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
