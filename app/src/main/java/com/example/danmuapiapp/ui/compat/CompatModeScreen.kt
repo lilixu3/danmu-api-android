@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DarkMode
@@ -35,12 +36,14 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Upgrade
@@ -84,11 +87,13 @@ import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.GithubProxyOption
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
+import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -108,14 +113,35 @@ data class CompatModeActions(
     val onCheckAppUpdate: () -> Unit,
     val onDownloadAppUpdate: () -> Unit,
     val onInstallAppUpdate: () -> Unit,
-    val onToggleNightMode: () -> Unit
+    val onToggleNightMode: () -> Unit,
+    val onOpenProxyPicker: () -> Unit,
+    val onSelectProxy: (String) -> Unit,
+    val onRetestProxySpeed: () -> Unit,
+    val onConfirmProxySelection: () -> Unit,
+    val onDismissProxyPicker: () -> Unit
 )
+
+data class CompatProxyPickerState(
+    val currentLabel: String,
+    val options: List<GithubProxyOption>,
+    val selectedId: String,
+    val testingIds: Set<String>,
+    val latencyMap: Map<String, Long>,
+    val isVisible: Boolean
+)
+
+private enum class CompatPage {
+    Home,
+    Settings
+}
 
 @Composable
 fun CompatModeScreen(
     uiState: CompatModeUiState,
+    proxyPickerState: CompatProxyPickerState,
     actions: CompatModeActions
 ) {
+    var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
     val background = if (uiState.nightMode == NightModePreference.Dark) {
         Brush.verticalGradient(
             listOf(
@@ -153,56 +179,127 @@ fun CompatModeScreen(
                     CompatHeader(
                         uiState = uiState,
                         actions = actions,
-                        isWide = wideLayout
+                        isWide = wideLayout,
+                        currentPage = currentPage,
+                        onOpenSettings = { currentPage = CompatPage.Settings },
+                        onBackHome = { currentPage = CompatPage.Home }
                     )
                 }
 
                 item {
-                    val heroAndCoreModifier = if (wideLayout) {
-                        Modifier.fillMaxWidth()
+                    if (currentPage == CompatPage.Settings) {
+                        CompatSettingsPage(
+                            uiState = uiState,
+                            proxyPickerState = proxyPickerState,
+                            actions = actions,
+                            wideLayout = wideLayout
+                        )
                     } else {
-                        Modifier.fillMaxWidth()
-                    }
-                    if (wideLayout) {
-                        Row(
-                            modifier = heroAndCoreModifier,
-                            horizontalArrangement = Arrangement.spacedBy(18.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1.15f)
-                                    .focusGroup(),
-                                verticalArrangement = Arrangement.spacedBy(18.dp)
-                            ) {
-                                ServiceHeroCard(uiState, actions)
-                                RuntimeStatusStrip(uiState)
-                                OperationProgressCard(uiState)
-                                KeepAliveCard(uiState, actions)
-                            }
-                            Column(
-                                modifier = Modifier
-                                    .weight(0.95f)
-                                    .focusGroup(),
-                                verticalArrangement = Arrangement.spacedBy(18.dp)
-                            ) {
-                                AppUpdateCard(uiState, actions)
-                                CoreManagementCard(uiState, actions)
-                                SyncCard(uiState)
-                            }
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                            ServiceHeroCard(uiState, actions)
-                            RuntimeStatusStrip(uiState)
-                            OperationProgressCard(uiState)
-                            AppUpdateCard(uiState, actions)
-                            CoreManagementCard(uiState, actions)
-                            KeepAliveCard(uiState, actions)
-                            SyncCard(uiState)
-                        }
+                        CompatHomePage(
+                            uiState = uiState,
+                            actions = actions,
+                            wideLayout = wideLayout
+                        )
                     }
                 }
             }
+        }
+
+        if (proxyPickerState.isVisible) {
+            GithubProxyPickerDialog(
+                title = "选择 GitHub 线路",
+                subtitle = "首次下载核心前请先测速并选择线路",
+                options = proxyPickerState.options,
+                selectedId = proxyPickerState.selectedId,
+                testingIds = proxyPickerState.testingIds,
+                resultMap = proxyPickerState.latencyMap,
+                onSelect = actions.onSelectProxy,
+                onRetest = actions.onRetestProxySpeed,
+                onConfirm = actions.onConfirmProxySelection,
+                onDismiss = actions.onDismissProxyPicker,
+                confirmText = "保存线路"
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompatHomePage(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions,
+    wideLayout: Boolean
+) {
+    if (wideLayout) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1.08f)
+                    .focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                ServiceHeroCard(uiState, actions)
+                RuntimeStatusStrip(uiState)
+                OperationProgressCard(uiState)
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                CoreManagementCard(uiState, actions)
+                SyncCard(uiState)
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            ServiceHeroCard(uiState, actions)
+            RuntimeStatusStrip(uiState)
+            OperationProgressCard(uiState)
+            CoreManagementCard(uiState, actions)
+            SyncCard(uiState)
+        }
+    }
+}
+
+@Composable
+private fun CompatSettingsPage(
+    uiState: CompatModeUiState,
+    proxyPickerState: CompatProxyPickerState,
+    actions: CompatModeActions,
+    wideLayout: Boolean
+) {
+    if (wideLayout) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                AppUpdateCard(uiState, actions)
+                GithubProxyCard(proxyPickerState, actions)
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .focusGroup(),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                KeepAliveCard(uiState, actions)
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            AppUpdateCard(uiState, actions)
+            KeepAliveCard(uiState, actions)
+            GithubProxyCard(proxyPickerState, actions)
         }
     }
 }
@@ -211,7 +308,10 @@ fun CompatModeScreen(
 private fun CompatHeader(
     uiState: CompatModeUiState,
     actions: CompatModeActions,
-    isWide: Boolean
+    isWide: Boolean,
+    currentPage: CompatPage,
+    onOpenSettings: () -> Unit,
+    onBackHome: () -> Unit
 ) {
     val runtime = uiState.runtimeState
     val statusColor = statusColor(runtime.status)
@@ -228,7 +328,7 @@ private fun CompatHeader(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "DanmuApi TV",
+                    text = "弹幕 API",
                     style = MaterialTheme.typography.headlineLarge.copy(
                         fontSize = if (isWide) 34.sp else 30.sp,
                         fontWeight = FontWeight.SemiBold
@@ -237,7 +337,7 @@ private fun CompatHeader(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "兼容模式控制台",
+                    text = if (currentPage == CompatPage.Settings) "兼容模式设置" else "兼容模式控制台",
                     style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -249,6 +349,12 @@ private fun CompatHeader(
             NightModeButton(
                 label = nightModeLabel(uiState.nightMode),
                 onClick = actions.onToggleNightMode
+            )
+            TvActionButton(
+                text = if (currentPage == CompatPage.Settings) "首页" else "设置",
+                icon = if (currentPage == CompatPage.Settings) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Settings,
+                tone = ButtonTone.Secondary,
+                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings
             )
             TvActionButton(
                 text = "刷新",
@@ -694,6 +800,69 @@ private fun KeepAliveCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GithubProxyCard(
+    proxyPickerState: CompatProxyPickerState,
+    actions: CompatModeActions
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "GitHub 加速",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "用于核心下载、更新和版本检查。",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = proxyPickerState.currentLabel,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvActionButton(
+                    text = "测速并选择",
+                    icon = Icons.Rounded.Speed,
+                    tone = ButtonTone.Primary,
+                    onClick = actions.onOpenProxyPicker
+                )
+                TvActionButton(
+                    text = "重新测速",
+                    icon = Icons.Rounded.Refresh,
+                    tone = ButtonTone.Secondary,
+                    onClick = actions.onOpenProxyPicker
+                )
+            }
+
+            Text(
+                text = when {
+                    proxyPickerState.testingIds.isNotEmpty() -> "正在测速 ${proxyPickerState.testingIds.size} 条线路"
+                    proxyPickerState.latencyMap.isNotEmpty() -> "测速结果已更新，可继续切换线路"
+                    else -> "当前线路已保存，必要时可重新测速。"
+                },
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1346,7 +1515,7 @@ private fun StatusChip(text: String, color: Color) {
 private fun NightModeButton(label: String, onClick: () -> Unit) {
     TvActionButton(
         text = label,
-        icon = if (label.contains("亮")) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+        icon = if (label.contains("浅")) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
         tone = ButtonTone.Secondary,
         onClick = onClick
     )
@@ -1422,6 +1591,8 @@ private fun TvActionButton(
         ButtonTone.Secondary -> MaterialTheme.colorScheme.onSurface
         ButtonTone.Danger -> MaterialTheme.colorScheme.onError
     }
+    val disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+    val disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
     var focused by remember { mutableStateOf(false) }
     val focusedScale by animateFloatAsState(
         targetValue = if (enabled && focused) 1.05f else 1f,
@@ -1431,27 +1602,33 @@ private fun TvActionButton(
 
     Surface(
         shape = shape,
-        color = baseColor.copy(alpha = if (enabled) 1f else 0.45f),
-        contentColor = contentColor,
+        color = if (enabled) baseColor else disabledContainerColor,
+        contentColor = if (enabled) contentColor else disabledContentColor,
         border = BorderStroke(
             if (focused && enabled) 2.dp else 1.dp,
             when (tone) {
                 ButtonTone.Primary -> {
-                    if (focused && enabled) {
+                    if (!enabled) {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    } else if (focused) {
                         MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.95f)
                     } else {
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
                     }
                 }
                 ButtonTone.Secondary -> {
-                    if (focused && enabled) {
+                    if (!enabled) {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    } else if (focused) {
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
                     } else {
                         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f)
                     }
                 }
                 ButtonTone.Danger -> {
-                    if (focused && enabled) {
+                    if (!enabled) {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    } else if (focused) {
                         MaterialTheme.colorScheme.onError.copy(alpha = 0.95f)
                     } else {
                         MaterialTheme.colorScheme.error.copy(alpha = 0.95f)
@@ -1466,7 +1643,7 @@ private fun TvActionButton(
                 scaleX = if (enabled) focusedScale else 1f
                 scaleY = if (enabled) focusedScale else 1f
             }
-            .shadow(if (focused && enabled) 10.dp else 2.dp, shape = shape, clip = false)
+            .shadow(if (focused && enabled) 10.dp else if (enabled) 2.dp else 0.dp, shape = shape, clip = false)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 enabled = enabled,

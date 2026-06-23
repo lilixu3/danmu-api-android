@@ -76,6 +76,14 @@ class CompatModeActivity : ComponentActivity() {
 
                 CompatModeScreen(
                     uiState = uiState,
+                    proxyPickerState = CompatProxyPickerState(
+                        currentLabel = compatViewModel.currentProxyLabel(),
+                        options = compatViewModel.proxyOptions,
+                        selectedId = compatViewModel.proxySelectedId,
+                        testingIds = compatViewModel.proxyTestingIds,
+                        latencyMap = compatViewModel.proxyLatencyMap,
+                        isVisible = compatViewModel.showProxyPickerDialog
+                    ),
                     actions = CompatModeActions(
                         onStartService = compatViewModel::startService,
                         onRestartService = compatViewModel::restartService,
@@ -93,7 +101,12 @@ class CompatModeActivity : ComponentActivity() {
                         onInstallAppUpdate = {
                             compatViewModel.installAppUpdate(this@CompatModeActivity)
                         },
-                        onToggleNightMode = compatViewModel::toggleNightMode
+                        onToggleNightMode = compatViewModel::toggleNightMode,
+                        onOpenProxyPicker = compatViewModel::openProxyPicker,
+                        onSelectProxy = compatViewModel::selectProxy,
+                        onRetestProxySpeed = compatViewModel::retestProxySpeed,
+                        onConfirmProxySelection = compatViewModel::confirmProxySelection,
+                        onDismissProxyPicker = compatViewModel::dismissProxyPickerDialog
                     )
                 )
             }

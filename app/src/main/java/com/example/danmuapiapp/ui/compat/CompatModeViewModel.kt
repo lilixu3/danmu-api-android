@@ -13,6 +13,7 @@ import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
+import com.example.danmuapiapp.domain.model.GithubProxyOption
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
@@ -21,6 +22,7 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +91,30 @@ class CompatModeViewModel(
         coreRepository = graph.coreRepository,
         githubProxyService = graph.githubProxyService
     )
+    val proxyOptions: List<GithubProxyOption> = graph.githubProxyService.proxyOptions()
+
+    private val proxyPickerController = ProxyPickerController(
+        githubProxyService = graph.githubProxyService,
+        githubProxySpeedTester = graph.githubProxySpeedTester,
+        scope = viewModelScope,
+        proxyOptionsProvider = { proxyOptions }
+    )
+    private var pendingProxyAction: PendingProxyAction? = null
+
+    val showProxyPickerDialog: Boolean
+        get() = proxyPickerController.uiState.isVisible
+    val proxySelectedId: String
+        get() = proxyPickerController.uiState.selectedId
+    val proxyTestingIds: Set<String>
+        get() = proxyPickerController.uiState.testingIds
+    val proxyLatencyMap: Map<String, Long>
+        get() = proxyPickerController.uiState.latencyMap
+
+    private sealed interface PendingProxyAction {
+        data class Install(val variant: ApiVariant) : PendingProxyAction
+        data class Update(val variant: ApiVariant) : PendingProxyAction
+        data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+    }
 
     private val _uiState = MutableStateFlow(
         CompatModeUiState(
@@ -242,6 +268,16 @@ class CompatModeViewModel(
 
     fun installCore(variant: ApiVariant) {
         if (!canOperateVariant(variant)) return
+        if (!graph.githubProxyService.hasUserSelectedProxy()) {
+            pendingProxyAction = PendingProxyAction.Install(variant)
+            emitEvent("首次下载前，请先选择 GitHub 线路")
+            proxyPickerController.open()
+            return
+        }
+        doInstallCore(variant)
+    }
+
+    private fun doInstallCore(variant: ApiVariant) {
         performCoreOperation("正在下载 ${resolveVariantLabel(variant)}") {
             graph.coreRepository.installCore(variant).fold(
                 onSuccess = {
@@ -256,6 +292,10 @@ class CompatModeViewModel(
                 },
                 onFailure = {
                     emitEvent("${resolveVariantLabel(variant)} 下载失败：${it.message ?: "未知错误"}")
+                    if (graph.githubProxyService.isUsingProxy()) {
+                        pendingProxyAction = PendingProxyAction.Install(variant)
+                        proxyPickerController.open()
+                    }
                 }
             )
         }
@@ -263,6 +303,16 @@ class CompatModeViewModel(
 
     fun updateCore(variant: ApiVariant) {
         if (!canOperateVariant(variant)) return
+        if (!graph.githubProxyService.hasUserSelectedProxy()) {
+            pendingProxyAction = PendingProxyAction.Update(variant)
+            emitEvent("更新核心前，请先选择 GitHub 线路")
+            proxyPickerController.open()
+            return
+        }
+        doUpdateCore(variant)
+    }
+
+    private fun doUpdateCore(variant: ApiVariant) {
         performCoreOperation("正在更新 ${resolveVariantLabel(variant)}") {
             graph.coreRepository.updateCore(variant).fold(
                 onSuccess = {
@@ -277,6 +327,10 @@ class CompatModeViewModel(
                 },
                 onFailure = {
                     emitEvent("${resolveVariantLabel(variant)} 更新失败：${it.message ?: "未知错误"}")
+                    if (graph.githubProxyService.isUsingProxy()) {
+                        pendingProxyAction = PendingProxyAction.Update(variant)
+                        proxyPickerController.open()
+                    }
                 }
             )
         }
@@ -284,6 +338,16 @@ class CompatModeViewModel(
 
     fun checkCoreUpdate(variant: ApiVariant) {
         if (!canOperateVariant(variant)) return
+        if (!graph.githubProxyService.hasUserSelectedProxy()) {
+            pendingProxyAction = PendingProxyAction.CheckUpdate(variant)
+            emitEvent("检查更新前，请先选择 GitHub 线路")
+            proxyPickerController.open()
+            return
+        }
+        doCheckCoreUpdate(variant)
+    }
+
+    private fun doCheckCoreUpdate(variant: ApiVariant) {
         performCoreOperation("正在检查 ${resolveVariantLabel(variant)} 更新") {
             runCatching {
                 graph.coreRepository.checkAndMarkUpdate(variant)
@@ -303,6 +367,10 @@ class CompatModeViewModel(
                 }
             }.onFailure {
                 emitEvent("${resolveVariantLabel(variant)} 检查更新失败：${it.message ?: "未知错误"}")
+                if (graph.githubProxyService.isUsingProxy()) {
+                    pendingProxyAction = PendingProxyAction.CheckUpdate(variant)
+                    proxyPickerController.open()
+                }
             }
         }
     }
@@ -346,6 +414,40 @@ class CompatModeViewModel(
                 else -> "自定义仓库格式无效，请检查后重试"
             }
         )
+    }
+
+    fun currentProxyLabel(): String {
+        return graph.githubProxyService.currentSelectedOption().name
+    }
+
+    fun openProxyPicker() {
+        proxyPickerController.open()
+    }
+
+    fun dismissProxyPickerDialog() {
+        proxyPickerController.dismiss()
+        pendingProxyAction = null
+    }
+
+    fun selectProxy(proxyId: String) {
+        proxyPickerController.select(proxyId)
+    }
+
+    fun retestProxySpeed() {
+        proxyPickerController.retest()
+    }
+
+    fun confirmProxySelection() {
+        val action = pendingProxyAction
+        proxyPickerController.confirm {
+            pendingProxyAction = null
+            when (action) {
+                is PendingProxyAction.Install -> doInstallCore(action.variant)
+                is PendingProxyAction.Update -> doUpdateCore(action.variant)
+                is PendingProxyAction.CheckUpdate -> doCheckCoreUpdate(action.variant)
+                null -> emitEvent("GitHub 线路已保存")
+            }
+        }
     }
 
     fun checkAppUpdate(showFreshToast: Boolean = true) {
