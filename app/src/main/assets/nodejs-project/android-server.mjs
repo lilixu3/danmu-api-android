@@ -198,10 +198,9 @@ async function _spawnWorkerForVariant(variantKey, info) {
     throw new Error('worker_threads unavailable');
   }
 
-  const workerUrl = new URL('./worker-proxy.mjs', import.meta.url);
+  const workerUrl = new URL('./worker-proxy.js', import.meta.url);
   const envSnapshot = _getEnvSnapshot();
   const worker = new _WorkerCtor(workerUrl, {
-    type: 'module',
     workerData: {
       variantDir: info.dir,
       projectDir: __dirname,
