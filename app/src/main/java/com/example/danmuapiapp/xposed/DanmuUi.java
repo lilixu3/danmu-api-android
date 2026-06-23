@@ -94,10 +94,8 @@ final class DanmuUi {
         b.setMinHeight(0);
         b.setMinimumHeight(0);
         b.setPadding(t.dp(c, DanmuTheme.SPACE_3), 0, t.dp(c, DanmuTheme.SPACE_3), 0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            b.setStateListAnimator(null);
-            b.setElevation(0f);
-        }
+        b.setStateListAnimator(null);
+        b.setElevation(0f);
         return b;
     }
 

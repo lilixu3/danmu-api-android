@@ -32,6 +32,13 @@ class GithubProxyService @Inject constructor(
         private const val KEY_HAS_USER_SELECTED = "has_user_selected_proxy"
         private const val KEY_AUTO_SELECT = "auto_select"
         private const val PROXY_ID_ORIGINAL = "original"
+        private const val FAST_LATENCY_CONNECT_TIMEOUT_MS = 2500L
+        private const val FAST_LATENCY_READ_TIMEOUT_MS = 2500L
+        private const val FAST_LATENCY_CALL_TIMEOUT_MS = 3500L
+        private const val SLOW_LATENCY_CONNECT_TIMEOUT_MS = 5000L
+        private const val SLOW_LATENCY_READ_TIMEOUT_MS = 5000L
+        private const val SLOW_LATENCY_CALL_TIMEOUT_MS = 7000L
+        private const val SLOW_FALLBACK_CANDIDATE_LIMIT = 1
     }
 
     private val prefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
@@ -114,12 +121,6 @@ class GithubProxyService @Inject constructor(
     }
 
     suspend fun testLatency(option: GithubProxyOption): Long = withContext(Dispatchers.IO) {
-        val client = httpClient.newBuilder()
-            .connectTimeout(2500, TimeUnit.MILLISECONDS)
-            .readTimeout(2500, TimeUnit.MILLISECONDS)
-            .callTimeout(3500, TimeUnit.MILLISECONDS)
-            .build()
-
         // 仅使用 raw 资源测速，避免代理站对 github.com/release 页面返回 403
         // 时把仍可用于下载配置/核心资源的线路整体误判为不可用。
         val targetUrl =
@@ -129,7 +130,32 @@ class GithubProxyService @Inject constructor(
         } else {
             buildProxyCandidates(option.baseUrl, targetUrl)
         }
-        probeLatency(client, candidates)
+
+        val fastLatency = probeLatency(buildLatencyClient(fast = true), candidates)
+        if (fastLatency >= 0L) return@withContext fastLatency
+
+        // 慢测只作为兜底，并限制候选数量，避免黑洞代理把整轮测速拖得过久。
+        probeLatency(
+            buildLatencyClient(fast = false),
+            candidates.distinct().take(SLOW_FALLBACK_CANDIDATE_LIMIT)
+        )
+    }
+
+    private fun buildLatencyClient(fast: Boolean): OkHttpClient {
+        return httpClient.newBuilder()
+            .connectTimeout(
+                if (fast) FAST_LATENCY_CONNECT_TIMEOUT_MS else SLOW_LATENCY_CONNECT_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            .readTimeout(
+                if (fast) FAST_LATENCY_READ_TIMEOUT_MS else SLOW_LATENCY_READ_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            .callTimeout(
+                if (fast) FAST_LATENCY_CALL_TIMEOUT_MS else SLOW_LATENCY_CALL_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            .build()
     }
 
     private fun probeLatency(client: OkHttpClient, candidates: List<String>): Long {

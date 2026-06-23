@@ -78,10 +78,18 @@ class ConfigViewModel @Inject constructor(
         _operationMessage.value = "已删除 $key"
     }
 
-    fun saveRawContent(content: String) {
-        if (!ensureAdminMode()) return
-        envConfigRepo.saveRawContent(content)
-        _operationMessage.value = "源码已保存"
+    fun saveRawContent(content: String): Result<String> {
+        if (!ensureAdminMode()) {
+            return Result.failure(IllegalStateException("当前为只读模式，请先开启管理员模式"))
+        }
+        val result = envConfigRepo.saveRawContent(content)
+        result.fold(
+            onSuccess = { _operationMessage.value = "源码已保存" },
+            onFailure = { error ->
+                _operationMessage.value = "源码保存失败：${error.message ?: "请查看日志"}"
+            }
+        )
+        return result
     }
 
     suspend fun fetchRecentAnimeCache(): Result<List<AnimeCacheItem>> {

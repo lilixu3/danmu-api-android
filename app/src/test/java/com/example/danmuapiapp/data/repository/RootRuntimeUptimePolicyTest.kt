@@ -9,6 +9,22 @@ import org.junit.Test
 class RootRuntimeUptimePolicyTest {
 
     @Test
+    fun `Root should not stop on a single passive miss`() {
+        assertFalse(shouldMarkRootStoppedAfterPassiveMiss(1))
+    }
+
+    @Test
+    fun `Root should stop after repeated passive misses`() {
+        assertTrue(shouldMarkRootStoppedAfterPassiveMiss(ROOT_RECONCILE_STALE_MISS_THRESHOLD))
+    }
+
+    @Test
+    fun `Root should reject zero passive misses`() {
+        assertFalse(shouldMarkRootStoppedAfterPassiveMiss(0))
+    }
+
+
+    @Test
     fun `Root start should not clear existing uptime anchor when runtime may already be alive`() {
         assertFalse(shouldClearRootStartedAtBeforeStart(rootProbablyRunning = true))
     }

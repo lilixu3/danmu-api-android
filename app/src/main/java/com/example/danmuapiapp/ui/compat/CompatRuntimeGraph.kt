@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import android.annotation.SuppressLint
 import android.content.Context
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.repository.CoreRepositoryImpl
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
+@SuppressLint("StaticFieldLeak") // Holder 持有的是 applicationContext，不会泄漏 Activity
 object CompatRuntimeGraph {
     @Volatile
     private var holder: Holder? = null

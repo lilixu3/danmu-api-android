@@ -11,6 +11,6 @@ interface EnvConfigRepository {
     fun reload()
     fun setValue(key: String, value: String)
     fun deleteKey(key: String)
-    fun saveRawContent(content: String)
+    fun saveRawContent(content: String): Result<String>
     fun getEnvFilePath(): String
 }

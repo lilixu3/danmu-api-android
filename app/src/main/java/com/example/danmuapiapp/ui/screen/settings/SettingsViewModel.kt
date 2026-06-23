@@ -681,10 +681,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun importEnvContent(content: String) {
-        envConfigRepo.saveRawContent(content)
-        applyRuntimeFromEnv(content)
-        operationMessage = "导入成功，已覆盖当前 .env，建议重启服务"
-        runtimeRepo.addLog(LogLevel.Info, "已导入 .env 配置，建议重启服务")
+        envConfigRepo.saveRawContent(content).fold(
+            onSuccess = {
+                applyRuntimeFromEnv(content)
+                operationMessage = "导入成功，已覆盖当前 .env，建议重启服务"
+                runtimeRepo.addLog(LogLevel.Info, "已导入 .env 配置，建议重启服务")
+            },
+            onFailure = {
+                operationMessage = "导入失败：${it.message ?: "写入 .env 失败"}"
+                runtimeRepo.addLog(LogLevel.Error, "导入 .env 配置失败：${it.message ?: "写入失败"}")
+            }
+        )
     }
 
     fun openWebDavConfigDialog() {
@@ -775,10 +782,17 @@ class SettingsViewModel @Inject constructor(
             webDavOperatingText = "正在从 WebDAV 下载 .env..."
             webDavService.restoreEnv().fold(
                 onSuccess = { content ->
-                    envConfigRepo.saveRawContent(content)
-                    applyRuntimeFromEnv(content)
-                    operationMessage = "WebDAV 恢复成功，已覆盖当前 .env，建议重启服务"
-                    runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置，建议重启服务")
+                    envConfigRepo.saveRawContent(content).fold(
+                        onSuccess = {
+                            applyRuntimeFromEnv(content)
+                            operationMessage = "WebDAV 恢复成功，已覆盖当前 .env，建议重启服务"
+                            runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置，建议重启服务")
+                        },
+                        onFailure = {
+                            operationMessage = "WebDAV 恢复失败：${it.message ?: "写入 .env 失败"}"
+                            runtimeRepo.addLog(LogLevel.Error, "WebDAV 恢复写入 .env 失败：${it.message ?: "写入失败"}")
+                        }
+                    )
                 },
                 onFailure = {
                     operationMessage = "WebDAV 恢复失败：${it.message}"
