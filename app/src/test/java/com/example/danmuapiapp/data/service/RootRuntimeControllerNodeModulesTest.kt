@@ -149,7 +149,7 @@ class RootRuntimeControllerNodeModulesTest {
             dstProject.mkdirs()
 
             srcProject.resolve("main.js").writeText("new-main\n")
-            srcProject.resolve("android-server.mjs").writeText("new-server\n")
+            srcProject.resolve("android-server.js").writeText("new-server\n")
             srcProject.resolve(".app_version").writeText("new-version\n")
             srcProject.resolve("node_modules/node-fetch").mkdirs()
             srcProject.resolve("node_modules/node-fetch/package.json").writeText("src-dep\n")
@@ -174,7 +174,7 @@ class RootRuntimeControllerNodeModulesTest {
             assertFalse(script.contains("SRC/."))
             assertEquals(0, runShell(script))
             assertEquals("new-main\n", dstProject.resolve("main.js").readText())
-            assertEquals("new-server\n", dstProject.resolve("android-server.mjs").readText())
+            assertEquals("new-server\n", dstProject.resolve("android-server.js").readText())
             assertEquals("new-version\n", dstProject.resolve(".app_version").readText())
             assertEquals("dst-dep\n", dstProject.resolve("node_modules/existing/package.json").readText())
             assertEquals("dst-core\n", dstProject.resolve("danmu_api_stable/worker.js").readText())

@@ -648,7 +648,7 @@ object RootRuntimeController {
                 mkdir -p "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
 
                 # 热启动只修正启动必需的浅层文件和配置/日志目录。
-                for NAME in main.js android-server.mjs worker-proxy.mjs startup-failure.mjs package.json package-lock.json .app_version; do
+                for NAME in main.js android-server.js worker-proxy.js startup-failure.js package.json package-lock.json .app_version; do
                   [ -f "${'$'}DST/${'$'}NAME" ] && chmod 0644 "${'$'}DST/${'$'}NAME" 2>/dev/null || true
                 done
 
