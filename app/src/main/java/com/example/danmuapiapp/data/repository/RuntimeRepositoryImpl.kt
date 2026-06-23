@@ -224,6 +224,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private val normalStoppedBroadcastSeq = AtomicLong(0L)
 
     private var reconcileConsecutiveDeadCount = 0
+    private var rootReconcileConsecutiveDeadCount = 0
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1336,24 +1337,35 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun reconcileRootStateLocked() {
         val state = _runtimeState.value
-        if (state.runMode != RunMode.Root) return
+        if (state.runMode != RunMode.Root) {
+            rootReconcileConsecutiveDeadCount = 0
+            return
+        }
         if (state.status != ServiceStatus.Running &&
             state.status != ServiceStatus.Starting &&
             state.status != ServiceStatus.Stopping
         ) {
+            rootReconcileConsecutiveDeadCount = 0
             return
         }
 
         val running = RootRuntimeController.isProbablyRunning(context, state.port)
         when (state.status) {
             ServiceStatus.Running -> {
-                if (!running) {
-                    markStopped("Root 服务未运行，可重新启动")
-                    addLog(LogLevel.Warn, "检测到 Root 模式服务已退出，状态已自动重置")
+                if (running) {
+                    rootReconcileConsecutiveDeadCount = 0
+                } else {
+                    rootReconcileConsecutiveDeadCount++
+                    if (shouldMarkRootStoppedAfterPassiveMiss(rootReconcileConsecutiveDeadCount)) {
+                        markStopped("Root 服务未运行，可重新启动")
+                        addLog(LogLevel.Warn, "检测到 Root 模式服务已退出，状态已自动重置")
+                        rootReconcileConsecutiveDeadCount = 0
+                    }
                 }
             }
 
             ServiceStatus.Starting -> {
+                rootReconcileConsecutiveDeadCount = 0
                 if (running) {
                     markRunning(
                         pid = RootRuntimeController.getPid(context),
@@ -1363,6 +1375,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Stopping -> {
+                rootReconcileConsecutiveDeadCount = 0
                 if (!running) {
                     markStopped()
                 }

@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import android.annotation.SuppressLint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -48,6 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
+@SuppressLint("SetTextI18n") // TV 兼容模式传统 View，不需要国际化
 class CompatModeActivity : AppCompatActivity() {
 
     private val graph by lazy { CompatRuntimeGraph.get(applicationContext) }

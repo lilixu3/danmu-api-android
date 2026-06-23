@@ -27,6 +27,11 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
+internal fun normalizeRawContentForSave(content: String): String {
+    val normalized = content.replace("\r\n", "\n")
+    return if (normalized.endsWith('\n')) normalized else "$normalized\n"
+}
+
 @Singleton
 class EnvConfigRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
@@ -148,14 +153,18 @@ class EnvConfigRepositoryImpl @Inject constructor(
         reload()
     }
 
-    override fun saveRawContent(content: String) {
+    override fun saveRawContent(content: String): Result<String> {
         val file = envFile()
-        val normalized = content.replace("\r\n", "\n")
-        val out = if (normalized.endsWith('\n')) normalized else "$normalized\n"
-        writeEnvText(file, out).onFailure {
+        val out = normalizeRawContentForSave(content)
+        val writeResult = writeEnvText(file, out)
+        writeResult.onFailure {
             Log.w(TAG, "写入 .env 失败：${file.absolutePath}", it)
         }
-        reload()
+        if (writeResult.isSuccess) {
+            _rawContent.value = out
+            reload()
+        }
+        return writeResult.map { out }
     }
 
     override fun getEnvFilePath(): String = envFile().absolutePath

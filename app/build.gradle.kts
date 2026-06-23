@@ -128,7 +128,7 @@ android {
     defaultConfig {
         applicationId = "com.example.danmuapiapp"
         minSdk = 23
-        targetSdk = 36
+        targetSdk = 37
         versionCode = configuredVersionCode
         versionName = configuredVersionName
     }

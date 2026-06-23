@@ -13,7 +13,12 @@ internal fun shouldClearRootStartedAtBeforeStart(rootProbablyRunning: Boolean): 
     return !rootProbablyRunning
 }
 
-internal const val ROOT_PASSIVE_LIVENESS_HINT_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L
+internal const val ROOT_PASSIVE_LIVENESS_HINT_TTL_MS: Long = 24L * 60L * 60L * 1000L
+internal const val ROOT_RECONCILE_STALE_MISS_THRESHOLD: Int = 3
+
+internal fun shouldMarkRootStoppedAfterPassiveMiss(consecutiveMissCount: Int): Boolean {
+    return consecutiveMissCount >= ROOT_RECONCILE_STALE_MISS_THRESHOLD
+}
 
 internal fun shouldClearStartedAtOnError(
     runMode: RunMode,
