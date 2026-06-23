@@ -1,20 +1,15 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title><%= title %></title>
-    <link rel="stylesheet" href="/public/style.css" />
-  </head>
-  <body class="page-auth">
-    <main class="auth-card">
+const { escapeHtml, renderFlash, renderPage } = require('./helpers');
+
+function renderLoginPage({ title = '公告后台登录', flash = null } = {}) {
+  return renderPage({
+    title,
+    bodyClass: 'page-auth',
+    body: `    <main class="auth-card">
       <div class="brand-eyebrow">DanmuApiApp</div>
       <h1>公告中心</h1>
       <p class="muted">登录后可以创建、发布和管理 App 公告。</p>
 
-      <% if (flash) { %>
-        <div class="flash <%= flash.type %>"><%= flash.message %></div>
-      <% } %>
+      ${renderFlash(flash)}
 
       <form method="post" action="/admin/login" class="auth-form">
         <label>
@@ -27,6 +22,10 @@
         </label>
         <button type="submit" class="btn btn-primary">登录后台</button>
       </form>
-    </main>
-  </body>
-</html>
+    </main>`,
+  });
+}
+
+module.exports = {
+  renderLoginPage,
+};
