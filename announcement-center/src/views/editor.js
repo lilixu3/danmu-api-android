@@ -1,16 +1,38 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title><%= title %></title>
-    <link rel="stylesheet" href="/public/style.css" />
-  </head>
-  <body>
-    <header class="topbar">
+const { escapeHtml, raw, renderPage, selected } = require('./helpers');
+
+function renderError(errorMessage) {
+  if (!errorMessage) {
+    return '';
+  }
+  return `<div class="flash error">${escapeHtml(errorMessage)}</div>`;
+}
+
+function renderActionRouteOptions(actionRouteOptions, selectedValue) {
+  return actionRouteOptions.map((group) => `                    <optgroup label="${escapeHtml(group.group)}">
+${group.items.map((item) => `                      <option value="${escapeHtml(item.value)}"${selected(selectedValue === item.value)}>${escapeHtml(item.label)}</option>`).join('\n')}
+                    </optgroup>`).join('\n');
+}
+
+function renderEditorPage({
+  title = '新建公告',
+  actionRouteOptions = [],
+  announcement = null,
+  errorMessage = null,
+  form = {},
+  mode = 'create',
+  previewHtml = '',
+} = {}) {
+  const isCreate = mode === 'create';
+  const formAction = isCreate ? '/admin/announcements' : `/admin/announcements/${announcement ? announcement.id : ''}`;
+  const primaryRouteOptions = renderActionRouteOptions(actionRouteOptions, form.primary_button_route);
+  const secondaryRouteOptions = renderActionRouteOptions(actionRouteOptions, form.secondary_button_route);
+
+  return renderPage({
+    title,
+    body: `    <header class="topbar">
       <div>
         <div class="brand-eyebrow">DanmuApiApp</div>
-        <h1><%= mode === 'create' ? '新建公告' : '编辑公告' %></h1>
+        <h1>${isCreate ? '新建公告' : '编辑公告'}</h1>
       </div>
       <div class="topbar-actions">
         <a href="/admin" class="btn btn-ghost">返回列表</a>
@@ -18,13 +40,11 @@
     </header>
 
     <main class="page-shell">
-      <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
-        <div class="flash error"><%= errorMessage %></div>
-      <% } %>
+      ${renderError(errorMessage)}
 
       <form
         method="post"
-        action="<%= mode === 'create' ? '/admin/announcements' : `/admin/announcements/${announcement.id}` %>"
+        action="${escapeHtml(formAction)}"
         class="editor-grid"
       >
         <section class="panel">
@@ -38,25 +58,25 @@
           <div class="form-grid">
             <label class="field">
               <span>公告标题</span>
-              <input type="text" name="title" maxlength="160" value="<%= form.title %>" required />
+              <input type="text" name="title" maxlength="160" value="${escapeHtml(form.title)}" required />
               <small class="field-hint">建议一句话说清楚重点。</small>
             </label>
 
             <label class="field">
               <span>简介</span>
-              <input type="text" name="summary" maxlength="320" value="<%= form.summary %>" />
+              <input type="text" name="summary" maxlength="320" value="${escapeHtml(form.summary)}" />
               <small class="field-hint">可选，不填时 App 会自动截取正文摘要。</small>
             </label>
 
             <label class="field field-full">
               <span>正文</span>
-              <textarea name="content_markdown" rows="14" id="content_markdown" required><%= form.content_markdown %></textarea>
+              <textarea name="content_markdown" rows="14" id="content_markdown" required>${escapeHtml(form.content_markdown)}</textarea>
               <small class="field-hint">支持 Markdown，适合写更新说明、活动规则或提示信息。</small>
             </label>
 
             <label class="field field-full">
               <span>封面图地址</span>
-              <input type="text" name="cover_image_url" maxlength="500" value="<%= form.cover_image_url %>" placeholder="可选，不填也可以正常发布" />
+              <input type="text" name="cover_image_url" maxlength="500" value="${escapeHtml(form.cover_image_url)}" placeholder="可选，不填也可以正常发布" />
               <small class="field-hint">当前主要用于兼容后续扩展，不影响本次弹窗发布。</small>
             </label>
           </div>
@@ -74,8 +94,8 @@
             <label class="field">
               <span>公告类型</span>
               <select name="announcement_type" id="announcement_type">
-                <option value="long" <%= form.announcement_type === 'long' ? 'selected' : '' %>>长期公告</option>
-                <option value="short" <%= form.announcement_type === 'short' ? 'selected' : '' %>>短期公告</option>
+                <option value="long"${selected(form.announcement_type === 'long')}>长期公告</option>
+                <option value="short"${selected(form.announcement_type === 'short')}>短期公告</option>
               </select>
               <small class="field-hint" id="announcement_type_hint"></small>
             </label>
@@ -83,8 +103,8 @@
             <label class="field">
               <span>提醒强度</span>
               <select name="popup_mode">
-                <option value="normal" <%= form.popup_mode === 'normal' ? 'selected' : '' %>>普通弹窗</option>
-                <option value="force" <%= form.popup_mode === 'force' ? 'selected' : '' %>>强提醒弹窗</option>
+                <option value="normal"${selected(form.popup_mode === 'normal')}>普通弹窗</option>
+                <option value="force"${selected(form.popup_mode === 'force')}>强提醒弹窗</option>
               </select>
               <small class="field-hint">强提醒更适合停服、强制升级或重要通知。</small>
             </label>
@@ -92,31 +112,31 @@
             <label class="field">
               <span>公告等级</span>
               <select name="severity">
-                <option value="info" <%= form.severity === 'info' ? 'selected' : '' %>>普通</option>
-                <option value="success" <%= form.severity === 'success' ? 'selected' : '' %>>成功</option>
-                <option value="warning" <%= form.severity === 'warning' ? 'selected' : '' %>>提醒</option>
-                <option value="danger" <%= form.severity === 'danger' ? 'selected' : '' %>>重要</option>
+                <option value="info"${selected(form.severity === 'info')}>普通</option>
+                <option value="success"${selected(form.severity === 'success')}>成功</option>
+                <option value="warning"${selected(form.severity === 'warning')}>提醒</option>
+                <option value="danger"${selected(form.severity === 'danger')}>重要</option>
               </select>
             </label>
 
             <label class="field">
               <span>投放对象</span>
               <select name="target_variants">
-                <option value="all" <%= form.target_variants === 'all' ? 'selected' : '' %>>全部版本</option>
-                <option value="stable" <%= form.target_variants === 'stable' ? 'selected' : '' %>>正式版</option>
-                <option value="dev" <%= form.target_variants === 'dev' ? 'selected' : '' %>>开发版</option>
-                <option value="custom" <%= form.target_variants === 'custom' ? 'selected' : '' %>>自定义版</option>
+                <option value="all"${selected(form.target_variants === 'all')}>全部版本</option>
+                <option value="stable"${selected(form.target_variants === 'stable')}>正式版</option>
+                <option value="dev"${selected(form.target_variants === 'dev')}>开发版</option>
+                <option value="custom"${selected(form.target_variants === 'custom')}>自定义版</option>
               </select>
             </label>
 
             <label class="field">
               <span>最低 App 版本</span>
-              <input type="text" name="min_app_version" maxlength="32" value="<%= form.min_app_version %>" placeholder="如 1.0.5.18，不限制可留空" />
+              <input type="text" name="min_app_version" maxlength="32" value="${escapeHtml(form.min_app_version)}" placeholder="如 1.0.5.18，不限制可留空" />
             </label>
 
             <label class="field">
               <span>最高 App 版本</span>
-              <input type="text" name="max_app_version" maxlength="32" value="<%= form.max_app_version %>" placeholder="不限制可留空" />
+              <input type="text" name="max_app_version" maxlength="32" value="${escapeHtml(form.max_app_version)}" placeholder="不限制可留空" />
             </label>
           </div>
         </section>
@@ -133,9 +153,9 @@
             <label class="field">
               <span>保存方式</span>
               <select name="status">
-                <option value="draft" <%= form.status === 'draft' ? 'selected' : '' %>>存为草稿</option>
-                <option value="published" <%= form.status === 'published' ? 'selected' : '' %>>立即发布</option>
-                <option value="offline" <%= form.status === 'offline' ? 'selected' : '' %>>下线</option>
+                <option value="draft"${selected(form.status === 'draft')}>存为草稿</option>
+                <option value="published"${selected(form.status === 'published')}>立即发布</option>
+                <option value="offline"${selected(form.status === 'offline')}>下线</option>
               </select>
               <small class="field-hint">立即发布后，会自动替换掉当前已发布公告。</small>
             </label>
@@ -147,13 +167,13 @@
 
             <label class="field">
               <span>开始时间</span>
-              <input type="datetime-local" name="start_at" id="start_at" value="<%= form.start_at %>" />
+              <input type="datetime-local" name="start_at" id="start_at" value="${escapeHtml(form.start_at)}" />
               <small class="field-hint">留空表示保存后立即生效。</small>
             </label>
 
             <label class="field">
               <span>结束时间</span>
-              <input type="datetime-local" name="end_at" id="end_at" value="<%= form.end_at %>" />
+              <input type="datetime-local" name="end_at" id="end_at" value="${escapeHtml(form.end_at)}" />
               <small class="field-hint" id="end_at_hint"></small>
             </label>
           </div>
@@ -174,34 +194,28 @@
                 <label class="field">
                   <span>按钮类型</span>
                   <select name="primary_button_mode" id="primary_button_mode">
-                    <option value="none" <%= form.primary_button_mode === 'none' ? 'selected' : '' %>>不启用</option>
-                    <option value="app_route" <%= form.primary_button_mode === 'app_route' ? 'selected' : '' %>>App内跳转</option>
-                    <option value="link" <%= form.primary_button_mode === 'link' ? 'selected' : '' %>>自定义链接</option>
+                    <option value="none"${selected(form.primary_button_mode === 'none')}>不启用</option>
+                    <option value="app_route"${selected(form.primary_button_mode === 'app_route')}>App内跳转</option>
+                    <option value="link"${selected(form.primary_button_mode === 'link')}>自定义链接</option>
                   </select>
                 </label>
 
                 <label class="field">
                   <span>按钮文案</span>
-                  <input type="text" name="primary_button_text" maxlength="80" value="<%= form.primary_button_text %>" placeholder="如：立即前往" />
+                  <input type="text" name="primary_button_text" maxlength="80" value="${escapeHtml(form.primary_button_text)}" placeholder="如：立即前往" />
                 </label>
 
                 <label class="field field-full action-route-field" id="primary_button_route_field">
                   <span>App 跳转页面</span>
                   <select name="primary_button_route">
                     <option value="">请选择页面</option>
-                    <% actionRouteOptions.forEach(function(group) { %>
-                      <optgroup label="<%= group.group %>">
-                        <% group.items.forEach(function(item) { %>
-                          <option value="<%= item.value %>" <%= form.primary_button_route === item.value ? 'selected' : '' %>><%= item.label %></option>
-                        <% }) %>
-                      </optgroup>
-                    <% }) %>
+${primaryRouteOptions}
                   </select>
                 </label>
 
                 <label class="field field-full action-link-field" id="primary_button_url_field">
                   <span>自定义链接</span>
-                  <input type="text" name="primary_button_url" maxlength="500" value="<%= form.primary_button_url %>" placeholder="必须是 http 或 https 链接" />
+                  <input type="text" name="primary_button_url" maxlength="500" value="${escapeHtml(form.primary_button_url)}" placeholder="必须是 http 或 https 链接" />
                 </label>
               </div>
             </div>
@@ -212,34 +226,28 @@
                 <label class="field">
                   <span>按钮类型</span>
                   <select name="secondary_button_mode" id="secondary_button_mode">
-                    <option value="none" <%= form.secondary_button_mode === 'none' ? 'selected' : '' %>>不启用</option>
-                    <option value="app_route" <%= form.secondary_button_mode === 'app_route' ? 'selected' : '' %>>App内跳转</option>
-                    <option value="link" <%= form.secondary_button_mode === 'link' ? 'selected' : '' %>>自定义链接</option>
+                    <option value="none"${selected(form.secondary_button_mode === 'none')}>不启用</option>
+                    <option value="app_route"${selected(form.secondary_button_mode === 'app_route')}>App内跳转</option>
+                    <option value="link"${selected(form.secondary_button_mode === 'link')}>自定义链接</option>
                   </select>
                 </label>
 
                 <label class="field">
                   <span>按钮文案</span>
-                  <input type="text" name="secondary_button_text" maxlength="80" value="<%= form.secondary_button_text %>" placeholder="如：查看详情" />
+                  <input type="text" name="secondary_button_text" maxlength="80" value="${escapeHtml(form.secondary_button_text)}" placeholder="如：查看详情" />
                 </label>
 
                 <label class="field field-full action-route-field" id="secondary_button_route_field">
                   <span>App 跳转页面</span>
                   <select name="secondary_button_route">
                     <option value="">请选择页面</option>
-                    <% actionRouteOptions.forEach(function(group) { %>
-                      <optgroup label="<%= group.group %>">
-                        <% group.items.forEach(function(item) { %>
-                          <option value="<%= item.value %>" <%= form.secondary_button_route === item.value ? 'selected' : '' %>><%= item.label %></option>
-                        <% }) %>
-                      </optgroup>
-                    <% }) %>
+${secondaryRouteOptions}
                   </select>
                 </label>
 
                 <label class="field field-full action-link-field" id="secondary_button_url_field">
                   <span>自定义链接</span>
-                  <input type="text" name="secondary_button_url" maxlength="500" value="<%= form.secondary_button_url %>" placeholder="必须是 http 或 https 链接" />
+                  <input type="text" name="secondary_button_url" maxlength="500" value="${escapeHtml(form.secondary_button_url)}" placeholder="必须是 http 或 https 链接" />
                 </label>
               </div>
             </div>
@@ -257,11 +265,11 @@
           <div class="preview-shell">
             <div class="preview-card">
               <h3>App 摘要预览</h3>
-              <pre id="preview-text"><%= form.summary || '' %></pre>
+              <pre id="preview-text">${escapeHtml(form.summary || '')}</pre>
             </div>
             <div class="preview-card">
               <h3>Markdown 渲染预览</h3>
-              <div id="preview-html" class="markdown-body"><%- previewHtml %></div>
+              <div id="preview-html" class="markdown-body">${raw(previewHtml)}</div>
             </div>
           </div>
         </section>
@@ -349,6 +357,10 @@
       syncAnnouncementTypeHint();
       syncActionFields(primaryButtonMode, primaryButtonRouteField, primaryButtonUrlField);
       syncActionFields(secondaryButtonMode, secondaryButtonRouteField, secondaryButtonUrlField);
-    </script>
-  </body>
-</html>
+    </script>`,
+  });
+}
+
+module.exports = {
+  renderEditorPage,
+};
