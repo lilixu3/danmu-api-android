@@ -26,9 +26,9 @@ class InjectedPlaybackDialogPolicyTest {
 
     @Test
     fun `播放底部弹窗应保持 AlertDialog 窗口宽度约束不能被全屏 fallback 放大`() {
-        val source = readXposedSource()
-        val showMethod = source.substringAfter("private void showManualSearchDialog")
-            .substringBefore("/** A scroll container styled as a sheet panel surface. */")
+        val source = readManualSearchDialogSource()
+        val showMethod = source.substringAfter("void show(Activity activity)")
+            .substringBefore("private ScrollView buildSheetScroll")
 
         assertTrue(showMethod.contains("root.setBackground(t.topRoundedSheet(activity))"))
         assertTrue(showMethod.contains("new AlertDialog.Builder(activity)"))
@@ -45,9 +45,9 @@ class InjectedPlaybackDialogPolicyTest {
 
     @Test
     fun `播放控制按钮应复制官方控制项样式而不是自造透明按钮`() {
-        val source = readXposedSource()
-        val styleMethod = source.substringAfter("private void copyHostControlStyle")
-            .substringBefore("private Drawable cloneDrawable")
+        val source = readPlaybackControlsSource()
+        val styleMethod = source.substringAfter("private static void copyHostControlStyle")
+            .substringBefore("private static Drawable cloneDrawable")
 
         assertTrue(source.contains("copyHostControlStyle(activity, button, anchorView)"))
         assertTrue(styleMethod.contains("cloneDrawable(anchorView.getBackground())"))
@@ -61,11 +61,11 @@ class InjectedPlaybackDialogPolicyTest {
 
     @Test
     fun `播放控制按钮布局应保留官方 wrap_content 尺寸而不是硬塞固定高度`() {
-        val source = readXposedSource()
-        val createMethod = source.substringAfter("private View createButton")
-            .substringBefore("private void copyHostControlStyle")
-        val cloneLpMethod = source.substringAfter("private ViewGroup.LayoutParams cloneLayoutParamsForInsert")
-            .substringBefore("private View findTaggedButton")
+        val source = readPlaybackControlsSource()
+        val createMethod = source.substringAfter("static View createButton")
+            .substringBefore("private static void copyHostControlStyle")
+        val cloneLpMethod = source.substringAfter("static ViewGroup.LayoutParams cloneLayoutParamsForInsert")
+            .substringBefore("static View findTaggedButton")
 
         assertTrue(cloneLpMethod.contains("int width = textButton && source != null ? source.width"))
         assertTrue(cloneLpMethod.contains("int height = textButton && source != null ? source.height"))
@@ -75,11 +75,11 @@ class InjectedPlaybackDialogPolicyTest {
 
     @Test
     fun `官方弹幕控制项可见时应优先贴近弹幕按钮注入`() {
-        val source = readXposedSource()
+        val source = readPlaybackControlsSource()
         val idBlock = source.substringAfter("private static final String[] SHELL_CONTROL_ANCHOR_IDS")
             .substringBefore("private static final String[] CONTAINER_ANCHOR_IDS")
-        val priorityMethod = source.substringAfter("private int anchorPriority")
-            .substringBefore("private String readViewText")
+        val priorityMethod = source.substringAfter("private static int anchorPriority")
+            .substringBefore("private static String readViewText")
 
         assertTrue(idBlock.contains("\"danmaku\", \"ending\", \"episodes\""))
         assertTrue(priorityMethod.indexOf("弹幕") < priorityMethod.indexOf("片尾"))
@@ -87,13 +87,13 @@ class InjectedPlaybackDialogPolicyTest {
 
     @Test
     fun `播放页识别和锚点应收窄到官方 VideoActivity 控制栏`() {
-        val source = readXposedSource()
+        val source = readPlaybackControlsSource()
         val hintsBlock = source.substringAfter("private static final String[] ACTIVITY_HINTS")
             .substringBefore("private static final String[] ANCHOR_TEXTS")
 
-        assertTrue(source.contains("private boolean isKnownPlaybackActivityName"))
+        assertTrue(source.contains("private static boolean isKnownPlaybackActivityName"))
         assertTrue(source.contains("className.endsWith(\".VideoActivity\")"))
-        assertTrue(source.contains("anchor != null && anchor.parent != null"))
+        assertTrue(source.contains("anchor == null || anchor.parent == null"))
         assertTrue(source.contains("\"episodes\""))
         assertFalse("不能只靠 vod 这类宽泛命中判断播放页", hintsBlock.contains("\"vod\""))
     }
@@ -110,8 +110,20 @@ class InjectedPlaybackDialogPolicyTest {
     }
 
     private fun readXposedSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedModule.java")
+    }
+
+    private fun readPlaybackControlsSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedPlaybackControls.java")
+    }
+
+    private fun readManualSearchDialogSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedManualSearchDialog.java")
+    }
+
+    private fun readSource(relativePath: String): String {
         return resolveRepoRoot()
-            .resolve("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedModule.java")
+            .resolve(relativePath)
             .toFile()
             .readText()
     }

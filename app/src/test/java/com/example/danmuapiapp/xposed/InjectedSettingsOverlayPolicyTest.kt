@@ -12,12 +12,13 @@ class InjectedSettingsOverlayPolicyTest {
 
     @Test
     fun `注入设置子页应挂到宿主 content 并在宿主切页时关闭 overlay`() {
-        val source = readXposedSource()
-        val overlayMethod = source.substringAfter("private void showInjectionSettingsOverlay")
+        val moduleSource = readXposedSource()
+        val source = readSettingsOverlaySource()
+        val overlayMethod = source.substringAfter("void showInjectionSettingsOverlay")
             .substringBefore("private ViewGroup findHostContentRoot")
 
         assertTrue(source.contains("activity.findViewById(android.R.id.content)"))
-        assertTrue(source.contains("showInjectionSettingsOverlay(activity, backgroundAnchor, shellPortRef)"))
+        assertTrue(moduleSource.contains("settingsOverlay.showInjectionSettingsOverlay(activity, backgroundAnchor, shellPortRef)"))
         assertTrue(overlayMethod.contains("hostContent.addView(root, buildSettingsOverlayLayoutParams"))
         assertTrue(overlayMethod.contains("root.setTag(overlayState)"))
         assertTrue(source.contains("attachHostNavigationCloseGuard(root, overlayState)"))
@@ -35,7 +36,8 @@ class InjectedSettingsOverlayPolicyTest {
 
     @Test
     fun `注入设置子页返回键应拦截影视壳官方返回入口先关闭 overlay`() {
-        val source = readXposedSource()
+        val moduleSource = readXposedSource()
+        val source = readSettingsOverlaySource()
         val backHookMethod = source.substringAfter("private void installSettingsOverlayBackInterceptor")
             .substringBefore("private Method findHostBackHandlerMethod")
         val findBackMethod = source.substringAfter("private Method findHostBackHandlerMethod")
@@ -46,10 +48,11 @@ class InjectedSettingsOverlayPolicyTest {
         assertTrue(source.contains("installSettingsOverlayBackInterceptor(activity)"))
         assertTrue("FongMi/OK Android 13+ 返回链路是 OnBackInvokedCallback -> 官方 HomeActivity 返回方法，不能只 hook onBackPressed",
             backHookMethod.contains("findHostBackHandlerMethod(activity.getClass())"))
-        assertTrue(backHookMethod.contains("hook(method).intercept"))
-        assertTrue(backHookMethod.contains("closeActiveSettingsOverlay((Activity) thisObject)"))
+        assertTrue(backHookMethod.contains("host.installBackInterceptor(method, this::closeActiveSettingsOverlay)"))
+        assertTrue(moduleSource.contains("hook(method).intercept"))
+        assertTrue(moduleSource.contains("handler.closeActiveSettingsOverlay((Activity) thisObject)"))
         assertTrue("有注入 overlay 时必须直接消费官方返回入口，不能继续 chain.proceed() 触发官方返回到主界面",
-            backHookMethod.contains("return null"))
+            moduleSource.contains("return null"))
         assertTrue(source.contains("private Method findHostBackHandlerMethod(Class<?> cls)"))
         assertTrue("FongMi 5.5.2 HomeActivity 官方返回入口是 p0()", findBackMethod.contains("\"p0\""))
         assertTrue("OK影视 5.1.x HomeActivity 官方返回入口是 q()", findBackMethod.contains("\"q\""))
@@ -66,10 +69,11 @@ class InjectedSettingsOverlayPolicyTest {
 
     @Test
     fun `注入设置子页背景应裁剪复用宿主壁纸避免拼接色差`() {
-        val source = readXposedSource()
+        val moduleSource = readXposedSource()
+        val source = readHostBackgroundsSource()
 
-        assertTrue(source.contains("resolveHostPageBackground(activity, backgroundAnchor, hostPageContainer)"))
-        assertTrue(source.contains("captureHostWallpaperBackground(activity, cropAnchor)"))
+        assertTrue(readSettingsOverlaySource().contains("resolveHostPageBackground(activity, backgroundAnchor, hostPageContainer"))
+        assertTrue(source.contains("captureHostWallpaperBackground(activity, cropAnchor"))
         assertTrue(source.contains("canvas.translate(wallLoc[0] - targetLoc[0], wallLoc[1] - targetLoc[1])"))
         assertTrue(source.contains("findDirectHostWallpaperLayer(content)"))
         assertTrue(source.contains("isKnownHostWallpaperLayerClass(className)"))
@@ -83,30 +87,42 @@ class InjectedSettingsOverlayPolicyTest {
 
     @Test
     fun `OK影视静态窗口壁纸应按屏幕坐标裁剪避免顶底拼接色差`() {
-        val source = readXposedSource()
-        val resolveMethod = source.substringAfter("private Drawable resolveHostPageBackground")
-            .substringBefore("private Drawable resolveRowTemplateBackground")
-        val captureMethod = source.substringAfter("private Drawable captureHostWallpaperBackground")
-            .substringBefore("private View findHostWallpaperView")
+        val source = readHostBackgroundsSource()
+        val resolveMethod = source.substringAfter("static Drawable resolveHostPageBackground")
+            .substringBefore("static Drawable resolveRowTemplateBackground")
+        val captureMethod = source.substringAfter("private static Drawable captureHostWallpaperBackground")
+            .substringBefore("private static View findHostWallpaperView")
 
         assertTrue("OK影视 5.1.x 静态壁纸设置在 Window background，不能直接加载 wallpaper_1 当 overlay 本地背景",
-            captureMethod.contains("captureWindowBackground(activity, target)"))
-        assertTrue(resolveMethod.contains("captureHostWallpaperResourceBackground(activity, cropAnchor)"))
+            captureMethod.contains("captureWindowBackground(activity, target"))
+        assertTrue(resolveMethod.contains("captureHostWallpaperResourceBackground(activity, cropAnchor"))
         assertFalse("资源兜底也必须按 decor/content 屏幕坐标裁剪，避免从 overlay 顶部重新铺图造成状态栏/底部导航拼接色差",
             resolveMethod.contains("Drawable resourceWall = loadHostWallpaperResource(activity)"))
 
-        assertTrue(source.contains("private Drawable captureWindowBackground(Activity activity, View target)"))
+        assertTrue(source.contains("private static Drawable captureWindowBackground(Activity activity, View target"))
         assertTrue(source.contains("window.getDecorView()"))
         assertTrue(source.contains("captureScreenAlignedDrawable(activity, background, decor, target)"))
-        assertTrue(source.contains("private Drawable captureScreenAlignedDrawable(Activity activity, Drawable source, View boundsAnchor, View target)"))
+        assertTrue(source.contains("private static Drawable captureScreenAlignedDrawable(Activity activity, Drawable source, View boundsAnchor, View target)"))
         assertTrue(source.contains("boundsAnchor.getLocationOnScreen(boundsLoc)"))
         assertTrue(source.contains("target.getLocationOnScreen(targetLoc)"))
         assertTrue(source.contains("canvas.translate(boundsLoc[0] - targetLoc[0], boundsLoc[1] - targetLoc[1])"))
     }
 
     private fun readXposedSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedModule.java")
+    }
+
+    private fun readHostBackgroundsSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedHostBackgrounds.java")
+    }
+
+    private fun readSettingsOverlaySource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedSettingsOverlay.java")
+    }
+
+    private fun readSource(relativePath: String): String {
         return resolveRepoRoot()
-            .resolve("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedModule.java")
+            .resolve(relativePath)
             .toFile()
             .readText()
     }
