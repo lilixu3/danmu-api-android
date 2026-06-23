@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.compat
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -16,8 +17,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.ui.theme.DanmuApiTheme
 
@@ -106,7 +109,31 @@ class CompatModeActivity : ComponentActivity() {
                         onSelectProxy = compatViewModel::selectProxy,
                         onRetestProxySpeed = compatViewModel::retestProxySpeed,
                         onConfirmProxySelection = compatViewModel::confirmProxySelection,
-                        onDismissProxyPicker = compatViewModel::dismissProxyPickerDialog
+                        onDismissProxyPicker = compatViewModel::dismissProxyPickerDialog,
+                        onExitToBackground = {
+                            moveTaskToBack(true)
+                        },
+                        onStopServiceAndExit = {
+                            compatViewModel.stopService()
+                            finishAndRemoveTask()
+                        },
+                        onExitCompatMode = {
+                            DeviceCompatMode.setNormalModeForced(this@CompatModeActivity, true)
+                            Toast.makeText(
+                                this@CompatModeActivity,
+                                "已退出兼容模式，正在进入普通首页",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            startActivity(
+                                Intent(this@CompatModeActivity, MainActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                    addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                                }
+                            )
+                            overridePendingTransition(0, 0)
+                            finish()
+                        }
                     )
                 )
             }
