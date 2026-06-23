@@ -9,6 +9,7 @@ import com.example.danmuapiapp.data.repository.RuntimeRepositoryImpl
 import com.example.danmuapiapp.data.repository.SettingsRepositoryImpl
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.domain.model.AdminSessionState
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,7 @@ object CompatRuntimeGraph {
             .followRedirects(true)
             .build()
         val githubProxyService = GithubProxyService(context, httpClient)
+        val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)
         val runtimeRepository = RuntimeRepositoryImpl(
             context = context,
@@ -62,7 +64,8 @@ object CompatRuntimeGraph {
             runtimeRepository = runtimeRepository,
             coreRepository = coreRepository,
             appUpdateService = appUpdateService,
-            githubProxyService = githubProxyService
+            githubProxyService = githubProxyService,
+            githubProxySpeedTester = githubProxySpeedTester
         )
     }
 
@@ -72,7 +75,8 @@ object CompatRuntimeGraph {
         val runtimeRepository: RuntimeRepositoryImpl,
         val coreRepository: CoreRepositoryImpl,
         val appUpdateService: AppUpdateService,
-        val githubProxyService: GithubProxyService
+        val githubProxyService: GithubProxyService,
+        val githubProxySpeedTester: GithubProxySpeedTester
     ) {
         val envConfigRepository: EnvConfigRepositoryImpl by lazy {
             EnvConfigRepositoryImpl(context)
