@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.xposed;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -74,6 +75,7 @@ import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam;
 /**
  * LSPosed API 102 target / API 101+ compatible entry point. It runs inside the hooked OK影视/FongMi process.
  */
+@SuppressLint("SetTextI18n") // Hook 端注入宿主进程 UI，不需要国际化
 public class DanmuXposedModule extends XposedModule {
     private static final String TAG = "DanmuAppXposed";
     private static final String MODULE_PACKAGE = "com.example.danmuapiapp";
@@ -383,7 +385,7 @@ public class DanmuXposedModule extends XposedModule {
                 @Override
                 public void onGlobalLayout() {
                     try {
-                        if (activity.isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed())) {
+                        if (activity.isFinishing() || activity.isDestroyed()) {
                             clearInjectionWatch(activity);
                             return;
                         }
@@ -437,7 +439,7 @@ public class DanmuXposedModule extends XposedModule {
     private void injectButton(Activity activity) {
         try {
             if (activity.isFinishing()) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return;
+            if (activity.isDestroyed()) return;
             if (!isActivityActiveForInjection(activity)) {
                 return;
             }
@@ -501,8 +503,7 @@ public class DanmuXposedModule extends XposedModule {
             @Override
             public void onViewDetachedFromWindow(View v) {
                 try {
-                    if (activity.isFinishing()) return;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return;
+                    if (activity.isFinishing() || activity.isDestroyed()) return;
                     Window window = activity.getWindow();
                     View decor = window == null ? null : window.getDecorView();
                     if (decor != null) {
@@ -3190,10 +3191,7 @@ public class DanmuXposedModule extends XposedModule {
             String pkg = activity.getPackageName();
             int id = activity.getResources().getIdentifier("wallpaper_1", "drawable", pkg);
             if (id == 0) return null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                return activity.getResources().getDrawable(id, activity.getTheme());
-            }
-            return activity.getResources().getDrawable(id);
+            return activity.getResources().getDrawable(id, activity.getTheme());
         } catch (Throwable ignored) {
             return null;
         }
@@ -3573,7 +3571,7 @@ public class DanmuXposedModule extends XposedModule {
 
     private boolean isActivityActiveForInjection(Activity activity) {
         if (activity == null || activity.isFinishing()) return false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return false;
+        if (activity.isDestroyed()) return false;
         if (System.identityHashCode(activity) != foregroundActivityIdentity) return false;
         Window window = activity.getWindow();
         View decor = window == null ? null : window.getDecorView();
@@ -3587,7 +3585,7 @@ public class DanmuXposedModule extends XposedModule {
         WeakReference<Activity> ref = autoLoopActivity;
         Activity activity = ref == null ? null : ref.get();
         if (activity == null || activity.isFinishing()) return false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return false;
+        if (activity.isDestroyed()) return false;
         int identity = System.identityHashCode(activity);
         return identity == foregroundActivityIdentity && (lastPlaybackActivityIdentity == 0 || identity == lastPlaybackActivityIdentity);
     }
@@ -3908,7 +3906,7 @@ public class DanmuXposedModule extends XposedModule {
         WeakReference<Activity> ref = autoLoopActivity;
         Activity activity = ref == null ? null : ref.get();
         if (activity == null || activity.isFinishing()) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed()) return;
+        if (activity.isDestroyed()) return;
         activity.runOnUiThread(() -> Toast.makeText(activity, message, Toast.LENGTH_LONG).show());
     }
 
@@ -4029,16 +4027,10 @@ public class DanmuXposedModule extends XposedModule {
         button.setSingleLine(true);
         button.setGravity(Gravity.CENTER);
         copyHostControlStyle(activity, button, anchorView);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            button.setElevation(0f);
-            button.setStateListAnimator(null);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-            button.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            button.setId(View.generateViewId());
-        }
+        button.setElevation(0f);
+        button.setStateListAnimator(null);
+        button.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        button.setId(View.generateViewId());
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setTranslationY(0f);
@@ -4061,9 +4053,7 @@ public class DanmuXposedModule extends XposedModule {
                 applyBorderlessControlBackground(activity, button);
             }
             button.setPadding(anchorView.getPaddingLeft(), anchorView.getPaddingTop(), anchorView.getPaddingRight(), anchorView.getPaddingBottom());
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                button.setTextAlignment(anchorView.getTextAlignment());
-            }
+            button.setTextAlignment(anchorView.getTextAlignment());
         } else {
             applyBorderlessControlBackground(activity, button);
         }

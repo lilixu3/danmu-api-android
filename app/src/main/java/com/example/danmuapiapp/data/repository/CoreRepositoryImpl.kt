@@ -5,6 +5,8 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.FileObserver
 import android.os.Looper
+import android.util.Log
+import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.service.CoreVersionParser
 import com.example.danmuapiapp.data.service.GithubProxyService
@@ -44,12 +46,24 @@ class CoreRepositoryImpl @Inject constructor(
 ) : CoreRepository {
 
     companion object {
+        private const val TAG = "CoreRepo"
         private const val USER_AGENT = "DanmuApiApp"
         private const val CORE_REFRESH_DEBOUNCE_MS = 800L
         private const val WORK_DIR_PREFS = "danmu_work_dir"
         private const val WORK_DIR_KEY_CUSTOM_BASE_PATH = "custom_path"
         private const val RUNTIME_PREFS = "runtime"
         private const val CORE_SOURCE_METADATA_FILE = ".danmuapiapp-core-source.json"
+    }
+
+    private fun logRecoverableWarning(message: String, throwable: Throwable) {
+        if (throwable is CancellationException) throw throwable
+        if (BuildConfig.DEBUG) {
+            Log.w(TAG, message, throwable)
+        } else {
+            val summary = throwable.message?.takeIf { it.isNotBlank() }
+                ?: throwable::class.java.simpleName
+            Log.w(TAG, "$message：$summary")
+        }
     }
 
     @Serializable
@@ -608,14 +622,18 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                     else it
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                logRecoverableWarning("checkAndMarkUpdate(${variant.key}) 失败", e)
+            }
         }
     }
 
     override suspend fun checkAllUpdates() {
         withContext(Dispatchers.IO) {
             ApiVariant.entries.forEach { variant ->
-                try { checkAndMarkUpdate(variant) } catch (_: Exception) {}
+                try { checkAndMarkUpdate(variant) } catch (e: Exception) {
+                    logRecoverableWarning("checkAllUpdates: ${variant.key} 更新检查失败", e)
+                }
             }
         }
     }
@@ -804,7 +822,10 @@ class CoreRepositoryImpl @Inject constructor(
                 publishedAt = obj["published_at"]?.jsonPrimitive?.content ?: "",
                 zipballUrl = obj["zipball_url"]?.jsonPrimitive?.content ?: ""
             )
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            logRecoverableWarning("parseRelease 解析失败", e)
+            null
+        }
     }
 
     private fun buildLatestVersionLabel(
@@ -1513,8 +1534,8 @@ class CoreRepositoryImpl @Inject constructor(
             pendingCoreRefreshReason = null
             try {
                 refreshCoreInfo()
-            } catch (_: Exception) {
-                // 忽略刷新异常，避免影响核心下载与运行流程
+            } catch (e: Exception) {
+                logRecoverableWarning("debouncedRefreshCoreInfo 刷新失败", e)
             }
         }
     }

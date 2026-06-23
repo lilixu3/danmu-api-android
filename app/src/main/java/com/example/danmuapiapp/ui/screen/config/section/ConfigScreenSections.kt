@@ -55,6 +55,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal fun shouldSyncRawDraft(currentText: String, lastSyncedRaw: String): Boolean {
+    return currentText == lastSyncedRaw
+}
+
 @Composable
 internal fun VisualEditMode(
     grouped: Map<String, List<EnvVarDef>>,
@@ -167,14 +171,23 @@ internal fun VisualEditMode(
 @Composable
 internal fun RawEditMode(
     rawContent: String,
-    onSave: (String) -> Unit,
+    onSave: (String) -> Result<String>,
     onRequireAdminMode: () -> Unit,
     envFilePath: String,
     editable: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var text by remember(rawContent) { mutableStateOf(rawContent) }
-    val hasChanges = text != rawContent
+    var text by remember { mutableStateOf(rawContent) }
+    var lastSyncedRaw by remember { mutableStateOf(rawContent) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(rawContent) {
+        if (shouldSyncRawDraft(text, lastSyncedRaw)) {
+            text = rawContent
+            saveError = null
+        }
+        lastSyncedRaw = rawContent
+    }
+    val hasChanges = text != lastSyncedRaw
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -190,7 +203,10 @@ internal fun RawEditMode(
 
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = {
+                text = it
+                saveError = null
+            },
             readOnly = !editable,
             modifier = Modifier
                 .fillMaxWidth()
@@ -203,7 +219,20 @@ internal fun RawEditMode(
 
         FilledTonalButton(
             onClick = {
-                if (editable) onSave(text) else onRequireAdminMode()
+                if (editable) {
+                    onSave(text).fold(
+                        onSuccess = { savedContent ->
+                            text = savedContent
+                            lastSyncedRaw = savedContent
+                            saveError = null
+                        },
+                        onFailure = { error ->
+                            saveError = "保存失败：${error.message ?: "请查看日志"}"
+                        }
+                    )
+                } else {
+                    onRequireAdminMode()
+                }
             },
             enabled = hasChanges,
             modifier = Modifier.fillMaxWidth(),
@@ -212,6 +241,14 @@ internal fun RawEditMode(
             Icon(if (editable) Icons.Rounded.Save else Icons.Rounded.Lock, null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(if (editable) "保存" else "需要管理员模式")
+        }
+
+        saveError?.let { message ->
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))

@@ -218,7 +218,7 @@ class CompatTvConfigSyncServer(
     private suspend fun applyPayload(payload: TvConfigSyncPayload): String {
         require(payload.envContent.isNotBlank()) { "同步内容为空" }
 
-        envConfigRepository.saveRawContent(payload.envContent)
+        envConfigRepository.saveRawContent(payload.envContent).getOrThrow()
 
         val runtimeSnapshot = runtimeRepository.runtimeState.value
         val requestedVariant = ApiVariant.entries.firstOrNull {
