@@ -4,7 +4,8 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 import { URL, fileURLToPath } from 'url';
-import { clearStartupFailure, recordStartupFailure } from './startup-failure.mjs';
+import startupFailure from './startup-failure.js';
+const { clearStartupFailure, recordStartupFailure } = startupFailure;
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
