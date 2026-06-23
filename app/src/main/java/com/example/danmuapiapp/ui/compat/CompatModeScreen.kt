@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,7 +38,6 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -46,8 +47,11 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -56,6 +60,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -118,7 +123,10 @@ data class CompatModeActions(
     val onSelectProxy: (String) -> Unit,
     val onRetestProxySpeed: () -> Unit,
     val onConfirmProxySelection: () -> Unit,
-    val onDismissProxyPicker: () -> Unit
+    val onDismissProxyPicker: () -> Unit,
+    val onExitToBackground: () -> Unit,
+    val onStopServiceAndExit: () -> Unit,
+    val onExitCompatMode: () -> Unit
 )
 
 data class CompatProxyPickerState(
@@ -142,6 +150,8 @@ fun CompatModeScreen(
     actions: CompatModeActions
 ) {
     var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
+    var showExitDialog by rememberSaveable { mutableStateOf(false) }
+    var showExitCompatModeDialog by rememberSaveable { mutableStateOf(false) }
     val background = if (uiState.nightMode == NightModePreference.Dark) {
         Brush.verticalGradient(
             listOf(
@@ -160,6 +170,14 @@ fun CompatModeScreen(
         )
     }
 
+    BackHandler {
+        if (currentPage == CompatPage.Settings) {
+            currentPage = CompatPage.Home
+        } else {
+            showExitDialog = true
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -171,35 +189,41 @@ fun CompatModeScreen(
                 .padding(horizontal = 40.dp, vertical = 32.dp)
         ) {
             val wideLayout = maxWidth >= 960.dp
-            LazyColumn(
+            Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                item {
-                    CompatHeader(
-                        uiState = uiState,
-                        actions = actions,
-                        isWide = wideLayout,
-                        currentPage = currentPage,
-                        onOpenSettings = { currentPage = CompatPage.Settings },
-                        onBackHome = { currentPage = CompatPage.Home }
-                    )
-                }
+                CompatHeader(
+                    uiState = uiState,
+                    actions = actions,
+                    isWide = wideLayout,
+                    currentPage = currentPage,
+                    onOpenSettings = { currentPage = CompatPage.Settings },
+                    onBackHome = { currentPage = CompatPage.Home }
+                )
 
-                item {
-                    if (currentPage == CompatPage.Settings) {
-                        CompatSettingsPage(
-                            uiState = uiState,
-                            proxyPickerState = proxyPickerState,
-                            actions = actions,
-                            wideLayout = wideLayout
-                        )
-                    } else {
-                        CompatHomePage(
-                            uiState = uiState,
-                            actions = actions,
-                            wideLayout = wideLayout
-                        )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    item {
+                        if (currentPage == CompatPage.Settings) {
+                            CompatSettingsPage(
+                                uiState = uiState,
+                                proxyPickerState = proxyPickerState,
+                                actions = actions,
+                                wideLayout = wideLayout,
+                                onRequestExitCompatMode = { showExitCompatModeDialog = true }
+                            )
+                        } else {
+                            CompatHomePage(
+                                uiState = uiState,
+                                actions = actions
+                            )
+                        }
                     }
                 }
             }
@@ -220,48 +244,45 @@ fun CompatModeScreen(
                 confirmText = "保存线路"
             )
         }
+
+        if (showExitDialog) {
+            ExitConfirmDialog(
+                isRunning = uiState.runtimeState.status == ServiceStatus.Running,
+                onDismiss = { showExitDialog = false },
+                onBackground = {
+                    showExitDialog = false
+                    actions.onExitToBackground()
+                },
+                onStopAndExit = {
+                    showExitDialog = false
+                    actions.onStopServiceAndExit()
+                }
+            )
+        }
+
+        if (showExitCompatModeDialog) {
+            ExitCompatModeDialog(
+                onDismiss = { showExitCompatModeDialog = false },
+                onConfirm = {
+                    showExitCompatModeDialog = false
+                    actions.onExitCompatMode()
+                }
+            )
+        }
     }
 }
 
 @Composable
 private fun CompatHomePage(
     uiState: CompatModeUiState,
-    actions: CompatModeActions,
-    wideLayout: Boolean
+    actions: CompatModeActions
 ) {
-    if (wideLayout) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1.08f)
-                    .focusGroup(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                ServiceHeroCard(uiState, actions)
-                RuntimeStatusStrip(uiState)
-                OperationProgressCard(uiState)
-            }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .focusGroup(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                CoreManagementCard(uiState, actions)
-                SyncCard(uiState)
-            }
-        }
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            ServiceHeroCard(uiState, actions)
-            RuntimeStatusStrip(uiState)
-            OperationProgressCard(uiState)
-            CoreManagementCard(uiState, actions)
-            SyncCard(uiState)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        ServiceHeroCard(uiState, actions)
+        RuntimeStatusStrip(uiState)
+        OperationProgressCard(uiState)
+        CoreManagementCard(uiState, actions)
+        SyncCard(uiState)
     }
 }
 
@@ -270,7 +291,8 @@ private fun CompatSettingsPage(
     uiState: CompatModeUiState,
     proxyPickerState: CompatProxyPickerState,
     actions: CompatModeActions,
-    wideLayout: Boolean
+    wideLayout: Boolean,
+    onRequestExitCompatMode: () -> Unit
 ) {
     if (wideLayout) {
         Row(
@@ -293,6 +315,9 @@ private fun CompatSettingsPage(
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 KeepAliveCard(uiState, actions)
+                CompatModeExitCard(
+                    onRequestExitCompatMode = onRequestExitCompatMode
+                )
             }
         }
     } else {
@@ -300,6 +325,125 @@ private fun CompatSettingsPage(
             AppUpdateCard(uiState, actions)
             KeepAliveCard(uiState, actions)
             GithubProxyCard(proxyPickerState, actions)
+            CompatModeExitCard(
+                onRequestExitCompatMode = onRequestExitCompatMode
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExitConfirmDialog(
+    isRunning: Boolean,
+    onDismiss: () -> Unit,
+    onBackground: () -> Unit,
+    onStopAndExit: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("退出弹幕 API？") },
+        text = {
+            Text(
+                text = if (isRunning) {
+                    "服务正在运行。选择后台运行会只关闭界面，服务继续提供访问；选择关闭退出会先停止服务再退出 App。"
+                } else {
+                    "当前服务未运行。你可以退到后台保留界面状态，也可以直接关闭退出。"
+                }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onStopAndExit) {
+                Text("关闭退出")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onBackground) {
+                Text("后台运行")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ExitCompatModeDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error
+            )
+        },
+        title = { Text("退出兼容模式？") },
+        text = {
+            Text(
+                text = "TV 或一些旧设备退出兼容模式后，普通首页可能打不开或出现闪退。确认后会立即切换到普通首页，并在下次启动继续使用普通模式。"
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("仍要退出")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("继续使用兼容模式")
+            }
+        }
+    )
+}
+
+@Composable
+private fun CompatModeExitCard(
+    onRequestExitCompatMode: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.34f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.42f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "兼容模式",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "当前正在使用 TV / 旧设备兼容首页。退出后会改用普通首页。",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = "高风险",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Text(
+                text = "如果普通首页在当前设备上无法渲染，App 可能打不开或闪退。建议只在确认普通模式可用时退出。",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
+            )
+
+            TvActionButton(
+                text = "退出兼容模式",
+                icon = Icons.Rounded.PowerSettingsNew,
+                tone = ButtonTone.Danger,
+                onClick = onRequestExitCompatMode
+            )
         }
     }
 }
@@ -461,11 +605,11 @@ private fun ServiceHeroCard(
                     onClick = actions.onStopService
                 )
                 TvActionButton(
-                    text = "同步刷新",
-                    icon = Icons.Rounded.Sync,
+                    text = if (uiState.keepAlive.recommendedProfileEnabled) "后台恢复 开" else "后台恢复 关",
+                    icon = if (uiState.keepAlive.recommendedProfileEnabled) Icons.Rounded.Shield else Icons.Rounded.Security,
                     tone = ButtonTone.Secondary,
-                    enabled = !isBusy,
-                    onClick = actions.onRefreshCoreInfo
+                    enabled = uiState.keepAlive.actionEnabled && !isBusy,
+                    onClick = actions.onToggleKeepAliveProfile
                 )
             }
         }
@@ -1095,6 +1239,10 @@ private fun CoreVariantCard(
     }
     val mainPrimary = !info.isInstalled || info.sourceMismatch || info.hasVersionUpdate
     val canDelete = info.isInstalled && !isActive
+    val activeProgress = uiState.downloadProgress.takeIf {
+        it.inProgress && it.variant == info.variant
+    }
+    var isCustomEditing by rememberSaveable(info.variant.name) { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -1147,11 +1295,26 @@ private fun CoreVariantCard(
             if (info.variant == ApiVariant.Custom) {
                 CustomCoreEditor(
                     uiState = uiState,
-                    actions = actions
+                    actions = actions,
+                    isEditing = isCustomEditing,
+                    onEditingChange = { isCustomEditing = it }
                 )
             }
 
+            if (activeProgress != null) {
+                CoreVariantProgress(progress = activeProgress)
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (info.variant == ApiVariant.Custom) {
+                    TvActionButton(
+                        text = if (isCustomEditing) "收起编辑" else "编辑配置",
+                        icon = if (isCustomEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
+                        tone = ButtonTone.Secondary,
+                        enabled = !uiState.isOperating,
+                        onClick = { isCustomEditing = !isCustomEditing }
+                    )
+                }
                 if (!isActive) {
                     TvActionButton(
                         text = "切换使用",
@@ -1189,13 +1352,79 @@ private fun CoreVariantCard(
 }
 
 @Composable
+private fun CoreVariantProgress(progress: CoreDownloadProgress) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = progress.actionLabel.ifBlank { "正在处理核心" },
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                val detail = buildString {
+                    if (progress.stageText.isNotBlank()) append(progress.stageText)
+                    val bytes = formatByteProgress(progress)
+                    if (bytes.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(bytes)
+                    }
+                }
+                if (detail.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (progress.progress != null) {
+                Text(
+                    text = "${(progress.progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        if (progress.progress == null) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { progress.progress.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun CustomCoreEditor(
     uiState: CompatModeUiState,
-    actions: CompatModeActions
+    actions: CompatModeActions,
+    isEditing: Boolean,
+    onEditingChange: (Boolean) -> Unit
 ) {
     val source = uiState.customCoreSource
     val focusManager = LocalFocusManager.current
-    var isEditing by rememberSaveable { mutableStateOf(false) }
     var repoText by rememberSaveable(uiState.customRepo) { mutableStateOf(uiState.customRepo) }
     var branchText by rememberSaveable(uiState.customRepoBranch) { mutableStateOf(uiState.customRepoBranch) }
 
@@ -1207,7 +1436,7 @@ private fun CustomCoreEditor(
     val saveAction = {
         actions.onSaveCustomCore(repoText.trim(), branchText.trim())
         focusManager.clearFocus(force = true)
-        isEditing = false
+        onEditingChange(false)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1229,13 +1458,6 @@ private fun CustomCoreEditor(
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TvActionButton(
-                        text = if (isEditing) "收起编辑" else "编辑配置",
-                        icon = if (isEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
-                        tone = ButtonTone.Secondary,
-                        enabled = !uiState.isOperating,
-                        onClick = { isEditing = !isEditing }
                     )
                 }
             } else {
@@ -1260,13 +1482,6 @@ private fun CustomCoreEditor(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    TvActionButton(
-                        text = if (isEditing) "收起编辑" else "编辑配置",
-                        icon = if (isEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
-                        tone = ButtonTone.Secondary,
-                        enabled = !uiState.isOperating,
-                        onClick = { isEditing = !isEditing }
-                    )
                 }
             }
         }
@@ -1345,7 +1560,7 @@ private fun CustomCoreEditor(
                             repoText = uiState.customRepo
                             branchText = uiState.customRepoBranch
                             focusManager.clearFocus(force = true)
-                            isEditing = false
+                            onEditingChange(false)
                         }
                     )
                 }
