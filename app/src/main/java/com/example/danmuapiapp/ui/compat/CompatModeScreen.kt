@@ -1,0 +1,1289 @@
+package com.example.danmuapiapp.ui.compat
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Upgrade
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.service.TvConfigSyncCodec
+import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CoreDownloadProgress
+import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.model.RunMode
+import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
+import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+data class CompatModeActions(
+    val onStartService: () -> Unit,
+    val onRestartService: () -> Unit,
+    val onStopService: () -> Unit,
+    val onRefreshCoreInfo: () -> Unit,
+    val onSwitchVariant: (ApiVariant) -> Unit,
+    val onInstallCore: (ApiVariant) -> Unit,
+    val onUpdateCore: (ApiVariant) -> Unit,
+    val onCheckCoreUpdate: (ApiVariant) -> Unit,
+    val onDeleteCore: (ApiVariant) -> Unit,
+    val onSaveCustomCore: (String, String) -> Unit,
+    val onToggleKeepAliveProfile: () -> Unit,
+    val onCheckAppUpdate: () -> Unit,
+    val onDownloadAppUpdate: () -> Unit,
+    val onInstallAppUpdate: () -> Unit,
+    val onToggleNightMode: () -> Unit
+)
+
+@Composable
+fun CompatModeScreen(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val background = if (uiState.nightMode == NightModePreference.Dark) {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.background,
+                MaterialTheme.colorScheme.surface,
+                MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                MaterialTheme.colorScheme.surface,
+                MaterialTheme.colorScheme.background,
+                MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(background)
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 40.dp, vertical = 32.dp)
+        ) {
+            val wideLayout = maxWidth >= 960.dp
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                item {
+                    CompatHeader(
+                        uiState = uiState,
+                        actions = actions,
+                        isWide = wideLayout
+                    )
+                }
+
+                item {
+                    val heroAndCoreModifier = if (wideLayout) {
+                        Modifier.fillMaxWidth()
+                    } else {
+                        Modifier.fillMaxWidth()
+                    }
+                    if (wideLayout) {
+                        Row(
+                            modifier = heroAndCoreModifier,
+                            horizontalArrangement = Arrangement.spacedBy(18.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1.15f),
+                                verticalArrangement = Arrangement.spacedBy(18.dp)
+                            ) {
+                                ServiceHeroCard(uiState, actions)
+                                RuntimeStatusStrip(uiState)
+                                OperationProgressCard(uiState)
+                                KeepAliveCard(uiState, actions)
+                            }
+                            Column(
+                                modifier = Modifier.weight(0.95f),
+                                verticalArrangement = Arrangement.spacedBy(18.dp)
+                            ) {
+                                AppUpdateCard(uiState, actions)
+                                CoreManagementCard(uiState, actions)
+                                SyncCard(uiState)
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                            ServiceHeroCard(uiState, actions)
+                            RuntimeStatusStrip(uiState)
+                            OperationProgressCard(uiState)
+                            AppUpdateCard(uiState, actions)
+                            CoreManagementCard(uiState, actions)
+                            KeepAliveCard(uiState, actions)
+                            SyncCard(uiState)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompatHeader(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions,
+    isWide: Boolean
+) {
+    val runtime = uiState.runtimeState
+    val statusColor = statusColor(runtime.status)
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = if (isWide) 28.dp else 22.dp, vertical = 22.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "DanmuApi TV",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontSize = if (isWide) 34.sp else 30.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "兼容模式控制台",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            StatusPill(
+                text = statusLabel(runtime.status),
+                color = statusColor
+            )
+            NightModeButton(
+                label = nightModeLabel(uiState.nightMode),
+                onClick = actions.onToggleNightMode
+            )
+            TvActionButton(
+                text = "刷新",
+                icon = Icons.Rounded.Refresh,
+                tone = ButtonTone.Secondary,
+                onClick = actions.onRefreshCoreInfo
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServiceHeroCard(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val runtime = uiState.runtimeState
+    val statusColor = statusColor(runtime.status)
+    val isRunning = runtime.status == ServiceStatus.Running
+    val isBusy = uiState.isOperating
+    val cardTone = when (runtime.status) {
+        ServiceStatus.Running -> MaterialTheme.colorScheme.tertiaryContainer
+        ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.primaryContainer
+        ServiceStatus.Error -> MaterialTheme.colorScheme.errorContainer
+        ServiceStatus.Stopped -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+    ElevatedCard(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = cardTone),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "服务状态",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = statusLabel(runtime.status),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = statusColor
+                    )
+                }
+                StatusPill(text = runtime.runMode.label, color = MaterialTheme.colorScheme.secondary)
+            }
+
+            Text(
+                text = runtime.statusMessage?.takeIf { it.isNotBlank() }
+                    ?: runtime.errorMessage?.takeIf { it.isNotBlank() }
+                    ?: when (runtime.status) {
+                        ServiceStatus.Running -> "服务正在正常提供局域网与本机访问地址。"
+                        ServiceStatus.Starting -> "正在启动中，界面会继续刷新运行状态。"
+                        ServiceStatus.Stopping -> "正在停止中，等待服务进程回收。"
+                        ServiceStatus.Error -> "服务异常，建议先查看核心与运行模式。"
+                        ServiceStatus.Stopped -> "当前尚未启动服务，可以直接启动或切换核心后再启动。"
+                    },
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TvActionButton(
+                    text = if (isRunning) "重启服务" else "启动服务",
+                    icon = if (isRunning) Icons.Rounded.RestartAlt else Icons.Rounded.PlayArrow,
+                    tone = ButtonTone.Primary,
+                    enabled = !isBusy,
+                    onClick = if (isRunning) actions.onRestartService else actions.onStartService
+                )
+                TvActionButton(
+                    text = "停止服务",
+                    icon = Icons.Rounded.Stop,
+                    tone = ButtonTone.Secondary,
+                    enabled = isRunning && !isBusy,
+                    onClick = actions.onStopService
+                )
+                TvActionButton(
+                    text = "同步刷新",
+                    icon = Icons.Rounded.Sync,
+                    tone = ButtonTone.Secondary,
+                    enabled = !isBusy,
+                    onClick = actions.onRefreshCoreInfo
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
+    val runtime = uiState.runtimeState
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MetricTile(
+            label = "当前核心",
+            value = resolveVariantLabel(uiState, runtime.variant),
+            icon = Icons.Rounded.Memory,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "核心版本",
+            value = coreVersionText(
+                info = uiState.coreInfos.find { it.variant == runtime.variant },
+                isLoading = uiState.isCoreInfoLoading
+            ),
+            icon = Icons.Rounded.Upgrade,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "运行模式",
+            value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
+            icon = Icons.Rounded.Security,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "端口",
+            value = runtime.port.toString(),
+            icon = Icons.Rounded.Settings,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "本机地址",
+            value = runtime.localUrl.ifBlank { "--" },
+            icon = Icons.Rounded.Wifi,
+            modifier = Modifier.weight(1f)
+        )
+        MetricTile(
+            label = "局域网地址",
+            value = runtime.lanUrl.ifBlank { "--" },
+            icon = Icons.Rounded.QrCode2,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun OperationProgressCard(uiState: CompatModeUiState) {
+    val progress = uiState.downloadProgress
+    val visible = progress.inProgress || uiState.isOperating
+    AnimatedVisibility(visible = visible) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = progress.actionLabel.ifBlank {
+                        uiState.operationProgressTitle.ifBlank { "处理中" }
+                    },
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 19.sp),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = buildString {
+                        val stage = progress.stageText.ifBlank {
+                            if (uiState.isOperating) "请稍候" else "正在准备资源"
+                        }
+                        append(stage)
+                        val bytesText = formatByteProgress(progress)
+                        if (bytesText.isNotBlank()) {
+                            append("\n")
+                            append(bytesText)
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (progress.progress == null) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress.progress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeepAliveCard(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val state = uiState.keepAlive
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "后台运行健康度",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = state.summary,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = if (state.recommendedProfileEnabled) "推荐方案已启用" else "可配置",
+                    color = if (state.recommendedProfileEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Text(
+                text = state.detail,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvActionButton(
+                    text = state.actionLabel,
+                    icon = if (state.recommendedProfileEnabled) Icons.Rounded.Shield else Icons.Rounded.Security,
+                    tone = ButtonTone.Primary,
+                    enabled = state.actionEnabled,
+                    onClick = actions.onToggleKeepAliveProfile
+                )
+                if (state.isRootMode) {
+                    StatusChip(
+                        text = "Root 模式",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                } else {
+                    StatusChip(
+                        text = "心跳：${state.heartbeatModeLabel}",
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppUpdateCard(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val update = uiState.appUpdate.checkResult
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "App 更新",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = uiState.appUpdate.checkError.takeIf { it.isNotBlank() }
+                            ?: if (uiState.appUpdate.isChecking) {
+                                "正在检查版本..."
+                            } else if (update?.hasUpdate == true) {
+                                "发现新版本 v${update.latestVersion}，当前 v${update.currentVersion}"
+                            } else {
+                                "当前版本 v${uiState.appUpdate.currentVersion}"
+                            },
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = when {
+                        uiState.appUpdate.isChecking -> "检查中"
+                        update?.hasUpdate == true -> "有更新"
+                        else -> "最新"
+                    },
+                    color = when {
+                        uiState.appUpdate.isChecking -> MaterialTheme.colorScheme.secondary
+                        update?.hasUpdate == true -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+                )
+            }
+
+            if (update?.hasUpdate == true) {
+                Text(
+                    text = update.releaseNotes.takeIf { it.isNotBlank() } ?: "未提供更新说明",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (uiState.appUpdate.isDownloading) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LinearProgressIndicator(
+                            progress = {
+                                if (uiState.appUpdate.downloadPercent in 0..100) {
+                                    uiState.appUpdate.downloadPercent / 100f
+                                } else {
+                                    0f
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                        )
+                        Text(
+                            text = uiState.appUpdate.downloadDetail,
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (uiState.appUpdate.downloadedApk == null) {
+                        TvActionButton(
+                            text = "下载更新",
+                            icon = Icons.Rounded.CloudDownload,
+                            tone = ButtonTone.Primary,
+                            enabled = !uiState.appUpdate.isDownloading,
+                            onClick = actions.onDownloadAppUpdate
+                        )
+                    } else {
+                        TvActionButton(
+                            text = "安装更新",
+                            icon = Icons.Rounded.Upgrade,
+                            tone = ButtonTone.Primary,
+                            onClick = actions.onInstallAppUpdate
+                        )
+                    }
+                    TvActionButton(
+                        text = "检查版本",
+                        icon = Icons.Rounded.Refresh,
+                        tone = ButtonTone.Secondary,
+                        enabled = !uiState.appUpdate.isChecking,
+                        onClick = actions.onCheckAppUpdate
+                    )
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvActionButton(
+                        text = "检查版本",
+                        icon = Icons.Rounded.Refresh,
+                        tone = ButtonTone.Primary,
+                        enabled = !uiState.appUpdate.isChecking,
+                        onClick = actions.onCheckAppUpdate
+                    )
+                    if (uiState.appUpdate.downloadedApk != null) {
+                        TvActionButton(
+                            text = "安装缓存包",
+                            icon = Icons.Rounded.Upgrade,
+                            tone = ButtonTone.Secondary,
+                            onClick = actions.onInstallAppUpdate
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoreManagementCard(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "核心管理",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "安装、更新、切换和删除都在这里完成。",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TvActionButton(
+                    text = "刷新",
+                    icon = Icons.Rounded.Refresh,
+                    tone = ButtonTone.Secondary,
+                    onClick = actions.onRefreshCoreInfo
+                )
+            }
+
+            if (uiState.isCoreInfoLoading) {
+                Text(
+                    text = "正在读取核心信息...",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                uiState.coreInfos.forEach { info ->
+                    CoreVariantCard(
+                        uiState = uiState,
+                        info = info,
+                        actions = actions
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoreVariantCard(
+    uiState: CompatModeUiState,
+    info: CoreInfo,
+    actions: CompatModeActions
+) {
+    val runtime = uiState.runtimeState
+    val isActive = runtime.variant == info.variant
+    val surfaceColor = if (isActive) {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f)
+    }
+    val badge = when {
+        isActive -> "使用中"
+        info.sourceMismatch -> "需替换"
+        info.hasVersionUpdate -> "可更新"
+        info.isInstalled -> "已安装"
+        else -> "未安装"
+    }
+    val badgeColor = when {
+        isActive -> MaterialTheme.colorScheme.primary
+        info.sourceMismatch -> MaterialTheme.colorScheme.error
+        info.hasVersionUpdate -> MaterialTheme.colorScheme.tertiary
+        info.isInstalled -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.outline
+    }
+    val sourceText = resolveVariantSource(uiState, info.variant)
+    val mainText = when {
+        !info.isInstalled -> "下载核心"
+        info.sourceMismatch -> "重新下载"
+        info.hasVersionUpdate -> "立即更新"
+        else -> "检查更新"
+    }
+    val mainIcon = when {
+        !info.isInstalled -> Icons.Rounded.CloudDownload
+        info.sourceMismatch || info.hasVersionUpdate -> Icons.Rounded.Upgrade
+        else -> Icons.Rounded.Refresh
+    }
+    val mainPrimary = !info.isInstalled || info.sourceMismatch || info.hasVersionUpdate
+    val canDelete = info.isInstalled && !isActive
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = surfaceColor,
+        border = BorderStroke(
+            1.dp,
+            if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = resolveVariantLabel(uiState, info.variant),
+                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        StatusChip(text = badge, color = badgeColor)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = coreVersionText(info, uiState.isCoreInfoLoading),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = if (info.needsAttention) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (sourceText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = sourceText,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (info.variant == ApiVariant.Custom) {
+                    StatusChip(
+                        text = "自定义",
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+
+            if (info.variant == ApiVariant.Custom) {
+                CustomCoreEditor(
+                    uiState = uiState,
+                    actions = actions
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!isActive) {
+                    TvActionButton(
+                        text = "切换使用",
+                        icon = Icons.Rounded.Sync,
+                        tone = ButtonTone.Secondary,
+                        enabled = info.isReady && !uiState.isOperating,
+                        onClick = { actions.onSwitchVariant(info.variant) }
+                    )
+                }
+                TvActionButton(
+                    text = mainText,
+                    icon = mainIcon,
+                    tone = if (mainPrimary) ButtonTone.Primary else ButtonTone.Secondary,
+                    enabled = !uiState.isOperating,
+                    onClick = {
+                        when {
+                            !info.isInstalled -> actions.onInstallCore(info.variant)
+                            info.needsAttention -> actions.onUpdateCore(info.variant)
+                            else -> actions.onCheckCoreUpdate(info.variant)
+                        }
+                    }
+                )
+                if (canDelete) {
+                    TvActionButton(
+                        text = "删除",
+                        icon = Icons.Rounded.Delete,
+                        tone = ButtonTone.Danger,
+                        enabled = !uiState.isOperating,
+                        onClick = { actions.onDeleteCore(info.variant) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomCoreEditor(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val source = uiState.customCoreSource
+    var repoText by rememberSaveable(uiState.customRepo) { mutableStateOf(uiState.customRepo) }
+    var branchText by rememberSaveable(uiState.customRepoBranch) { mutableStateOf(uiState.customRepoBranch) }
+
+    LaunchedEffect(uiState.customRepo, uiState.customRepoBranch) {
+        repoText = uiState.customRepo
+        branchText = uiState.customRepoBranch
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = repoText,
+                onValueChange = { repoText = it },
+                modifier = Modifier.weight(1f),
+                label = { Text("仓库") },
+                placeholder = { Text("owner/repo 或 GitHub 地址") },
+                singleLine = true,
+                maxLines = 1
+            )
+            OutlinedTextField(
+                value = branchText,
+                onValueChange = { branchText = it },
+                modifier = Modifier.widthIn(min = 170.dp).weight(0.55f),
+                label = { Text("分支") },
+                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
+                singleLine = true,
+                maxLines = 1
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TvActionButton(
+                text = "保存自定义核心",
+                icon = Icons.Rounded.Settings,
+                tone = ButtonTone.Secondary,
+                enabled = !uiState.isOperating,
+                onClick = {
+                    actions.onSaveCustomCore(repoText.trim(), branchText.trim())
+                }
+            )
+            Text(
+                text = when {
+                    source.isValidRepo -> "当前来源：${source.sourceText}"
+                    source.isConfigured -> "仓库已配置，等待有效分支"
+                    else -> "未配置自定义仓库"
+                },
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.alignByBaseline()
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncCard(uiState: CompatModeUiState) {
+    val sync = uiState.syncState
+    val inviteUrl = sync.inviteUrl
+    val qrBitmap by produceState(initialValue = null as androidx.compose.ui.graphics.ImageBitmap?, inviteUrl) {
+        value = if (inviteUrl.isBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.Default) {
+                TvConfigSyncCodec.buildQrBitmap(inviteUrl, 540).asImageBitmap()
+            }
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "手机同步",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (inviteUrl.isNotBlank()) {
+                            "手机端进入备份与恢复，扫码后即可推送当前配置。"
+                        } else {
+                            "请让电视和手机接入同一 Wi-Fi，获取局域网地址后会自动生成同步码。"
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = if (inviteUrl.isNotBlank()) "可扫码" else "等待局域网",
+                    color = if (inviteUrl.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(184.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (qrBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = qrBitmap!!,
+                            contentDescription = "手机同步二维码",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.QrCode2,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(72.dp)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = sync.statusText,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (sync.lastSyncSummary.isNotBlank()) {
+                        Text(
+                            text = sync.lastSyncSummary,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = if (inviteUrl.isNotBlank()) {
+                            "配对地址：${sync.host}:${sync.port}"
+                        } else {
+                            "当前未检测到可用局域网地址"
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "同步时会自动覆盖电视侧配置，适合在手机上集中整理后一次性推送。",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.14f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.5f))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            color = color,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun StatusChip(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.5f))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            color = color,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun NightModeButton(label: String, onClick: () -> Unit) {
+    TvActionButton(
+        text = label,
+        icon = if (label.contains("亮")) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+        tone = ButtonTone.Secondary,
+        onClick = onClick
+    )
+}
+
+@Composable
+private fun MetricTile(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+enum class ButtonTone {
+    Primary,
+    Secondary,
+    Danger
+}
+
+@Composable
+private fun TvActionButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tone: ButtonTone,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val baseColor = when (tone) {
+        ButtonTone.Primary -> MaterialTheme.colorScheme.primary
+        ButtonTone.Secondary -> MaterialTheme.colorScheme.surfaceContainerHighest
+        ButtonTone.Danger -> MaterialTheme.colorScheme.error
+    }
+    val contentColor = when (tone) {
+        ButtonTone.Primary -> MaterialTheme.colorScheme.onPrimary
+        ButtonTone.Secondary -> MaterialTheme.colorScheme.onSurface
+        ButtonTone.Danger -> MaterialTheme.colorScheme.onError
+    }
+    var focused by remember { mutableStateOf(false) }
+    val focusedScale by animateFloatAsState(
+        targetValue = if (enabled && focused) 1.04f else 1f,
+        label = "tv_button_scale"
+    )
+    val shape = RoundedCornerShape(18.dp)
+
+    Surface(
+        shape = shape,
+        color = baseColor.copy(alpha = if (enabled) 1f else 0.45f),
+        contentColor = contentColor,
+        border = BorderStroke(
+            if (focused && enabled) 2.dp else 1.dp,
+            when (tone) {
+                ButtonTone.Primary -> {
+                    if (focused && enabled) {
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.95f)
+                    } else {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
+                    }
+                }
+                ButtonTone.Secondary -> {
+                    if (focused && enabled) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f)
+                    }
+                }
+                ButtonTone.Danger -> {
+                    if (focused && enabled) {
+                        MaterialTheme.colorScheme.onError.copy(alpha = 0.95f)
+                    } else {
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.95f)
+                    }
+                }
+            }
+        ),
+        modifier = modifier
+            .heightIn(min = 50.dp)
+            .graphicsLayer {
+                scaleX = if (enabled) focusedScale else 1f
+                scaleY = if (enabled) focusedScale else 1f
+            }
+            .shadow(if (enabled) 6.dp else 0.dp, shape = shape, clip = false)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .focusable(enabled)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+private fun resolveVariantLabel(
+    uiState: CompatModeUiState,
+    variant: ApiVariant
+): String {
+    return uiState.coreDisplayNames.resolve(variant)
+}
+
+private fun resolveVariantSource(
+    uiState: CompatModeUiState,
+    variant: ApiVariant
+): String {
+    return resolveCoreVariantSourceText(
+        variant = variant,
+        customRepo = uiState.customRepo,
+        customBranch = uiState.customRepoBranch
+    )
+}
+
+private fun coreVersionText(info: CoreInfo?, isLoading: Boolean): String {
+    return when {
+        info == null -> if (isLoading) "读取中" else "未知"
+        !info.isInstalled -> "未安装"
+        info.hasVersionUpdate && !info.version.isNullOrBlank() ->
+            formatCoreVersionTransition(info.version, info.availableVersion)
+        !info.version.isNullOrBlank() -> formatCoreVersionTransition(info.version, null)
+        else -> "版本未知"
+    }
+}
+
+private fun statusLabel(status: ServiceStatus): String = when (status) {
+    ServiceStatus.Stopped -> "已停止"
+    ServiceStatus.Starting -> "启动中"
+    ServiceStatus.Running -> "运行中"
+    ServiceStatus.Stopping -> "停止中"
+    ServiceStatus.Error -> "异常"
+}
+
+private fun statusColor(status: ServiceStatus): Color = when (status) {
+    ServiceStatus.Stopped -> Color(0xFF748197)
+    ServiceStatus.Starting -> Color(0xFF4F8CFF)
+    ServiceStatus.Running -> Color(0xFF48C78E)
+    ServiceStatus.Stopping -> Color(0xFFFFC857)
+    ServiceStatus.Error -> Color(0xFFFF7C8A)
+}
+
+private fun nightModeLabel(mode: NightModePreference): String {
+    return when (mode) {
+        NightModePreference.Dark -> "浅色"
+        NightModePreference.Light -> "深色"
+        NightModePreference.FollowSystem -> "深色"
+    }
+}
+
+private fun formatByteProgress(progress: CoreDownloadProgress): String {
+    if (progress.downloadedBytes <= 0L && progress.totalBytes <= 0L) return ""
+    return buildString {
+        append(formatBytes(progress.downloadedBytes))
+        if (progress.totalBytes > 0L) {
+            append(" / ")
+            append(formatBytes(progress.totalBytes))
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+    return when {
+        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
+        bytes >= mb -> String.format(Locale.getDefault(), "%.2f MB", bytes / mb)
+        bytes >= kb -> String.format(Locale.getDefault(), "%.2f KB", bytes / kb)
+        else -> "$bytes B"
+    }
+}
