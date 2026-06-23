@@ -1,11 +1,10 @@
-import http from 'http';
-import https from 'https';
-import fs from 'fs';
-import net from 'net';
-import path from 'path';
-import { URL, fileURLToPath } from 'url';
-import startupFailure from './startup-failure.js';
-const { clearStartupFailure, recordStartupFailure } = startupFailure;
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const net = require('net');
+const path = require('path');
+const { URL, pathToFileURL } = require('url');
+const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -198,9 +197,9 @@ async function _spawnWorkerForVariant(variantKey, info) {
     throw new Error('worker_threads unavailable');
   }
 
-  const workerUrl = new URL('./worker-proxy.js', import.meta.url);
+  const workerPath = path.join(__dirname, 'worker-proxy.js');
   const envSnapshot = _getEnvSnapshot();
-  const worker = new _WorkerCtor(workerUrl, {
+  const worker = new _WorkerCtor(workerPath, {
     workerData: {
       variantDir: info.dir,
       projectDir: __dirname,
@@ -314,7 +313,7 @@ async function _terminateWorkerImmediately(state) {
 function _exitProcess(exitCode) {
   try {
     // 这里不能再用 process.exit(exitCode)：
-    // 当前 android-server.mjs 运行在嵌入式 Node（node::Start）里，
+    // 当前 android-server.js 运行在嵌入式 Node（node::Start）里，
     // 硬退出会直接杀掉宿主 :node / app_process 进程，
     // Java/Kotlin 侧拿不到 startNodeWithArguments() 的返回，
     // 也就无法把“真正启动失败”上报成 STATUS_ERROR，只会继续卡在“等待端口就绪”。
@@ -525,7 +524,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     const workerLoaded = await _tryLoadViaWorker(variantKey, i, forceReload);
     if (workerLoaded) return workerLoaded;
     // 动态 import worker.js
-    const workerUrl = new URL(`./${i.dir}/worker.js`, import.meta.url);
+    const workerUrl = pathToFileURL(path.join(__dirname, i.dir, 'worker.js'));
     if (forceReload) {
       workerUrl.searchParams.set('v', String(reloadTag));
     }
@@ -536,7 +535,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     let coreGlobals = null;
     for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
       try {
-        const globalsUrl = new URL(`./${i.dir}/${globalsRel}`, import.meta.url);
+        const globalsUrl = pathToFileURL(path.join(__dirname, i.dir, globalsRel));
         if (forceReload) {
           globalsUrl.searchParams.set('v', String(reloadTag));
         }
@@ -579,9 +578,6 @@ async function _loadHandleRequestForVariant(options = {}) {
   }
 }
 
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Persistent home (config/logs are stored outside the module folder)
 const HOME = process.env.DANMU_API_HOME || __dirname;

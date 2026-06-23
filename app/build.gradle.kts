@@ -593,7 +593,7 @@ tasks.register("verifyBundledNodeModules") {
 }
 
 tasks.register<Exec>("checkNodeRuntimeScripts") {
-    commandLine("node", "--check", "src/main/assets/nodejs-project/android-server.mjs")
+    commandLine("node", "--check", "src/main/assets/nodejs-project/android-server.js")
 }
 
 tasks.register<Exec>("testNodeRuntimeParsing") {
