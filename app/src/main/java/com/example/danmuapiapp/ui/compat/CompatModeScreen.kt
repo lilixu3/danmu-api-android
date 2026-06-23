@@ -524,7 +524,7 @@ private fun ServiceHeroCard(
         primaryActionRequester.requestFocus()
     }
     val cardTone = when (runtime.status) {
-        ServiceStatus.Running -> MaterialTheme.colorScheme.tertiaryContainer
+        ServiceStatus.Running -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f)
         ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.primaryContainer
         ServiceStatus.Error -> MaterialTheme.colorScheme.errorContainer
         ServiceStatus.Stopped -> MaterialTheme.colorScheme.surfaceContainerHigh

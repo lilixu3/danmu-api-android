@@ -791,7 +791,10 @@ class CompatModeViewModel(
                     }
                 }
                 else -> {
-                    append("\n开启后会自动配置：普通模式开机恢复、系统定时心跳、15 分钟恢复间隔。")
+                    append(
+                        "\n开启后会自动配置：普通模式开机恢复、系统定时心跳、" +
+                            "${NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES} 分钟恢复间隔。"
+                    )
                     if (hasPartialConfig) {
                         append(
                             "\n当前状态：开机恢复${if (autoStartEnabled) "开" else "关"}，" +

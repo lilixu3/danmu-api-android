@@ -39,7 +39,7 @@ object NodeKeepAlivePrefs {
     const val HEARTBEAT_INTERVAL_MIN_MINUTES = 1
     const val HEARTBEAT_INTERVAL_MAX_MINUTES = 24 * 60
     const val HEARTBEAT_INTERVAL_DEFAULT_MINUTES = 30
-    const val HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES = 15
+    const val HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES = 10
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
