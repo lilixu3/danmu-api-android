@@ -7,6 +7,9 @@ const MarkdownIt = require('markdown-it');
 const { ACTION_ROUTE_OPTIONS } = require('./action-routes');
 const { createPoolFromEnv, ensureSchema } = require('./db');
 const { hashPassword, verifyPassword, requireAdmin } = require('./auth');
+const { renderDashboardPage } = require('./views/dashboard');
+const { renderEditorPage } = require('./views/editor');
+const { renderLoginPage } = require('./views/login');
 const {
   buildAnnouncementPayload,
   buildContentPreview,
@@ -53,9 +56,6 @@ const md = new MarkdownIt({
   breaks: true,
 });
 const pool = createPoolFromEnv();
-
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, '..', 'views'));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -194,8 +194,9 @@ async function regenerateSession(req) {
   });
 }
 
-function renderEditor(res, payload) {
-  res.render('editor', {
+function renderEditor(res, payload = {}) {
+  res.send(renderEditorPage({
+    title: payload.title,
     actionRouteOptions: ACTION_ROUTE_OPTIONS,
     announcement: null,
     errorMessage: null,
@@ -203,7 +204,21 @@ function renderEditor(res, payload) {
     mode: 'create',
     previewHtml: '',
     ...payload,
-  });
+  }));
+}
+
+function renderDashboard(res, payload = {}) {
+  res.send(renderDashboardPage({
+    title: '公告中心',
+    ...payload,
+  }));
+}
+
+function renderLogin(res, payload = {}) {
+  res.send(renderLoginPage({
+    title: '公告后台登录',
+    ...payload,
+  }));
 }
 
 function toEditorValues(row = null) {
@@ -466,8 +481,8 @@ app.get('/admin/login', (req, res) => {
   if (req.session.adminId) {
     return res.redirect('/admin');
   }
-  return res.render('login', {
-    title: '公告后台登录',
+  return renderLogin(res, {
+    flash: res.locals.flash,
   });
 });
 
@@ -529,10 +544,10 @@ app.get('/admin', requireAdmin, async (req, res) => {
     }))
     .filter((row) => filter === 'all' || row.status === filter || row.displayState === filter);
 
-  res.render('dashboard', {
-    title: '公告中心',
+  renderDashboard(res, {
     items,
     filter,
+    flash: res.locals.flash,
   });
 });
 

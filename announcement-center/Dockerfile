@@ -7,7 +7,6 @@ RUN npm ci --omit=dev
 
 COPY public ./public
 COPY src ./src
-COPY views ./views
 
 ENV NODE_ENV=production
 
