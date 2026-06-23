@@ -598,7 +598,7 @@ tasks.register<Exec>("checkNodeRuntimeScripts") {
 
 tasks.register<Exec>("testNodeRuntimeParsing") {
     workingDir = rootProject.projectDir
-    commandLine("node", "node-tests/parse-dotenv-regression.mjs")
+    commandLine("node", "node-tests/parse-dotenv-regression.js")
 }
 
 tasks.register("verifyPackagedNodeModulesDebug") {

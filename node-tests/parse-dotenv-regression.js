@@ -1,9 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(__dirname, '..');
 const serverPath = path.join(root, 'app/src/main/assets/nodejs-project/android-server.mjs');
 const source = fs.readFileSync(serverPath, 'utf8');
 const start = source.indexOf('function parseDotEnv');
