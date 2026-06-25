@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
+import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DanmuDownloadInput
 import com.example.danmuapiapp.domain.model.DanmuDownloadResult
@@ -110,6 +111,9 @@ class DanmuDownloadViewModel @Inject constructor(
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
+    var previewDialogState by mutableStateOf(DanmuPreviewDialogState())
+        private set
+
     var activeTaskId by mutableStateOf<Long?>(null)
         private set
 
@@ -184,6 +188,26 @@ class DanmuDownloadViewModel @Inject constructor(
 
     fun clearError() {
         errorMessage = null
+    }
+
+    fun openRecordPreview(record: DanmuDownloadRecord) {
+        if (previewDialogState.loadingRecordId != null) return
+        previewDialogState = DanmuPreviewDialogState(loadingRecordId = record.id)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                downloadRepository.loadDanmuPreview(record)
+            }
+            previewDialogState = result.fold(
+                onSuccess = { preview -> DanmuPreviewDialogState(preview = preview) },
+                onFailure = { throwable ->
+                    DanmuPreviewDialogState(error = throwable.message ?: "读取弹幕文件失败")
+                }
+            )
+        }
+    }
+
+    fun dismissRecordPreview() {
+        previewDialogState = DanmuPreviewDialogState()
     }
 
     fun clearRecords() {

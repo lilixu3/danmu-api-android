@@ -126,7 +126,7 @@ internal fun SearchDownloadPage(
             start = 20.dp,
             end = 20.dp,
             top = 2.dp,
-            bottom = if (inDetail) 96.dp else 16.dp
+            bottom = if (inDetail) 128.dp else 16.dp
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {

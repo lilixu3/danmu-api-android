@@ -296,12 +296,18 @@ fun DanmuDownloadScreen(
                     when (selectedTab) {
                         0 -> SearchDownloadPage(viewModel = viewModel, settings = settings)
                         1 -> QueuePage(viewModel = viewModel, queueTasks = queueTasks)
-                        2 -> RecordsPage(records = records, onClear = viewModel::clearRecords)
+                        2 -> RecordsPage(
+                            records = records,
+                            previewState = viewModel.previewDialogState,
+                            onClear = viewModel::clearRecords,
+                            onPreviewRecord = viewModel::openRecordPreview,
+                            onDismissPreview = viewModel::dismissRecordPreview
+                        )
                     }
                 }
             }
 
-            if (inEpisodeDetail) {
+            if (inEpisodeDetail && selectedTab == 0) {
                 val selectedCount = viewModel
                     .visibleEpisodes()
                     .count { viewModel.selectedEpisodeIds.contains(it.episodeId) }

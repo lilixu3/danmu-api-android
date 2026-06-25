@@ -3,24 +3,18 @@ package com.example.danmuapiapp.ui.screen.download
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppPanelDialog
 
-import android.content.Context
-import android.content.ContextWrapper
-import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,54 +24,28 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ClearAll
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.FilterAlt
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
-import androidx.compose.material.icons.rounded.Link
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TaskAlt
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Badge
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,25 +54,25 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.unit.sp
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
-import com.example.danmuapiapp.domain.model.DownloadQueueStatus
+import com.example.danmuapiapp.domain.model.DanmuFilePreview
+import com.example.danmuapiapp.domain.model.DanmuPreviewFilter
+import com.example.danmuapiapp.domain.model.DanmuPreviewItem
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
-import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
-import com.example.danmuapiapp.ui.theme.appDangerButtonColors
-import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
-import com.example.danmuapiapp.ui.theme.appPrimaryIconButtonColors
+import com.example.danmuapiapp.domain.model.previewFilter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToLong
 
 internal enum class RecordFilter(val label: String) {
     All("全部"),
@@ -116,7 +84,10 @@ internal enum class RecordFilter(val label: String) {
 @Composable
 internal fun RecordsPage(
     records: List<DanmuDownloadRecord>,
-    onClear: () -> Unit
+    previewState: DanmuPreviewDialogState,
+    onClear: () -> Unit,
+    onPreviewRecord: (DanmuDownloadRecord) -> Unit,
+    onDismissPreview: () -> Unit
 ) {
     val formatter = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()) }
     var filter by rememberSaveable { mutableStateOf(RecordFilter.All) }
@@ -146,7 +117,7 @@ internal fun RecordsPage(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("下载记录", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "最多展示最近 80 条，支持按状态筛选",
+                            "最多展示最近 80 条；成功的 XML/JSON 可查看弹幕数和内容",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -211,7 +182,12 @@ internal fun RecordsPage(
             }
         } else {
             items(display, key = { it.id }) { record ->
-                RecordItem(record = record, formatter = formatter)
+                RecordItem(
+                    record = record,
+                    formatter = formatter,
+                    loadingPreview = previewState.loadingRecordId == record.id,
+                    onPreview = { onPreviewRecord(record) }
+                )
             }
             if (filtered.size > display.size) {
                 item {
@@ -225,10 +201,22 @@ internal fun RecordsPage(
             }
         }
     }
+
+    if (previewState.isVisible) {
+        DanmuPreviewDialog(
+            state = previewState,
+            onDismiss = onDismissPreview
+        )
+    }
 }
 
 @Composable
-internal fun RecordItem(record: DanmuDownloadRecord, formatter: SimpleDateFormat) {
+internal fun RecordItem(
+    record: DanmuDownloadRecord,
+    formatter: SimpleDateFormat,
+    loadingPreview: Boolean,
+    onPreview: () -> Unit
+) {
     val status = record.statusEnum()
     val color = when (status) {
         DownloadRecordStatus.Success -> Color(0xFF2E7D32)
@@ -308,8 +296,435 @@ internal fun RecordItem(record: DanmuDownloadRecord, formatter: SimpleDateFormat
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                val canPreview = record.statusEnum() == DownloadRecordStatus.Success &&
+                    record.fileUri.isNotBlank() &&
+                    (record.formatEnum() == DanmuDownloadFormat.Xml || record.formatEnum() == DanmuDownloadFormat.Json)
+                if (canPreview) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = record.danmuCount?.let { "弹幕 $it 条" } ?: "弹幕数待读取",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = onPreview,
+                            enabled = !loadingPreview,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            if (loadingPreview) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Rounded.Search, null, Modifier.size(16.dp))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (loadingPreview) "读取中" else "查看")
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+@Composable
+private fun DanmuPreviewDialog(
+    state: DanmuPreviewDialogState,
+    onDismiss: () -> Unit
+) {
+    AppPanelDialog(
+        onDismissRequest = onDismiss,
+        sheetGesturesEnabled = false,
+        showDragHandle = false,
+        minHeight = 480.dp,
+        sheetMaxHeightFraction = 0.92f,
+        popupMaxHeightFraction = 0.9f,
+        horizontalPadding = 12.dp,
+        sheetTopPadding = 0.dp,
+        sheetBottomPadding = 6.dp,
+        verticalArrangement = Arrangement.Top,
+        horizontalAlignment = Alignment.Start
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (state.error != null) "读取弹幕失败" else "弹幕内容预览",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+        Spacer(Modifier.height(8.dp))
+        when {
+            state.loadingRecordId != null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text("正在读取弹幕文件…")
+                    }
+                }
+            }
+            state.error != null -> {
+                val errorMsg = state.error.orEmpty()
+                val parseHint = state.preview?.parseError
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        errorMsg,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    if (!parseHint.isNullOrBlank() && parseHint != errorMsg) {
+                        Text(
+                            parseHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            state.preview != null -> {
+                DanmuPreviewContent(preview = state.preview)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DanmuPreviewContent(preview: DanmuFilePreview) {
+    val pageSize = 500
+    var selectedFilter by remember { mutableStateOf(DanmuPreviewFilter.All) }
+    var visibleCount by remember { mutableIntStateOf(pageSize) }
+    val listState = rememberLazyListState()
+
+    val filterCounts = remember(preview.items) {
+        DanmuPreviewFilter.entries.associateWith { filter ->
+            when (filter) {
+                DanmuPreviewFilter.All -> preview.items.size
+                else -> preview.items.count { it.previewFilter() == filter }
+            }
+        }
+    }
+    val filteredItems = remember(preview.items, selectedFilter) {
+        when (selectedFilter) {
+            DanmuPreviewFilter.All -> preview.items
+            else -> preview.items.filter { it.previewFilter() == selectedFilter }
+        }
+    }
+    val displayedItems = remember(filteredItems, visibleCount) {
+        filteredItems.take(visibleCount)
+    }
+    val canLoadMore = displayedItems.size < filteredItems.size
+    val loadMoreVisible by remember {
+        derivedStateOf {
+            if (!canLoadMore || displayedItems.isEmpty()) return@derivedStateOf false
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            lastVisible >= displayedItems.lastIndex
+        }
+    }
+
+    LaunchedEffect(selectedFilter) {
+        visibleCount = pageSize
+        listState.scrollToItem(0)
+    }
+
+    // 切到新文件时重置筛选和滚动状态
+    LaunchedEffect(preview.relativePath) {
+        selectedFilter = DanmuPreviewFilter.All
+        visibleCount = pageSize
+        listState.scrollToItem(0)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            PreviewStatBadge(preview.format.label, preview.count, MaterialTheme.colorScheme.primary)
+            PreviewStatBadge("预览", displayedItems.size, MaterialTheme.colorScheme.tertiary)
+            if (preview.truncated) {
+                PreviewStatBadge("文件", preview.items.size, MaterialTheme.colorScheme.secondary)
+            }
+        }
+        val metaText = buildString {
+            append(preview.relativePath.ifBlank { preview.fileName.ifBlank { "未命名文件" } })
+            if (preview.bytes > 0L) append(" · ${formatBytesForPreview(preview.bytes)}")
+        }
+        if (metaText.isNotBlank()) {
+            Text(
+                metaText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        DanmuPreviewFilterBar(
+            selectedFilter = selectedFilter,
+            counts = filterCounts,
+            onSelect = { selectedFilter = it }
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        ) {
+            if (filteredItems.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "当前筛选下没有弹幕",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        items(
+                            items = displayedItems,
+                            key = { it.index }
+                        ) { item ->
+                            DanmuPreviewRow(item = item)
+                        }
+                    }
+                    if (canLoadMore && loadMoreVisible) {
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedButton(
+                            onClick = { visibleCount += pageSize },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("加载更多 500 条")
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DanmuPreviewFilterBar(
+    selectedFilter: DanmuPreviewFilter,
+    counts: Map<DanmuPreviewFilter, Int>,
+    onSelect: (DanmuPreviewFilter) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        DanmuPreviewFilter.entries.forEach { filter ->
+            CompactPreviewFilterButton(
+                modifier = Modifier.weight(1f),
+                selected = selectedFilter == filter,
+                text = "${filter.label} ${counts[filter] ?: 0}",
+                onClick = { onSelect(filter) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactPreviewFilterButton(
+    modifier: Modifier = Modifier,
+    selected: Boolean,
+    text: String,
+    onClick: () -> Unit
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.26f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = modifier.height(32.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
+        onClick = onClick
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val fontSize = when {
+                maxWidth < 72.dp || text.length >= 8 -> 9.sp
+                maxWidth < 84.dp || text.length >= 7 -> 10.sp
+                else -> 11.sp
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = fontSize),
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = contentColor,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun DanmuPreviewRow(item: DanmuPreviewItem) {
+    val filter = item.previewFilter()
+    val filterColor = when (filter) {
+        DanmuPreviewFilter.Scroll -> MaterialTheme.colorScheme.primary
+        DanmuPreviewFilter.Top -> MaterialTheme.colorScheme.tertiary
+        DanmuPreviewFilter.Bottom -> MaterialTheme.colorScheme.secondary
+        DanmuPreviewFilter.All -> MaterialTheme.colorScheme.primary
+    }
+    val danmuColor = parsePreviewColor(item.color)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (item.source.isNotBlank()) {
+                    PreviewBadge(text = item.source, color = MaterialTheme.colorScheme.secondary)
+                }
+                PreviewBadge(text = formatPreviewTime(item.timeSeconds), color = MaterialTheme.colorScheme.primary)
+                PreviewBadge(text = filter.label, color = filterColor)
+                if (danmuColor != null) {
+                    PreviewColorSwatch(color = danmuColor)
+                }
+            }
+            Text(
+                text = item.text.ifBlank { "（空弹幕）" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewBadge(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.20f))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun PreviewStatBadge(label: String, value: Int, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.22f))
+    ) {
+        Text(
+            "$label $value",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
+    }
+}
+
+@Composable
+private fun PreviewColorSwatch(color: Color) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
+    ) {
+        Box(
+            modifier = Modifier
+                .size(18.dp)
+                .padding(3.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+    }
+}
+
+private fun parsePreviewColor(colorStr: String): Color? {
+    val value = colorStr.toLongOrNull() ?: return null
+    if (value <= 0 || value > 0xFFFFFF) return null
+    return Color(0xFF000000 or value)
+}
+
+private fun formatPreviewTime(seconds: Double?): String {
+    if (seconds == null || !seconds.isFinite()) return "--:--.--"
+    val totalCentis = (seconds.coerceAtLeast(0.0) * 100.0).roundToLong()
+    val minutes = totalCentis / 6000
+    val sec = (totalCentis % 6000) / 100
+    val centis = totalCentis % 100
+    return "%02d:%02d.%02d".format(Locale.getDefault(), minutes, sec, centis)
+}
+
+private fun formatBytesForPreview(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val units = listOf("KB", "MB", "GB")
+    var value = bytes.toDouble() / 1024.0
+    var unit = units.first()
+    for (i in 1 until units.size) {
+        if (value < 1024.0) break
+        value /= 1024.0
+        unit = units[i]
+    }
+    return "%.1f %s".format(Locale.getDefault(), value, unit)
+}
