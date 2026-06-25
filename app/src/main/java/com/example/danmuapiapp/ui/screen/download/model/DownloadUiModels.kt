@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.domain.model.DanmuFilePreview
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 
 data class DownloadAnimeCandidate(
@@ -96,4 +97,13 @@ data class AnimeQueueGroup(
 ) {
     val progress: Float
         get() = if (total <= 0) 0f else completed.toFloat() / total.toFloat()
+}
+
+data class DanmuPreviewDialogState(
+    val loadingRecordId: Long? = null,
+    val preview: DanmuFilePreview? = null,
+    val error: String? = null
+) {
+    val isVisible: Boolean
+        get() = loadingRecordId != null || preview != null || error != null
 }

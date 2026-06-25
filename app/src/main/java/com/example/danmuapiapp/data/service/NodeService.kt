@@ -22,8 +22,16 @@ import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.domain.model.ErrorHandler
 import kotlinx.coroutines.*
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.net.ConnectivityManager
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import java.net.HttpURLConnection
+import java.net.Inet4Address
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.atomic.AtomicLong
@@ -51,6 +59,8 @@ class NodeService : Service() {
         const val STATUS_STOPPED = "stopped"
         const val STATUS_ERROR = "error"
         const val EXTRA_ERROR = "error_message"
+        val ACTION_COPY_LAN_ADDRESS: String
+            get() = "$actionPrefix.COPY_LAN_ADDRESS"
         private val runtimeGeneration = AtomicLong(0L)
         const val RUNTIME_WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
         private const val STOP_SHUTDOWN_ATTEMPTS = 4
@@ -199,7 +209,14 @@ class NodeService : Service() {
         val explicitStart = intent?.getBooleanExtra(EXTRA_EXPLICIT_START, false) == true
         when (action) {
             ACTION_STOP -> {
+                NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
+                NodeKeepAlivePrefs.clearRestartBackoff(applicationContext)
+                SystemHeartbeatScheduler.refresh(applicationContext)
                 stopNode()
+                return START_NOT_STICKY
+            }
+            ACTION_COPY_LAN_ADDRESS -> {
+                copyLanAddressToClipboard()
                 return START_NOT_STICKY
             }
             ACTION_START -> Unit
@@ -885,11 +902,23 @@ class NodeService : Service() {
             Intent(this, MainActivity::class.java),
             pendingFlags
         )
+        val stopIntent = Intent(this, NodeService::class.java).apply {
+            action = ACTION_STOP
+            setPackage(packageName)
+        }
+        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, pendingFlags)
+        val copyLanIntent = Intent(this, NodeService::class.java).apply {
+            action = ACTION_COPY_LAN_ADDRESS
+            setPackage(packageName)
+        }
+        val copyLanPendingIntent = PendingIntent.getService(this, 2, copyLanIntent, pendingFlags)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止服务", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_share, "复制地址", copyLanPendingIntent)
             .setOngoing(true)
             .build()
     }
@@ -897,6 +926,104 @@ class NodeService : Service() {
     private fun updateNotification(text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         nm.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun copyLanAddressToClipboard() {
+        scope.launch(Dispatchers.IO) {
+            val lanUrl = resolveLanUrl()
+            Handler(Looper.getMainLooper()).post {
+                val appCtx = applicationContext
+                val isValid = lanUrl.isNotBlank() && !lanUrl.contains("0.0.0.0")
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                if (clipboard != null && isValid) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("局域网地址", lanUrl))
+                    val displayUrl = maskTokenInUrl(lanUrl)
+                    Toast.makeText(
+                        appCtx,
+                        "已复制：$displayUrl",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        appCtx,
+                        "未获取到局域网地址",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun resolveLanUrl(): String {
+        val port = readPortFromEnvFile().takeIf { it in 1..65535 } ?: 9321
+        val token = readTokenFromEnvFile()
+        val tokenPath = token.takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty()
+        val lanIp = resolveLanIp()
+        return "http://$lanIp:$port$tokenPath"
+    }
+
+    @Suppress("deprecation")
+    private fun resolveLanIp(): String {
+        val activeNetworkIp = runCatching {
+            val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? ConnectivityManager ?: return@runCatching null
+            val activeNetwork = cm.activeNetwork ?: return@runCatching null
+            val properties = cm.getLinkProperties(activeNetwork) ?: return@runCatching null
+            properties.linkAddresses
+                .asSequence()
+                .mapNotNull { it.address as? Inet4Address }
+                .mapNotNull { it.hostAddress }
+                .firstOrNull { it != "0.0.0.0" && !it.startsWith("169.254.") }
+        }.getOrNull()
+        if (!activeNetworkIp.isNullOrBlank()) return activeNetworkIp
+
+        try {
+            var fallbackIp: String? = null
+            NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { intf ->
+                if (!intf.isUp || intf.isLoopback) return@forEach
+                intf.inetAddresses?.toList()?.forEach { addr ->
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        val ip = addr.hostAddress ?: return@forEach
+                        if (ip == "0.0.0.0" || ip.startsWith("169.254.")) return@forEach
+                        val name = (intf.name ?: "").lowercase()
+                        if (name.startsWith("wlan") || name.startsWith("eth") ||
+                            name.startsWith("en") || name.startsWith("rmnet")
+                        ) {
+                            return ip
+                        }
+                        if (fallbackIp == null) fallbackIp = ip
+                    }
+                }
+            }
+            if (!fallbackIp.isNullOrBlank()) return fallbackIp
+        } catch (e: Exception) {
+            AppDiagnosticLogger.w(applicationContext, TAG, "resolveLanIp 回退枚举失败: ${e.message}", e)
+        }
+        return "0.0.0.0"
+    }
+
+    private fun readTokenFromEnvFile(): String {
+        return try {
+            val envFile = java.io.File(NodeProjectManager.projectDir(this), "config/.env")
+            if (!envFile.exists()) return ""
+            DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["TOKEN"]?.trim().orEmpty()
+        } catch (e: Exception) {
+            AppDiagnosticLogger.w(applicationContext, TAG, "readTokenFromEnvFile 失败: ${e.message}", e)
+            ""
+        }
+    }
+
+    private fun maskTokenInUrl(url: String): String {
+        // 隐藏 token 路径段，例如 http://192.168.1.5:9321/abc123 → http://192.168.1.5:9321/****
+        val lastSlash = url.lastIndexOf('/')
+        if (lastSlash <= 0) return url
+        val beforeSlash = url.substring(0, lastSlash)
+        val afterSlash = url.substring(lastSlash + 1)
+        // 仅当斜杠后是 token（不含 : 和更多路径）才脱敏
+        if (afterSlash.isNotBlank() && !afterSlash.contains(':') && !afterSlash.contains('/')) {
+            return "$beforeSlash/****"
+        }
+        return url
     }
 
     override fun onDestroy() {
