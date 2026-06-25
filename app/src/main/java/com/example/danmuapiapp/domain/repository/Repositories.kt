@@ -153,6 +153,10 @@ interface DanmuDownloadRepository {
         input: DanmuDownloadInput,
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): Result<DanmuDownloadResult>
+    suspend fun loadDanmuPreview(
+        record: DanmuDownloadRecord,
+        previewLimit: Int = 50000
+    ): Result<DanmuFilePreview>
     fun clearRecords()
 }
 

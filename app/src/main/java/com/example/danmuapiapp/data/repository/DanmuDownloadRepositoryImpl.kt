@@ -2,10 +2,12 @@ package com.example.danmuapiapp.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
+import com.example.danmuapiapp.domain.model.DanmuFilePreview
 import com.example.danmuapiapp.domain.model.DanmuDownloadInput
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DanmuDownloadResult
@@ -305,6 +307,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             val targetFile = animeDir.createFile(input.format.mimeType, resolvedName)
                 ?: error("创建文件失败：$resolvedName")
             val normalizedPayload = normalizePayloadIfNeeded(input, payload)
+            val danmuCount = DanmuFilePreviewParser.count(normalizedPayload, input.format)
             writePayload(targetFile.uri, normalizedPayload)
 
             onProgress(1.0f, "下载完成")
@@ -316,6 +319,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 fileUri = targetFile.uri.toString(),
                 bytes = normalizedPayload.size.toLong(),
                 durationMs = elapsed,
+                danmuCount = danmuCount,
                 httpCode = httpCode
             )
             appendRecord(buildRecord(input, success))
@@ -359,9 +363,40 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             fileUri = result.fileUri,
             durationMs = result.durationMs,
             bytes = result.bytes,
+            danmuCount = result.danmuCount,
             httpCode = result.httpCode,
             errorMessage = result.errorMessage
         )
+    }
+
+    override suspend fun loadDanmuPreview(
+        record: DanmuDownloadRecord,
+        previewLimit: Int
+    ): Result<DanmuFilePreview> {
+        return runCatching {
+            if (record.statusEnum() != DownloadRecordStatus.Success) {
+                error("只有下载成功的记录可以查看弹幕内容")
+            }
+            val fileUriText = record.fileUri.trim()
+            if (fileUriText.isBlank()) {
+                error("该记录没有可读取的文件地址")
+            }
+            val format = record.formatEnum()
+            val stream = context.contentResolver.openInputStream(fileUriText.toUri())
+                ?: error("无法打开文件，可能已被移动或目录权限失效")
+            stream.use { input ->
+                val preview = DanmuFilePreviewParser.parse(
+                    input = input,
+                    format = format,
+                    fileName = record.fileName,
+                    relativePath = record.relativePath,
+                    bytes = record.bytes,
+                    previewLimit = previewLimit
+                )
+                updateRecordDanmuCount(record.id, preview.count)
+                preview
+            }
+        }
     }
 
     private fun requestDanmuPayload(url: String): Pair<Int, ByteArray> {
@@ -554,19 +589,44 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     private fun appendRecord(record: DanmuDownloadRecord) {
         val merged = listOf(record) + _records.value
         val trimmed = merged.take(MAX_RECORDS)
-        _records.value = trimmed
+        persistRecords(trimmed)
+    }
+
+    private fun updateRecordDanmuCount(recordId: Long, count: Int) {
+        val next = _records.value.map { record ->
+            if (record.id == recordId && record.danmuCount != count) {
+                record.copy(danmuCount = count)
+            } else {
+                record
+            }
+        }
+        if (next != _records.value) {
+            persistRecords(next)
+        }
+    }
+
+    private fun persistRecords(records: List<DanmuDownloadRecord>) {
+        _records.value = records
         val payload = runCatching {
-            json.encodeToString(ListSerializer(DanmuDownloadRecord.serializer()), trimmed)
-        }.getOrDefault("[]")
-        prefs.edit { putString(KEY_RECORDS_JSON, payload) }
+            json.encodeToString(ListSerializer(DanmuDownloadRecord.serializer()), records)
+        }.onFailure {
+            Log.w("DanmuDownloadRepo", "序列化下载记录失败，不覆写持久化", it)
+        }.getOrNull()
+        if (payload != null) {
+            prefs.edit { putString(KEY_RECORDS_JSON, payload) }
+        }
     }
 
     private fun persistQueueTasks(tasks: List<DanmuDownloadTask>) {
         _queueTasks.value = tasks
         val payload = runCatching {
             json.encodeToString(ListSerializer(DanmuDownloadTask.serializer()), tasks)
-        }.getOrDefault("[]")
-        prefs.edit { putString(KEY_QUEUE_JSON, payload) }
+        }.onFailure {
+            Log.w("DanmuDownloadRepo", "序列化队列任务失败，不覆写持久化", it)
+        }.getOrNull()
+        if (payload != null) {
+            prefs.edit { putString(KEY_QUEUE_JSON, payload) }
+        }
     }
 
     private fun loadSettings(): DanmuDownloadSettings {

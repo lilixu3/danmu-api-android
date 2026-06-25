@@ -276,6 +276,7 @@ data class DanmuDownloadRecord(
     val fileUri: String = "",
     val durationMs: Long = 0L,
     val bytes: Long = 0L,
+    val danmuCount: Int? = null,
     val httpCode: Int? = null,
     val errorMessage: String? = null
 ) {
@@ -340,9 +341,43 @@ data class DanmuDownloadResult(
     val fileUri: String,
     val bytes: Long,
     val durationMs: Long,
+    val danmuCount: Int? = null,
     val httpCode: Int? = null,
     val errorMessage: String? = null
 )
+
+data class DanmuPreviewItem(
+    val index: Int,
+    val timeSeconds: Double? = null,
+    val mode: String = "",
+    val color: String = "",
+    val source: String = "",
+    val text: String = ""
+)
+
+data class DanmuFilePreview(
+    val format: DanmuDownloadFormat,
+    val fileName: String,
+    val relativePath: String,
+    val bytes: Long,
+    val count: Int,
+    val previewLimit: Int,
+    val truncated: Boolean,
+    val items: List<DanmuPreviewItem>,
+    val parseError: String? = null
+)
+
+enum class DanmuPreviewFilter(val label: String) {
+    All("全部"), Scroll("滚动"), Top("顶部"), Bottom("底部")
+}
+
+fun DanmuPreviewItem.previewFilter(): DanmuPreviewFilter {
+    return when (mode.toIntOrNull()) {
+        4 -> DanmuPreviewFilter.Top
+        5 -> DanmuPreviewFilter.Bottom
+        else -> DanmuPreviewFilter.Scroll
+    }
+}
 
 fun DanmuDownloadInput.toQueueTask(taskId: Long): DanmuDownloadTask {
     val now = System.currentTimeMillis()
