@@ -71,15 +71,23 @@ class InjectedSettingsOverlayPolicyTest {
     fun `注入设置子页背景应裁剪复用宿主壁纸避免拼接色差`() {
         val moduleSource = readXposedSource()
         val source = readHostBackgroundsSource()
+        val rowInjectorSource = readSettingsRowInjectorSource()
+        val resolveMethod = source.substringAfter("static Drawable resolveHostPageBackground")
+            .substringBefore("private static Drawable findMeaningfulAncestorBackgroundDrawable")
 
         assertTrue(readSettingsOverlaySource().contains("resolveHostPageBackground(activity, backgroundAnchor, hostPageContainer"))
-        assertTrue(source.contains("captureHostWallpaperBackground(activity, cropAnchor"))
-        assertTrue(source.contains("canvas.translate(wallLoc[0] - targetLoc[0], wallLoc[1] - targetLoc[1])"))
+        assertTrue(resolveMethod.contains("loadHostWallpaperPreviewDrawable(activity)"))
+        assertTrue(resolveMethod.contains("captureHostWallpaperResourceBackground(activity, cropAnchor"))
+        assertTrue(resolveMethod.contains("captureHostWallpaperBackground(activity, cropAnchor"))
+        assertTrue(resolveMethod.contains("captureWindowBackground(activity, resolveBackgroundCaptureTarget(activity, cropAnchor), logger)"))
+        assertTrue(source.contains("loadHostWallpaperResource(activity, wallIndex)"))
+        assertTrue(source.contains("readHostPreferenceInt(activity, \"wall\", 1)"))
         assertTrue(source.contains("findDirectHostWallpaperLayer(content)"))
         assertTrue(source.contains("isKnownHostWallpaperLayerClass(className)"))
+        assertTrue(rowInjectorSource.contains("cloneDrawable(anchorRow.getBackground())"))
         assertTrue(source.contains("\"s30\""))
         assertTrue(source.contains("\"Q3.k\""))
-        assertFalse("FongMi 5.5.2 dex 描述符是 Ls30;，运行时类名是 s30；不能保留 JADX 反编译目录里的假包名 defpackage.s30",
+        assertFalse("FongMi 5.5.x dex 描述符是 Ls30;，运行时类名是 s30；不能保留 JADX 反编译目录里的假包名 defpackage.s30",
             source.contains("\"defpackage.s30\""))
         assertFalse("普通页面里的 @id/image 不能再作为壁纸发现依据", source.contains("hasWallpaperImageSignature"))
         assertFalse("普通页面里的 className.contains(\"wall\") 不能再作为壁纸发现依据", source.contains("className.toLowerCase(Locale.ROOT).contains(\"wall\")"))
@@ -89,13 +97,16 @@ class InjectedSettingsOverlayPolicyTest {
     fun `OK影视静态窗口壁纸应按屏幕坐标裁剪避免顶底拼接色差`() {
         val source = readHostBackgroundsSource()
         val resolveMethod = source.substringAfter("static Drawable resolveHostPageBackground")
-            .substringBefore("static Drawable resolveRowTemplateBackground")
+            .substringBefore("private static Drawable findMeaningfulAncestorBackgroundDrawable")
         val captureMethod = source.substringAfter("private static Drawable captureHostWallpaperBackground")
-            .substringBefore("private static View findHostWallpaperView")
+            .substringBefore("private static View resolveBackgroundCaptureTarget")
 
         assertTrue("OK影视 5.1.x 静态壁纸设置在 Window background，不能直接加载 wallpaper_1 当 overlay 本地背景",
-            captureMethod.contains("captureWindowBackground(activity, target"))
+            resolveMethod.contains("loadHostWallpaperPreviewDrawable(activity)"))
         assertTrue(resolveMethod.contains("captureHostWallpaperResourceBackground(activity, cropAnchor"))
+        assertTrue(resolveMethod.contains("captureHostWallpaperBackground(activity, cropAnchor"))
+        assertTrue(resolveMethod.contains("captureWindowBackground(activity, resolveBackgroundCaptureTarget(activity, cropAnchor), logger)"))
+        assertTrue(resolveMethod.contains("findMeaningfulAncestorBackgroundDrawable(backgroundAnchor)"))
         assertFalse("资源兜底也必须按 decor/content 屏幕坐标裁剪，避免从 overlay 顶部重新铺图造成状态栏/底部导航拼接色差",
             resolveMethod.contains("Drawable resourceWall = loadHostWallpaperResource(activity)"))
 
@@ -106,6 +117,8 @@ class InjectedSettingsOverlayPolicyTest {
         assertTrue(source.contains("boundsAnchor.getLocationOnScreen(boundsLoc)"))
         assertTrue(source.contains("target.getLocationOnScreen(targetLoc)"))
         assertTrue(source.contains("canvas.translate(boundsLoc[0] - targetLoc[0], boundsLoc[1] - targetLoc[1])"))
+        assertTrue(captureMethod.contains("if (wall == null || wall.getWidth() <= 0 || wall.getHeight() <= 0) return null;"))
+        assertFalse(captureMethod.contains("captureWindowBackground(activity, target"))
     }
 
     private fun readXposedSource(): String {
@@ -114,6 +127,10 @@ class InjectedSettingsOverlayPolicyTest {
 
     private fun readHostBackgroundsSource(): String {
         return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedHostBackgrounds.java")
+    }
+
+    private fun readSettingsRowInjectorSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedSettingsRowInjector.java")
     }
 
     private fun readSettingsOverlaySource(): String {

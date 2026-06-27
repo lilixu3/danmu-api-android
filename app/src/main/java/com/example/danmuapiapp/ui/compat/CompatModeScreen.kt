@@ -1,10 +1,12 @@
 package com.example.danmuapiapp.ui.compat
 
+import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,7 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.text.KeyboardActions
@@ -52,6 +54,7 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -86,10 +89,12 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
+import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
@@ -120,6 +125,7 @@ data class CompatModeActions(
     val onDownloadAppUpdate: () -> Unit,
     val onInstallAppUpdate: () -> Unit,
     val onToggleNightMode: () -> Unit,
+    val onSetAppDpiOverride: (Int) -> Unit,
     val onOpenProxyPicker: () -> Unit,
     val onSelectProxy: (String) -> Unit,
     val onRetestProxySpeed: () -> Unit,
@@ -203,28 +209,27 @@ fun CompatModeScreen(
                     onBackHome = { currentPage = CompatPage.Home }
                 )
 
-                LazyColumn(
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    item {
-                        if (currentPage == CompatPage.Settings) {
-                            CompatSettingsPage(
-                                uiState = uiState,
-                                proxyPickerState = proxyPickerState,
-                                actions = actions,
-                                wideLayout = wideLayout,
-                                onRequestExitCompatMode = { showExitCompatModeDialog = true }
-                            )
-                        } else {
-                            CompatHomePage(
-                                uiState = uiState,
-                                actions = actions
-                            )
-                        }
+                    if (currentPage == CompatPage.Settings) {
+                        CompatSettingsPage(
+                            uiState = uiState,
+                            proxyPickerState = proxyPickerState,
+                            actions = actions,
+                            wideLayout = wideLayout,
+                            onRequestExitCompatMode = { showExitCompatModeDialog = true }
+                        )
+                    } else {
+                        CompatHomePage(
+                            uiState = uiState,
+                            actions = actions
+                        )
                     }
                 }
             }
@@ -307,6 +312,7 @@ private fun CompatSettingsPage(
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 AppUpdateCard(uiState, actions)
+                CompatAppDisplayCard(uiState, actions)
                 GithubProxyCard(proxyPickerState, actions)
             }
             Column(
@@ -324,6 +330,7 @@ private fun CompatSettingsPage(
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
             AppUpdateCard(uiState, actions)
+            CompatAppDisplayCard(uiState, actions)
             KeepAliveCard(uiState, actions)
             GithubProxyCard(proxyPickerState, actions)
             CompatModeExitCard(
@@ -467,7 +474,10 @@ private fun CompatHeader(
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = if (isWide) 28.dp else 22.dp, vertical = 22.dp),
+            modifier = Modifier
+                .padding(horizontal = if (isWide) 28.dp else 22.dp, vertical = 22.dp)
+                .fillMaxWidth()
+                .focusGroup(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -493,22 +503,19 @@ private fun CompatHeader(
             )
             NightModeButton(
                 label = nightModeLabel(uiState.nightMode),
-                onClick = actions.onToggleNightMode,
-                focusEnabled = false
+                onClick = actions.onToggleNightMode
             )
             TvActionButton(
                 text = if (currentPage == CompatPage.Settings) "首页" else "设置",
                 icon = if (currentPage == CompatPage.Settings) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Settings,
                 tone = ButtonTone.Secondary,
-                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings,
-                focusEnabled = false
+                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings
             )
             TvActionButton(
                 text = "刷新",
                 icon = Icons.Rounded.Refresh,
                 tone = ButtonTone.Secondary,
-                onClick = actions.onRefreshCoreInfo,
-                focusEnabled = false
+                onClick = actions.onRefreshCoreInfo
             )
         }
     }
@@ -1021,6 +1028,22 @@ private fun AppUpdateCard(
     actions: CompatModeActions
 ) {
     val update = uiState.appUpdate.checkResult
+    val primaryActionRequester = remember { FocusRequester() }
+    var restorePrimaryActionFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(
+        uiState.appUpdate.isChecking,
+        uiState.appUpdate.isDownloading,
+        uiState.appUpdate.downloadedApk
+    ) {
+        if (
+            restorePrimaryActionFocus &&
+            !uiState.appUpdate.isChecking &&
+            !uiState.appUpdate.isDownloading
+        ) {
+            primaryActionRequester.requestFocus()
+            restorePrimaryActionFocus = false
+        }
+    }
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
@@ -1103,14 +1126,22 @@ private fun AppUpdateCard(
                             icon = Icons.Rounded.CloudDownload,
                             tone = ButtonTone.Primary,
                             enabled = !uiState.appUpdate.isDownloading,
-                            onClick = actions.onDownloadAppUpdate
+                            onClick = {
+                                restorePrimaryActionFocus = true
+                                actions.onDownloadAppUpdate()
+                            },
+                            modifier = Modifier.focusRequester(primaryActionRequester)
                         )
                     } else {
                         TvActionButton(
                             text = "安装更新",
                             icon = Icons.Rounded.Upgrade,
                             tone = ButtonTone.Primary,
-                            onClick = actions.onInstallAppUpdate
+                            onClick = {
+                                restorePrimaryActionFocus = true
+                                actions.onInstallAppUpdate()
+                            },
+                            modifier = Modifier.focusRequester(primaryActionRequester)
                         )
                     }
                     TvActionButton(
@@ -1118,7 +1149,10 @@ private fun AppUpdateCard(
                         icon = Icons.Rounded.Refresh,
                         tone = ButtonTone.Secondary,
                         enabled = !uiState.appUpdate.isChecking,
-                        onClick = actions.onCheckAppUpdate
+                        onClick = {
+                            restorePrimaryActionFocus = true
+                            actions.onCheckAppUpdate()
+                        }
                     )
                 }
             } else {
@@ -1128,16 +1162,147 @@ private fun AppUpdateCard(
                         icon = Icons.Rounded.Refresh,
                         tone = ButtonTone.Primary,
                         enabled = !uiState.appUpdate.isChecking,
-                        onClick = actions.onCheckAppUpdate
+                        onClick = {
+                            restorePrimaryActionFocus = true
+                            actions.onCheckAppUpdate()
+                        },
+                        modifier = Modifier.focusRequester(primaryActionRequester)
                     )
                     if (uiState.appUpdate.downloadedApk != null) {
                         TvActionButton(
                             text = "安装缓存包",
                             icon = Icons.Rounded.Upgrade,
                             tone = ButtonTone.Secondary,
-                            onClick = actions.onInstallAppUpdate
+                            onClick = {
+                                restorePrimaryActionFocus = true
+                                actions.onInstallAppUpdate()
+                            }
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompatAppDisplayCard(
+    uiState: CompatModeUiState,
+    actions: CompatModeActions
+) {
+    val systemDpi = remember { Resources.getSystem().displayMetrics.densityDpi }
+    val effectiveDpi = if (uiState.appDpiOverride > 0) uiState.appDpiOverride else systemDpi
+    val presetDpi = remember(systemDpi) {
+        listOf(
+            (systemDpi * 0.85f).toInt(),
+            (systemDpi * 0.95f).toInt(),
+            systemDpi,
+            (systemDpi * 1.08f).toInt(),
+            (systemDpi * 1.18f).toInt()
+        )
+            .map { it.coerceIn(AppAppearancePrefs.APP_DPI_MIN, AppAppearancePrefs.APP_DPI_MAX) }
+            .distinct()
+    }
+    var dpiInput by rememberSaveable(uiState.appDpiOverride, systemDpi) {
+        mutableStateOf((if (uiState.appDpiOverride > 0) uiState.appDpiOverride else systemDpi).toString())
+    }
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "显示缩放（App DPI）",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "系统 DPI：$systemDpi  ·  当前应用 DPI：$effectiveDpi",
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = if (uiState.appDpiOverride > 0) "已覆盖" else "跟随系统",
+                    color = if (uiState.appDpiOverride > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                )
+            }
+
+            Text(
+                text = "仅对本应用生效，不会修改系统 DPI。",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "可用范围：${AppAppearancePrefs.APP_DPI_MIN}-${AppAppearancePrefs.APP_DPI_MAX}",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                presetDpi.forEach { dpi ->
+                    AssistChip(
+                        onClick = {
+                            dpiInput = dpi.toString()
+                            actions.onSetAppDpiOverride(dpi)
+                        },
+                        label = { Text("$dpi") }
+                    )
+                }
+                AssistChip(
+                    onClick = {
+                        dpiInput = AppAppearancePrefs.APP_DPI_SYSTEM.toString()
+                        actions.onSetAppDpiOverride(AppAppearancePrefs.APP_DPI_SYSTEM)
+                    },
+                    label = { Text("跟随系统") }
+                )
+            }
+
+            OutlinedTextField(
+                value = dpiInput,
+                onValueChange = { input ->
+                    dpiInput = input.filter { it.isDigit() }.take(4)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("自定义 App DPI") },
+                placeholder = { Text("例如 360") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = {
+                        val parsed = dpiInput.toIntOrNull()
+                        if (parsed == null) {
+                            dpiInput = if (uiState.appDpiOverride > 0) {
+                                uiState.appDpiOverride.toString()
+                            } else {
+                                systemDpi.toString()
+                            }
+                        } else {
+                            actions.onSetAppDpiOverride(parsed)
+                        }
+                    }
+                ) {
+                    Text("应用 DPI")
                 }
             }
         }
@@ -1246,6 +1411,14 @@ private fun CoreVariantCard(
     val activeProgress = uiState.downloadProgress.takeIf {
         it.inProgress && it.variant == info.variant
     }
+    val primaryActionRequester = remember(info.variant) { FocusRequester() }
+    var restorePrimaryActionFocus by remember(info.variant) { mutableStateOf(false) }
+    LaunchedEffect(uiState.isOperating, info.variant) {
+        if (restorePrimaryActionFocus && !uiState.isOperating) {
+            primaryActionRequester.requestFocus()
+            restorePrimaryActionFocus = false
+        }
+    }
     var isCustomEditing by rememberSaveable(info.variant.name) { mutableStateOf(false) }
 
     Surface(
@@ -1334,12 +1507,14 @@ private fun CoreVariantCard(
                     tone = if (mainPrimary) ButtonTone.Primary else ButtonTone.Secondary,
                     enabled = !uiState.isOperating,
                     onClick = {
+                        restorePrimaryActionFocus = true
                         when {
                             !info.isInstalled -> actions.onInstallCore(info.variant)
                             info.needsAttention -> actions.onUpdateCore(info.variant)
                             else -> actions.onCheckCoreUpdate(info.variant)
                         }
-                    }
+                    },
+                    modifier = Modifier.focusRequester(primaryActionRequester)
                 )
                 if (canDelete) {
                     TvActionButton(
@@ -1586,12 +1761,20 @@ private fun SyncCard(uiState: CompatModeUiState) {
             }
         }
     }
+    var focused by remember { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
+        border = BorderStroke(
+            if (focused) 2.dp else 1.dp,
+            if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusable()
+            .onFocusChanged { focused = it.isFocused }
     ) {
         Column(
             modifier = Modifier.padding(22.dp),

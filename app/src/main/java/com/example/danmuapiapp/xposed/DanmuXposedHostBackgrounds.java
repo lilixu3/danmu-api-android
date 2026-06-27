@@ -13,7 +13,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.Window;
+import android.widget.ImageView;
 
+import java.io.File;
 import java.util.ArrayList;
 
 final class DanmuXposedHostBackgrounds {
@@ -27,10 +29,14 @@ final class DanmuXposedHostBackgrounds {
     }
 
     static Drawable resolveHostPageBackground(Activity activity, View backgroundAnchor, View cropAnchor, WarningLogger logger) {
-        Drawable wall = captureHostWallpaperBackground(activity, cropAnchor, logger);
-        if (wall != null) return wall;
+        Drawable previewWallpaper = loadHostWallpaperPreviewDrawable(activity);
+        if (previewWallpaper != null) return previewWallpaper;
         Drawable resourceWall = captureHostWallpaperResourceBackground(activity, cropAnchor, logger);
         if (resourceWall != null) return resourceWall;
+        Drawable wall = captureHostWallpaperBackground(activity, cropAnchor, logger);
+        if (wall != null) return wall;
+        Drawable windowWallpaper = captureWindowBackground(activity, resolveBackgroundCaptureTarget(activity, cropAnchor), logger);
+        if (windowWallpaper != null) return windowWallpaper;
         Drawable fromTree = findMeaningfulAncestorBackgroundDrawable(backgroundAnchor);
         if (fromTree != null) return fromTree;
         return buildFallbackHostBackground(activity);
@@ -43,6 +49,23 @@ final class DanmuXposedHostBackgrounds {
             if (cloned != null) return cloned;
         }
         return buildFallbackRowBackground(backgroundAnchor == null ? null : backgroundAnchor.getContext());
+    }
+
+    private static Drawable loadHostWallpaperPreviewDrawable(Activity activity) {
+        try {
+            if (activity == null) return null;
+            File preview = new File(activity.getFilesDir(), "wallpaper_cache");
+            if (!preview.exists() || preview.length() <= 0L) return null;
+            Drawable drawable = Drawable.createFromPath(preview.getAbsolutePath());
+            if (drawable instanceof BitmapDrawable) {
+                BitmapDrawable bitmapDrawable = (BitmapDrawable) drawable;
+                bitmapDrawable.setTargetDensity(activity.getResources().getDisplayMetrics());
+                bitmapDrawable.setGravity(Gravity.FILL);
+            }
+            return drawable;
+        } catch (Throwable throwable) {
+            return null;
+        }
     }
 
     private static Drawable findMeaningfulAncestorBackgroundDrawable(View backgroundAnchor) {
@@ -67,9 +90,7 @@ final class DanmuXposedHostBackgrounds {
             View target = resolveBackgroundCaptureTarget(activity, cropAnchor);
             if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
             View wall = findHostWallpaperView(activity);
-            if (wall == null || wall.getWidth() <= 0 || wall.getHeight() <= 0) {
-                return captureWindowBackground(activity, target, logger);
-            }
+            if (wall == null || wall.getWidth() <= 0 || wall.getHeight() <= 0) return null;
             Bitmap bitmap = Bitmap.createBitmap(target.getWidth(), target.getHeight(), Bitmap.Config.ARGB_8888);
             bitmap.setDensity(activity.getResources().getDisplayMetrics().densityDpi);
             Canvas canvas = new Canvas(bitmap);
@@ -143,7 +164,8 @@ final class DanmuXposedHostBackgrounds {
     private static Drawable captureHostWallpaperResourceBackground(Activity activity, View cropAnchor, WarningLogger logger) {
         try {
             if (activity == null) return null;
-            Drawable resourceWall = loadHostWallpaperResource(activity);
+            int wallIndex = readHostPreferenceInt(activity, "wall", 1);
+            Drawable resourceWall = loadHostWallpaperResource(activity, wallIndex);
             if (resourceWall == null) return null;
             View target = resolveBackgroundCaptureTarget(activity, cropAnchor);
             if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) return null;
@@ -199,28 +221,61 @@ final class DanmuXposedHostBackgrounds {
 
     private static View findDirectHostWallpaperLayer(ViewGroup content) {
         if (content == null) return null;
+        Context context = content.getContext();
         for (int i = 0; i < content.getChildCount(); i++) {
             View child = content.getChildAt(i);
             if (child == null || child.getVisibility() != View.VISIBLE) continue;
             String className = child.getClass().getName();
-            if (isKnownHostWallpaperLayerClass(className)) return child;
+            if (isKnownHostWallpaperLayerClass(className) || containsWallpaperImageChild(child, context)) return child;
         }
         return null;
     }
 
     private static boolean isKnownHostWallpaperLayerClass(String className) {
-        return "s30".equals(className) || "Q3.k".equals(className);
+        return "s30".equals(className)
+            || "Q3.k".equals(className)
+            || "defpackage.h40".equals(className)
+            || (className != null && className.endsWith(".h40"));
     }
 
-    private static Drawable loadHostWallpaperResource(Activity activity) {
+    private static boolean containsWallpaperImageChild(View view, Context context) {
+        if (!(view instanceof ViewGroup) || context == null) return false;
+        int imageId = context.getResources().getIdentifier("image", "id", context.getPackageName());
+        if (imageId == 0) return false;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof ImageView && child.getId() == imageId) return true;
+        }
+        return false;
+    }
+
+    private static Drawable loadHostWallpaperResource(Activity activity, int wallIndex) {
         if (activity == null) return null;
         try {
+            int safeIndex = wallIndex <= 0 ? 1 : Math.min(4, wallIndex);
             String pkg = activity.getPackageName();
-            int id = activity.getResources().getIdentifier("wallpaper_1", "drawable", pkg);
+            int id = activity.getResources().getIdentifier("wallpaper_" + safeIndex, "drawable", pkg);
             if (id == 0) return null;
-            return activity.getResources().getDrawable(id, activity.getTheme());
+            Drawable drawable = activity.getResources().getDrawable(id, activity.getTheme());
+            if (drawable instanceof BitmapDrawable) {
+                BitmapDrawable bitmapDrawable = (BitmapDrawable) drawable;
+                bitmapDrawable.setTargetDensity(activity.getResources().getDisplayMetrics());
+                bitmapDrawable.setGravity(Gravity.FILL);
+            }
+            return drawable;
         } catch (Throwable ignored) {
             return null;
+        }
+    }
+
+    private static int readHostPreferenceInt(Context context, String key, int defaultValue) {
+        if (context == null) return defaultValue;
+        try {
+            String name = context.getPackageName() + "_preferences";
+            return context.getSharedPreferences(name, Context.MODE_PRIVATE).getInt(key, defaultValue);
+        } catch (Throwable ignored) {
+            return defaultValue;
         }
     }
 

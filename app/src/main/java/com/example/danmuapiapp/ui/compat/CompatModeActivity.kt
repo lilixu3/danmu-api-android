@@ -33,7 +33,7 @@ class CompatModeActivity : ComponentActivity() {
             super.attachBaseContext(null)
             return
         }
-        super.attachBaseContext(AppAppearancePrefs.wrapContextWithAppDpi(newBase))
+        super.attachBaseContext(AppAppearancePrefs.wrapContextWithAppDpi(newBase, includeCompatMode = true))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,6 +105,9 @@ class CompatModeActivity : ComponentActivity() {
                             compatViewModel.installAppUpdate(this@CompatModeActivity)
                         },
                         onToggleNightMode = compatViewModel::toggleNightMode,
+                        onSetAppDpiOverride = { dpi ->
+                            compatViewModel.setAppDpiOverride(this@CompatModeActivity, dpi)
+                        },
                         onOpenProxyPicker = compatViewModel::openProxyPicker,
                         onSelectProxy = compatViewModel::selectProxy,
                         onRetestProxySpeed = compatViewModel::retestProxySpeed,
