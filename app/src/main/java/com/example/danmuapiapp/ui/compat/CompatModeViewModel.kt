@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.domain.model.ApiVariant
@@ -51,7 +52,8 @@ data class CompatModeUiState(
     val customCoreSource: ResolvedCustomCoreSource = ResolvedCustomCoreSource(),
     val customRepo: String = "",
     val customRepoBranch: String = "",
-    val nightMode: NightModePreference = NightModePreference.FollowSystem
+    val nightMode: NightModePreference = NightModePreference.FollowSystem,
+    val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM
 )
 
 data class CompatKeepAliveUiState(
@@ -133,7 +135,8 @@ class CompatModeViewModel(
             customCoreSource = graph.settingsRepository.customCoreSource.value,
             customRepo = graph.settingsRepository.customRepo.value,
             customRepoBranch = graph.settingsRepository.customRepoBranch.value,
-            nightMode = graph.settingsRepository.nightMode.value
+            nightMode = graph.settingsRepository.nightMode.value,
+            appDpiOverride = graph.settingsRepository.appDpiOverride.value
         )
     )
     val uiState: StateFlow<CompatModeUiState> = _uiState.asStateFlow()
@@ -592,6 +595,29 @@ class CompatModeViewModel(
         graph.settingsRepository.setNightMode(next)
     }
 
+    fun setAppDpiOverride(activity: Activity?, dpi: Int) {
+        val normalized = AppAppearancePrefs.normalizeAppDpiOverride(dpi)
+        if (normalized == _uiState.value.appDpiOverride) {
+            emitEvent(
+                if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
+                    "当前已是跟随系统 DPI"
+                } else {
+                    "当前已是 ${normalized} DPI"
+                }
+            )
+            return
+        }
+        graph.settingsRepository.setAppDpiOverride(normalized)
+        emitEvent(
+            if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
+                "已恢复跟随系统 DPI"
+            } else {
+                "已应用 ${normalized} DPI"
+            }
+        )
+        activity?.recreate()
+    }
+
     override fun onCleared() {
         syncServer.stop()
         super.onCleared()
@@ -650,6 +676,11 @@ class CompatModeViewModel(
         viewModelScope.launch {
             graph.settingsRepository.nightMode.collectLatest { mode ->
                 _uiState.update { it.copy(nightMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            graph.settingsRepository.appDpiOverride.collectLatest { dpi ->
+                _uiState.update { it.copy(appDpiOverride = dpi) }
             }
         }
         viewModelScope.launch {

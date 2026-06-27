@@ -75,8 +75,8 @@ object AppAppearancePrefs {
         return dpi.coerceIn(APP_DPI_MIN, APP_DPI_MAX)
     }
 
-    fun wrapContextWithAppDpi(base: Context): Context {
-        if (DeviceCompatMode.shouldUseCompatMode(base)) return base
+    fun wrapContextWithAppDpi(base: Context, includeCompatMode: Boolean = false): Context {
+        if (!includeCompatMode && DeviceCompatMode.shouldUseCompatMode(base)) return base
         val prefs = base.getSharedPreferences(PREFS_UI_SCALE_LEGACY, Context.MODE_PRIVATE)
         val overrideDpi = readAppDpiOverride(prefs)
         if (overrideDpi == APP_DPI_SYSTEM) return base
