@@ -39,10 +39,6 @@ internal object RuntimeIdentityStore {
         }
     }
 
-    fun readInstanceId(context: Context): String {
-        return secureStore(context).get(KEY_INSTANCE_ID).trim()
-    }
-
     fun extractHealthIdentity(body: String): String? {
         return Regex(""""runtimeIdentity"\s*:\s*"([^"]+)"""")
             .find(body)
