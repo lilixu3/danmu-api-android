@@ -399,3 +399,13 @@ fun DanmuDownloadInput.toQueueTask(taskId: Long): DanmuDownloadTask {
         lastDetail = "等待下载"
     )
 }
+
+data class DanmuCommentItem(
+    val text: String,
+    val timeSec: Float? = null,
+    val mode: Int? = null,
+    val fontSize: Int? = null,
+    val color: Int? = null,
+    val sendTime: Long? = null,
+    val senderHash: String? = null
+)

@@ -20,6 +20,7 @@ import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
+import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.domain.model.ErrorHandler
 import kotlinx.coroutines.*
 import android.content.ClipData
@@ -73,6 +74,7 @@ class NodeService : Service() {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, true)
+            RuntimeIdentityStore.ensureInstanceId(appContext)
             if (userInitiated) {
                 NodeKeepAlivePrefs.clearRestartBackoff(appContext)
             } else {
@@ -357,6 +359,7 @@ class NodeService : Service() {
                     generation = generation,
                     startupStartedAtMs = startupIssuedAtMs
                 ) ?: return@launch
+                RuntimeIdentityStore.exportToEnv(applicationContext)
                 val startCanceled = synchronized(stateLock) {
                     runtimeGeneration.get() != generation || !isRunning || isStopping
                 }
@@ -468,7 +471,7 @@ class NodeService : Service() {
                     while (isActive && runtimeGeneration.get() == generation) {
                         if (!isNodeThreadAlive()) return@launch
                         val ports = resolveCandidatePorts()
-                        val nowReady = ports.any { it in 1..65535 && isPortOpen(it) }
+                        val nowReady = ports.any { it in 1..65535 && isRuntimeOwnedByApp(it) }
                         if (nowReady) {
                             publishRunningIfNeeded(generation)
                             return@launch
@@ -767,6 +770,32 @@ class NodeService : Service() {
         stopSelf()
     }
 
+    private fun isRuntimeOwnedByApp(port: Int): Boolean {
+        if (port !in 1..65535) return false
+        val expected = RuntimeIdentityStore.readInstanceId(applicationContext).trim()
+        if (expected.isBlank()) return false
+        val actual = readRuntimeIdentityFromHealth(port) ?: return false
+        return actual == expected
+    }
+
+    private fun readRuntimeIdentityFromHealth(port: Int): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 450
+                readTimeout = 700
+                requestMethod = "GET"
+            }
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            RuntimeIdentityStore.extractHealthIdentity(body)
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private fun isPortOpen(port: Int): Boolean {
         var socket: Socket? = null
         return try {
@@ -917,8 +946,16 @@ class NodeService : Service() {
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止服务", stopPendingIntent)
-            .addAction(android.R.drawable.ic_menu_share, "复制地址", copyLanPendingIntent)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                getString(R.string.notification_action_stop),
+                stopPendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_share,
+                getString(R.string.notification_action_copy_address),
+                copyLanPendingIntent
+            )
             .setOngoing(true)
             .build()
     }
