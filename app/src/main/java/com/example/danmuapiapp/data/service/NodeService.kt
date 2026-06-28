@@ -18,6 +18,8 @@ import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.NodeBridge
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.R
+import com.example.danmuapiapp.data.repository.determineRuntimeOwnershipFromHealth
+import com.example.danmuapiapp.data.repository.isRuntimeOwnershipOwned
 import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.service.RuntimeIdentityStore
@@ -772,13 +774,19 @@ class NodeService : Service() {
 
     private fun isRuntimeOwnedByApp(port: Int): Boolean {
         if (port !in 1..65535) return false
-        val expected = RuntimeIdentityStore.readInstanceId(applicationContext).trim()
-        if (expected.isBlank()) return false
-        val actual = readRuntimeIdentityFromHealth(port) ?: return false
-        return actual == expected
+        val expectedIdentity = RuntimeIdentityStore.ensureInstanceId(applicationContext).trim()
+        val expectedHome = NodeProjectManager.projectDir(this).absolutePath
+        val body = readRuntimeHealthBody(port) ?: return false
+        return isRuntimeOwnershipOwned(
+            determineRuntimeOwnershipFromHealth(
+                body = body,
+                expectedIdentity = expectedIdentity,
+                expectedHome = expectedHome
+            )
+        )
     }
 
-    private fun readRuntimeIdentityFromHealth(port: Int): String? {
+    private fun readRuntimeHealthBody(port: Int): String? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
@@ -787,8 +795,7 @@ class NodeService : Service() {
                 requestMethod = "GET"
             }
             if (connection.responseCode !in 200..299) return null
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            RuntimeIdentityStore.extractHealthIdentity(body)
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } catch (_: Exception) {
             null
         } finally {
