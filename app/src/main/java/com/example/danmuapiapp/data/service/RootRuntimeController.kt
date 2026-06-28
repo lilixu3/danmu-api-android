@@ -66,8 +66,34 @@ object RootRuntimeController {
         return isPortOpen("127.0.0.1", port, 220)
     }
 
+    private fun isRuntimeOwnedByApp(context: Context, port: Int): Boolean {
+        if (port !in 1..65535) return false
+        val expected = RuntimeIdentityStore.readInstanceId(context).trim()
+        if (expected.isBlank()) return false
+        val actual = readRuntimeIdentityFromHealth(port) ?: return false
+        return actual == expected
+    }
+
+    private fun readRuntimeIdentityFromHealth(port: Int): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 450
+                readTimeout = 700
+                requestMethod = "GET"
+            }
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            RuntimeIdentityStore.extractHealthIdentity(body)
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     fun isRunning(context: Context, port: Int): Boolean {
-        if (isRunningFast(port)) return true
+        if (isRunningFast(port)) return isRuntimeOwnedByApp(context, port)
 
         val pid = readPid(context) ?: return false
         if (Looper.getMainLooper().thread === Thread.currentThread()) {
@@ -123,6 +149,13 @@ object RootRuntimeController {
         skipSync: Boolean = false
     ): OpResult {
         if (isRunningFast(port)) {
+            if (!isRuntimeOwnedByApp(context, port)) {
+                return OpResult(
+                    ok = false,
+                    message = "Root 端口已被其他实例占用",
+                    detail = "端口 $port 已有其他实例在运行，请先停止外部进程后再启动"
+                )
+            }
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -138,7 +171,7 @@ object RootRuntimeController {
             return OpResult(false, "Root 授权失败", "请确认设备已 Root，并允许本应用获取 Root 权限")
         }
 
-        if (isRunning(context, port)) {
+        if (isRuntimeOwnedByApp(context, port)) {
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -171,6 +204,7 @@ object RootRuntimeController {
         val apkPathHint = context.applicationInfo.sourceDir
         val libDirHint = context.applicationInfo.nativeLibraryDir
         val bootLogPath = bootLogFile.absolutePath
+        val runtimeIdentity = RuntimeIdentityStore.ensureInstanceId(context)
 
         StartupFailureStore.clearRoot(context)
 
@@ -230,6 +264,7 @@ object RootRuntimeController {
 
             mkdir -p "${'$'}(dirname "${'$'}PID_FILE")" >/dev/null 2>&1 || true
             export DANMU_API_HOME="${'$'}(dirname "${'$'}ENTRY")"
+            export DANMU_API_RUNTIME_IDENTITY=${shellQuote(runtimeIdentity)}
             cd "${'$'}DANMU_API_HOME" >/dev/null 2>&1 || true
             printf '%s [INFO] DANMU_API_HOME=%s\n' "${'$'}(ts)" "${'$'}DANMU_API_HOME" >> "${'$'}BOOT_LOG" 2>/dev/null || true
 
