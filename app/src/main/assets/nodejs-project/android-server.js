@@ -41,6 +41,7 @@ let _coreScanInFlight = false;
 let _coreReloadSeq = 1;
 
 const _VARIANT_ENV_KEY = 'DANMU_API_VARIANT';
+const _RUNTIME_IDENTITY_ENV_KEY = 'DANMU_API_RUNTIME_IDENTITY';
 
 // === 修改 1: 添加 custom 的映射 ===
 const _VARIANT_MAP = {
@@ -63,6 +64,10 @@ function _getEnvSnapshot() {
     out[k] = String(v);
   }
   return out;
+}
+
+function _getRuntimeIdentity() {
+  return String(process.env[_RUNTIME_IDENTITY_ENV_KEY] || '').trim();
 }
 
 function _refreshRuntimeFlags() {
@@ -1964,6 +1969,7 @@ function createMainServer() {
         const info = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
         const cacheProbeDir = _resolveCacheProbeDir();
         const cacheProbeWritable = _checkCacheProbeWritable(cacheProbeDir);
+        const runtimeIdentity = _getRuntimeIdentity();
         const payload = {
           ok: true,
           time: new Date().toISOString(),
@@ -1979,6 +1985,7 @@ function createMainServer() {
           cacheProbeWritable,
           variant: variantKey,
           variantLabel: info.label,
+          runtimeIdentity: runtimeIdentity || null,
           requestCount: METRICS.requestCount,
           lastRequestAt: METRICS.lastRequestAt,
           lastRequestPath: METRICS.lastRequestPath,

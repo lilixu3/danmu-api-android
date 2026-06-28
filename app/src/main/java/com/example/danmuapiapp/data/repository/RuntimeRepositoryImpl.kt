@@ -18,6 +18,7 @@ import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
+import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RootRuntimeController
@@ -272,14 +273,10 @@ class RuntimeRepositoryImpl @Inject constructor(
             persistSelectedVariant(variant, commit = false)
         }
 
-        val portOpen = isPortOpen(port)
-        // 普通模式的真值源以本地端口是否可达为准。
-        // 主进程被系统回收后，ActivityManager 对远程 :node 进程的枚举并不稳定，
-        // 继续把“端口可达 && 能枚举到进程”当成运行条件，会导致服务实际还活着但 UI 误判为已停。
         val normalRuntimeAlive = isNormalRuntimeReachable(port)
         val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
         val running = if (mode == RunMode.Root) {
-            RootRuntimeController.isProbablyRunning(context, port)
+            isRootRuntimeOwnedByApp(port)
         } else {
             normalRuntimeAlive
         }
@@ -714,7 +711,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         normalPendingExplicitStart = state.runMode == RunMode.Normal
         if (state.runMode == RunMode.Root) {
             if (shouldClearRootStartedAtBeforeStart(
-                    rootProbablyRunning = RootRuntimeController.isProbablyRunning(context, state.port)
+                    rootProbablyRunning = isRootRuntimeOwnedByApp(state.port)
                 )
             ) {
                 clearRuntimeStartedAt()
@@ -804,7 +801,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     delay(normalProfile.startupPrimaryNoticeMs)
                     val snapshot = _runtimeState.value
                     if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Starting) {
-                        if (isPortOpen(snapshot.port)) {
+                        if (isNormalRuntimeReachable(snapshot.port)) {
                             markRunning(forceNewStart = normalPendingExplicitStart)
                         } else {
                             addLog(LogLevel.Warn, "普通模式首次启动较慢，继续等待...")
@@ -817,7 +814,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                             if (retrySnapshot.runMode == RunMode.Normal &&
                                 retrySnapshot.status == ServiceStatus.Starting
                             ) {
-                                if (isPortOpen(retrySnapshot.port)) {
+                                if (isNormalRuntimeReachable(retrySnapshot.port)) {
                                     markRunning(forceNewStart = normalPendingExplicitStart)
                                 } else {
                                     addLog(LogLevel.Warn, "普通模式启动耗时较长，继续等待服务自行就绪...")
@@ -1052,11 +1049,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
         while (System.currentTimeMillis() < deadline) {
             if (!NodeService.isProcessRunning(context)) return false
-            if (port in 1..65535 && isPortOpen(port)) return false
+            if (port in 1..65535 && isNormalRuntimeReachable(port)) return false
             delay(180)
         }
         return NodeService.isProcessRunning(context) &&
-            (port !in 1..65535 || !isPortOpen(port))
+            (port !in 1..65535 || !isNormalRuntimeReachable(port))
     }
 
     private fun markStarting(message: String? = null) {
@@ -1143,9 +1140,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         val portOpen = isPortOpen(state.port)
         val rootProbablyRunning = state.runMode == RunMode.Root &&
-            RootRuntimeController.isProbablyRunning(context, state.port)
+            isRootRuntimeOwnedByApp(state.port)
         val stillRunning = if (state.runMode == RunMode.Root) {
-            portOpen || rootProbablyRunning
+            rootProbablyRunning
         } else {
             portOpen
         }
@@ -1209,7 +1206,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             RunMode.Root -> {
-                if (RootRuntimeController.isProbablyRunning(context, state.port)) {
+                if (isRootRuntimeOwnedByApp(state.port)) {
                     markRunning(
                         pid = RootRuntimeController.getPid(context),
                         forceNewStart = false
@@ -1258,7 +1255,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.status) {
             ServiceStatus.Running -> {
                 when {
-                    portOpen -> {
+                    isNormalRuntimeReachable(state.port) -> {
                         reconcileConsecutiveDeadCount = 0
                     }
 
@@ -1282,14 +1279,14 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             ServiceStatus.Starting -> {
                 reconcileConsecutiveDeadCount = 0
-                if (portOpen) {
+                if (isNormalRuntimeReachable(state.port)) {
                     markRunning(forceNewStart = normalPendingExplicitStart)
                     return
                 }
                 val startAt = normalStartIssuedAtMs
                 if (startAt <= 0L) {
                     when {
-                        serviceRunning || processRunning -> {
+                        serviceRunning || processRunning || portOpen -> {
                             normalStartIssuedAtMs = System.currentTimeMillis()
                             updateStatusMessage(
                                 expectedStatus = ServiceStatus.Starting,
@@ -1307,7 +1304,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 val staleTimeoutMs = normalRuntimeProfile().startupStaleTimeoutMs
                 if (System.currentTimeMillis() - startAt >= staleTimeoutMs) {
                     val message = when {
-                        serviceRunning -> "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
+                        serviceRunning -> "普通模式启动卡住：服务进程仍在但实例身份未匹配，请重试启动"
                         processRunning -> "普通模式启动卡住：旧进程未完全退出，请重试启动"
                         else -> "普通模式启动状态失效，请重试启动"
                     }
@@ -1349,7 +1346,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             return
         }
 
-        val running = RootRuntimeController.isProbablyRunning(context, state.port)
+        val running = isRootRuntimeOwnedByApp(state.port)
         when (state.status) {
             ServiceStatus.Running -> {
                 if (running) {
@@ -2167,14 +2164,14 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalRuntimeStopped(port: Int): Boolean {
-        return !isNormalProcessRunning() && !isPortOpen(port)
+        return !isNormalProcessRunning() && !isNormalRuntimeReachable(port)
     }
 
     private fun isNormalRestartStopCompleted(oldPort: Int, stopBroadcastSeqBefore: Long): Boolean {
         if (normalStoppedBroadcastSeq.get() > stopBroadcastSeqBefore) {
             return true
         }
-        return !isNormalServiceRunning() && !isPortOpen(oldPort)
+        return !isNormalServiceRunning() && !isNormalRuntimeReachable(oldPort)
     }
 
     private suspend fun waitForRestartStopCompletion(
@@ -2213,7 +2210,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalProcessStopped(port: Int): Boolean {
-        return !isNormalProcessRunning() && !isPortOpen(port)
+        return !isNormalProcessRunning() && !isNormalRuntimeReachable(port)
     }
 
     private suspend fun waitForNormalProcessStopped(port: Int, timeoutMs: Long): Boolean {
@@ -2240,7 +2237,37 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalRuntimeReachable(port: Int): Boolean {
-        return isPortOpen(port)
+        return isPortOpen(port) && isRuntimeIdentityOwned(port)
+    }
+
+    private fun isRootRuntimeOwnedByApp(port: Int): Boolean {
+        return isPortOpen(port) && isRuntimeIdentityOwned(port)
+    }
+
+    private fun isRuntimeIdentityOwned(port: Int): Boolean {
+        if (port !in 1..65535) return false
+        val expected = RuntimeIdentityStore.readInstanceId(context).trim()
+        if (expected.isBlank()) return false
+        val actual = readRuntimeIdentityFromHealth(port) ?: return false
+        return actual == expected
+    }
+
+    private fun readRuntimeIdentityFromHealth(port: Int): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 450
+                readTimeout = 700
+                requestMethod = "GET"
+            }
+            if (connection.responseCode !in 200..299) return null
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            RuntimeIdentityStore.extractHealthIdentity(body)
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
     }
 
     private fun buildLocalUrl(port: Int, token: String): String {
