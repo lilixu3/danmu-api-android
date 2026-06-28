@@ -1158,7 +1158,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         val stillRunning = if (state.runMode == RunMode.Root) {
             rootProbablyRunning
         } else {
-            portOpen
+            isNormalRuntimeReachable(state.port)
         }
         if (shouldClearStartedAtOnError(state.runMode, portOpen, rootProbablyRunning)) {
             clearRuntimeStartedAt()

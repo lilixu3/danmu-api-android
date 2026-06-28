@@ -31,7 +31,6 @@ object NodeBridge {
 
     external fun startNodeWithArguments(args: Array<String>): Int
     external fun setEnvironmentVariable(name: String, value: String, overwrite: Boolean): Boolean
-    external fun changeWorkingDirectory(path: String): Boolean
 
     private fun cleanPath(raw: String): String {
         var s = raw.trim()

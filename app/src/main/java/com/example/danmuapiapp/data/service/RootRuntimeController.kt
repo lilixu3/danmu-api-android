@@ -103,7 +103,7 @@ object RootRuntimeController {
     }
 
     fun isRunning(context: Context, port: Int): Boolean {
-        if (isRunningFast(port)) return isRuntimeOwnedByApp(context, port)
+        if (isRuntimeOwnedByApp(context, port)) return true
 
         val pid = readPid(context) ?: return false
         if (Looper.getMainLooper().thread === Thread.currentThread()) {
@@ -158,14 +158,7 @@ object RootRuntimeController {
         quickMode: Boolean = false,
         skipSync: Boolean = false
     ): OpResult {
-        if (isRunningFast(port)) {
-            if (!isRuntimeOwnedByApp(context, port)) {
-                return OpResult(
-                    ok = false,
-                    message = "Root 端口已被其他实例占用",
-                    detail = "端口 $port 已有其他实例在运行，请先停止外部进程后再启动"
-                )
-            }
+        if (isRuntimeOwnedByApp(context, port)) {
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -186,6 +179,14 @@ object RootRuntimeController {
                 ok = true,
                 message = "Root 模式已在运行",
                 startOutcome = StartOutcome.AlreadyRunning
+            )
+        }
+
+        if (isRunningFast(port)) {
+            return OpResult(
+                ok = false,
+                message = "Root 端口已被其他实例占用",
+                detail = "端口 $port 已有其他实例在运行，请先停止外部进程后再启动"
             )
         }
 
