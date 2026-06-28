@@ -2237,22 +2237,30 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isNormalRuntimeReachable(port: Int): Boolean {
-        return isPortOpen(port) && isRuntimeIdentityOwned(port)
+        return isPortOpen(port) && isRuntimeOwnedByApp(port, RunMode.Normal)
     }
 
     private fun isRootRuntimeOwnedByApp(port: Int): Boolean {
-        return isPortOpen(port) && isRuntimeIdentityOwned(port)
+        return isPortOpen(port) && isRuntimeOwnedByApp(port, RunMode.Root)
     }
 
-    private fun isRuntimeIdentityOwned(port: Int): Boolean {
-        if (port !in 1..65535) return false
-        val expected = RuntimeIdentityStore.readInstanceId(context).trim()
-        if (expected.isBlank()) return false
-        val actual = readRuntimeIdentityFromHealth(port) ?: return false
-        return actual == expected
+    private fun isRuntimeOwnedByApp(port: Int, mode: RunMode): Boolean {
+        return isRuntimeOwnershipOwned(readRuntimeOwnership(port, mode))
     }
 
-    private fun readRuntimeIdentityFromHealth(port: Int): String? {
+    private fun readRuntimeOwnership(port: Int, mode: RunMode): RuntimeOwnership {
+        if (port !in 1..65535) return RuntimeOwnership.Foreign
+        val expectedIdentity = RuntimeIdentityStore.ensureInstanceId(context).trim()
+        val expectedHome = RuntimePaths.projectDir(context, mode).absolutePath
+        val body = readRuntimeHealthBody(port) ?: return RuntimeOwnership.Foreign
+        return determineRuntimeOwnershipFromHealth(
+            body = body,
+            expectedIdentity = expectedIdentity,
+            expectedHome = expectedHome
+        )
+    }
+
+    private fun readRuntimeHealthBody(port: Int): String? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
@@ -2261,8 +2269,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 requestMethod = "GET"
             }
             if (connection.responseCode !in 200..299) return null
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            RuntimeIdentityStore.extractHealthIdentity(body)
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } catch (_: Exception) {
             null
         } finally {
