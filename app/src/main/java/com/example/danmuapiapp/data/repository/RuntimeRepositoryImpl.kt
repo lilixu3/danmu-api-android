@@ -730,6 +730,20 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, reason)
                     return
                 }
+                when (
+                    decideNormalStartPreflight(
+                        portOpen = isPortOpen(state.port),
+                        ownership = readRuntimeOwnership(state.port, RunMode.Normal)
+                    )
+                ) {
+                    NormalStartPreflightDecision.Proceed -> Unit
+                    NormalStartPreflightDecision.ForeignInstanceOccupiesPort -> {
+                        val reason = buildNormalForeignPortOccupiedMessage(state.port)
+                        markError(reason)
+                        addLog(LogLevel.Error, reason)
+                        return
+                    }
+                }
                 val normalProfile = normalRuntimeProfile()
                 val projectDir = RuntimePaths.normalProjectDir(context)
                 val selectedCoreDir = File(projectDir, "danmu_api_${state.variant.key}")

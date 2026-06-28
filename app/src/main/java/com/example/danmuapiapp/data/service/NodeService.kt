@@ -701,12 +701,12 @@ class NodeService : Service() {
         while (System.currentTimeMillis() < deadline) {
             if (runtimeGeneration.get() != generation) return false
             if (!isNodeThreadAlive()) return false
-            if (validPorts.any { isPortOpen(it) }) return true
+            if (validPorts.any { isRuntimeOwnedByApp(it) }) return true
             delay(140)
         }
         if (runtimeGeneration.get() != generation) return false
         if (!isNodeThreadAlive()) return false
-        return validPorts.any { isPortOpen(it) }
+        return validPorts.any { isRuntimeOwnedByApp(it) }
     }
 
     private fun isNodeThreadAlive(): Boolean {
