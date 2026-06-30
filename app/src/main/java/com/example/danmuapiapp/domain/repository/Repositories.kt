@@ -10,6 +10,7 @@ interface RuntimeRepository {
     fun stopService()
     fun restartService()
     fun refreshRuntimeState()
+    fun setAppForeground(foreground: Boolean)
     fun refreshLogs()
     fun applyServiceConfig(port: Int, token: String, restartIfRunning: Boolean = true)
     fun updatePort(port: Int)

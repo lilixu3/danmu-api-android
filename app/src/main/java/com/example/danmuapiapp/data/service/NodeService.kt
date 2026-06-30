@@ -473,7 +473,7 @@ class NodeService : Service() {
                     while (isActive && runtimeGeneration.get() == generation) {
                         if (!isNodeThreadAlive()) return@launch
                         val ports = resolveCandidatePorts()
-                        val nowReady = ports.any { it in 1..65535 && isRuntimeOwnedByApp(it) }
+                        val nowReady = ports.any { it in 1..65535 && isPortOpen(it) }
                         if (nowReady) {
                             publishRunningIfNeeded(generation)
                             return@launch
