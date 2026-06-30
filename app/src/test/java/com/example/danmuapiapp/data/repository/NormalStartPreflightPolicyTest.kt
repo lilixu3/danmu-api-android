@@ -26,6 +26,16 @@ class NormalStartPreflightPolicyTest {
     }
 
     @Test
+    fun `普通模式端口已开但身份未知时应前置拦截避免误认外部端口`() {
+        val decision = decideNormalStartPreflight(
+            portOpen = true,
+            ownership = RuntimeOwnership.Unknown
+        )
+
+        assertEquals(NormalStartPreflightDecision.ForeignInstanceOccupiesPort, decision)
+    }
+
+    @Test
     fun `普通模式端口被外部实例占用时应前置拦截`() {
         val decision = decideNormalStartPreflight(
             portOpen = true,
