@@ -39,6 +39,17 @@ class RuntimeOwnershipPolicyTest {
     }
 
     @Test
+    fun `旧版 health 缺少 identity 时应兼容 data data 与 data user 0 路径别名`() {
+        val ownership = determineRuntimeOwnershipFromHealth(
+            body = """{"resolvedHome":"/data/data/pkg/files/nodejs-project"}""",
+            expectedIdentity = "abc123",
+            expectedHome = "/data/user/0/pkg/files/nodejs-project"
+        )
+
+        assertEquals(RuntimeOwnership.OwnedLegacy, ownership)
+    }
+
+    @Test
     fun `旧版 health 缺少 identity 且 home 不匹配时应判定为外部实例`() {
         val ownership = determineRuntimeOwnershipFromHealth(
             body = """{"resolvedHome":"/data/adb/danmuapi_runtime/other/nodejs-project"}""",

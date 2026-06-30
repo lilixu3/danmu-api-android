@@ -28,6 +28,7 @@ import com.example.danmuapiapp.data.service.UpdateChecker
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.DanmuApiApp
 import com.example.danmuapiapp.ui.compat.CompatModeActivity
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var appForegroundAnnouncementChecker: AppForegroundAnnouncementChecker
     @Inject lateinit var appUpdateService: AppUpdateService
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var runtimeRepository: RuntimeRepository
     @Inject lateinit var runtimeWarmupCoordinator: RuntimeWarmupCoordinator
 
     override fun attachBaseContext(newBase: Context?) {
@@ -124,10 +126,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        runtimeRepository.setAppForeground(true)
         updateChecker.onAppResume()
         appForegroundUpdateChecker.onAppResume()
         appForegroundAnnouncementChecker.onAppResume()
         appUpdateService.tryResumePendingInstall(this)
+    }
+
+    override fun onStop() {
+        runtimeRepository.setAppForeground(false)
+        super.onStop()
     }
 
     private fun applyHideFromRecents(hide: Boolean) {

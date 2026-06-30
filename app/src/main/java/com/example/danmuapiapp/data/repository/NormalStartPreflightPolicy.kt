@@ -10,10 +10,10 @@ internal fun decideNormalStartPreflight(
     ownership: RuntimeOwnership
 ): NormalStartPreflightDecision {
     if (!portOpen) return NormalStartPreflightDecision.Proceed
-    return if (ownership == RuntimeOwnership.Foreign) {
-        NormalStartPreflightDecision.ForeignInstanceOccupiesPort
-    } else {
+    return if (ownership == RuntimeOwnership.OwnedExact || ownership == RuntimeOwnership.OwnedLegacy) {
         NormalStartPreflightDecision.Proceed
+    } else {
+        NormalStartPreflightDecision.ForeignInstanceOccupiesPort
     }
 }
 
