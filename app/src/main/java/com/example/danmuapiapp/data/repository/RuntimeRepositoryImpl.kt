@@ -238,6 +238,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val initState = _runtimeState.value
+        if (shouldCloseRootShellSessionForMode(initState.runMode)) {
+            RootShell.closeSession()
+        }
         if (initState.status == ServiceStatus.Running) {
             val startedAt = ensureRuntimeStartedAt(initState.runMode, forceNew = false)
             startUptimeCounter(startedAt)
@@ -381,6 +384,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         scope.launch {
             runCatching {
                 operationMutex.withLock {
+                    if (shouldCloseRootShellSessionForMode(_runtimeState.value.runMode)) {
+                        RootShell.closeSession()
+                    }
                     reconcileInitialState()
                     if (_runtimeState.value.runMode == RunMode.Normal) {
                         reconcileNormalStateLocked()
@@ -484,12 +490,17 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             clearRuntimeStartedAt()
             RuntimeModePrefs.put(context, mode)
-            val shouldSyncBootMode = RootAutoStartPrefs.isBootAutoStartEnabled(context)
-            if (shouldSyncBootMode) {
+            val rootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
+            if (shouldSyncRootAutoStartModeFlag(mode, rootAutoStartEnabled)) {
                 val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
                 if (!flagResult.ok) {
                     addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
                 }
+            } else if (rootAutoStartEnabled) {
+                addLog(LogLevel.Info, "已切换到普通模式：跳过 Root 开机触发模式同步，避免普通模式触发 Root 授权")
+            }
+            if (shouldCloseRootShellSessionForMode(mode)) {
+                RootShell.closeSession()
             }
             _runtimeState.update {
                 it.copy(
@@ -1349,14 +1360,19 @@ class RuntimeRepositoryImpl @Inject constructor(
             return
         }
 
-        val running = isRootRuntimeOwnedByApp(state.port)
+        val ownedByCurrentApp = isRootRuntimeOwnedByApp(state.port)
+        val passiveAliveHint = if (ownedByCurrentApp) {
+            true
+        } else {
+            RootRuntimeController.isProbablyRunning(context, state.port)
+        }
         when (state.status) {
             ServiceStatus.Running -> {
-                if (running) {
+                if (ownedByCurrentApp || passiveAliveHint) {
                     rootReconcileConsecutiveDeadCount = 0
                 } else {
                     rootReconcileConsecutiveDeadCount++
-                    if (shouldMarkRootStoppedAfterPassiveMiss(rootReconcileConsecutiveDeadCount)) {
+                    if (shouldMarkRootStoppedAfterPassiveMiss(rootReconcileConsecutiveDeadCount, passiveAliveHint)) {
                         markStopped("Root 服务未运行，可重新启动")
                         addLog(LogLevel.Warn, "检测到 Root 模式服务已退出，状态已自动重置")
                         rootReconcileConsecutiveDeadCount = 0
@@ -1366,7 +1382,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             ServiceStatus.Starting -> {
                 rootReconcileConsecutiveDeadCount = 0
-                if (running) {
+                if (ownedByCurrentApp) {
                     markRunning(
                         pid = RootRuntimeController.getPid(context),
                         forceNewStart = false
@@ -1376,7 +1392,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             ServiceStatus.Stopping -> {
                 rootReconcileConsecutiveDeadCount = 0
-                if (!running) {
+                if (!ownedByCurrentApp && !passiveAliveHint) {
                     markStopped()
                 }
             }

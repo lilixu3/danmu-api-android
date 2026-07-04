@@ -122,6 +122,13 @@ object RootRuntimeController {
         val result = RootShell.exec(checkScript, timeoutMs = 2500L)
         if (result.ok) return true
 
+        // 如果没有 Root 权限、授权超时或 su 会话不可用，不要在状态探测路径里
+        // 删除 pid 文件或把仍可能存活的 Root 运行时判死。保留非 su 的被动
+        // liveness 结果，避免“没 Root 权限 + 身份暂时不匹配”导致 UI 异常停止。
+        if (result.timedOut || result.exitCode == -1) {
+            return isProbablyRunning(context, port)
+        }
+
         runCatching { pidFile(context).delete() }
         return false
     }

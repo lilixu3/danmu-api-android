@@ -1,12 +1,16 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import android.content.ClipData
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -58,6 +62,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -68,6 +73,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
+import com.example.danmuapiapp.domain.model.LogEntry
+import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.domain.model.LogTagClassifier
+import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
@@ -75,6 +84,9 @@ import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
 import com.example.danmuapiapp.ui.screen.download.buildAnimeSearchResultPresentation
+import com.example.danmuapiapp.ui.screen.console.LogExportFormatter
+import com.example.danmuapiapp.ui.screen.console.buildLogExportText
+import com.example.danmuapiapp.ui.screen.console.shareLogsAsTextFile
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -87,13 +99,38 @@ fun ApiTestScreen(
     viewModel: ApiTestViewModel = hiltViewModel()
 ) {
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val logs by viewModel.logs.collectAsStateWithLifecycle()
     val clipboard = LocalClipboard.current
+    val context = LocalContext.current
 
     var primaryTab by rememberSaveable { mutableIntStateOf(0) }
     var danmuTab by rememberSaveable { mutableIntStateOf(0) }
     var endpointExpanded by remember { mutableStateOf(false) }
     var endpointIndex by rememberSaveable { mutableIntStateOf(0) }
     var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+    var showLogSheet by rememberSaveable { mutableStateOf(false) }
+    var initialLogScope by rememberSaveable { mutableIntStateOf(0) }
+    var pendingLogExportText by remember { mutableStateOf("") }
+    val saveLogLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null && pendingLogExportText.isNotBlank()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(pendingLogExportText.toByteArray(Charsets.UTF_8))
+                } ?: error("无法打开导出文件")
+            }.onSuccess {
+                Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
+            }.onFailure { throwable ->
+                Toast.makeText(context, throwable.message ?: "导出日志失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val openLogs: (Int) -> Unit = { scope ->
+        initialLogScope = scope
+        viewModel.refreshLogs()
+        showLogSheet = true
+    }
     var baseUrl by rememberSaveable(runtimeState.localUrl, runtimeState.lanUrl) {
         mutableStateOf(
             RuntimeUrlParser.extractBase(runtimeState.localUrl).ifBlank {
@@ -163,6 +200,13 @@ fun ApiTestScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+            TextButton(
+                onClick = { openLogs(0) },
+                modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp)
+            ) {
+                Text("日志", style = MaterialTheme.typography.labelLarge)
             }
             FilledTonalIconButton(
                 onClick = { showSettingsSheet = true },
@@ -274,7 +318,8 @@ fun ApiTestScreen(
                         manualResult = viewModel.manualResult,
                         onOpenAnime = { anime -> viewModel.openManualAnimeDetail(baseUrl, anime) },
                         onPickEpisode = { anime, episode -> viewModel.loadManualDanmu(baseUrl, anime, episode) },
-                        onBackManual = viewModel::backManualStep
+                        onBackManual = viewModel::backManualStep,
+                        onOpenLogs = { openLogs(0) }
                     )
                 }
             }
@@ -295,6 +340,29 @@ fun ApiTestScreen(
                 baseUrl = RuntimeUrlParser.extractBase(runtimeState.lanUrl)
             },
             onDismissRequest = { showSettingsSheet = false }
+        )
+    }
+
+    if (showLogSheet) {
+        ApiLogSheet(
+            logs = logs,
+            runtimeState = runtimeState,
+            sinceMs = viewModel.lastApiActionStartedAtMs,
+            initialScope = initialLogScope,
+            onDismissRequest = { showLogSheet = false },
+            onRefresh = viewModel::refreshLogs,
+            onCopy = { text ->
+                clipboard.nativeClipboard.setPrimaryClip(
+                    ClipData.newPlainText("接口调试日志", text)
+                )
+            },
+            onSave = { text ->
+                pendingLogExportText = text
+                saveLogLauncher.launch(LogExportFormatter.defaultFileName())
+            },
+            onShare = { fileName, text ->
+                shareLogsAsTextFile(context, fileName, text)
+            }
         )
     }
 
@@ -417,6 +485,187 @@ private fun SettingsPresetButton(
                 color = MaterialTheme.colorScheme.primary
             )
         }
+    }
+}
+
+@Composable
+private fun ApiLogSheet(
+    logs: List<LogEntry>,
+    runtimeState: RuntimeState,
+    sinceMs: Long?,
+    initialScope: Int,
+    onDismissRequest: () -> Unit,
+    onRefresh: () -> Unit,
+    onCopy: (String) -> Unit,
+    onSave: (String) -> Unit,
+    onShare: (String, String) -> Unit
+) {
+    var selectedScope by rememberSaveable(initialScope) { mutableIntStateOf(initialScope) }
+    val currentStart = sinceMs?.minus(2_000L)
+    val currentLogs = remember(logs, currentStart) {
+        if (currentStart != null) logs.filter { it.timestamp >= currentStart } else emptyList()
+    }
+    val problemLogs = remember(logs) {
+        logs.filter { it.level == LogLevel.Error || it.level == LogLevel.Warn }
+    }
+    val visibleLogs = when (selectedScope) {
+        0 -> currentLogs.ifEmpty { logs.takeLast(80) }
+        2 -> problemLogs
+        else -> logs
+    }
+    val scopeLabel = when (selectedScope) {
+        0 -> if (currentLogs.isEmpty() && logs.isNotEmpty()) "最近日志（本次请求暂无记录）" else "本次请求日志"
+        2 -> "错误/警告日志"
+        else -> "全部日志"
+    }
+    val exportText = remember(visibleLogs, scopeLabel, runtimeState) {
+        buildLogExportText(visibleLogs, scopeLabel, runtimeState)
+    }
+
+    AppBottomSheetDialog(
+        onDismissRequest = onDismissRequest,
+        style = AppBottomSheetStyle.Form,
+        tone = AppBottomSheetTone.Brand,
+        icon = { Icon(Icons.Rounded.GraphicEq, contentDescription = null) },
+        title = {
+            Text(
+                text = "接口调试日志",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            Text(
+                text = "不用离开当前调试页，可直接查看、复制、导出或分享日志。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedScope == 0,
+                    onClick = { selectedScope = 0 },
+                    label = { Text("本次 ${currentLogs.size}") }
+                )
+                FilterChip(
+                    selected = selectedScope == 1,
+                    onClick = { selectedScope = 1 },
+                    label = { Text("全部 ${logs.size}") }
+                )
+                FilterChip(
+                    selected = selectedScope == 2,
+                    onClick = { selectedScope = 2 },
+                    label = { Text("错误/警告 ${problemLogs.size}") }
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.weight(1f)
+                ) { Text("刷新") }
+                OutlinedButton(
+                    onClick = { onCopy(LogExportFormatter.toClipboardText(visibleLogs)) },
+                    enabled = visibleLogs.isNotEmpty(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("复制") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onSave(exportText) },
+                    enabled = visibleLogs.isNotEmpty(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("导出 txt") }
+                OutlinedButton(
+                    onClick = { onShare(LogExportFormatter.defaultFileName(), exportText) },
+                    enabled = visibleLogs.isNotEmpty(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("分享 txt") }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = apiTestSubPanelColor(),
+                border = BorderStroke(1.dp, apiTestOutlineColor())
+            ) {
+                if (visibleLogs.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (selectedScope == 0) "暂无本次请求日志，可点刷新或切到全部日志" else "暂无日志",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(
+                            items = visibleLogs.takeLast(200),
+                            key = { index, entry -> "${entry.timestamp}-${entry.level}-${entry.message.hashCode()}-$index" }
+                        ) { _, entry ->
+                            ApiLogRow(entry)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismissRequest) { Text("关闭") }
+        }
+    )
+}
+
+@Composable
+private fun ApiLogRow(entry: LogEntry) {
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val levelColor = when (entry.level) {
+        LogLevel.Error -> MaterialTheme.colorScheme.error
+        LogLevel.Warn -> Color(0xFFF59E0B)
+        LogLevel.Info -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = buildString {
+                append(timeFormat.format(Date(entry.timestamp)))
+                append(" · ")
+                append(entry.level.name)
+                val source = LogTagClassifier.sourceFilterFor(entry)
+                if (source.isNotBlank()) {
+                    append(" · ")
+                    append(LogTagClassifier.labelFor(source))
+                }
+            },
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = levelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = entry.message,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 6,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -714,7 +963,8 @@ private fun DanmuTestPane(
     manualResult: DanmuInsight?,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
-    onBackManual: () -> Unit
+    onBackManual: () -> Unit,
+    onOpenLogs: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DanmuModeSwitcher(
@@ -749,7 +999,8 @@ private fun DanmuTestPane(
                     result = manualResult,
                     onOpenAnime = onOpenAnime,
                     onPickEpisode = onPickEpisode,
-                    onBack = onBackManual
+                    onBack = onBackManual,
+                    onOpenLogs = onOpenLogs
                 )
             }
         }
@@ -941,7 +1192,8 @@ private fun DanmuManualPane(
     result: DanmuInsight?,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenLogs: () -> Unit
 ) {
     when {
         result != null -> {
@@ -1187,7 +1439,15 @@ private fun DanmuManualPane(
                             }
                         }
                     }
-                    manualHasSearched -> InfoHintCard(title = "没有找到匹配动漫", subtitle = "换个关键词试试")
+                    manualHasSearched -> InfoHintCard(
+                        title = "没有找到匹配动漫",
+                        subtitle = "可以换个关键词，或查看本次日志确认各数据源返回情况。",
+                        action = {
+                            TextButton(onClick = onOpenLogs) {
+                                Text("查看本次日志")
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -2392,7 +2652,8 @@ private fun MonoPreview(text: String) {
 @Composable
 private fun InfoHintCard(
     title: String,
-    subtitle: String
+    subtitle: String,
+    action: (@Composable RowScope.() -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -2418,6 +2679,14 @@ private fun InfoHintCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+            if (action != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = action
+                )
+            }
         }
     }
 }
