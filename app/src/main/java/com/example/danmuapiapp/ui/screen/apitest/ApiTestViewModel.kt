@@ -31,12 +31,13 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ApiTestViewModel @Inject constructor(
-    runtimeRepository: RuntimeRepository,
+    private val runtimeRepository: RuntimeRepository,
     private val recordRepository: RequestRecordRepository,
     private val httpClient: OkHttpClient
 ) : ViewModel() {
 
     val runtimeState = runtimeRepository.runtimeState
+    val logs = runtimeRepository.logs
     val endpoints = ApiTestCatalog.endpoints
 
     var isLoading by mutableStateOf(false)
@@ -90,6 +91,9 @@ class ApiTestViewModel @Inject constructor(
     var loadingAnimeId by mutableStateOf<Long?>(null)
         private set
 
+    var lastApiActionStartedAtMs by mutableStateOf<Long?>(null)
+        private set
+
     private var manualRequestTrace: List<DanmuRequestTrace> = emptyList()
     private var manualOriginalInput: String = ""
 
@@ -102,6 +106,8 @@ class ApiTestViewModel @Inject constructor(
         requestUrl = ""
         curlCommand = ""
     }
+
+    fun refreshLogs() = runtimeRepository.refreshLogs()
 
     fun clearAutoResult() {
         autoMatchResult = null
@@ -142,6 +148,7 @@ class ApiTestViewModel @Inject constructor(
             debugResponse = null
 
             val startedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = startedAt
             val result = executeRequest(
                 Request.Builder().url(built.url).apply {
                     if (built.method == "GET") {
@@ -226,6 +233,7 @@ class ApiTestViewModel @Inject constructor(
             errorMessage = null
             autoMatchResult = null
             val flowStartedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = flowStartedAt
 
             val matchResult = executeJsonPost(matchUrl, matchBody)
             val matchElapsed = (System.currentTimeMillis() - flowStartedAt).coerceAtLeast(0L)
@@ -368,6 +376,7 @@ class ApiTestViewModel @Inject constructor(
             errorMessage = null
             manualResult = null
             val startedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = startedAt
             val result = executeGet(url)
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
             manualHasSearched = true
@@ -437,6 +446,7 @@ class ApiTestViewModel @Inject constructor(
             manualCurrentAnime = null
             manualEpisodeCandidates = emptyList()
             manualOriginalInput = inputUrl
+            lastApiActionStartedAtMs = System.currentTimeMillis()
 
             val metadataResult = fetchUrlMetadata(inputUrl)
             val selection = withContext(Dispatchers.Default) {
@@ -483,6 +493,7 @@ class ApiTestViewModel @Inject constructor(
             errorMessage = null
             manualResult = null
             val startedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = startedAt
             val result = executeGet(url)
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
 
@@ -557,6 +568,7 @@ class ApiTestViewModel @Inject constructor(
             loadingEpisodeId = episode.episodeId
             errorMessage = null
             val startedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = startedAt
             val result = executeGet(url)
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
 
@@ -640,6 +652,7 @@ class ApiTestViewModel @Inject constructor(
             }
             errorMessage = null
             val startedAt = System.currentTimeMillis()
+            lastApiActionStartedAtMs = startedAt
             val metadataDeferred = async(Dispatchers.IO) { fetchUrlMetadata(inputUrl) }
             val commentDeferred = async(Dispatchers.IO) { executeGet(commentUrl) }
             val result = commentDeferred.await()
