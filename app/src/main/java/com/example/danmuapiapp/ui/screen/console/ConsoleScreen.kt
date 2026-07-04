@@ -1,5 +1,10 @@
 package com.example.danmuapiapp.ui.screen.console
 
+import android.content.Intent
+import android.content.Context
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,18 +25,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.LogTagClassifier
+import com.example.danmuapiapp.domain.model.RuntimeState
+import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.AppPanelDialog
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -40,6 +52,7 @@ import kotlin.math.roundToInt
 @Composable
 fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
+    val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
     val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
     val logMaxCount by viewModel.logMaxCount.collectAsStateWithLifecycle()
@@ -48,10 +61,28 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboard.current
+    val context = LocalContext.current
     var filterLevel by remember { mutableStateOf<LogLevel?>(null) }
     var filterSource by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+    var moreMenuExpanded by remember { mutableStateOf(false) }
+    var pendingExportText by remember { mutableStateOf("") }
+    val saveLogLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null && pendingExportText.isNotBlank()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(pendingExportText.toByteArray(Charsets.UTF_8))
+                } ?: error("无法打开导出文件")
+            }.onSuccess {
+                Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
+            }.onFailure { throwable ->
+                Toast.makeText(context, throwable.message ?: "导出日志失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     val dark = isSystemInDarkTheme()
     val chipErrorColor = if (dark) Color(0xFFF87171) else Color(0xFFE53935)
@@ -87,6 +118,14 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
             } else list
         }
     val hasActiveFilters = filterLevel != null || filterSource != null || searchQuery.isNotBlank()
+    val exportScopeLabel = if (hasActiveFilters) "当前筛选日志" else "全部日志"
+    val exportText = remember(filteredLogs, runtimeState, exportScopeLabel) {
+        buildLogExportText(
+            logs = filteredLogs,
+            scopeLabel = exportScopeLabel,
+            runtimeState = runtimeState
+        )
+    }
 
     val errorCount = logs.count { it.level == LogLevel.Error }
     val warnCount = logs.count { it.level == LogLevel.Warn }
@@ -193,8 +232,13 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text("运行日志", style = MaterialTheme.typography.headlineLarge)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "运行日志",
+                    style = MaterialTheme.typography.headlineLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Text(
                     buildString {
                         if (hasActiveFilters) {
@@ -217,12 +261,6 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     Icon(Icons.Rounded.Search, "搜索日志", Modifier.size(18.dp))
                 }
                 FilledTonalIconButton(
-                    onClick = { showSettings = true },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(Icons.Rounded.Settings, "日志设置", Modifier.size(18.dp))
-                }
-                FilledTonalIconButton(
                     onClick = viewModel::refreshLogs,
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -231,7 +269,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 // Copy visible logs after current filters/search.
                 FilledTonalIconButton(
                     onClick = {
-                        val text = filteredLogs.toClipboardText()
+                        val text = LogExportFormatter.toClipboardText(filteredLogs)
                         clipboardManager.nativeClipboard.setPrimaryClip(
                             android.content.ClipData.newPlainText("当前筛选日志", text)
                         )
@@ -247,6 +285,50 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(Icons.Rounded.ClearAll, "清除日志", Modifier.size(18.dp))
+                }
+                Box {
+                    FilledTonalIconButton(
+                        onClick = { moreMenuExpanded = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Rounded.MoreVert, "更多日志操作", Modifier.size(18.dp))
+                    }
+                    DropdownMenu(
+                        expanded = moreMenuExpanded,
+                        onDismissRequest = { moreMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("日志设置") },
+                            leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+                            onClick = {
+                                moreMenuExpanded = false
+                                showSettings = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("导出为 txt") },
+                            leadingIcon = { Icon(Icons.Rounded.FileDownload, contentDescription = null) },
+                            enabled = filteredLogs.isNotEmpty(),
+                            onClick = {
+                                moreMenuExpanded = false
+                                pendingExportText = exportText
+                                saveLogLauncher.launch(LogExportFormatter.defaultFileName())
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("分享 txt") },
+                            leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null) },
+                            enabled = filteredLogs.isNotEmpty(),
+                            onClick = {
+                                moreMenuExpanded = false
+                                shareLogsAsTextFile(
+                                    context = context,
+                                    fileName = LogExportFormatter.defaultFileName(),
+                                    text = exportText
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -512,17 +594,52 @@ private fun LogEntryRow(entry: LogEntry) {
     }
 }
 
-private fun List<LogEntry>.toClipboardText(): String {
-    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    return joinToString("\n") { entry ->
-        buildString {
-            append('[')
-            append(timeFormat.format(Date(entry.timestamp)))
-            append(']')
-            append('[')
-            append(entry.level.name)
-            append("] ")
-            append(entry.message)
+internal fun buildLogExportText(
+    logs: List<LogEntry>,
+    scopeLabel: String,
+    runtimeState: RuntimeState
+): String {
+    return LogExportFormatter.buildExportText(
+        logs = logs,
+        scopeLabel = scopeLabel,
+        versionName = BuildConfig.VERSION_NAME,
+        runModeLabel = runtimeState.runMode.label,
+        statusLabel = runtimeState.status.toDisplayLabel(),
+        port = runtimeState.port
+    )
+}
+
+internal fun shareLogsAsTextFile(
+    context: Context,
+    fileName: String,
+    text: String
+) {
+    runCatching {
+        val dir = File(context.cacheDir, "log-exports").apply { mkdirs() }
+        val file = File(dir, fileName).apply { writeText(text, Charsets.UTF_8) }
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${BuildConfig.APPLICATION_ID}.fileprovider",
+            file
+        )
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        context.startActivity(Intent.createChooser(sendIntent, "分享日志文件"))
+    }.onFailure { throwable ->
+        Toast.makeText(context, throwable.message ?: "分享日志失败", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun ServiceStatus.toDisplayLabel(): String {
+    return when (this) {
+        ServiceStatus.Stopped -> "已停止"
+        ServiceStatus.Starting -> "启动中"
+        ServiceStatus.Running -> "运行中"
+        ServiceStatus.Stopping -> "停止中"
+        ServiceStatus.Error -> "异常"
     }
 }

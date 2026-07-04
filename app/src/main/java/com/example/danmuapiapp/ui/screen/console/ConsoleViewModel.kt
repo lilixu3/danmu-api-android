@@ -17,6 +17,7 @@ class ConsoleViewModel @Inject constructor(
 ) : ViewModel() {
 
     val logs = runtimeRepo.logs
+    val runtimeState = runtimeRepo.runtimeState
     val adminSessionState = adminSessionRepository.sessionState
 
     val logEnabled = settingsRepository.logEnabled

@@ -16,7 +16,11 @@ internal fun shouldClearRootStartedAtBeforeStart(rootProbablyRunning: Boolean): 
 internal const val ROOT_PASSIVE_LIVENESS_HINT_TTL_MS: Long = 24L * 60L * 60L * 1000L
 internal const val ROOT_RECONCILE_STALE_MISS_THRESHOLD: Int = 3
 
-internal fun shouldMarkRootStoppedAfterPassiveMiss(consecutiveMissCount: Int): Boolean {
+internal fun shouldMarkRootStoppedAfterPassiveMiss(
+    consecutiveMissCount: Int,
+    passiveAliveHint: Boolean
+): Boolean {
+    if (passiveAliveHint) return false
     return consecutiveMissCount >= ROOT_RECONCILE_STALE_MISS_THRESHOLD
 }
 

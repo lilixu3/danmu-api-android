@@ -10,17 +10,42 @@ class RootRuntimeUptimePolicyTest {
 
     @Test
     fun `Root should not stop on a single passive miss`() {
-        assertFalse(shouldMarkRootStoppedAfterPassiveMiss(1))
+        assertFalse(
+            shouldMarkRootStoppedAfterPassiveMiss(
+                consecutiveMissCount = 1,
+                passiveAliveHint = false
+            )
+        )
     }
 
     @Test
     fun `Root should stop after repeated passive misses`() {
-        assertTrue(shouldMarkRootStoppedAfterPassiveMiss(ROOT_RECONCILE_STALE_MISS_THRESHOLD))
+        assertTrue(
+            shouldMarkRootStoppedAfterPassiveMiss(
+                consecutiveMissCount = ROOT_RECONCILE_STALE_MISS_THRESHOLD,
+                passiveAliveHint = false
+            )
+        )
     }
 
     @Test
     fun `Root should reject zero passive misses`() {
-        assertFalse(shouldMarkRootStoppedAfterPassiveMiss(0))
+        assertFalse(
+            shouldMarkRootStoppedAfterPassiveMiss(
+                consecutiveMissCount = 0,
+                passiveAliveHint = false
+            )
+        )
+    }
+
+    @Test
+    fun `Root should not stop when passive liveness still indicates alive`() {
+        assertFalse(
+            shouldMarkRootStoppedAfterPassiveMiss(
+                consecutiveMissCount = ROOT_RECONCILE_STALE_MISS_THRESHOLD,
+                passiveAliveHint = true
+            )
+        )
     }
 
 
