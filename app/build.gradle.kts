@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.48"
+    ?: "1.0.5.49"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 129
+    ?: 130
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -396,7 +396,8 @@ val baseNodeModulesPackages = buildList {
             "fetch-blob",
             "formdata-polyfill",
             "node-domexception",
-            "web-streams-polyfill"
+            "web-streams-polyfill",
+            "base64-js"
         )
     )
 }.distinct()
@@ -601,6 +602,23 @@ tasks.register<Exec>("testNodeRuntimeParsing") {
     commandLine("node", "node-tests/parse-dotenv-regression.js")
 }
 
+tasks.register<Exec>("testBundledBrotliRuntime") {
+    dependsOn("verifyBundledNodeModules")
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/brotli-runtime-smoke.mjs")
+}
+
+val requiredPackagedNodeRuntimeEntries = listOf(
+    "assets/nodejs-project/node_modules/node-fetch/package.json",
+    "assets/nodejs-project/node_modules/pako/package.json",
+    "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js",
+    "assets/nodejs-project/node_modules/brotli/package.json",
+    "assets/nodejs-project/node_modules/brotli/decompress.js",
+    "assets/nodejs-project/node_modules/brotli/dec/decode.js",
+    "assets/nodejs-project/node_modules/brotli/dec/dictionary-data.js",
+    "assets/nodejs-project/node_modules/base64-js/package.json"
+)
+
 tasks.register("verifyPackagedNodeModulesDebug") {
     val apkFile = layout.buildDirectory.file("outputs/apk/debug/app-arm64-v8a-debug.apk")
     dependsOn("assembleDebug")
@@ -608,13 +626,8 @@ tasks.register("verifyPackagedNodeModulesDebug") {
     doLast {
         val file = apkFile.get().asFile
         if (!file.exists()) throw GradleException("未找到 debug APK：${file.absolutePath}")
-        val requiredEntries = listOf(
-            "assets/nodejs-project/node_modules/node-fetch/package.json",
-            "assets/nodejs-project/node_modules/pako/package.json",
-            "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js"
-        )
         ZipFile(file).use { zip ->
-            val missing = requiredEntries.filter { zip.getEntry(it) == null }
+            val missing = requiredPackagedNodeRuntimeEntries.filter { zip.getEntry(it) == null }
             if (missing.isNotEmpty()) {
                 throw GradleException("Debug APK 缺少关键依赖文件：${missing.joinToString(", ")}")
             }
@@ -629,13 +642,8 @@ tasks.register("verifyPackagedNodeModulesRelease") {
     doLast {
         val file = apkFile.get().asFile
         if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
-        val requiredEntries = listOf(
-            "assets/nodejs-project/node_modules/node-fetch/package.json",
-            "assets/nodejs-project/node_modules/pako/package.json",
-            "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js"
-        )
         ZipFile(file).use { zip ->
-            val missing = requiredEntries.filter { zip.getEntry(it) == null }
+            val missing = requiredPackagedNodeRuntimeEntries.filter { zip.getEntry(it) == null }
             if (missing.isNotEmpty()) {
                 throw GradleException("Release APK 缺少关键依赖文件：${missing.joinToString(", ")}")
             }
@@ -646,10 +654,12 @@ tasks.register("verifyPackagedNodeModulesRelease") {
 val prepareNodeModulesTask = tasks.named("prepareNodeModules")
 val syncBundledNodeModulesTask = tasks.named("syncBundledNodeModulesFromWorkspace")
 val verifyBundledNodeModulesTask = tasks.named("verifyBundledNodeModules")
+val testBundledBrotliRuntimeTask = tasks.named("testBundledBrotliRuntime")
 tasks.named("preBuild").configure {
     dependsOn(prepareNodeModulesTask)
     dependsOn(syncBundledNodeModulesTask)
     dependsOn(verifyBundledNodeModulesTask)
+    dependsOn(testBundledBrotliRuntimeTask)
 }
 
 tasks.matching {

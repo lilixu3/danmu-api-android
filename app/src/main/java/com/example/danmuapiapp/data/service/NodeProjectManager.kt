@@ -43,7 +43,18 @@ object NodeProjectManager {
         "node-domexception" to "1.0.0",
         "web-streams-polyfill" to "3.3.3",
         "node-fetch" to "3.3.2",
-        "pako" to "2.1.0"
+        "pako" to "2.1.0",
+        "brotli" to "1.3.3",
+        "base64-js" to "1.5.1"
+    )
+    private val coreDependenciesManagedOutsideBaseRuntime = setOf(
+        // Android 入口不使用 Node server 的文件监听与 dotenv 加载链路。
+        "chokidar",
+        "dotenv",
+        // 仅用于构建 ForwardWidget，不属于手机端运行时。
+        "esbuild",
+        // 按 LOCAL_REDIS_URL 条件从 nodejs-optional 单独补齐。
+        "redis"
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -51,7 +62,10 @@ object NodeProjectManager {
     fun bundledRuntimeDependencyNames(): List<String> = runtimeBundledDependencyVersions.keys.toList()
 
     private fun requiredRuntimeDependencyFiles(): List<String> = listOf(
-        "data-uri-to-buffer/dist/index.js"
+        "data-uri-to-buffer/dist/index.js",
+        "brotli/package.json",
+        "brotli/decompress.js",
+        "brotli/dec/dictionary-data.js"
     )
 
     internal fun hasRequiredRuntimeDependencyFiles(targetNodeModulesDir: File): Boolean {
@@ -453,7 +467,13 @@ object NodeProjectManager {
         val dependencies = readCoreDependencies(coreDir)
         if (dependencies.isEmpty()) return emptyList()
         return dependencies.mapNotNull { (name, version) ->
-            if (!runtimeBundledDependencyVersions.containsKey(name)) return@mapNotNull null
+            if (!runtimeBundledDependencyVersions.containsKey(name)) {
+                return@mapNotNull if (name in coreDependenciesManagedOutsideBaseRuntime) {
+                    null
+                } else {
+                    "$name@$version"
+                }
+            }
             val pkgFile = File(runtimeNodeModulesDir, "$name/package.json")
             val installedVersion = runCatching {
                 runCatching {

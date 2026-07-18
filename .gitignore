@@ -10,13 +10,16 @@
 .cxx
 local.properties
 /app/build
-/app/src/main/assets/nodejs-project/node_modules
 /app/src/main/assets/nodejs-optional
 /app/src/main/assets/nodejs-project/node_modules/*
 !/app/src/main/assets/nodejs-project/node_modules/node-fetch/
 !/app/src/main/assets/nodejs-project/node_modules/node-fetch/**
 !/app/src/main/assets/nodejs-project/node_modules/pako/
 !/app/src/main/assets/nodejs-project/node_modules/pako/**
+!/app/src/main/assets/nodejs-project/node_modules/brotli/
+!/app/src/main/assets/nodejs-project/node_modules/brotli/**
+!/app/src/main/assets/nodejs-project/node_modules/base64-js/
+!/app/src/main/assets/nodejs-project/node_modules/base64-js/**
 /dist
 *.jks
 
