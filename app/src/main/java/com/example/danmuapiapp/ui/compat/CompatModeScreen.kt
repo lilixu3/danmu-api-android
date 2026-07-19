@@ -104,6 +104,7 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
+import com.example.danmuapiapp.ui.component.CoreDependencyBlockedDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -131,6 +132,7 @@ data class CompatModeActions(
     val onRetestProxySpeed: () -> Unit,
     val onConfirmProxySelection: () -> Unit,
     val onDismissProxyPicker: () -> Unit,
+    val onDismissDependencyBlockedPrompt: () -> Unit,
     val onExitToBackground: () -> Unit,
     val onStopServiceAndExit: () -> Unit,
     val onExitCompatMode: () -> Unit
@@ -233,6 +235,13 @@ fun CompatModeScreen(
                     }
                 }
             }
+        }
+
+        uiState.dependencyBlockedPrompt?.let { prompt ->
+            CoreDependencyBlockedDialog(
+                prompt = prompt,
+                onDismiss = actions.onDismissDependencyBlockedPrompt
+            )
         }
 
         if (proxyPickerState.isVisible) {

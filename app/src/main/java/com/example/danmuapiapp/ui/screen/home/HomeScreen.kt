@@ -156,6 +156,7 @@ import com.example.danmuapiapp.domain.model.AnnouncementSeverity
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
+import com.example.danmuapiapp.ui.component.CoreDependencyBlockedDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
@@ -669,6 +670,13 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    viewModel.dependencyBlockedPrompt?.let { prompt ->
+        CoreDependencyBlockedDialog(
+            prompt = prompt,
+            onDismiss = viewModel::dismissDependencyBlockedPrompt
+        )
     }
 
     if (viewModel.showNoCoreDialog) {

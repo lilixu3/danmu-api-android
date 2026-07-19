@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.core
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.CoreDependencyBlockedDialog
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -118,6 +119,12 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
         }
     }
 
+    viewModel.dependencyBlockedPrompt?.let { prompt ->
+        CoreDependencyBlockedDialog(
+            prompt = prompt,
+            onDismiss = viewModel::dismissDependencyBlockedPrompt
+        )
+    }
     if (viewModel.showUpdateDialog) {
         UpdateResultDialog(viewModel, coreDisplayNames)
     }

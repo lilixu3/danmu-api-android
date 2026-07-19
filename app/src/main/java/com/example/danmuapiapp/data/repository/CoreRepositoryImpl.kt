@@ -1165,21 +1165,30 @@ class CoreRepositoryImpl @Inject constructor(
             val runtimePackResult = if (missingBeforePack.isEmpty()) {
                 RuntimePackInstallResult(applicable = true)
             } else {
-                runtimeDependencyPackManager.installIfAvailable(
-                    coreDir = stagingDir,
-                    variant = variant,
-                    coreSha = sourceMetadata?.commitSha.orEmpty(),
-                    onProgress = { stage, progress, downloadedBytes, dependencyTotalBytes ->
-                        updateDownloadProgress(
-                            variant = variant,
-                            actionLabel = actionLabel,
-                            stageText = stage,
-                            progress = progress,
-                            downloadedBytes = downloadedBytes,
-                            totalBytes = dependencyTotalBytes
-                        )
-                    }
-                )
+                try {
+                    runtimeDependencyPackManager.installIfAvailable(
+                        coreDir = stagingDir,
+                        variant = variant,
+                        coreSha = sourceMetadata?.commitSha.orEmpty(),
+                        onProgress = { stage, progress, downloadedBytes, dependencyTotalBytes ->
+                            updateDownloadProgress(
+                                variant = variant,
+                                actionLabel = actionLabel,
+                                stageText = stage,
+                                progress = progress,
+                                downloadedBytes = downloadedBytes,
+                                totalBytes = dependencyTotalBytes
+                            )
+                        }
+                    )
+                } catch (error: Exception) {
+                    throw CoreRuntimeDependencyUnavailableException(
+                        missingDependencies = missingBeforePack,
+                        runtimePackUnavailableReason = error.message
+                            ?: "签名依赖包校验或安装失败",
+                        cause = error
+                    )
+                }
             }
             verifyCoreRuntimeDependencies(
                 coreDir = stagingDir,
@@ -1567,11 +1576,9 @@ class CoreRepositoryImpl @Inject constructor(
     ) {
         val missing = collectMissingCoreRuntimeDependencies(coreDir)
         if (missing.isNotEmpty()) {
-            val detail = runtimePackUnavailableReason?.let {
-                "签名依赖仓库未能提供匹配依赖包（$it）。"
-            }.orEmpty()
-            throw IOException(
-                "${detail}检测到未安装的核心依赖：${missing.joinToString(", ")}。本次核心更新已取消并保留旧版本；若依赖包含原生模块，则需要兼容该 Node ABI 的 App 版本。"
+            throw CoreRuntimeDependencyUnavailableException(
+                missingDependencies = missing,
+                runtimePackUnavailableReason = runtimePackUnavailableReason
             )
         }
     }

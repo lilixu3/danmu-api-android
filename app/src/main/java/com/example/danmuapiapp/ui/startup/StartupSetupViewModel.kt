@@ -16,8 +16,10 @@ import com.example.danmuapiapp.domain.model.resolveCustomCoreConfig
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.CoreDependencyBlockedPrompt
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.resolveCoreMutationFailure
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -50,6 +52,8 @@ class StartupSetupViewModel @Inject constructor(
     val proxyOptions = githubProxyService.proxyOptions()
 
     var operationMessage by mutableStateOf<String?>(null)
+        private set
+    var dependencyBlockedPrompt by mutableStateOf<CoreDependencyBlockedPrompt?>(null)
         private set
     var isRunModeSwitching by mutableStateOf(false)
         private set
@@ -155,6 +159,10 @@ class StartupSetupViewModel @Inject constructor(
         operationMessage = null
     }
 
+    fun dismissDependencyBlockedPrompt() {
+        dependencyBlockedPrompt = null
+    }
+
     fun selectProxy(proxyId: String) {
         proxyPickerController.select(proxyId)
     }
@@ -216,15 +224,26 @@ class StartupSetupViewModel @Inject constructor(
     private fun doInstallCore(variant: ApiVariant) {
         viewModelScope.launch {
             runtimeRepo.updateVariant(variant)
+            dependencyBlockedPrompt = null
             operationMessage = "正在下载${variantLabel(variant)}..."
             coreRepo.installCore(variant).fold(
                 onSuccess = {
                     coreRepo.refreshCoreInfo()
                     operationMessage = "${variantLabel(variant)} 已准备好"
                 },
-                onFailure = {
-                    operationMessage = "下载失败：${it.message ?: "请稍后重试"}"
-                    if (githubProxyService.isUsingProxy()) {
+                onFailure = { error ->
+                    val presentation = resolveCoreMutationFailure(
+                        error = error,
+                        variant = variant,
+                        variantLabel = variantLabel(variant),
+                        actionLabel = "安装",
+                        failurePrefix = "下载失败"
+                    )
+                    operationMessage = presentation.fallbackMessage
+                    dependencyBlockedPrompt = presentation.dependencyBlockedPrompt
+                    if (presentation.dependencyBlockedPrompt == null &&
+                        githubProxyService.isUsingProxy()
+                    ) {
                         pendingInstallVariant = variant
                         proxyPickerController.open()
                     }

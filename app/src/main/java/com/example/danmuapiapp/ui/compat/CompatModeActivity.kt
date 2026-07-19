@@ -113,6 +113,8 @@ class CompatModeActivity : ComponentActivity() {
                         onRetestProxySpeed = compatViewModel::retestProxySpeed,
                         onConfirmProxySelection = compatViewModel::confirmProxySelection,
                         onDismissProxyPicker = compatViewModel::dismissProxyPickerDialog,
+                        onDismissDependencyBlockedPrompt =
+                            compatViewModel::dismissDependencyBlockedPrompt,
                         onExitToBackground = {
                             moveTaskToBack(true)
                         },

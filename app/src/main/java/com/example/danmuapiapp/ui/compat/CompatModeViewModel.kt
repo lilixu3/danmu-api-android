@@ -23,7 +23,9 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.ui.common.CoreDependencyBlockedPrompt
 import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.resolveCoreMutationFailure
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +54,7 @@ data class CompatModeUiState(
     val customCoreSource: ResolvedCustomCoreSource = ResolvedCustomCoreSource(),
     val customRepo: String = "",
     val customRepoBranch: String = "",
+    val dependencyBlockedPrompt: CoreDependencyBlockedPrompt? = null,
     val nightMode: NightModePreference = NightModePreference.FollowSystem,
     val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM
 )
@@ -293,12 +296,14 @@ class CompatModeViewModel(
                         emitEvent("${resolveVariantLabel(variant)} 下载完成")
                     }
                 },
-                onFailure = {
-                    emitEvent("${resolveVariantLabel(variant)} 下载失败：${it.message ?: "未知错误"}")
-                    if (graph.githubProxyService.isUsingProxy()) {
-                        pendingProxyAction = PendingProxyAction.Install(variant)
-                        proxyPickerController.open()
-                    }
+                onFailure = { error ->
+                    handleCoreMutationFailure(
+                        error = error,
+                        variant = variant,
+                        actionLabel = "安装",
+                        failurePrefix = "${resolveVariantLabel(variant)} 下载失败",
+                        retryAction = PendingProxyAction.Install(variant)
+                    )
                 }
             )
         }
@@ -328,15 +333,48 @@ class CompatModeViewModel(
                         emitEvent("${resolveVariantLabel(variant)} 更新完成")
                     }
                 },
-                onFailure = {
-                    emitEvent("${resolveVariantLabel(variant)} 更新失败：${it.message ?: "未知错误"}")
-                    if (graph.githubProxyService.isUsingProxy()) {
-                        pendingProxyAction = PendingProxyAction.Update(variant)
-                        proxyPickerController.open()
-                    }
+                onFailure = { error ->
+                    handleCoreMutationFailure(
+                        error = error,
+                        variant = variant,
+                        actionLabel = "更新",
+                        failurePrefix = "${resolveVariantLabel(variant)} 更新失败",
+                        retryAction = PendingProxyAction.Update(variant)
+                    )
                 }
             )
         }
+    }
+
+    private fun handleCoreMutationFailure(
+        error: Throwable,
+        variant: ApiVariant,
+        actionLabel: String,
+        failurePrefix: String,
+        retryAction: PendingProxyAction
+    ) {
+        val presentation = resolveCoreMutationFailure(
+            error = error,
+            variant = variant,
+            variantLabel = resolveVariantLabel(variant),
+            actionLabel = actionLabel,
+            failurePrefix = failurePrefix
+        )
+        val prompt = presentation.dependencyBlockedPrompt
+        if (prompt != null) {
+            _uiState.update { it.copy(dependencyBlockedPrompt = prompt) }
+            return
+        }
+
+        presentation.fallbackMessage?.let(::emitEvent)
+        if (graph.githubProxyService.isUsingProxy()) {
+            pendingProxyAction = retryAction
+            proxyPickerController.open()
+        }
+    }
+
+    fun dismissDependencyBlockedPrompt() {
+        _uiState.update { it.copy(dependencyBlockedPrompt = null) }
     }
 
     fun checkCoreUpdate(variant: ApiVariant) {
@@ -711,6 +749,7 @@ class CompatModeViewModel(
             it.copy(
                 isOperating = true,
                 operationProgressTitle = title,
+                dependencyBlockedPrompt = null,
                 keepAlive = buildKeepAliveUiState(
                     runtimeState = it.runtimeState,
                     isOperating = true

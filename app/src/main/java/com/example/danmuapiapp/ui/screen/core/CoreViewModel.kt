@@ -10,6 +10,8 @@ import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.CoreDependencyBlockedPrompt
+import com.example.danmuapiapp.ui.common.resolveCoreMutationFailure
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
@@ -40,6 +42,8 @@ class CoreViewModel @Inject constructor(
     var isOperating by mutableStateOf(false)
         private set
     var operationMessage by mutableStateOf<String?>(null)
+        private set
+    var dependencyBlockedPrompt by mutableStateOf<CoreDependencyBlockedPrompt?>(null)
         private set
     var showVariantSettingsDialog by mutableStateOf<ApiVariant?>(null)
         private set
@@ -124,6 +128,7 @@ class CoreViewModel @Inject constructor(
                 successMessage = "$label 安装成功",
                 stopTimeoutMessage = "$label 安装前停止服务超时，请稍后重试",
                 failurePrefix = "安装失败",
+                dependencyActionLabel = "安装",
                 pendingAction = PendingProxyAction.Install(variant),
                 applyBlock = { coreRepo.installCore(variant) }
             )
@@ -173,6 +178,7 @@ class CoreViewModel @Inject constructor(
                 successMessage = "$label 更新成功",
                 stopTimeoutMessage = "$label 更新前停止服务超时，请稍后重试",
                 failurePrefix = "更新失败",
+                dependencyActionLabel = "更新",
                 pendingAction = PendingProxyAction.DoUpdate(variant),
                 applyBlock = { coreRepo.updateCore(variant) }
             )
@@ -198,6 +204,7 @@ class CoreViewModel @Inject constructor(
                 successMessage = "$label 重装成功",
                 stopTimeoutMessage = "$label 重装前停止服务超时，请稍后重试",
                 failurePrefix = "重装失败",
+                dependencyActionLabel = "重装",
                 pendingAction = PendingProxyAction.Reinstall(variant),
                 applyBlock = { coreRepo.installCore(variant) }
             )
@@ -242,6 +249,7 @@ class CoreViewModel @Inject constructor(
                 successMessage = "已回退到 ${release.tagName}",
                 stopTimeoutMessage = "${variantLabel(variant)} 回退前停止服务超时，请稍后重试",
                 failurePrefix = "回退失败",
+                dependencyActionLabel = "回退",
                 pendingAction = PendingProxyAction.Rollback(variant, release),
                 applyBlock = { coreRepo.rollbackCore(variant, release) }
             )
@@ -286,16 +294,22 @@ class CoreViewModel @Inject constructor(
         operationMessage = null
     }
 
+    fun dismissDependencyBlockedPrompt() {
+        dependencyBlockedPrompt = null
+    }
+
     private suspend fun performCoreMutation(
         variant: ApiVariant,
         actionMessage: String,
         successMessage: String,
         stopTimeoutMessage: String,
         failurePrefix: String,
+        dependencyActionLabel: String,
         pendingAction: PendingProxyAction,
         applyBlock: suspend () -> Result<Unit>
     ) {
         isOperating = true
+        dependencyBlockedPrompt = null
         operationMessage = actionMessage
         val applyPlan = decideCoreApplyPlan(runtimeState.value, variant)
 
@@ -331,9 +345,19 @@ class CoreViewModel @Inject constructor(
                     }
                 }
             },
-            onFailure = {
-                operationMessage = "$failurePrefix: ${it.message}"
-                promptProxyReselectIfNeeded(pendingAction)
+            onFailure = { error ->
+                val presentation = resolveCoreMutationFailure(
+                    error = error,
+                    variant = variant,
+                    variantLabel = variantLabel(variant),
+                    actionLabel = dependencyActionLabel,
+                    failurePrefix = failurePrefix
+                )
+                operationMessage = presentation.fallbackMessage
+                dependencyBlockedPrompt = presentation.dependencyBlockedPrompt
+                if (presentation.dependencyBlockedPrompt == null) {
+                    promptProxyReselectIfNeeded(pendingAction)
+                }
             }
         )
         isOperating = false

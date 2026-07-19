@@ -26,8 +26,10 @@ import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
+import com.example.danmuapiapp.ui.common.CoreDependencyBlockedPrompt
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.resolveCoreMutationFailure
 import com.example.danmuapiapp.ui.screen.home.support.resolveAutoCoreUpdatePrompt
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -135,6 +137,8 @@ class HomeViewModel @Inject constructor(
     var coreUpdateCheckDialogMessage by mutableStateOf<String?>(null)
         private set
     var coreUpdateCheckDialogIsError by mutableStateOf(false)
+        private set
+    var dependencyBlockedPrompt by mutableStateOf<CoreDependencyBlockedPrompt?>(null)
         private set
     var showAppUpdatePromptDialog by mutableStateOf(false)
         private set
@@ -478,6 +482,7 @@ class HomeViewModel @Inject constructor(
 
     private fun doInstallAndStart(variant: ApiVariant) {
         isInstallingCore = true
+        dependencyBlockedPrompt = null
         viewModelScope.launch {
             runtimeRepo.addLog(LogLevel.Info, "正在下载 ${variantLabel(variant)}...")
             coreRepo.installCore(variant).fold(
@@ -493,13 +498,16 @@ class HomeViewModel @Inject constructor(
                         runtimeRepo.startService()
                     }
                 },
-                onFailure = {
-                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${it.message}")
+                onFailure = { error ->
+                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${error.message}")
                     isInstallingCore = false
-                    if (githubProxyService.isUsingProxy()) {
-                        pendingProxyAction = PendingProxyAction.Install(variant)
-                        openProxyPickerDialog()
-                    }
+                    handleCoreMutationFailure(
+                        error = error,
+                        variant = variant,
+                        actionLabel = "安装",
+                        failurePrefix = "安装失败",
+                        retryAction = PendingProxyAction.Install(variant)
+                    )
                 }
             )
         }
@@ -603,6 +611,7 @@ class HomeViewModel @Inject constructor(
 
     private fun doUpdateCurrentVariant(variant: ApiVariant) {
         isUpdatingCore = true
+        dependencyBlockedPrompt = null
         viewModelScope.launch {
             runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
             coreRepo.updateCore(variant).fold(
@@ -613,16 +622,49 @@ class HomeViewModel @Inject constructor(
                     ignoredUpdateVersionMap[variant] = null
                     isUpdatingCore = false
                 },
-                onFailure = {
-                    runtimeRepo.addLog(LogLevel.Error, "更新失败: ${it.message}")
+                onFailure = { error ->
+                    runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
                     isUpdatingCore = false
-                    if (githubProxyService.isUsingProxy()) {
-                        pendingProxyAction = PendingProxyAction.Update(variant)
-                        openProxyPickerDialog()
-                    }
+                    handleCoreMutationFailure(
+                        error = error,
+                        variant = variant,
+                        actionLabel = "更新",
+                        failurePrefix = "更新失败",
+                        retryAction = PendingProxyAction.Update(variant)
+                    )
                 }
             )
         }
+    }
+
+    private fun handleCoreMutationFailure(
+        error: Throwable,
+        variant: ApiVariant,
+        actionLabel: String,
+        failurePrefix: String,
+        retryAction: PendingProxyAction
+    ) {
+        val presentation = resolveCoreMutationFailure(
+            error = error,
+            variant = variant,
+            variantLabel = variantLabel(variant),
+            actionLabel = actionLabel,
+            failurePrefix = failurePrefix
+        )
+        val prompt = presentation.dependencyBlockedPrompt
+        if (prompt != null) {
+            dependencyBlockedPrompt = prompt
+            return
+        }
+
+        if (githubProxyService.isUsingProxy()) {
+            pendingProxyAction = retryAction
+            openProxyPickerDialog()
+        }
+    }
+
+    fun dismissDependencyBlockedPrompt() {
+        dependencyBlockedPrompt = null
     }
 
     private fun maybeRestartAfterCoreUpdate(variant: ApiVariant) {

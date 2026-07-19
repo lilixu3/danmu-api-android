@@ -73,6 +73,7 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.common.CustomCoreSettingsForm
 import com.example.danmuapiapp.ui.common.rememberCustomCoreSettingsFormState
+import com.example.danmuapiapp.ui.component.CoreDependencyBlockedDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SettingsHintCard
@@ -278,6 +279,13 @@ fun StartupPermissionGateHost(
         )
     } else {
         content()
+    }
+
+    viewModel.dependencyBlockedPrompt?.let { prompt ->
+        CoreDependencyBlockedDialog(
+            prompt = prompt,
+            onDismiss = viewModel::dismissDependencyBlockedPrompt
+        )
     }
 }
 
