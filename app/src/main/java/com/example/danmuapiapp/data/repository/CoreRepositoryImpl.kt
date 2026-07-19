@@ -42,7 +42,8 @@ class CoreRepositoryImpl @Inject constructor(
     private val httpClient: OkHttpClient,
     private val githubRemoteService: GithubRemoteService,
     private val githubProxyService: GithubProxyService,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val runtimeDependencyPackManager: RuntimeDependencyPackManager
 ) : CoreRepository {
 
     companion object {
@@ -53,6 +54,49 @@ class CoreRepositoryImpl @Inject constructor(
         private const val WORK_DIR_KEY_CUSTOM_BASE_PATH = "custom_path"
         private const val RUNTIME_PREFS = "runtime"
         private const val CORE_SOURCE_METADATA_FILE = ".danmuapiapp-core-source.json"
+
+        internal fun buildAtomicRootCoreSyncShell(
+            sourcePath: String,
+            destinationPath: String,
+            nonce: String
+        ): String {
+            val stagingPath = "$destinationPath.incoming-$nonce"
+            val backupPath = "$destinationPath.backup-$nonce"
+            return """
+                SRC=${shellQuote(sourcePath)}
+                DST=${shellQuote(destinationPath)}
+                TMP=${shellQuote(stagingPath)}
+                BAK=${shellQuote(backupPath)}
+                if [ ! -d "${'$'}SRC" ]; then
+                  exit 2
+                fi
+                rm -rf "${'$'}TMP" "${'$'}BAK" 2>/dev/null || true
+                mkdir -p "${'$'}TMP" 2>/dev/null || exit 3
+                if ! cp -a "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null; then
+                  rm -rf "${'$'}TMP" 2>/dev/null || true
+                  mkdir -p "${'$'}TMP" 2>/dev/null || exit 3
+                  cp -r "${'$'}SRC/." "${'$'}TMP/" 2>/dev/null || exit 4
+                fi
+                if ! { [ -f "${'$'}TMP/worker.js" ] || [ -f "${'$'}TMP/danmu_api/worker.js" ] || [ -f "${'$'}TMP/danmu-api/worker.js" ]; }; then
+                  rm -rf "${'$'}TMP" 2>/dev/null || true
+                  exit 5
+                fi
+                HAD_OLD=0
+                if [ -e "${'$'}DST" ] || [ -L "${'$'}DST" ]; then
+                  mv "${'$'}DST" "${'$'}BAK" 2>/dev/null || exit 6
+                  HAD_OLD=1
+                fi
+                if mv "${'$'}TMP" "${'$'}DST" 2>/dev/null; then
+                  rm -rf "${'$'}BAK" 2>/dev/null || true
+                  exit 0
+                fi
+                rm -rf "${'$'}DST" 2>/dev/null || true
+                if [ "${'$'}HAD_OLD" -eq 1 ]; then
+                  mv "${'$'}BAK" "${'$'}DST" 2>/dev/null || exit 7
+                fi
+                exit 8
+            """.trimIndent()
+        }
     }
 
     private fun logRecoverableWarning(message: String, throwable: Throwable) {
@@ -1117,7 +1161,29 @@ class CoreRepositoryImpl @Inject constructor(
             NodeProjectManager.normalizeCoreLayout(stagingDir)
             NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
             writeCoreSourceMetadata(stagingDir, sourceMetadata)
-            verifyCoreRuntimeDependencies(stagingDir)
+            val missingBeforePack = collectMissingCoreRuntimeDependencies(stagingDir)
+            val runtimePackResult = if (missingBeforePack.isEmpty()) {
+                RuntimePackInstallResult(applicable = true)
+            } else {
+                runtimeDependencyPackManager.installIfAvailable(
+                    coreDir = stagingDir,
+                    coreSha = sourceMetadata?.commitSha.orEmpty(),
+                    onProgress = { stage, progress, downloadedBytes, dependencyTotalBytes ->
+                        updateDownloadProgress(
+                            variant = variant,
+                            actionLabel = actionLabel,
+                            stageText = stage,
+                            progress = progress,
+                            downloadedBytes = downloadedBytes,
+                            totalBytes = dependencyTotalBytes
+                        )
+                    }
+                )
+            }
+            verifyCoreRuntimeDependencies(
+                coreDir = stagingDir,
+                runtimePackUnavailableReason = runtimePackResult.unavailableReason
+            )
 
             if (!NodeProjectManager.hasValidCore(stagingDir)) {
                 throw IOException("核心文件不完整，缺少关键入口文件")
@@ -1245,20 +1311,15 @@ class CoreRepositoryImpl @Inject constructor(
     }
 
     private fun syncCoreDirToRoot(srcDir: File, rootDirPath: String) {
-        val script = """
-            SRC=${shellQuote(srcDir.absolutePath)}
-            DST=${shellQuote(rootDirPath)}
-            if [ ! -d "${'$'}SRC" ]; then
-              exit 2
-            fi
-            rm -rf "${'$'}DST" 2>/dev/null || true
-            mkdir -p "${'$'}DST" 2>/dev/null || true
-            cp -a "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || true
-            [ -f "${'$'}DST/worker.js" ] || [ -f "${'$'}DST/danmu_api/worker.js" ] || [ -f "${'$'}DST/danmu-api/worker.js" ]
-        """.trimIndent()
+        val nonce = "${System.currentTimeMillis()}-${android.os.Process.myPid()}"
+        val script = buildAtomicRootCoreSyncShell(
+            sourcePath = srcDir.absolutePath,
+            destinationPath = rootDirPath,
+            nonce = nonce
+        )
         val result = RootShell.exec(script, timeoutMs = 30000L)
         if (!result.ok) {
-            val detail = (result.stderr.ifBlank { result.stdout }).trim().ifBlank { "未知错误" }
+            val detail = (result.stderr.ifBlank { result.stdout }).trim().ifBlank { "exit=${result.exitCode}" }
             throw IOException("同步 Root 核心目录失败: $detail")
         }
     }
@@ -1487,17 +1548,29 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun verifyCoreRuntimeDependencies(coreDir: File) {
+    private fun collectMissingCoreRuntimeDependencies(coreDir: File): List<String> {
         val normalProjectDir = RuntimePaths.normalProjectDir(context)
         runCatching {
             NodeProjectManager.ensureProjectExtracted(context, normalProjectDir)
             NodeProjectManager.ensureOptionalRuntimeDependencies(context, normalProjectDir)
         }
-        val runtimeNodeModulesDir = File(normalProjectDir, "node_modules")
-        val missing = NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+        return NodeProjectManager.collectMissingRuntimeDepsForCore(
+            coreDir = coreDir,
+            runtimeNodeModulesDir = File(normalProjectDir, "node_modules")
+        )
+    }
+
+    private fun verifyCoreRuntimeDependencies(
+        coreDir: File,
+        runtimePackUnavailableReason: String? = null
+    ) {
+        val missing = collectMissingCoreRuntimeDependencies(coreDir)
         if (missing.isNotEmpty()) {
+            val detail = runtimePackUnavailableReason?.let {
+                "签名依赖仓库未能提供匹配依赖包（$it）。"
+            }.orEmpty()
             throw IOException(
-                "当前 App 缺少该核心所需运行时依赖：${missing.joinToString(", ")}。请先升级 App 到带这些依赖的新版本后再更新核心。"
+                "${detail}检测到未安装的核心依赖：${missing.joinToString(", ")}。本次核心更新已取消并保留旧版本；若依赖包含原生模块，则需要兼容该 Node ABI 的 App 版本。"
             )
         }
     }
