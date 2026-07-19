@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.51"
+    ?: "1.0.5.61"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 132
+    ?: 142
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
