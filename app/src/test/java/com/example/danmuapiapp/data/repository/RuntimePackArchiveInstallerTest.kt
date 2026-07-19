@@ -31,8 +31,10 @@ class RuntimePackArchiveInstallerTest {
                 path = "node_modules/future-package"
             )
             val manifest = RuntimePackManifest(
-                schema = 1,
-                coreRepo = RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO,
+                schema = RuntimeDependencyPackProtocol.INDEX_SCHEMA,
+                channel = "stable",
+                coreRepo = RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+                coreBranch = "main",
                 coreSha = "a".repeat(40),
                 coreVersion = "1.0.0",
                 runtimeProtocol = RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL,
@@ -55,7 +57,9 @@ class RuntimePackArchiveInstallerTest {
                 )
             )
             val entry = RuntimePackEntry(
+                channel = manifest.channel,
                 coreRepo = manifest.coreRepo,
+                coreBranch = manifest.coreBranch,
                 coreSha = manifest.coreSha,
                 coreVersion = manifest.coreVersion,
                 runtimeProtocol = manifest.runtimeProtocol,
@@ -90,8 +94,10 @@ class RuntimePackArchiveInstallerTest {
                 path = "node_modules/future-package"
             )
             val manifest = RuntimePackManifest(
-                schema = 1,
-                coreRepo = RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO,
+                schema = RuntimeDependencyPackProtocol.INDEX_SCHEMA,
+                channel = "stable",
+                coreRepo = RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+                coreBranch = "main",
                 coreSha = "a".repeat(40),
                 runtimeProtocol = RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL,
                 nodeMajor = RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR + 1,
@@ -109,7 +115,9 @@ class RuntimePackArchiveInstallerTest {
                 )
             )
             val entry = RuntimePackEntry(
+                channel = manifest.channel,
                 coreRepo = manifest.coreRepo,
+                coreBranch = manifest.coreBranch,
                 coreSha = manifest.coreSha,
                 runtimeProtocol = manifest.runtimeProtocol,
                 dependencyFingerprint = manifest.dependencyFingerprint,
@@ -125,6 +133,52 @@ class RuntimePackArchiveInstallerTest {
             }
 
             assertTrue(failed)
+            assertFalse(File(coreDir, "node_modules").exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `manifest 与 entry 跨通道时在安装前拒绝`() {
+        val root = Files.createTempDirectory("runtime-pack-installer-channel").toFile()
+        try {
+            val coreDir = File(root, "core").apply { mkdirs() }
+            val archive = File(root, "pack.zip")
+            val manifest = RuntimePackManifest(
+                schema = RuntimeDependencyPackProtocol.INDEX_SCHEMA,
+                channel = "stable",
+                coreRepo = RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+                coreBranch = "main",
+                coreSha = "a".repeat(40),
+                runtimeProtocol = RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL,
+                nodeMajor = RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR,
+                dependencyFingerprint = "b".repeat(64)
+            )
+            val manifestBytes = json.encodeToString(manifest).toByteArray()
+            writeZip(
+                archive,
+                linkedMapOf(
+                    "manifest.json" to manifestBytes,
+                    "runtime-lock.json" to "{}".toByteArray()
+                )
+            )
+            val devEntry = RuntimePackEntry(
+                channel = "dev",
+                coreRepo = RuntimeDependencyPackProtocol.DEV_CORE_REPO,
+                coreBranch = "main",
+                coreSha = manifest.coreSha,
+                runtimeProtocol = manifest.runtimeProtocol,
+                dependencyFingerprint = manifest.dependencyFingerprint,
+                manifestSha256 = RuntimeDependencyPackProtocol.sha256(manifestBytes)
+            )
+
+            val error = runCatching {
+                RuntimePackArchiveInstaller.verifyAndInstall(archive, devEntry, coreDir)
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("通道"))
             assertFalse(File(coreDir, "node_modules").exists())
         } finally {
             root.deleteRecursively()

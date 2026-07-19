@@ -410,7 +410,7 @@ class CoreRepositoryImpl @Inject constructor(
         return if (variant == ApiVariant.Custom) {
             currentCustomCoreSource().branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
         } else {
-            null
+            RuntimeDependencyPackProtocol.CORE_BRANCH
         }
     }
 
@@ -1167,6 +1167,7 @@ class CoreRepositoryImpl @Inject constructor(
             } else {
                 runtimeDependencyPackManager.installIfAvailable(
                     coreDir = stagingDir,
+                    variant = variant,
                     coreSha = sourceMetadata?.commitSha.orEmpty(),
                     onProgress = { stage, progress, downloadedBytes, dependencyTotalBytes ->
                         updateDownloadProgress(

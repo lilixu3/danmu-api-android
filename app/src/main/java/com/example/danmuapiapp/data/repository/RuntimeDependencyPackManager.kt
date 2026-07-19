@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.repository
 import android.content.Context
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.domain.model.ApiVariant
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -26,20 +27,23 @@ import javax.inject.Singleton
 @Serializable
 internal data class RuntimePackIndex(
     val schema: Int = 0,
-    val upstream: RuntimePackUpstream = RuntimePackUpstream(),
+    val channel: String = "",
+    val source: RuntimePackSource = RuntimePackSource(),
     val entries: Map<String, RuntimePackEntry> = emptyMap(),
     val dependencyEntries: Map<String, String> = emptyMap()
 )
 
 @Serializable
-internal data class RuntimePackUpstream(
+internal data class RuntimePackSource(
     val repo: String = "",
     val branch: String = ""
 )
 
 @Serializable
 internal data class RuntimePackEntry(
+    val channel: String = "",
     val coreRepo: String = "",
+    val coreBranch: String = "",
     val coreSha: String = "",
     val coreVersion: String = "",
     val runtimeProtocol: Int = 0,
@@ -62,7 +66,9 @@ internal data class RuntimePackPackage(
 @Serializable
 internal data class RuntimePackManifest(
     val schema: Int = 0,
+    val channel: String = "",
     val coreRepo: String = "",
+    val coreBranch: String = "",
     val coreSha: String = "",
     val coreVersion: String = "",
     val runtimeProtocol: Int = 0,
@@ -86,9 +92,9 @@ internal data class RuntimePackInstallResult(
 )
 
 /**
- * Downloads and installs only signed, pure-JS packs derived from the official
- * upstream core. The service is deliberately fail-closed for a malformed or
- * signed-but-incompatible artifact.
+ * Downloads and installs only signed, pure-JS packs derived from the trusted
+ * stable or development source selected by [ApiVariant]. Custom cores never
+ * query the pack repository. Malformed or cross-channel artifacts fail closed.
  */
 @Singleton
 class RuntimeDependencyPackManager @Inject constructor(
@@ -138,12 +144,7 @@ class RuntimeDependencyPackManager @Inject constructor(
             val mapped = mappedSha?.let(index.entries::get)
             if (mapped?.dependencyFingerprint == normalizedFingerprint) return mapped
 
-            // Backward compatibility for an already signed schema-1 index that
-            // predates dependencyEntries. New indexes always publish the map.
-            return index.entries
-                .toSortedMap()
-                .values
-                .firstOrNull { entry -> entry.dependencyFingerprint == normalizedFingerprint }
+            return null
         }
 
         internal fun readLimited(input: InputStream, maxBytes: Int): ByteArray {
@@ -193,6 +194,7 @@ class RuntimeDependencyPackManager @Inject constructor(
 
     internal fun installIfAvailable(
         coreDir: File,
+        variant: ApiVariant,
         coreSha: String = "",
         onProgress: (stage: String, progress: Float?, downloadedBytes: Long, totalBytes: Long) -> Unit =
             { _, _, _, _ -> }
@@ -203,34 +205,39 @@ class RuntimeDependencyPackManager @Inject constructor(
         if (dependencies.isEmpty()) {
             return RuntimePackInstallResult(applicable = true)
         }
+        val channel = RuntimeDependencyPackProtocol.channelForVariant(variant)
+            ?: return RuntimePackInstallResult(
+                applicable = false,
+                unavailableReason = "自定义核心不使用稳定版或开发版依赖仓库"
+            )
         val fingerprint = RuntimeDependencyPackProtocol.dependencyFingerprint(dependencies)
-        onProgress("正在检查签名运行时依赖", null, 0L, -1L)
+        onProgress("正在检查${channel.label}签名运行时依赖", null, 0L, -1L)
 
         val index = try {
-            fetchSignedIndex()
+            fetchSignedIndex(channel)
         } catch (error: PackIntegrityException) {
             throw error
         } catch (error: Exception) {
             return RuntimePackInstallResult(
                 applicable = true,
-                unavailableReason = error.message ?: "依赖索引暂时不可用"
+                unavailableReason = error.message ?: "${channel.label}依赖索引暂时不可用"
             )
         } ?: return RuntimePackInstallResult(
             applicable = true,
-            unavailableReason = "签名运行时依赖索引暂时不可用"
+            unavailableReason = "${channel.label}签名运行时依赖索引暂时不可用"
         )
 
-        validateIndex(index)
+        validateIndex(index, channel)
         val preferredSha = normalizedSha.takeIf { Regex(CORE_SHA_PATTERN).matches(it) }.orEmpty()
         val entry = selectEntryForFingerprint(index, fingerprint, preferredSha)
             ?: return RuntimePackInstallResult(
                 applicable = true,
-                unavailableReason = "依赖仓库未收录当前核心的依赖指纹 ${fingerprint.take(12)}"
+                unavailableReason = "${channel.label}依赖仓库未收录当前核心的依赖指纹 ${fingerprint.take(12)}"
             )
-        validateEntry(entry, fingerprint)
+        validateEntry(entry, fingerprint, channel)
 
-        val archive = obtainArchive(entry, onProgress)
-        onProgress("正在校验官方运行时依赖", 1f, archive.length(), archive.length())
+        val archive = obtainArchive(entry, channel, onProgress)
+        onProgress("正在校验${channel.label}运行时依赖", 1f, archive.length(), archive.length())
         RuntimePackArchiveInstaller.verifyAndInstall(archive, entry, coreDir)
         return RuntimePackInstallResult(
             applicable = true,
@@ -238,30 +245,30 @@ class RuntimeDependencyPackManager @Inject constructor(
         )
     }
 
-    private fun fetchSignedIndex(): RuntimePackIndex? {
+    private fun fetchSignedIndex(channel: RuntimePackChannel): RuntimePackIndex? {
         val indexBytes = requestLimitedBytes(
             urls = githubRemoteService.rawUrlCandidates(
                 RuntimeDependencyPackProtocol.PACK_REPO,
-                RuntimeDependencyPackProtocol.INDEX_PATH
+                channel.indexPath
             ),
             maxBytes = RuntimeDependencyPackProtocol.MAX_INDEX_BYTES
         ) ?: return null
         val signatureBytes = requestLimitedBytes(
             urls = githubRemoteService.rawUrlCandidates(
                 RuntimeDependencyPackProtocol.PACK_REPO,
-                RuntimeDependencyPackProtocol.INDEX_SIGNATURE_PATH
+                channel.indexSignaturePath
             ),
             maxBytes = RuntimeDependencyPackProtocol.MAX_INDEX_SIGNATURE_BYTES
         ) ?: return null
         val indexText = indexBytes.toString(Charsets.UTF_8)
         val signatureText = signatureBytes.toString(Charsets.UTF_8)
         if (!verifyIndexSignature(indexBytes, signatureText)) {
-            throw PackIntegrityException("官方运行时依赖索引签名校验失败")
+            throw PackIntegrityException("${channel.label}运行时依赖索引签名校验失败")
         }
         return runCatching {
             json.decodeFromString<RuntimePackIndex>(indexText)
         }.getOrElse { error ->
-            throw PackIntegrityException("官方运行时依赖索引格式无效", error)
+            throw PackIntegrityException("${channel.label}运行时依赖索引格式无效", error)
         }
     }
 
@@ -293,35 +300,59 @@ class RuntimeDependencyPackManager @Inject constructor(
         return null
     }
 
-    private fun validateIndex(index: RuntimePackIndex) {
-        if (index.schema != 1 || index.upstream.repo != RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO) {
-            throw PackIntegrityException("运行时依赖索引来源不是官方上游核心")
+    private fun validateIndex(index: RuntimePackIndex, channel: RuntimePackChannel) {
+        if (index.schema != RuntimeDependencyPackProtocol.INDEX_SCHEMA ||
+            index.channel != channel.key ||
+            !RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                channel,
+                index.source.repo,
+                index.source.branch
+            )
+        ) {
+            throw PackIntegrityException("${channel.label}运行时依赖索引通道或来源无效")
         }
-        if (index.upstream.branch.isNotBlank() && index.upstream.branch != RuntimeDependencyPackProtocol.PACK_BRANCH) {
-            throw PackIntegrityException("运行时依赖索引分支不受支持")
+        index.entries.forEach { (coreSha, entry) ->
+            if (!Regex(CORE_SHA_PATTERN).matches(coreSha) ||
+                entry.coreSha.lowercase() != coreSha ||
+                entry.channel != channel.key ||
+                !RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                    channel,
+                    entry.coreRepo,
+                    entry.coreBranch
+                )
+            ) {
+                throw PackIntegrityException("${channel.label}运行时依赖索引包含跨通道或无效 entry")
+            }
         }
         index.dependencyEntries.forEach { (fingerprint, coreSha) ->
             if (!Regex(SHA256_PATTERN).matches(fingerprint) || !Regex(CORE_SHA_PATTERN).matches(coreSha)) {
-                throw PackIntegrityException("运行时依赖指纹映射格式无效")
+                throw PackIntegrityException("${channel.label}运行时依赖指纹映射格式无效")
             }
             val entry = index.entries[coreSha]
-                ?: throw PackIntegrityException("运行时依赖指纹映射指向不存在的依赖包")
+                ?: throw PackIntegrityException("${channel.label}运行时依赖指纹映射指向不存在的依赖包")
             if (entry.dependencyFingerprint != fingerprint) {
-                throw PackIntegrityException("运行时依赖指纹映射与依赖包不一致")
+                throw PackIntegrityException("${channel.label}运行时依赖指纹映射与依赖包不一致")
             }
         }
     }
 
     private fun validateEntry(
         entry: RuntimePackEntry,
-        expectedFingerprint: String
+        expectedFingerprint: String,
+        channel: RuntimePackChannel
     ) {
-        if (!RuntimeDependencyPackProtocol.isOfficialCoreRepo(entry.coreRepo)) {
-            throw PackIntegrityException("依赖包 entry 不是官方核心来源")
+        if (entry.channel != channel.key ||
+            !RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                channel,
+                entry.coreRepo,
+                entry.coreBranch
+            )
+        ) {
+            throw PackIntegrityException("依赖包 entry 与${channel.label}核心来源不一致")
         }
         val sourceSha = entry.coreSha.lowercase()
         if (!Regex(CORE_SHA_PATTERN).matches(sourceSha)) {
-            throw PackIntegrityException("依赖包缺少有效的官方来源 SHA")
+            throw PackIntegrityException("依赖包缺少有效的${channel.label}来源 SHA")
         }
         if (entry.runtimeProtocol != RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL) {
             throw PackIntegrityException("依赖包协议版本不兼容：${entry.runtimeProtocol}")
@@ -336,9 +367,9 @@ class RuntimeDependencyPackManager @Inject constructor(
         }
         val shortSha = sourceSha.take(12)
         val expectedUrl = "$ARTIFACT_PREFIX" +
-            "core-$shortSha/runtime-pack-$shortSha.zip"
+            "${channel.key}-core-$shortSha/runtime-pack-${channel.key}-$shortSha.zip"
         if (entry.artifactUrl != expectedUrl) {
-            throw PackIntegrityException("依赖包下载地址不是受信任的官方包仓库地址")
+            throw PackIntegrityException("依赖包下载地址与${channel.label}通道不一致")
         }
         val uri = runCatching { URI(entry.artifactUrl) }.getOrNull()
         if (uri?.scheme != "https" || uri.host != "github.com") {
@@ -351,10 +382,14 @@ class RuntimeDependencyPackManager @Inject constructor(
 
     private fun obtainArchive(
         entry: RuntimePackEntry,
+        channel: RuntimePackChannel,
         onProgress: (stage: String, progress: Float?, downloadedBytes: Long, totalBytes: Long) -> Unit
     ): File {
         val cacheDir = File(context.filesDir, CACHE_DIR_NAME).apply { mkdirs() }
-        val cached = File(cacheDir, "$CACHE_FILE_PREFIX${entry.artifactSha256}.zip")
+        val cached = File(
+            cacheDir,
+            "$CACHE_FILE_PREFIX${channel.key}-${entry.artifactSha256}.zip"
+        )
         if (cached.isFile && cached.length() == entry.artifactSize &&
             RuntimeDependencyPackProtocol.sha256(cached) == entry.artifactSha256
         ) {
@@ -385,7 +420,7 @@ class RuntimeDependencyPackManager @Inject constructor(
                             throw PackIntegrityException("依赖包超过大小上限")
                         }
                         var count = 0L
-                        onProgress("正在下载官方运行时依赖", 0f, 0L, entry.artifactSize)
+                        onProgress("正在下载${channel.label}运行时依赖", 0f, 0L, entry.artifactSize)
                         FileOutputStream(temporary).use { output ->
                             BufferedInputStream(body.byteStream()).use { input ->
                                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -399,7 +434,12 @@ class RuntimeDependencyPackManager @Inject constructor(
                                     output.write(buffer, 0, read)
                                     val progress = (count.toFloat() / entry.artifactSize.toFloat())
                                         .coerceIn(0f, 1f)
-                                    onProgress("正在下载官方运行时依赖", progress, count, entry.artifactSize)
+                                    onProgress(
+                                        "正在下载${channel.label}运行时依赖",
+                                        progress,
+                                        count,
+                                        entry.artifactSize
+                                    )
                                 }
                             }
                         }
@@ -419,7 +459,7 @@ class RuntimeDependencyPackManager @Inject constructor(
                 if (downloaded) break
             }
             if (!downloaded) {
-                throw IOException("下载官方运行时依赖失败：${lastFailure ?: "网络异常"}")
+                throw IOException("下载${channel.label}运行时依赖失败：${lastFailure ?: "网络异常"}")
             }
             if (!temporary.renameTo(cached)) {
                 temporary.copyTo(cached, overwrite = true)

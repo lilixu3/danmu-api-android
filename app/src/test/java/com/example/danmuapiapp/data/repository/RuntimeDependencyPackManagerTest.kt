@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.domain.model.ApiVariant
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
@@ -9,6 +10,9 @@ import java.security.Signature
 import java.util.Base64
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -21,18 +25,65 @@ class RuntimeDependencyPackManagerTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun `依赖包协议只绑定官方上游核心`() {
+    fun `依赖包协议只绑定稳定版和开发版两个可信来源`() {
+        assertEquals(2, RuntimeDependencyPackProtocol.INDEX_SCHEMA)
         assertEquals(
             "huangxd-/danmu_api",
-            RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO
+            RuntimeDependencyPackProtocol.STABLE_CORE_REPO
+        )
+        assertEquals(
+            "lilixu3/danmu_api",
+            RuntimeDependencyPackProtocol.DEV_CORE_REPO
         )
         assertEquals(
             "lilixu3/danmu-api-runtime-packs",
             RuntimeDependencyPackProtocol.PACK_REPO
         )
         assertEquals(18, RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR)
-        assertFalse(RuntimeDependencyPackProtocol.isOfficialCoreRepo("lilixu3/danmu_api"))
-        assertTrue(RuntimeDependencyPackProtocol.isOfficialCoreRepo("huangxd-/danmu_api"))
+
+        val stable = checkNotNull(RuntimeDependencyPackProtocol.channelForVariant(ApiVariant.Stable))
+        val dev = checkNotNull(RuntimeDependencyPackProtocol.channelForVariant(ApiVariant.Dev))
+        assertEquals(RuntimePackChannel.Stable, stable)
+        assertEquals(RuntimePackChannel.Dev, dev)
+        assertEquals(null, RuntimeDependencyPackProtocol.channelForVariant(ApiVariant.Custom))
+        assertEquals("main/stable/index.json", stable.indexPath)
+        assertEquals("main/dev/index.json", dev.indexPath)
+
+        assertTrue(
+            RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                stable,
+                "huangxd-/danmu_api",
+                "main"
+            )
+        )
+        assertFalse(
+            RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                stable,
+                "lilixu3/danmu_api",
+                "main"
+            )
+        )
+        assertTrue(
+            RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                dev,
+                "lilixu3/danmu_api",
+                "main"
+            )
+        )
+        assertFalse(
+            RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                dev,
+                "huangxd-/danmu_api",
+                "main"
+            )
+        )
+        assertFalse(
+            RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                dev,
+                "lilixu3/danmu_api",
+                "test"
+            )
+        )
     }
 
     @Test
@@ -55,32 +106,58 @@ class RuntimeDependencyPackManagerTest {
     }
 
     @Test
-    fun `开发版和自定义核心可按相同依赖指纹复用签名包`() {
+    fun `相同依赖指纹仍只在调用方选定的通道索引中命中`() {
         val fingerprint = "b".repeat(64)
-        val officialSha = "a".repeat(40)
-        val entry = RuntimePackEntry(
-            coreRepo = RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO,
-            coreSha = officialSha,
+        val sameSha = "a".repeat(40)
+        val stableEntry = RuntimePackEntry(
+            channel = "stable",
+            coreRepo = RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+            coreBranch = "main",
+            coreSha = sameSha,
             dependencyFingerprint = fingerprint
         )
-        val index = RuntimePackIndex(
-            entries = mapOf(officialSha to entry),
-            dependencyEntries = mapOf(fingerprint to officialSha)
+        val devEntry = RuntimePackEntry(
+            channel = "dev",
+            coreRepo = RuntimeDependencyPackProtocol.DEV_CORE_REPO,
+            coreBranch = "main",
+            coreSha = sameSha,
+            dependencyFingerprint = fingerprint
+        )
+        val stableIndex = RuntimePackIndex(
+            channel = "stable",
+            source = RuntimePackSource(RuntimeDependencyPackProtocol.STABLE_CORE_REPO, "main"),
+            entries = mapOf(sameSha to stableEntry),
+            dependencyEntries = mapOf(fingerprint to sameSha)
+        )
+        val devIndex = RuntimePackIndex(
+            channel = "dev",
+            source = RuntimePackSource(RuntimeDependencyPackProtocol.DEV_CORE_REPO, "main"),
+            entries = mapOf(sameSha to devEntry),
+            dependencyEntries = mapOf(fingerprint to sameSha)
         )
 
-        val selected = RuntimeDependencyPackManager.selectEntryForFingerprint(
-            index = index,
-            fingerprint = fingerprint,
-            preferredCoreSha = "c".repeat(40)
+        assertSame(
+            stableEntry,
+            RuntimeDependencyPackManager.selectEntryForFingerprint(
+                index = stableIndex,
+                fingerprint = fingerprint,
+                preferredCoreSha = sameSha
+            )
         )
-
-        assertSame(entry, selected)
+        assertSame(
+            devEntry,
+            RuntimeDependencyPackManager.selectEntryForFingerprint(
+                index = devIndex,
+                fingerprint = fingerprint,
+                preferredCoreSha = sameSha
+            )
+        )
         assertEquals(
             null,
             RuntimeDependencyPackManager.selectEntryForFingerprint(
-                index = index,
-                fingerprint = "d".repeat(64),
-                preferredCoreSha = officialSha
+                index = stableIndex.copy(dependencyEntries = emptyMap()),
+                fingerprint = fingerprint,
+                preferredCoreSha = "c".repeat(40)
             )
         )
     }
@@ -105,19 +182,74 @@ class RuntimeDependencyPackManagerTest {
     }
 
     @Test
-    fun `App 生产公钥可验证公网发布索引且来源是官方上游`() {
+    fun `App 生产公钥可分别验证稳定版和开发版公网发布索引`() {
         val loader = checkNotNull(javaClass.classLoader)
-        val indexBytes = checkNotNull(loader.getResourceAsStream("runtime-packs/index.json")).readBytes()
-        val signature = checkNotNull(loader.getResourceAsStream("runtime-packs/index.sig"))
-            .bufferedReader()
-            .use { it.readText() }
+        val expectedSha = "ce8b3cbddf01181c323627b485a1861390ca44b0"
+        val channels = listOf(
+            RuntimePackChannel.Stable to RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+            RuntimePackChannel.Dev to RuntimeDependencyPackProtocol.DEV_CORE_REPO
+        )
+        val fingerprints = mutableSetOf<String>()
+
+        channels.forEach { (channel, expectedRepo) ->
+            val resourceRoot = "runtime-packs/${channel.key}"
+            val indexBytes = checkNotNull(
+                loader.getResourceAsStream("$resourceRoot/index.json")
+            ).readBytes()
+            val signature = checkNotNull(
+                loader.getResourceAsStream("$resourceRoot/index.sig")
+            ).bufferedReader().use { it.readText() }
+
+            assertTrue(RuntimeDependencyPackManager.verifyIndexSignature(indexBytes, signature))
+            val index = json.decodeFromString<RuntimePackIndex>(indexBytes.toString(Charsets.UTF_8))
+            val entry = checkNotNull(index.entries[expectedSha])
+            assertEquals(RuntimeDependencyPackProtocol.INDEX_SCHEMA, index.schema)
+            assertEquals(channel.key, index.channel)
+            assertEquals(expectedRepo, index.source.repo)
+            assertEquals("main", index.source.branch)
+            assertEquals(channel.key, entry.channel)
+            assertEquals(expectedRepo, entry.coreRepo)
+            assertEquals("main", entry.coreBranch)
+            assertEquals(expectedSha, index.dependencyEntries[entry.dependencyFingerprint])
+            assertTrue(entry.artifactUrl.contains("/${channel.key}-core-"))
+            assertTrue(entry.artifactUrl.endsWith("runtime-pack-${channel.key}-${expectedSha.take(12)}.zip"))
+            fingerprints += entry.dependencyFingerprint
+        }
+        assertEquals(1, fingerprints.size)
+    }
+
+    @Test
+    fun `旧版公网兼容索引仍是 schema 1 且只包含稳定版独立资产`() {
+        val loader = checkNotNull(javaClass.classLoader)
+        val indexBytes = checkNotNull(
+            loader.getResourceAsStream("runtime-packs/index.json")
+        ).readBytes()
+        val signature = checkNotNull(
+            loader.getResourceAsStream("runtime-packs/index.sig")
+        ).bufferedReader().use { it.readText() }
 
         assertTrue(RuntimeDependencyPackManager.verifyIndexSignature(indexBytes, signature))
-        val index = json.decodeFromString<RuntimePackIndex>(indexBytes.toString(Charsets.UTF_8))
-        val expectedSha = "ce8b3cbddf01181c323627b485a1861390ca44b0"
-        val entry = checkNotNull(index.entries[expectedSha])
-        assertEquals(RuntimeDependencyPackProtocol.UPSTREAM_CORE_REPO, index.upstream.repo)
-        assertEquals(expectedSha, index.dependencyEntries[entry.dependencyFingerprint])
+        val root = json.parseToJsonElement(indexBytes.toString(Charsets.UTF_8)).jsonObject
+        assertEquals(1, root.getValue("schema").jsonPrimitive.int)
+        assertEquals(
+            RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+            root.getValue("upstream").jsonObject.getValue("repo").jsonPrimitive.content
+        )
+        val entries = root.getValue("entries").jsonObject
+        assertEquals(1, entries.size)
+        entries.values.forEach { value ->
+            val entry = value.jsonObject
+            assertEquals(
+                RuntimeDependencyPackProtocol.STABLE_CORE_REPO,
+                entry.getValue("coreRepo").jsonPrimitive.content
+            )
+            val artifactUrl = entry.getValue("artifactUrl").jsonPrimitive.content
+            assertTrue(artifactUrl.contains("/releases/download/core-"))
+            assertFalse(artifactUrl.contains("/stable-core-"))
+            assertFalse(artifactUrl.contains("/dev-core-"))
+            assertFalse(entry.containsKey("channel"))
+            assertFalse(entry.containsKey("coreBranch"))
+        }
     }
 
     @Test

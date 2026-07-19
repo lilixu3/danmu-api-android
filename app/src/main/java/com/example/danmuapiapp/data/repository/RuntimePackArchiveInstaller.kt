@@ -92,15 +92,24 @@ internal object RuntimePackArchiveInstaller {
         manifest: RuntimePackManifest,
         entry: RuntimePackEntry
     ) {
-        if (manifest.schema != 1 ||
-            !RuntimeDependencyPackProtocol.isOfficialCoreRepo(manifest.coreRepo) ||
+        val channel = RuntimePackChannel.entries.firstOrNull { it.key == entry.channel }
+            ?: throw IOException("依赖包 entry 通道无效")
+        if (!RuntimeDependencyPackProtocol.isTrustedCoreSource(
+                channel,
+                entry.coreRepo,
+                entry.coreBranch
+            ) ||
+            manifest.schema != RuntimeDependencyPackProtocol.INDEX_SCHEMA ||
+            manifest.channel != entry.channel ||
+            manifest.coreRepo != entry.coreRepo ||
+            manifest.coreBranch != entry.coreBranch ||
             manifest.coreSha.lowercase() != entry.coreSha.lowercase() ||
             manifest.runtimeProtocol != RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL ||
             manifest.nodeMajor != RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR ||
             manifest.dependencyFingerprint != entry.dependencyFingerprint ||
             manifest.packages != entry.packages
         ) {
-            throw IOException("依赖包 manifest 与索引不一致")
+            throw IOException("依赖包 manifest 与索引通道或身份不一致")
         }
     }
 
