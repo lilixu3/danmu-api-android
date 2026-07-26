@@ -1,0 +1,247 @@
+import { getTableName } from "../table.js";
+import { CONSTANTS } from "../utils.js";
+import { getColumnTable } from "../column.js";
+import { extractExtendedColumnType } from "../column-builder.js";
+import { type } from "arktype";
+
+//#region src/arktype/column.ts
+const literalSchema = type.string.or(type.number).or(type.boolean).or(type.null);
+const jsonSchema = literalSchema.or(type.unknown.as().array()).or(type.object.as());
+const bufferSchema = type.unknown.narrow((value) => value instanceof Buffer).as().describe("a Buffer instance");
+function columnToSchema(column) {
+	let schema;
+	const dimensions = column.dimensions;
+	if (typeof dimensions === "number" && dimensions > 0) return pgArrayColumnToSchema(column, dimensions);
+	const { type: columnType, constraint } = extractExtendedColumnType(column);
+	switch (columnType) {
+		case "array":
+			schema = arrayColumnToSchema(column, constraint);
+			break;
+		case "object":
+			schema = objectColumnToSchema(column, constraint);
+			break;
+		case "number":
+			schema = numberColumnToSchema(column, constraint);
+			break;
+		case "bigint":
+			schema = bigintColumnToSchema(column, constraint);
+			break;
+		case "boolean":
+			schema = type.boolean;
+			break;
+		case "string":
+			schema = stringColumnToSchema(column, constraint);
+			break;
+		case "custom":
+			schema = type.unknown;
+			break;
+		default: schema = type.unknown;
+	}
+	return schema;
+}
+function numberColumnToSchema(column, constraint) {
+	let min;
+	let max;
+	let integer = false;
+	switch (constraint) {
+		case "int8":
+			min = CONSTANTS.INT8_MIN;
+			max = CONSTANTS.INT8_MAX;
+			integer = true;
+			break;
+		case "uint8":
+			min = 0;
+			max = CONSTANTS.INT8_UNSIGNED_MAX;
+			integer = true;
+			break;
+		case "int16":
+			min = CONSTANTS.INT16_MIN;
+			max = CONSTANTS.INT16_MAX;
+			integer = true;
+			break;
+		case "uint16":
+			min = 0;
+			max = CONSTANTS.INT16_UNSIGNED_MAX;
+			integer = true;
+			break;
+		case "int24":
+			min = CONSTANTS.INT24_MIN;
+			max = CONSTANTS.INT24_MAX;
+			integer = true;
+			break;
+		case "uint24":
+			min = 0;
+			max = CONSTANTS.INT24_UNSIGNED_MAX;
+			integer = true;
+			break;
+		case "int32":
+			min = CONSTANTS.INT32_MIN;
+			max = CONSTANTS.INT32_MAX;
+			integer = true;
+			break;
+		case "uint32":
+			min = 0;
+			max = CONSTANTS.INT32_UNSIGNED_MAX;
+			integer = true;
+			break;
+		case "int53":
+			min = Number.MIN_SAFE_INTEGER;
+			max = Number.MAX_SAFE_INTEGER;
+			integer = true;
+			break;
+		case "uint53":
+			min = 0;
+			max = Number.MAX_SAFE_INTEGER;
+			integer = true;
+			break;
+		case "float":
+			min = CONSTANTS.INT24_MIN;
+			max = CONSTANTS.INT24_MAX;
+			break;
+		case "ufloat":
+			min = 0;
+			max = CONSTANTS.INT24_UNSIGNED_MAX;
+			break;
+		case "double":
+			min = CONSTANTS.INT48_MIN;
+			max = CONSTANTS.INT48_MAX;
+			break;
+		case "udouble":
+			min = 0;
+			max = CONSTANTS.INT48_UNSIGNED_MAX;
+			break;
+		case "year":
+			min = 1901;
+			max = 2155;
+			integer = true;
+			break;
+		case "unsigned":
+			min = 0;
+			max = Number.MAX_SAFE_INTEGER;
+			break;
+		default:
+			min = Number.MIN_SAFE_INTEGER;
+			max = Number.MAX_SAFE_INTEGER;
+			break;
+	}
+	return (integer ? type.keywords.number.integer : type.number).atLeast(min).atMost(max);
+}
+function pgArrayColumnToSchema(column, dimensions) {
+	const [baseType, baseConstraint] = column.dataType.split(" ");
+	let baseSchema;
+	switch (baseType) {
+		case "number":
+			baseSchema = numberColumnToSchema(column, baseConstraint);
+			break;
+		case "bigint":
+			baseSchema = bigintColumnToSchema(column, baseConstraint);
+			break;
+		case "boolean":
+			baseSchema = type.boolean;
+			break;
+		case "string":
+			baseSchema = stringColumnToSchema(column, baseConstraint);
+			break;
+		case "object":
+			baseSchema = objectColumnToSchema(column, baseConstraint);
+			break;
+		case "array":
+			baseSchema = arrayColumnToSchema(column, baseConstraint);
+			break;
+		default: baseSchema = type.unknown;
+	}
+	let schema = baseSchema.array();
+	for (let i = 1; i < dimensions; i++) schema = schema.array();
+	return schema;
+}
+function arrayColumnToSchema(column, constraint) {
+	switch (constraint) {
+		case "geometry":
+		case "point": return type([type.number, type.number]);
+		case "line": return type([
+			type.number,
+			type.number,
+			type.number
+		]);
+		case "vector":
+		case "halfvector": {
+			const length = column.length;
+			return length ? type.number.array().exactlyLength(length) : type.number.array();
+		}
+		case "int64vector": {
+			const length = column.length;
+			return length ? type.bigint.array().exactlyLength(length) : type.bigint.array();
+		}
+		case "basecolumn": {
+			const baseColumn = column.baseColumn;
+			if (baseColumn) {
+				const length = column.length;
+				const schema = columnToSchema(baseColumn).array();
+				if (length) return schema.exactlyLength(length);
+				return schema;
+			}
+			return type.unknown.array();
+		}
+		default: return type.unknown.array();
+	}
+}
+function objectColumnToSchema(column, constraint) {
+	switch (constraint) {
+		case "buffer": return bufferSchema;
+		case "date": return type.Date;
+		case "geometry":
+		case "point": return type({
+			x: type.number,
+			y: type.number
+		});
+		case "json": return jsonSchema;
+		case "line": return type({
+			a: type.number,
+			b: type.number,
+			c: type.number
+		});
+		default: return type({});
+	}
+}
+const unsignedBigintNarrow = (v, ctx) => v < 0n ? ctx.mustBe("greater than") : v > CONSTANTS.INT64_UNSIGNED_MAX ? ctx.mustBe("less than") : true;
+const bigintNarrow = (v, ctx) => v < CONSTANTS.INT64_MIN ? ctx.mustBe("greater than") : v > CONSTANTS.INT64_MAX ? ctx.mustBe("less than") : true;
+const bigintStringModeSchema = type.string.narrow((v, ctx) => {
+	if (typeof v !== "string") return ctx.mustBe("a string");
+	if (!/^-?\d+$/.test(v)) return ctx.mustBe("a string representing a number");
+	const bigint = BigInt(v);
+	if (bigint < CONSTANTS.INT64_MIN) return ctx.mustBe("greater than");
+	if (bigint > CONSTANTS.INT64_MAX) return ctx.mustBe("less than");
+	return true;
+});
+const unsignedBigintStringModeSchema = type.string.narrow((v, ctx) => {
+	if (typeof v !== "string") return ctx.mustBe("a string");
+	if (!/^\d+$/.test(v)) return ctx.mustBe("a string representing a number");
+	const bigint = BigInt(v);
+	if (bigint < 0) return ctx.mustBe("greater than");
+	if (bigint > CONSTANTS.INT64_MAX) return ctx.mustBe("less than");
+	return true;
+});
+function bigintColumnToSchema(column, constraint) {
+	switch (constraint) {
+		case "int64": return type.bigint.narrow(bigintNarrow);
+		case "uint64": return type.bigint.narrow(unsignedBigintNarrow);
+	}
+	return type.bigint;
+}
+function stringColumnToSchema(column, constraint) {
+	const { name: columnName, length, isLengthExact } = column;
+	if (constraint === "binary") return type(`/^[01]${length ? `{${isLengthExact ? length : `0,${length}`}}` : "*"}$/`).describe(`a string containing ones or zeros${length ? ` while being ${isLengthExact ? "" : "up to "}${length} characters long` : ""}`);
+	if (constraint === "uuid") return type(/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu).describe("a RFC-4122-compliant UUID");
+	if (constraint === "enum") {
+		const enumValues = column.enumValues;
+		if (!enumValues) throw new Error(`Column "${getTableName(getColumnTable(column))}"."${columnName}" is of 'enum' type, but lacks enum values`);
+		return type.enumerated(...enumValues);
+	}
+	if (constraint === "int64") return bigintStringModeSchema;
+	if (constraint === "uint64") return unsignedBigintStringModeSchema;
+	return length && isLengthExact ? type.string.exactlyLength(length) : length ? type.string.atMostLength(length) : type.string;
+}
+
+//#endregion
+export { bigintNarrow, bigintStringModeSchema, bufferSchema, columnToSchema, jsonSchema, literalSchema, unsignedBigintNarrow, unsignedBigintStringModeSchema };
+//# sourceMappingURL=column.js.map

@@ -1,0 +1,2 @@
+import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(s,n)=>({bundlePath:new URL("../uuid-ossp.tar.gz",import.meta.url)}),o={name:"uuid-ossp",setup:t};export{o as uuid_ossp};
+//# sourceMappingURL=uuid_ossp.js.map

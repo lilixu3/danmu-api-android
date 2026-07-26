@@ -1,0 +1,2 @@
+import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(n,s)=>({bundlePath:new URL("../pg_walinspect.tar.gz",import.meta.url)}),a={name:"pg_walinspect",setup:t};export{a as pg_walinspect};
+//# sourceMappingURL=pg_walinspect.js.map

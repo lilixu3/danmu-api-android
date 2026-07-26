@@ -1,0 +1,2 @@
+import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(n,s)=>({bundlePath:new URL("../pg_buffercache.tar.gz",import.meta.url)}),i={name:"pg_buffercache",setup:t};export{i as pg_buffercache};
+//# sourceMappingURL=pg_buffercache.js.map
