@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.49"
+    ?: "1.0.5.66"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 130
+    ?: 152
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -346,10 +346,37 @@ fun readBundledNodeDependencyNames(): List<String> {
     return dependencies
 }
 
+fun readBundledNodeDependencyClosure(): List<String> {
+    val lockFile = file("src/main/assets/nodejs-project/package-lock.json")
+    if (!lockFile.exists()) {
+        throw GradleException("缺少运行时依赖锁文件：${lockFile.absolutePath}")
+    }
+    val lock = groovy.json.JsonSlurper().parse(lockFile) as? Map<*, *>
+        ?: throw GradleException("无法解析 package-lock.json：${lockFile.absolutePath}")
+    val packages = lock["packages"] as? Map<*, *>
+        ?: throw GradleException("package-lock.json 缺少 packages：${lockFile.absolutePath}")
+    val roots = packages.keys.mapNotNull { rawPath ->
+        val path = rawPath?.toString().orEmpty()
+        if (!path.startsWith("node_modules/")) return@mapNotNull null
+        val relative = path.removePrefix("node_modules/")
+        val segments = relative.split('/')
+        when {
+            segments.firstOrNull()?.startsWith('@') == true && segments.size >= 2 ->
+                "${segments[0]}/${segments[1]}"
+            segments.firstOrNull()?.isNotBlank() == true -> segments[0]
+            else -> null
+        }
+    }.distinct().sorted()
+    if (roots.isEmpty()) {
+        throw GradleException("package-lock.json 未收录任何运行时依赖：${lockFile.absolutePath}")
+    }
+    return roots
+}
+
 fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
     if (!rootDir.exists() || !rootDir.isDirectory) return
 
-    val redundantDocName = Regex("""(?i)^(readme|changelog|history)(\..*)?$""")
+    val redundantDocName = Regex("""(?i)^(readme|changelog|history)([.-].*)?$""")
     val redundantPakoDistFiles = setOf(
         "pako/dist/pako.es5.js",
         "pako/dist/pako.es5.min.js",
@@ -372,6 +399,8 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
             val shouldDelete =
                 relativePath.endsWith(".map") ||
                     relativePath.endsWith(".d.ts") ||
+                    relativePath.endsWith(".d.cts") ||
+                    relativePath.endsWith(".d.mts") ||
                     redundantDocName.matches(file.name) ||
                     relativePath in redundantPakoDistFiles
 
@@ -385,22 +414,7 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
         .forEach { it.delete() }
 }
 
-val baseNodeModulesPackages = buildList {
-    addAll(readBundledNodeDependencyNames())
-    addAll(
-        listOf(
-            "agent-base",
-            "debug",
-            "ms",
-            "data-uri-to-buffer",
-            "fetch-blob",
-            "formdata-polyfill",
-            "node-domexception",
-            "web-streams-polyfill",
-            "base64-js"
-        )
-    )
-}.distinct()
+val baseNodeModulesPackages = readBundledNodeDependencyClosure()
 val optionalRedisNodeModulesPackages = listOf(
     "redis",
     "@redis",
@@ -410,6 +424,7 @@ val optionalRedisNodeModulesPackages = listOf(
 // 生成基础运行时依赖与可选 redis 依赖包，避免每次更新都预解压完整依赖树。
 tasks.register("prepareNodeModules") {
     val zipFile = rootProject.file("node_modules.zip")
+    val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
     val optionalRootDir = file("src/main/assets/nodejs-optional")
     val optionalRedisTargetDir = file("src/main/assets/nodejs-optional/redis/node_modules")
@@ -417,6 +432,7 @@ tasks.register("prepareNodeModules") {
     if (zipFile.exists()) {
         inputs.file(zipFile)
     }
+    inputs.file(packageLockFile)
     outputs.dirs(baseTargetDir, optionalRootDir)
     dependsOn("cleanupGarbageFiles")
     doLast {
@@ -517,9 +533,11 @@ tasks.register("prepareNodeModules") {
 
 tasks.register("syncBundledNodeModulesFromWorkspace") {
     val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
+    val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
     val optionalRedisTargetDir = file("src/main/assets/nodejs-optional/redis/node_modules")
     inputs.dir(workspaceNodeModules)
+    inputs.file(packageLockFile)
     outputs.dirs(baseTargetDir, optionalRedisTargetDir)
     doLast {
         if (!workspaceNodeModules.exists()) {
@@ -548,10 +566,12 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
 
 tasks.register("verifyBundledNodeModules") {
     val packageJsonFile = file("src/main/assets/nodejs-project/package.json")
+    val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val nodeModulesDir = file("src/main/assets/nodejs-project/node_modules")
     dependsOn("prepareNodeModules")
     dependsOn("syncBundledNodeModulesFromWorkspace")
     inputs.file(packageJsonFile)
+    inputs.file(packageLockFile)
     inputs.dir(nodeModulesDir)
     doLast {
         if (!packageJsonFile.exists()) {
@@ -583,6 +603,13 @@ tasks.register("verifyBundledNodeModules") {
             }
         }
 
+        baseNodeModulesPackages.forEach { name ->
+            val depPkg = file("src/main/assets/nodejs-project/node_modules/$name/package.json")
+            if (!depPkg.exists()) {
+                missing += "$name（锁文件闭包）"
+            }
+        }
+
         if (missing.isNotEmpty() || mismatched.isNotEmpty()) {
             val details = buildList {
                 if (missing.isNotEmpty()) add("缺少依赖：${missing.joinToString(", ")}")
@@ -608,7 +635,20 @@ tasks.register<Exec>("testBundledBrotliRuntime") {
     commandLine("node", "node-tests/brotli-runtime-smoke.mjs")
 }
 
+tasks.register<Exec>("testBundledNodeLockClosure") {
+    dependsOn("verifyBundledNodeModules")
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/bundled-node-lock-closure-smoke.mjs")
+}
+
+tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
+    dependsOn("verifyBundledNodeModules")
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/core-runtime-dependencies-smoke.mjs")
+}
+
 val requiredPackagedNodeRuntimeEntries = listOf(
+    "assets/nodejs-project/runtime-polyfills.js",
     "assets/nodejs-project/node_modules/node-fetch/package.json",
     "assets/nodejs-project/node_modules/pako/package.json",
     "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js",
@@ -616,7 +656,19 @@ val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-project/node_modules/brotli/decompress.js",
     "assets/nodejs-project/node_modules/brotli/dec/decode.js",
     "assets/nodejs-project/node_modules/brotli/dec/dictionary-data.js",
-    "assets/nodejs-project/node_modules/base64-js/package.json"
+    "assets/nodejs-project/node_modules/base64-js/package.json",
+    "assets/nodejs-project/node_modules/@dan-uni/dan-any/package.json",
+    "assets/nodejs-project/node_modules/@dan-uni/dan-any/dist/adapters.mjs",
+    "assets/nodejs-project/node_modules/@dan-uni/dan-any/dist/core/main/pure.mjs",
+    "assets/nodejs-project/node_modules/@electric-sql/pglite/package.json",
+    "assets/nodejs-project/node_modules/drizzle-orm/package.json",
+    "assets/nodejs-project/node_modules/fast-xml-parser/package.json",
+    "assets/nodejs-project/node_modules/opencc-js/package.json",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/core.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/STCharacters.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/cn.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/tw.js",
+    "assets/nodejs-project/node_modules/zod/package.json"
 )
 
 tasks.register("verifyPackagedNodeModulesDebug") {
@@ -655,11 +707,15 @@ val prepareNodeModulesTask = tasks.named("prepareNodeModules")
 val syncBundledNodeModulesTask = tasks.named("syncBundledNodeModulesFromWorkspace")
 val verifyBundledNodeModulesTask = tasks.named("verifyBundledNodeModules")
 val testBundledBrotliRuntimeTask = tasks.named("testBundledBrotliRuntime")
+val testBundledNodeLockClosureTask = tasks.named("testBundledNodeLockClosure")
+val testBundledCoreRuntimeDependenciesTask = tasks.named("testBundledCoreRuntimeDependencies")
 tasks.named("preBuild").configure {
     dependsOn(prepareNodeModulesTask)
     dependsOn(syncBundledNodeModulesTask)
     dependsOn(verifyBundledNodeModulesTask)
     dependsOn(testBundledBrotliRuntimeTask)
+    dependsOn(testBundledNodeLockClosureTask)
+    dependsOn(testBundledCoreRuntimeDependenciesTask)
 }
 
 tasks.matching {
