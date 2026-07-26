@@ -1,0 +1,188 @@
+import { PGlite } from '@electric-sql/pglite'
+import PgDumpModFactory, { PgDumpMod } from './pgDumpModFactory'
+
+const dumpFilePath = '/tmp/out.sql'
+
+/**
+ * Creates a new Uint8Array based on two different ArrayBuffers
+ *
+ * @private
+ * @param {ArrayBuffers} buffer1 The first buffer.
+ * @param {ArrayBuffers} buffer2 The second buffer.
+ * @return {ArrayBuffers} The new ArrayBuffer created out of the two.
+ */
+function concat(buffer1: ArrayBuffer, buffer2: ArrayBuffer) {
+  const tmp = new Uint8Array(buffer1.byteLength + buffer2.byteLength)
+  tmp.set(new Uint8Array(buffer1), 0)
+  tmp.set(new Uint8Array(buffer2), buffer1.byteLength)
+  return tmp
+}
+
+interface ExecResult {
+  exitCode: number
+  fileContents: string
+  stderr: string
+  stdout: string
+}
+
+/**
+ * Inner function to execute pg_dump
+ */
+async function execPgDump({
+  pg,
+  args,
+}: {
+  pg: PGlite
+  args: string[]
+}): Promise<ExecResult> {
+  let pgdump_write, pgdump_read
+  let exitCode = 0
+  let stderrOutput: string = ''
+  let stdoutOutput: string = ''
+  const emscriptenOpts: Partial<PgDumpMod> = {
+    noExitRuntime: false,
+    print: (text) => {
+      stdoutOutput += text
+    },
+    printErr: (text) => {
+      stderrOutput += text
+    },
+    onExit: (status: number) => {
+      exitCode = status
+    },
+    preRun: [
+      (mod: PgDumpMod) => {
+        mod.ENV.HOME = '/home/postgres'
+        mod.ENV.USER = 'postgres'
+        mod.ENV.LOGNAME = 'postgres'
+      },
+      (mod: PgDumpMod) => {
+        mod.onRuntimeInitialized = () => {
+          let bufferedBytes: Uint8Array = new Uint8Array()
+
+          pgdump_write = mod.addFunction((ptr: any, length: number) => {
+            let bytes
+            try {
+              bytes = mod.HEAPU8.subarray(ptr, ptr + length)
+            } catch (e: any) {
+              console.error('error', e)
+              throw e
+            }
+            pg.execProtocolRawStream(bytes, {
+              onRawData: (bytes) => {
+                bufferedBytes = concat(bufferedBytes, bytes)
+              },
+            })
+
+            return length
+          }, 'iii')
+
+          pgdump_read = mod.addFunction((ptr: any, max_length: number) => {
+            let length = bufferedBytes.length
+            if (length > max_length) {
+              length = max_length
+            }
+            try {
+              mod.HEAP8.set(bufferedBytes.subarray(0, length), ptr)
+            } catch (e) {
+              console.error(e)
+            }
+            bufferedBytes = bufferedBytes.subarray(length, bufferedBytes.length)
+            return length
+          }, 'iii')
+
+          mod._pgl_set_rw_cbs(pgdump_read, pgdump_write)
+
+          // default $HOME in emscripten is /home/postgres
+          mod.FS.chmod('/home/postgres/.pgpass', 0o0600) // https://www.postgresql.org/docs/current/libpq-pgpass.html
+        }
+      },
+    ],
+  }
+
+  const mod = await PgDumpModFactory(emscriptenOpts)
+  mod.callMain(args)
+  let fileContents = ''
+  if (!exitCode) {
+    fileContents = mod.FS.readFile(dumpFilePath, { encoding: 'utf8' })
+  }
+
+  return {
+    exitCode,
+    fileContents,
+    stderr: stderrOutput,
+    stdout: stdoutOutput,
+  }
+}
+
+interface PgDumpOptions {
+  pg: PGlite
+  args?: string[]
+  database?: string
+  fileName?: string
+  verbose?: boolean
+}
+
+/**
+ * Execute pg_dump
+ * @param pg - The PGlite instance
+ * @param args - The arguments to pass to pg_dump
+ * @param fileName - The name of the file to write the dump to (dump.sql by default)
+ * @returns The file containing the dump
+ */
+export async function pgDump({
+  pg,
+  args,
+  fileName = 'dump.sql',
+}: PgDumpOptions) {
+  const getSearchPath = await pg.query<{ search_path: string }>(
+    'SHOW SEARCH_PATH;',
+  )
+  const searchPath = getSearchPath.rows[0].search_path
+
+  const baseArgs = [
+    '-U',
+    'postgres',
+    '--inserts',
+    '-j',
+    '1',
+    '-f',
+    dumpFilePath,
+  ]
+
+  const execResult = await execPgDump({
+    pg,
+    args: [...(args ?? []), ...baseArgs],
+  })
+
+  await pg.exec(`DEALLOCATE ALL`)
+  await pg.exec(`SET SEARCH_PATH = ${searchPath}`)
+  const newSearchPath = await pg.query<{ search_path: string }>(
+    'SHOW SEARCH_PATH;',
+  )
+  if (newSearchPath.rows[0].search_path !== searchPath) {
+    console.warn(
+      `Warning: search_path has been changed from ${searchPath} to ${newSearchPath}`,
+      searchPath,
+      newSearchPath,
+    )
+  }
+
+  if (execResult.exitCode !== 0) {
+    throw new Error(
+      `pg_dump failed with exit code ${execResult.exitCode}. \nError message: ${execResult.stderr}`,
+    )
+  }
+
+  // remove \\restrict and \\unrestrict commands https://www.postgresql.org/docs/17/app-psql.html#APP-PSQL-META-COMMAND-RESTRICT
+  const contentsPruned = execResult.fileContents.replace(
+    /^(?:\\(?:un)?restrict\b.*\r?\n?)/gim,
+    '',
+  )
+
+  const file = new File([contentsPruned], fileName, {
+    type: 'text/plain',
+  })
+
+  return file
+}

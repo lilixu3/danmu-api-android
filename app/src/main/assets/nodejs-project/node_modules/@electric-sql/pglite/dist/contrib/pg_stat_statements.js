@@ -1,0 +1,2 @@
+import{j as t}from"../chunk-QY3QWFKW.js";t();var e=async(s,n)=>({bundlePath:new URL("../pg_stat_statements.tar.gz",import.meta.url),sharedPreloadLibraries:["pg_stat_statements"]}),i={name:"pg_stat_statements",setup:e};export{i as pg_stat_statements};
+//# sourceMappingURL=pg_stat_statements.js.map

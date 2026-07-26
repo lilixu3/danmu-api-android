@@ -9,6 +9,7 @@
  */
 
 (async () => {
+  require('./runtime-polyfills.js');
   const startupFailure = require('./startup-failure.js');
   try {
     startupFailure.clearStartupFailure?.();

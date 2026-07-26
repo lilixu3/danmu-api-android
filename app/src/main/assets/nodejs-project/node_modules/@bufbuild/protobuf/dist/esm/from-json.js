@@ -1,0 +1,731 @@
+// Copyright 2021-2026 Buf Technologies, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+import { ScalarType, } from "./descriptors.js";
+import { protoInt64 } from "./proto-int64.js";
+import { create } from "./create.js";
+import { reflect } from "./reflect/reflect.js";
+import { FieldError, isFieldError } from "./reflect/error.js";
+import { formatVal } from "./reflect/reflect-check.js";
+import { protoSnakeCase } from "./reflect/names.js";
+import { base64Decode } from "./wire/base64-encoding.js";
+import { hasCustomJsonRepresentation, isWrapperDesc, anyPack, ListValueSchema, NullValue, StructSchema, ValueSchema, } from "./wkt/index.js";
+import { createExtensionContainer, setExtension } from "./extensions.js";
+function makeReadContext(options) {
+    return Object.assign(Object.assign({ ignoreUnknownFields: false, recursionLimit: 100 }, options), { depth: 0 });
+}
+/**
+ * Parse a message from a JSON string.
+ *
+ * Duplicate keys are rejected.
+ */
+export function fromJsonString(schema, json, options) {
+    return fromJson(schema, parseJsonString(json, schema.typeName), options);
+}
+/**
+ * Parse a message from a JSON string, merging fields into the target.
+ *
+ * Repeated fields are appended. Map entries are added, overwriting
+ * existing keys.
+ *
+ * If a message field is already present, it will be merged with the
+ * new data.
+ *
+ * Duplicate keys in the JSON are rejected, as in `fromJsonString`.
+ */
+export function mergeFromJsonString(schema, target, json, options) {
+    return mergeFromJson(schema, target, parseJsonString(json, schema.typeName), options);
+}
+/**
+ * Parse a message from a JSON value.
+ *
+ * Duplicate keys are rejected, but a value parsed by JSON.parse has already
+ * dropped duplicates (the last one wins). Use `fromJsonString` for strict
+ * duplicate-key checking.
+ */
+export function fromJson(schema, json, options) {
+    const msg = reflect(schema);
+    try {
+        readMessage(msg, json, makeReadContext(options));
+    }
+    catch (e) {
+        if (isFieldError(e)) {
+            // @ts-expect-error we use the ES2022 error CTOR option "cause" for better stack traces
+            throw new Error(`cannot decode ${e.field()} from JSON: ${e.message}`, {
+                cause: e,
+            });
+        }
+        throw e;
+    }
+    return msg.message;
+}
+/**
+ * Parse a message from a JSON value, merging fields into the target.
+ *
+ * Repeated fields are appended. Map entries are added, overwriting
+ * existing keys.
+ *
+ * If a message field is already present, it will be merged with the
+ * new data.
+ *
+ * Duplicate keys are rejected as in `fromJson`; use `mergeFromJsonString`
+ * for strict checking.
+ */
+export function mergeFromJson(schema, target, json, options) {
+    try {
+        readMessage(reflect(schema, target), json, makeReadContext(options));
+    }
+    catch (e) {
+        if (isFieldError(e)) {
+            // @ts-expect-error we use the ES2022 error CTOR option "cause" for better stack traces
+            throw new Error(`cannot decode ${e.field()} from JSON: ${e.message}`, {
+                cause: e,
+            });
+        }
+        throw e;
+    }
+    return target;
+}
+/**
+ * Parses an enum value from JSON.
+ */
+export function enumFromJson(descEnum, json) {
+    return readEnum(descEnum, json, false);
+}
+/**
+ * Is the given value a JSON enum value?
+ */
+export function isEnumJson(descEnum, value) {
+    return undefined !== descEnum.values.find((v) => v.name === value);
+}
+const messageJsonFields = new WeakMap();
+function getJsonField(desc, jsonKey) {
+    var _a;
+    if (!messageJsonFields.has(desc)) {
+        const jsonNames = new Map();
+        for (const field of desc.fields) {
+            jsonNames.set(field.name, field).set(field.jsonName, field);
+        }
+        messageJsonFields.set(desc, jsonNames);
+    }
+    return (_a = messageJsonFields.get(desc)) === null || _a === void 0 ? void 0 : _a.get(jsonKey);
+}
+function readMessage(msg, json, ctx) {
+    var _a;
+    if (++ctx.depth > ctx.recursionLimit) {
+        throw new Error(`cannot decode ${msg.desc} from JSON: maximum recursion depth of ${ctx.recursionLimit} reached`);
+    }
+    if (tryWktFromJson(msg, json, ctx)) {
+        ctx.depth--;
+        return;
+    }
+    if (json == null || Array.isArray(json) || typeof json != "object") {
+        throw new Error(`cannot decode ${msg.desc} from JSON: ${formatVal(json)}`);
+    }
+    const oneofSeen = new Map();
+    const fieldSeen = new Set();
+    for (const [jsonKey, jsonValue] of Object.entries(json)) {
+        const field = getJsonField(msg.desc, jsonKey);
+        if (field) {
+            if (fieldSeen.has(field)) {
+                // The same field may be set by its proto name and its JSON name, or by
+                // a duplicate or unicode-escaped key that JSON.parse already collapsed.
+                // Checked before the null-skip below so that a null entry still counts.
+                throw new FieldError(field, "set multiple times");
+            }
+            fieldSeen.add(field);
+            if (field.oneof && jsonValue === null && field.fieldKind == "scalar") {
+                // see conformance test Required.Proto3.JsonInput.OneofFieldNull{First,Second}
+                continue;
+            }
+            if (field.oneof) {
+                const seen = oneofSeen.get(field.oneof);
+                if (seen !== undefined) {
+                    throw new FieldError(field.oneof, `oneof set multiple times by ${seen.name} and ${field.name}`);
+                }
+                oneofSeen.set(field.oneof, field);
+            }
+            readField(msg, field, jsonValue, ctx);
+        }
+        else {
+            let extension = undefined;
+            if (jsonKey.startsWith("[") &&
+                jsonKey.endsWith("]") &&
+                // biome-ignore lint/suspicious/noAssignInExpressions: no
+                (extension = (_a = ctx.registry) === null || _a === void 0 ? void 0 : _a.getExtension(jsonKey.substring(1, jsonKey.length - 1))) &&
+                extension.extendee.typeName === msg.desc.typeName) {
+                const [container, field, get] = createExtensionContainer(extension);
+                readField(container, field, jsonValue, ctx);
+                setExtension(msg.message, extension, get());
+            }
+            if (!extension && !ctx.ignoreUnknownFields) {
+                throw new Error(`cannot decode ${msg.desc} from JSON: key "${jsonKey}" is unknown`);
+            }
+        }
+    }
+    ctx.depth--;
+}
+function readField(msg, field, json, ctx) {
+    switch (field.fieldKind) {
+        case "scalar":
+            readScalarField(msg, field, json);
+            break;
+        case "enum":
+            readEnumField(msg, field, json, ctx);
+            break;
+        case "message":
+            readMessageField(msg, field, json, ctx);
+            break;
+        case "list":
+            readListField(msg.get(field), json, ctx);
+            break;
+        case "map":
+            readMapField(msg.get(field), json, ctx);
+            break;
+    }
+}
+function readListOrMapItem(field, json, ctx) {
+    if (field.scalar && json !== null) {
+        return scalarFromJson(field, json);
+    }
+    if (field.message && !isResetSentinelNullValue(field, json)) {
+        const msgValue = reflect(field.message);
+        readMessage(msgValue, json, ctx);
+        return msgValue;
+    }
+    if (field.enum && !isResetSentinelNullValue(field, json)) {
+        return readEnum(field.enum, json, ctx.ignoreUnknownFields);
+    }
+    throw new FieldError(field, `${field.fieldKind === "list" ? "list item" : "map value"} must not be null`);
+}
+function readMapField(map, json, ctx) {
+    if (json === null) {
+        return;
+    }
+    const field = map.field();
+    if (typeof json != "object" || Array.isArray(json)) {
+        throw new FieldError(field, "expected object, got " + formatVal(json));
+    }
+    const seen = new Set();
+    for (const [jsonMapKey, jsonMapValue] of Object.entries(json)) {
+        const key = mapKeyFromJson(field.mapKey, jsonMapKey);
+        if (seen.has(key)) {
+            throw new FieldError(field, `duplicate map key "${jsonMapKey}"`);
+        }
+        seen.add(key);
+        const value = readListOrMapItem(field, jsonMapValue, ctx);
+        if (value !== tokenIgnoredUnknownEnum) {
+            map.set(key, value);
+        }
+    }
+}
+function readListField(list, json, ctx) {
+    if (json === null) {
+        return;
+    }
+    const field = list.field();
+    if (!Array.isArray(json)) {
+        throw new FieldError(field, "expected Array, got " + formatVal(json));
+    }
+    for (const jsonItem of json) {
+        const value = readListOrMapItem(field, jsonItem, ctx);
+        if (value !== tokenIgnoredUnknownEnum) {
+            list.add(value);
+        }
+    }
+}
+function readMessageField(msg, field, json, ctx) {
+    if (isResetSentinelNullValue(field, json)) {
+        msg.clear(field);
+        return;
+    }
+    const msgValue = msg.isSet(field) ? msg.get(field) : reflect(field.message);
+    readMessage(msgValue, json, ctx);
+    msg.set(field, msgValue);
+}
+function readEnumField(msg, field, json, ctx) {
+    if (isResetSentinelNullValue(field, json)) {
+        msg.clear(field);
+        return;
+    }
+    const enumValue = readEnum(field.enum, json, ctx.ignoreUnknownFields);
+    if (enumValue !== tokenIgnoredUnknownEnum) {
+        msg.set(field, enumValue);
+    }
+}
+function readScalarField(msg, field, json) {
+    if (json === null) {
+        msg.clear(field);
+    }
+    else {
+        msg.set(field, scalarFromJson(field, json));
+    }
+}
+/**
+ * Indicates whether a value is a sentinel for reseting a field.
+ *
+ * For this to be true, the value must be a JSON null and the field must not
+ * permit a present, Protobuf-serializable null.
+ *
+ * Only message google.protobuf.Value and enum google.protobuf.NullValue fields
+ * permit Protobuf-serializable nulls.
+ *
+ * Note that field-resetting sentinel nulls are not permitted in lists and maps.
+ */
+function isResetSentinelNullValue(field, json) {
+    var _a, _b;
+    return (json === null &&
+        ((_a = field.message) === null || _a === void 0 ? void 0 : _a.typeName) != "google.protobuf.Value" &&
+        ((_b = field.enum) === null || _b === void 0 ? void 0 : _b.typeName) != "google.protobuf.NullValue");
+}
+const tokenIgnoredUnknownEnum = Symbol();
+function readEnum(desc, json, ignoreUnknownFields) {
+    if (json === null) {
+        return desc.values[0].number;
+    }
+    switch (typeof json) {
+        case "number":
+            if (Number.isInteger(json)) {
+                return json;
+            }
+            break;
+        case "string":
+            const value = desc.values.find((ev) => ev.name === json);
+            if (value !== undefined) {
+                return value.number;
+            }
+            if (ignoreUnknownFields) {
+                return tokenIgnoredUnknownEnum;
+            }
+            break;
+    }
+    throw new Error(`cannot decode ${desc} from JSON: ${formatVal(json)}`);
+}
+/**
+ * Try to parse a JSON value to a scalar value for the reflect API.
+ *
+ * Returns the input if the JSON value cannot be converted. Raises a FieldError
+ * if conversion would be ambiguous.
+ */
+function scalarFromJson(field, json) {
+    // int64, sfixed64, sint64, fixed64, uint64: Reflect supports string and number.
+    // string, bool: Supported by reflect.
+    switch (field.scalar) {
+        // float, double: JSON value will be a number or one of the special string values "NaN", "Infinity", and "-Infinity".
+        // Either numbers or strings are accepted. Exponent notation is also accepted.
+        case ScalarType.DOUBLE:
+        case ScalarType.FLOAT:
+            if (json === "NaN")
+                return NaN;
+            if (json === "Infinity")
+                return Number.POSITIVE_INFINITY;
+            if (json === "-Infinity")
+                return Number.NEGATIVE_INFINITY;
+            if (typeof json == "number") {
+                if (Number.isNaN(json)) {
+                    // NaN must be encoded with string constants
+                    throw new FieldError(field, "unexpected NaN number");
+                }
+                if (!Number.isFinite(json)) {
+                    // Infinity must be encoded with string constants
+                    throw new FieldError(field, "unexpected infinite number");
+                }
+                break;
+            }
+            if (typeof json == "string") {
+                if (json === "") {
+                    // empty string is not a number
+                    break;
+                }
+                if (json.trim().length !== json.length) {
+                    // extra whitespace
+                    break;
+                }
+                const float = Number(json);
+                if (!Number.isFinite(float)) {
+                    // Infinity and NaN must be encoded with string constants
+                    break;
+                }
+                return float;
+            }
+            break;
+        // int32, fixed32, uint32: JSON value will be a decimal number. Either numbers or strings are accepted.
+        case ScalarType.INT32:
+        case ScalarType.FIXED32:
+        case ScalarType.SFIXED32:
+        case ScalarType.SINT32:
+        case ScalarType.UINT32:
+            return int32FromJson(json);
+        // bytes: JSON value will be the data encoded as a string using standard base64 encoding with paddings.
+        // Either standard or URL-safe base64 encoding with/without paddings are accepted.
+        case ScalarType.BYTES:
+            if (typeof json == "string") {
+                if (json === "") {
+                    return new Uint8Array(0);
+                }
+                try {
+                    return base64Decode(json);
+                }
+                catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    throw new FieldError(field, message);
+                }
+            }
+            break;
+    }
+    return json;
+}
+/**
+ * Try to parse a JSON value to a map key for the reflect API.
+ * Canonicalizes 64-bit integers given as string, so that "01 and "1" are one
+ * key, and duplicates can raise an error.
+ * Returns the input if the JSON value cannot be converted.
+ */
+function mapKeyFromJson(type, jsonString) {
+    switch (type) {
+        case ScalarType.BOOL:
+            switch (jsonString) {
+                case "true":
+                    return true;
+                case "false":
+                    return false;
+            }
+            return jsonString;
+        case ScalarType.INT32:
+        case ScalarType.FIXED32:
+        case ScalarType.UINT32:
+        case ScalarType.SFIXED32:
+        case ScalarType.SINT32:
+            return int32FromJson(jsonString);
+        case ScalarType.INT64:
+        case ScalarType.SINT64:
+        case ScalarType.SFIXED64:
+        case ScalarType.UINT64:
+        case ScalarType.FIXED64:
+            return /^-?0+$/.test(jsonString)
+                ? "0"
+                : jsonString.replace(/^(-?)0+(?=\d)/, "$1");
+        default:
+            return jsonString;
+    }
+}
+/**
+ * Try to parse a JSON value to a 32-bit integer for the reflect API.
+ *
+ * Returns the input if the JSON value cannot be converted.
+ */
+function int32FromJson(json) {
+    if (typeof json == "string") {
+        if (json === "") {
+            // empty string is not a number
+            return json;
+        }
+        if (json.trim().length !== json.length) {
+            // extra whitespace
+            return json;
+        }
+        const num = Number(json);
+        if (Number.isNaN(num)) {
+            // not a number
+            return json;
+        }
+        return num;
+    }
+    return json;
+}
+/**
+ * Parse a JSON string, rejecting duplicate object keys (which JSON.parse would
+ * otherwise silently merge).
+ */
+function parseJsonString(jsonString, typeName) {
+    let json;
+    try {
+        json = JSON.parse(jsonString);
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        throw new Error(`cannot decode message ${typeName} from JSON: ${message}`, 
+        // @ts-expect-error we use the ES2022 error CTOR option "cause" for better stack traces
+        { cause: e });
+    }
+    checkDuplicateKeys(jsonString, typeName);
+    return json;
+}
+/**
+ * Scan a JSON string for duplicate object member names at any depth, throwing
+ * if any are found. JSON.parse() silently keeps the last of duplicate keys, so
+ * this raw-string scan is the only way to reject them. It must only be called
+ * with a string that JSON.parse() has already accepted, so it can assume the
+ * input is well-formed.
+ */
+function checkDuplicateKeys(jsonString, typeName) {
+    // One Set of seen member names for each open object; arrays push null.
+    const stack = [];
+    // Whether the next string token is an object member name.
+    let expectKey = false;
+    let i = 0;
+    while (i < jsonString.length) {
+        switch (jsonString[i]) {
+            case "{":
+                stack.push(new Set());
+                expectKey = true;
+                i++;
+                break;
+            case "[":
+                stack.push(null);
+                expectKey = false;
+                i++;
+                break;
+            case "}":
+            case "]":
+                stack.pop();
+                expectKey = false;
+                i++;
+                break;
+            case ",":
+                expectKey = stack[stack.length - 1] != null;
+                i++;
+                break;
+            case ":":
+                expectKey = false;
+                i++;
+                break;
+            case '"': {
+                const open = i++;
+                let escaped = false;
+                while (i < jsonString.length) {
+                    if (jsonString[i] == "\\") {
+                        escaped = true;
+                        i += 2; // skip the backslash and the character it escapes
+                        continue;
+                    }
+                    if (jsonString[i] == '"') {
+                        break;
+                    }
+                    i++;
+                }
+                const close = i++;
+                const seen = stack[stack.length - 1];
+                if (expectKey && seen) {
+                    // Decode escapes (rare) so that, for example, a key written with a
+                    // unicode escape collides with the same key written literally.
+                    const name = escaped
+                        ? JSON.parse(jsonString.substring(open, close + 1))
+                        : jsonString.substring(open + 1, close);
+                    if (seen.has(name)) {
+                        throw new Error(`cannot decode message ${typeName} from JSON: duplicate object key "${name}"`);
+                    }
+                    seen.add(name);
+                }
+                expectKey = false;
+                break;
+            }
+            default:
+                i++;
+                break;
+        }
+    }
+}
+function tryWktFromJson(msg, jsonValue, ctx) {
+    if (!msg.desc.typeName.startsWith("google.protobuf.")) {
+        return false;
+    }
+    switch (msg.desc.typeName) {
+        case "google.protobuf.Any":
+            anyFromJson(msg.message, jsonValue, ctx);
+            return true;
+        case "google.protobuf.Timestamp":
+            timestampFromJson(msg.message, jsonValue);
+            return true;
+        case "google.protobuf.Duration":
+            durationFromJson(msg.message, jsonValue);
+            return true;
+        case "google.protobuf.FieldMask":
+            fieldMaskFromJson(msg.message, jsonValue);
+            return true;
+        case "google.protobuf.Struct":
+            structFromJson(msg.message, jsonValue, ctx);
+            return true;
+        case "google.protobuf.Value":
+            valueFromJson(msg.message, jsonValue, ctx);
+            return true;
+        case "google.protobuf.ListValue":
+            listValueFromJson(msg.message, jsonValue, ctx);
+            return true;
+        default:
+            if (isWrapperDesc(msg.desc)) {
+                const valueField = msg.desc.fields[0];
+                if (jsonValue === null) {
+                    msg.clear(valueField);
+                }
+                else {
+                    msg.set(valueField, scalarFromJson(valueField, jsonValue));
+                }
+                return true;
+            }
+            return false;
+    }
+}
+function anyFromJson(any, json, ctx) {
+    var _a;
+    if (json === null || Array.isArray(json) || typeof json != "object") {
+        throw new Error(`cannot decode message ${any.$typeName} from JSON: expected object but got ${formatVal(json)}`);
+    }
+    if (Object.keys(json).length == 0) {
+        return;
+    }
+    const typeUrl = json["@type"];
+    if (typeof typeUrl != "string" || typeUrl == "") {
+        throw new Error(`cannot decode message ${any.$typeName} from JSON: "@type" is empty`);
+    }
+    const typeName = typeUrl.includes("/")
+        ? typeUrl.substring(typeUrl.lastIndexOf("/") + 1)
+        : typeUrl;
+    if (!typeName.length) {
+        throw new Error(`cannot decode message ${any.$typeName} from JSON: "@type" is invalid`);
+    }
+    const desc = (_a = ctx.registry) === null || _a === void 0 ? void 0 : _a.getMessage(typeName);
+    if (!desc) {
+        throw new Error(`cannot decode message ${any.$typeName} from JSON: ${typeUrl} is not in the type registry`);
+    }
+    const msg = reflect(desc);
+    if (hasCustomJsonRepresentation(desc) &&
+        Object.prototype.hasOwnProperty.call(json, "value")) {
+        const value = json.value;
+        readMessage(msg, value, ctx);
+    }
+    else {
+        const copy = Object.assign({}, json);
+        // biome-ignore lint/performance/noDelete: <explanation>
+        delete copy["@type"];
+        readMessage(msg, copy, ctx);
+    }
+    anyPack(msg.desc, msg.message, any);
+}
+function timestampFromJson(timestamp, json) {
+    if (typeof json !== "string") {
+        throw new Error(`cannot decode message ${timestamp.$typeName} from JSON: ${formatVal(json)}`);
+    }
+    const matches = json.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(?:Z|([+-][0-9][0-9]:[0-9][0-9]))$/);
+    if (!matches) {
+        throw new Error(`cannot decode message ${timestamp.$typeName} from JSON: invalid RFC 3339 string`);
+    }
+    const ms = Date.parse(
+    // biome-ignore format: want this to read well
+    matches[1] + "-" + matches[2] + "-" + matches[3] + "T" + matches[4] + ":" + matches[5] + ":" + matches[6] + (matches[8] ? matches[8] : "Z"));
+    if (Number.isNaN(ms)) {
+        throw new Error(`cannot decode message ${timestamp.$typeName} from JSON: invalid RFC 3339 string`);
+    }
+    if (ms < Date.parse("0001-01-01T00:00:00Z") ||
+        ms > Date.parse("9999-12-31T23:59:59Z")) {
+        throw new Error(`cannot decode message ${timestamp.$typeName} from JSON: must be from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59Z inclusive`);
+    }
+    timestamp.seconds = protoInt64.parse(ms / 1000);
+    timestamp.nanos = 0;
+    if (matches[7]) {
+        timestamp.nanos =
+            parseInt("1" + matches[7] + "0".repeat(9 - matches[7].length)) -
+                1000000000;
+    }
+}
+function durationFromJson(duration, json) {
+    if (typeof json !== "string") {
+        throw new Error(`cannot decode message ${duration.$typeName} from JSON: ${formatVal(json)}`);
+    }
+    const match = json.match(/^(-?[0-9]+)(?:\.([0-9]+))?s/);
+    if (match === null) {
+        throw new Error(`cannot decode message ${duration.$typeName} from JSON: ${formatVal(json)}`);
+    }
+    const longSeconds = Number(match[1]);
+    if (longSeconds > 315576000000 || longSeconds < -315576000000) {
+        throw new Error(`cannot decode message ${duration.$typeName} from JSON: ${formatVal(json)}`);
+    }
+    duration.seconds = protoInt64.parse(longSeconds);
+    if (typeof match[2] !== "string") {
+        return;
+    }
+    const nanosStr = match[2] + "0".repeat(9 - match[2].length);
+    duration.nanos = parseInt(nanosStr);
+    if (longSeconds < 0 || Object.is(longSeconds, -0)) {
+        duration.nanos = -duration.nanos;
+    }
+}
+function fieldMaskFromJson(fieldMask, json) {
+    if (typeof json !== "string") {
+        throw new Error(`cannot decode message ${fieldMask.$typeName} from JSON: ${formatVal(json)}`);
+    }
+    if (json === "") {
+        return;
+    }
+    fieldMask.paths = json.split(",").map((path) => {
+        if (path.includes("_")) {
+            throw new Error(`cannot decode message ${fieldMask.$typeName} from JSON: path names must be lowerCamelCase`);
+        }
+        return protoSnakeCase(path);
+    });
+}
+function structFromJson(struct, json, ctx) {
+    if (typeof json != "object" || json == null || Array.isArray(json)) {
+        throw new Error(`cannot decode message ${struct.$typeName} from JSON ${formatVal(json)}`);
+    }
+    for (const [k, v] of Object.entries(json)) {
+        const parsedV = create(ValueSchema);
+        valueFromJson(parsedV, v, ctx);
+        struct.fields[k] = parsedV;
+    }
+}
+function valueFromJson(value, json, ctx) {
+    if (++ctx.depth > ctx.recursionLimit) {
+        throw new Error(`cannot decode ${value.$typeName} from JSON: maximum recursion depth of ${ctx.recursionLimit} reached`);
+    }
+    switch (typeof json) {
+        case "number":
+            value.kind = { case: "numberValue", value: json };
+            break;
+        case "string":
+            value.kind = { case: "stringValue", value: json };
+            break;
+        case "boolean":
+            value.kind = { case: "boolValue", value: json };
+            break;
+        case "object":
+            if (json === null) {
+                value.kind = { case: "nullValue", value: NullValue.NULL_VALUE };
+            }
+            else if (Array.isArray(json)) {
+                const listValue = create(ListValueSchema);
+                listValueFromJson(listValue, json, ctx);
+                value.kind = { case: "listValue", value: listValue };
+            }
+            else {
+                const struct = create(StructSchema);
+                structFromJson(struct, json, ctx);
+                value.kind = { case: "structValue", value: struct };
+            }
+            break;
+        default:
+            throw new Error(`cannot decode message ${value.$typeName} from JSON ${formatVal(json)}`);
+    }
+    ctx.depth--;
+    return value;
+}
+function listValueFromJson(listValue, json, ctx) {
+    if (!Array.isArray(json)) {
+        throw new Error(`cannot decode message ${listValue.$typeName} from JSON ${formatVal(json)}`);
+    }
+    for (const e of json) {
+        const value = create(ValueSchema);
+        valueFromJson(value, e, ctx);
+        listValue.values.push(value);
+    }
+}

@@ -1,0 +1,2 @@
+import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(s,n)=>({bundlePath:new URL("../pg_surgery.tar.gz",import.meta.url)}),p={name:"pg_surgery",setup:t};export{p as pg_surgery};
+//# sourceMappingURL=pg_surgery.js.map
