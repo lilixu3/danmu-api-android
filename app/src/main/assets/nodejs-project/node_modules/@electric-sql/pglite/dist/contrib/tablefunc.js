@@ -1,0 +1,2 @@
+import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(n,s)=>({bundlePath:new URL("../tablefunc.tar.gz",import.meta.url)}),r={name:"tablefunc",setup:t};export{r as tablefunc};
+//# sourceMappingURL=tablefunc.js.map

@@ -1,0 +1,76 @@
+import { entityKind } from "../../entity.js";
+import { Column } from "../../column.js";
+import { ColumnBuilder } from "../../column-builder.js";
+import { ForeignKeyBuilder } from "../foreign-keys.js";
+
+//#region src/mysql-core/columns/common.ts
+var MySqlColumnBuilder = class extends ColumnBuilder {
+	static [entityKind] = "MySqlColumnBuilder";
+	foreignKeyConfigs = [];
+	references(ref, actions = {}) {
+		this.foreignKeyConfigs.push({
+			ref,
+			actions
+		});
+		return this;
+	}
+	unique(name) {
+		this.config.isUnique = true;
+		this.config.uniqueName = name;
+		return this;
+	}
+	generatedAlwaysAs(as, config) {
+		this.config.generated = {
+			as,
+			type: "always",
+			mode: config?.mode ?? "virtual"
+		};
+		return this;
+	}
+	/** @internal */
+	buildForeignKeys(column, table) {
+		return this.foreignKeyConfigs.map(({ ref, actions }) => {
+			return ((ref, actions) => {
+				const builder = new ForeignKeyBuilder(() => {
+					const foreignColumn = ref();
+					return {
+						columns: [column],
+						foreignColumns: [foreignColumn]
+					};
+				});
+				if (actions.onUpdate) builder.onUpdate(actions.onUpdate);
+				if (actions.onDelete) builder.onDelete(actions.onDelete);
+				return builder.build(table);
+			})(ref, actions);
+		});
+	}
+};
+var MySqlColumn = class extends Column {
+	static [entityKind] = "MySqlColumn";
+	/** @internal */
+	table;
+	constructor(table, config) {
+		super(table, config);
+		this.table = table;
+	}
+};
+var MySqlColumnBuilderWithAutoIncrement = class extends MySqlColumnBuilder {
+	static [entityKind] = "MySqlColumnBuilderWithAutoIncrement";
+	constructor(name, dataType, columnType) {
+		super(name, dataType, columnType);
+		this.config.autoIncrement = false;
+	}
+	autoincrement() {
+		this.config.autoIncrement = true;
+		this.config.hasDefault = true;
+		return this;
+	}
+};
+var MySqlColumnWithAutoIncrement = class extends MySqlColumn {
+	static [entityKind] = "MySqlColumnWithAutoIncrement";
+	autoIncrement = this.config.autoIncrement;
+};
+
+//#endregion
+export { MySqlColumn, MySqlColumnBuilder, MySqlColumnBuilderWithAutoIncrement, MySqlColumnWithAutoIncrement };
+//# sourceMappingURL=common.js.map
