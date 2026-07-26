@@ -45,7 +45,9 @@ object NodeProjectManager {
         "node-fetch" to "3.3.2",
         "pako" to "2.1.0",
         "brotli" to "1.3.3",
-        "base64-js" to "1.5.1"
+        "base64-js" to "1.5.1",
+        "@dan-uni/dan-any" to "2.3.9",
+        "opencc-js" to "1.4.1"
     )
     private val coreDependenciesManagedOutsideBaseRuntime = setOf(
         // Android 入口不使用 Node server 的文件监听与 dotenv 加载链路。
@@ -467,23 +469,23 @@ object NodeProjectManager {
         val dependencies = readCoreDependencies(coreDir)
         if (dependencies.isEmpty()) return emptyList()
         return dependencies.mapNotNull { (name, version) ->
-            if (!runtimeBundledDependencyVersions.containsKey(name)) {
-                return@mapNotNull if (name in coreDependenciesManagedOutsideBaseRuntime) {
-                    null
-                } else {
-                    "$name@$version"
-                }
-            }
             val pkgFile = File(runtimeNodeModulesDir, "$name/package.json")
-            val installedVersion = runCatching {
+            val installedVersion = if (pkgFile.isFile) {
                 runCatching {
-                    json.parseToJsonElement(pkgFile.readText()).jsonObject["version"]?.jsonPrimitive?.content?.trim()
-                }.getOrNull()
-            }.getOrNull().orEmpty()
-            if (!pkgFile.exists() || installedVersion.isBlank() || installedVersion != version.removePrefix("^").removePrefix("~")) {
-                "$name@$version"
+                    json.parseToJsonElement(pkgFile.readText())
+                        .jsonObject["version"]
+                        ?.jsonPrimitive
+                        ?.content
+                        ?.trim()
+                }.getOrNull().orEmpty()
             } else {
-                null
+                ""
+            }
+            val expectedVersion = version.removePrefix("^").removePrefix("~")
+            when {
+                installedVersion.isNotBlank() && installedVersion == expectedVersion -> null
+                name in coreDependenciesManagedOutsideBaseRuntime -> null
+                else -> "$name@$version"
             }
         }.sorted()
     }

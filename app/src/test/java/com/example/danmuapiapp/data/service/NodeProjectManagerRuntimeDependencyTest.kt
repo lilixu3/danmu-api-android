@@ -64,6 +64,32 @@ class NodeProjectManagerRuntimeDependencyTest {
     }
 
     @Test
+    fun `未列入清单但运行目录存在匹配版本时应通过依赖校验`() {
+        val root = Files.createTempDirectory("core-runtime-deps-unknown-ready").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            val runtimeNodeModulesDir = root.resolve("node_modules").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """{"dependencies":{"future-runtime-package":"^2.0.0"}}"""
+            )
+            runtimeNodeModulesDir.resolve("future-runtime-package").mkdirs()
+            runtimeNodeModulesDir.resolve("future-runtime-package/package.json").writeText(
+                """{"name":"future-runtime-package","version":"2.0.0"}"""
+            )
+
+            assertEquals(
+                emptyList<String>(),
+                NodeProjectManager.collectMissingRuntimeDepsForCore(
+                    coreDir = coreDir,
+                    runtimeNodeModulesDir = runtimeNodeModulesDir
+                )
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `缺少 brotli 深层运行文件时不应复用旧 node_modules`() {
         val nodeModulesDir = Files.createTempDirectory("runtime-deps-brotli-deep-file").toFile()
         try {
@@ -80,11 +106,13 @@ class NodeProjectManagerRuntimeDependencyTest {
     }
 
     @Test
-    fun `Brotli 及其传递依赖应纳入运行时依赖清单`() {
+    fun `App 内置直接依赖应纳入运行时依赖清单`() {
         val names = NodeProjectManager.bundledRuntimeDependencyNames()
 
         assertTrue("缺少 brotli", "brotli" in names)
         assertTrue("缺少 base64-js", "base64-js" in names)
+        assertTrue("缺少 @dan-uni/dan-any", "@dan-uni/dan-any" in names)
+        assertTrue("缺少 opencc-js", "opencc-js" in names)
     }
 
     @Test
