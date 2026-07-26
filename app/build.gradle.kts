@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.66"
+    ?: "1.0.5.67"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 152
+    ?: 153
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -493,9 +493,12 @@ tasks.register("prepareNodeModules") {
 
         val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
         if (workspaceNodeModules.exists()) {
+            val missingBasePackages = baseNodeModulesPackages.filterNot { name ->
+                File(sourceNodeModules, "$name/package.json").isFile
+            }
             copy {
                 from(workspaceNodeModules) {
-                    includeNodeModuleDirs(baseNodeModulesPackages + optionalRedisNodeModulesPackages)
+                    includeNodeModuleDirs(missingBasePackages + optionalRedisNodeModulesPackages)
                     includeEmptyDirs = false
                 }
                 into(sourceNodeModules)
@@ -545,12 +548,17 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
         }
         baseTargetDir.mkdirs()
         optionalRedisTargetDir.mkdirs()
-        copy {
-            from(workspaceNodeModules) {
-                includeNodeModuleDirs(baseNodeModulesPackages)
-                includeEmptyDirs = false
+        val missingBasePackages = baseNodeModulesPackages.filterNot { name ->
+            File(baseTargetDir, "$name/package.json").isFile
+        }
+        if (missingBasePackages.isNotEmpty()) {
+            copy {
+                from(workspaceNodeModules) {
+                    includeNodeModuleDirs(missingBasePackages)
+                    includeEmptyDirs = false
+                }
+                into(baseTargetDir)
             }
-            into(baseTargetDir)
         }
         copy {
             from(workspaceNodeModules) {
