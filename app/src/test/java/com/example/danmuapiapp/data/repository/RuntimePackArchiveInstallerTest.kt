@@ -13,7 +13,7 @@ import org.junit.Test
 
 class RuntimePackArchiveInstallerTest {
     @Test
-    fun `整包与包清单校验通过后替换 node_modules 并保留审计清单`() {
+    fun `签名整包校验通过后替换 node_modules 并保留审计清单`() {
         val root = Files.createTempDirectory("runtime-pack-installer-ok").toFile()
         try {
             val coreDir = File(root, "core").apply { mkdirs() }
@@ -94,8 +94,8 @@ class RuntimePackArchiveInstallerTest {
     }
 
     @Test
-    fun `实际包集合与签名清单不一致时拒绝安装`() {
-        val root = Files.createTempDirectory("runtime-pack-installer-inventory").toFile()
+    fun `整包哈希已签名时不在设备端重复重建传递包集合`() {
+        val root = Files.createTempDirectory("runtime-pack-installer-extra-package").toFile()
         try {
             val coreDir = File(root, "core").apply { mkdirs() }
             val archive = File(root, "node_modules.zip")
@@ -103,7 +103,9 @@ class RuntimePackArchiveInstallerTest {
                 archive,
                 linkedMapOf(
                     "node_modules/future-package/package.json" to
-                        """{"name":"future-package","version":"1.2.3"}""".toByteArray()
+                        """{"name":"future-package","version":"1.2.3"}""".toByteArray(),
+                    "node_modules/transitive-package/package.json" to
+                        """{"name":"transitive-package","version":"4.5.6"}""".toByteArray()
                 )
             )
             val manifest = manifestFor(
@@ -111,18 +113,45 @@ class RuntimePackArchiveInstallerTest {
                 listOf(
                     RuntimePackPackage(
                         name = "future-package",
-                        version = "9.9.9",
+                        version = "1.2.3",
                         path = "node_modules/future-package"
                     )
                 )
             )
 
+            RuntimePackArchiveInstaller.verifyAndInstall(
+                archive = archive,
+                manifest = manifest,
+                manifestBytes = "{}".toByteArray(),
+                coreDir = coreDir
+            )
+
+            assertTrue(File(coreDir, "node_modules/future-package/package.json").isFile)
+            assertTrue(File(coreDir, "node_modules/transitive-package/package.json").isFile)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `缺少 node_modules 根目录时拒绝安装`() {
+        val root = Files.createTempDirectory("runtime-pack-installer-no-root").toFile()
+        try {
+            val coreDir = File(root, "core").apply { mkdirs() }
+            val archive = File(root, "node_modules.zip")
+            writeZip(archive, linkedMapOf())
+
             val error = runCatching {
-                RuntimePackArchiveInstaller.verifyAndInstall(archive, manifest, byteArrayOf(), coreDir)
+                RuntimePackArchiveInstaller.verifyAndInstall(
+                    archive,
+                    manifestFor(archive, emptyList()),
+                    byteArrayOf(),
+                    coreDir
+                )
             }.exceptionOrNull()
 
             assertTrue(error is IOException)
-            assertTrue(error?.message.orEmpty().contains("版本"))
+            assertTrue(error?.message.orEmpty().contains("node_modules"))
             assertFalse(File(coreDir, "node_modules").exists())
         } finally {
             root.deleteRecursively()
