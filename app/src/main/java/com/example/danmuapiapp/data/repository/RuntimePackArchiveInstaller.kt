@@ -1,9 +1,5 @@
 package com.example.danmuapiapp.data.repository
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -12,14 +8,6 @@ import java.io.IOException
 import java.util.zip.ZipInputStream
 
 internal object RuntimePackArchiveInstaller {
-    private val json = Json { ignoreUnknownKeys = true }
-
-    private data class InstalledPackage(
-        val name: String,
-        val version: String,
-        val path: String
-    )
-
     fun verifyAndInstall(
         archive: File,
         manifest: RuntimePackManifest,
@@ -40,7 +28,9 @@ internal object RuntimePackArchiveInstaller {
         try {
             extractArchive(archive, unpackDir)
             val sourceNodeModules = File(unpackDir, "node_modules")
-            verifyPackageInventory(sourceNodeModules, manifest.packages)
+            if (!sourceNodeModules.isDirectory) {
+                throw IOException("依赖包缺少 node_modules 目录")
+            }
             installVerifiedFiles(
                 coreDir = coreDir,
                 sourceNodeModules = sourceNodeModules,
@@ -94,65 +84,6 @@ internal object RuntimePackArchiveInstaller {
                 input.closeEntry()
             }
         }
-    }
-
-    private fun verifyPackageInventory(
-        nodeModulesDir: File,
-        expectedPackages: List<RuntimePackPackage>
-    ) {
-        if (!nodeModulesDir.isDirectory || expectedPackages.isEmpty()) {
-            throw IOException("依赖包缺少 node_modules 或包清单")
-        }
-        val expected = LinkedHashMap<String, RuntimePackPackage>()
-        expectedPackages.forEach { item ->
-            if (item.name.isBlank() || item.version.isBlank() ||
-                !RuntimeDependencyPackProtocol.isSafeArchivePath("${item.path}/package.json") ||
-                expected.put(item.path, item) != null
-            ) {
-                throw IOException("依赖包包清单无效：${item.path}")
-            }
-        }
-        val actual = collectInstalledPackages(nodeModulesDir)
-        if (actual.keys != expected.keys) {
-            throw IOException("依赖包实际包集合与签名清单不一致")
-        }
-        expected.forEach { (path, item) ->
-            val installed = actual.getValue(path)
-            if (installed.name != item.name || installed.version != item.version) {
-                throw IOException("依赖包版本与签名清单不一致：$path")
-            }
-        }
-    }
-
-    private fun collectInstalledPackages(nodeModulesDir: File): Map<String, InstalledPackage> {
-        val unpackRoot = nodeModulesDir.parentFile?.canonicalFile
-            ?: throw IOException("依赖包解压目录无效")
-        return nodeModulesDir.walkTopDown()
-            .filter { it.isFile && it.name == "package.json" }
-            .mapNotNull { packageJson ->
-                val packageDir = packageJson.parentFile ?: return@mapNotNull null
-                val relative = packageDir.relativeTo(unpackRoot).invariantSeparatorsPath
-                val parts = relative.split('/')
-                val marker = parts.indexOfLast { it == "node_modules" }
-                if (marker < 0) return@mapNotNull null
-                val packageParts = parts.drop(marker + 1)
-                val isPackageRoot = if (packageParts.firstOrNull()?.startsWith('@') == true) {
-                    packageParts.size == 2
-                } else {
-                    packageParts.size == 1
-                }
-                if (!isPackageRoot) return@mapNotNull null
-                val root = runCatching {
-                    json.parseToJsonElement(packageJson.readText(Charsets.UTF_8)) as? JsonObject
-                }.getOrNull() ?: throw IOException("依赖包 package.json 无效：$relative")
-                val name = (root["name"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-                val version = (root["version"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-                if (name.isBlank() || version.isBlank()) {
-                    throw IOException("依赖包 package.json 缺少名称或版本：$relative")
-                }
-                InstalledPackage(name = name, version = version, path = relative)
-            }
-            .associateBy { it.path }
     }
 
     private fun installVerifiedFiles(
