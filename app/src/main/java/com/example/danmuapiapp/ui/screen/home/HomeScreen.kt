@@ -157,6 +157,7 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.StatusIndicator
@@ -184,6 +185,7 @@ fun HomeScreen(
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
+    val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
     val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
@@ -248,7 +250,8 @@ fun HomeScreen(
     val sourceUnknownLegacy = currentCoreInfo?.sourceStatus == CoreSourceStatus.UnknownLegacy
     val availableVersion = currentCoreInfo?.availableVersion
     val isBusy = isTransitioning || viewModel.isInstallingCore ||
-        viewModel.isSwitchingCore || viewModel.isUpdatingCore
+        viewModel.isSwitchingCore || viewModel.isUpdatingCore ||
+        viewModel.isRepairingDependencies
     val isHeroChipBusy = isBusy || viewModel.isCheckingCoreUpdate
     val uptimeText = if (isRunning) viewModel.formatUptime(state.uptimeSeconds) else "00:00"
     val coreVersionText = when {
@@ -683,6 +686,18 @@ fun HomeScreen(
         )
     }
 
+    CoreDependencyRepairHost(
+        request = pendingDependencyRepair,
+        showRequiredPrompt = viewModel.showDependencyRequiredPrompt,
+        showRepairDialog = viewModel.showDependencyRepairDialog,
+        onOpenRepair = viewModel::openDependencyRepairDialog,
+        onDismissRequiredPrompt = viewModel::dismissDependencyRequiredPrompt,
+        onOnlineRepair = viewModel::repairPendingDependenciesOnline,
+        onRepairFromArchive = viewModel::repairPendingDependenciesFromArchive,
+        onCancelMutation = viewModel::discardPendingCoreMutation,
+        onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
+    )
+
     if (showRuntimeInfoDialog) {
         ServiceRuntimeInfoDialog(
             status = state.status,
@@ -789,7 +804,7 @@ fun HomeScreen(
             onRetest = viewModel::retestProxySpeed,
             onConfirm = viewModel::confirmProxySelection,
             onDismiss = viewModel::dismissProxyPickerDialog,
-            confirmText = "保存并下载"
+            confirmText = "保存并继续"
         )
     }
 

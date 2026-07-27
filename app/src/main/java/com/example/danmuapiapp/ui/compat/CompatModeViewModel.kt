@@ -14,6 +14,8 @@ import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequiredException
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubProxyOption
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -25,6 +27,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
 import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +57,8 @@ data class CompatModeUiState(
     val customRepo: String = "",
     val customRepoBranch: String = "",
     val nightMode: NightModePreference = NightModePreference.FollowSystem,
-    val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM
+    val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM,
+    val pendingDependencyRepair: CoreDependencyRepairRequest? = null
 )
 
 data class CompatKeepAliveUiState(
@@ -112,11 +116,16 @@ class CompatModeViewModel(
         get() = proxyPickerController.uiState.testingIds
     val proxyLatencyMap: Map<String, Long>
         get() = proxyPickerController.uiState.latencyMap
+    val showDependencyRequiredPrompt: Boolean
+        get() = dependencyRepairController.showRequiredPrompt
+    val showDependencyRepairDialog: Boolean
+        get() = dependencyRepairController.showRepairDialog
 
     private sealed interface PendingProxyAction {
         data class Install(val variant: ApiVariant) : PendingProxyAction
         data class Update(val variant: ApiVariant) : PendingProxyAction
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+        data object RepairDependenciesOnline : PendingProxyAction
     }
 
     private val _uiState = MutableStateFlow(
@@ -137,10 +146,37 @@ class CompatModeViewModel(
             customRepo = graph.settingsRepository.customRepo.value,
             customRepoBranch = graph.settingsRepository.customRepoBranch.value,
             nightMode = graph.settingsRepository.nightMode.value,
-            appDpiOverride = graph.settingsRepository.appDpiOverride.value
+            appDpiOverride = graph.settingsRepository.appDpiOverride.value,
+            pendingDependencyRepair = graph.coreRepository.pendingDependencyRepair.value
         )
     )
     val uiState: StateFlow<CompatModeUiState> = _uiState.asStateFlow()
+
+    private val dependencyRepairController = CoreDependencyRepairController(
+        scope = viewModelScope,
+        repository = graph.coreRepository,
+        setOperating = { operating ->
+            _uiState.update { state ->
+                state.copy(
+                    isOperating = operating,
+                    operationProgressTitle = if (operating) "正在修复运行时依赖" else "",
+                    keepAlive = buildKeepAliveUiState(
+                        runtimeState = state.runtimeState,
+                        isOperating = operating
+                    )
+                )
+            }
+        },
+        postMessage = ::emitEvent,
+        onApplied = ::onCompatDependenciesApplied,
+        onDiscarded = { request ->
+            if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                "已取消依赖修复，当前工作目录保持不变"
+            } else {
+                "已取消${resolveVariantLabel(request.variant)}${request.actionLabel}"
+            }
+        }
+    )
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events.asSharedFlow()
@@ -296,7 +332,7 @@ class CompatModeViewModel(
                 },
                 onFailure = { error ->
                     if (error is CoreDependencyRepairRequiredException) {
-                        emitEvent("${resolveVariantLabel(variant)}安装待修复，请在普通界面的“核心”页完成修复")
+                        emitEvent("${resolveVariantLabel(variant)}安装已暂停，等待修复依赖")
                     } else {
                         emitEvent("${resolveVariantLabel(variant)} 下载失败：${error.message ?: "未知错误"}")
                     }
@@ -335,7 +371,7 @@ class CompatModeViewModel(
                 },
                 onFailure = { error ->
                     if (error is CoreDependencyRepairRequiredException) {
-                        emitEvent("${resolveVariantLabel(variant)}更新待修复，请在普通界面的“核心”页完成修复")
+                        emitEvent("${resolveVariantLabel(variant)}更新已暂停，等待修复依赖")
                     } else {
                         emitEvent("${resolveVariantLabel(variant)} 更新失败：${error.message ?: "未知错误"}")
                     }
@@ -457,8 +493,46 @@ class CompatModeViewModel(
                 is PendingProxyAction.Install -> doInstallCore(action.variant)
                 is PendingProxyAction.Update -> doUpdateCore(action.variant)
                 is PendingProxyAction.CheckUpdate -> doCheckCoreUpdate(action.variant)
+                PendingProxyAction.RepairDependenciesOnline -> {
+                    dependencyRepairController.repairOnlineNow()
+                }
                 null -> emitEvent("GitHub 线路已保存")
             }
+        }
+    }
+
+    fun dismissDependencyRequiredPrompt() = dependencyRepairController.dismissRequiredPrompt()
+
+    fun openDependencyRepairDialog() = dependencyRepairController.openRepairDialog()
+
+    fun dismissDependencyRepairDialog() = dependencyRepairController.dismissRepairDialog()
+
+    fun repairPendingDependenciesOnline() {
+        if (graph.githubProxyService.hasUserSelectedProxy()) {
+            dependencyRepairController.repairOnlineNow()
+        } else {
+            pendingProxyAction = PendingProxyAction.RepairDependenciesOnline
+            emitEvent("在线修复前，请先选择 GitHub 线路")
+            proxyPickerController.open()
+        }
+    }
+
+    fun repairPendingDependenciesFromArchive(archiveUri: String) {
+        dependencyRepairController.repairFromArchive(archiveUri)
+    }
+
+    fun discardPendingCoreMutation() = dependencyRepairController.discardPendingMutation()
+
+    private suspend fun onCompatDependenciesApplied(
+        request: CoreDependencyRepairRequest
+    ): String {
+        graph.coreRepository.refreshCoreInfo()
+        val state = _uiState.value.runtimeState
+        return if (state.variant == request.variant && state.status == ServiceStatus.Running) {
+            graph.runtimeRepository.restartService()
+            "${resolveVariantLabel(request.variant)}${request.actionLabel}成功，正在重启服务"
+        } else {
+            "${resolveVariantLabel(request.variant)}${request.actionLabel}成功"
         }
     }
 
@@ -660,6 +734,11 @@ class CompatModeViewModel(
         viewModelScope.launch {
             graph.coreRepository.isCoreInfoLoading.collectLatest { loading ->
                 _uiState.update { it.copy(isCoreInfoLoading = loading) }
+            }
+        }
+        viewModelScope.launch {
+            graph.coreRepository.pendingDependencyRepair.collectLatest { request ->
+                _uiState.update { it.copy(pendingDependencyRepair = request) }
             }
         }
         viewModelScope.launch {

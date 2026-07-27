@@ -41,6 +41,7 @@ interface CoreRepository {
     suspend fun repairPendingDependenciesFromArchive(archiveUri: String): Result<Unit>
     suspend fun applyPendingCoreMutation(): Result<Unit>
     suspend fun discardPendingCoreMutation()
+    suspend fun prepareInstalledCoreDependencyRepair(variant: ApiVariant): CoreDependencyRepairRequest?
 }
 
 interface SettingsRepository {

@@ -34,6 +34,8 @@ import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.DialogPresentationPreference
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
@@ -47,6 +49,7 @@ import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
+import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import com.example.danmuapiapp.ui.common.parseEnvContentMap
@@ -80,6 +83,7 @@ class SettingsViewModel @Inject constructor(
         get() = envConfigRepoLazy.get()
 
     val runtimeState = runtimeRepo.runtimeState
+    val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val githubProxy = settingsRepo.githubProxy
     val githubToken = settingsRepo.githubToken
     val customRepo = settingsRepo.customRepo
@@ -179,6 +183,8 @@ class SettingsViewModel @Inject constructor(
         private set
     var isApplyingWorkDir by mutableStateOf(false)
         private set
+    var isRepairingDependencies by mutableStateOf(false)
+        private set
 
     private val proxyPickerController = ProxyPickerController(
         githubProxyService = githubProxyService,
@@ -191,6 +197,21 @@ class SettingsViewModel @Inject constructor(
         appUpdateService = appUpdateService,
         postMessage = { operationMessage = it }
     )
+    private var pendingOnlineDependencyRepair = false
+    private val dependencyRepairController = CoreDependencyRepairController(
+        scope = viewModelScope,
+        repository = coreRepo,
+        shouldHandle = { it.origin == CoreDependencyRepairOrigin.WorkDirectory },
+        setOperating = { isRepairingDependencies = it },
+        postMessage = { operationMessage = it },
+        onApplied = ::onWorkDirDependenciesApplied,
+        onDiscarded = { "已取消依赖修复，当前工作目录保持不变" }
+    )
+
+    val showDependencyRequiredPrompt: Boolean
+        get() = dependencyRepairController.showRequiredPrompt
+    val showDependencyRepairDialog: Boolean
+        get() = dependencyRepairController.showRepairDialog
 
     fun adminModeSummary(): String {
         val state = adminSessionState.value
@@ -625,6 +646,7 @@ class SettingsViewModel @Inject constructor(
 
     fun dismissProxyPickerDialog() {
         proxyPickerController.dismiss()
+        pendingOnlineDependencyRepair = false
     }
 
     fun selectProxy(proxyId: String) {
@@ -636,7 +658,51 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun confirmProxySelection() {
-        proxyPickerController.confirm()
+        val repairDependencies = pendingOnlineDependencyRepair
+        proxyPickerController.confirm {
+            pendingOnlineDependencyRepair = false
+            if (repairDependencies) {
+                dependencyRepairController.repairOnlineNow()
+            }
+        }
+    }
+
+    fun dismissDependencyRequiredPrompt() = dependencyRepairController.dismissRequiredPrompt()
+
+    fun openDependencyRepairDialog() = dependencyRepairController.openRepairDialog()
+
+    fun dismissDependencyRepairDialog() = dependencyRepairController.dismissRepairDialog()
+
+    fun repairPendingDependenciesOnline() {
+        if (githubProxyService.hasUserSelectedProxy()) {
+            dependencyRepairController.repairOnlineNow()
+        } else {
+            pendingOnlineDependencyRepair = true
+            operationMessage = "在线修复前，请先选择 GitHub 线路"
+            proxyPickerController.open()
+        }
+    }
+
+    fun repairPendingDependenciesFromArchive(archiveUri: String) {
+        dependencyRepairController.repairFromArchive(archiveUri)
+    }
+
+    fun discardPendingCoreMutation() = dependencyRepairController.discardPendingMutation()
+
+    private suspend fun onWorkDirDependenciesApplied(
+        request: CoreDependencyRepairRequest
+    ): String {
+        coreRepo.refreshCoreInfo()
+        val running = runtimeState.value.status == ServiceStatus.Running
+        if (running) {
+            runtimeRepo.addLog(LogLevel.Info, "工作目录依赖已修复，正在重启服务应用新目录")
+            runtimeRepo.restartService()
+        }
+        return if (running) {
+            "${request.variant.label}在当前工作目录中的依赖已修复，服务正在重启"
+        } else {
+            "${request.variant.label}在当前工作目录中的依赖已修复"
+        }
     }
 
     fun envFilePath(): String = envConfigRepo.getEnvFilePath()
@@ -867,12 +933,49 @@ class SettingsViewModel @Inject constructor(
                 envConfigRepo.reload()
                 refreshWorkDirInfo()
                 val selectedVariant = resolvedVariant
+                val dependencyCheck = runCatching {
+                    if (selectedVariant != null) {
+                        coreRepo.prepareInstalledCoreDependencyRepair(selectedVariant)
+                    } else {
+                        coreRepo.discardPendingCoreMutation()
+                        null
+                    }
+                }
+                val dependencyRepair = dependencyCheck.getOrNull()
+                val dependencyCheckError = dependencyCheck.exceptionOrNull()
                 val variantMessage = when {
                     selectedVariant == null -> "当前目录未检测到可用核心，请先下载核心"
                     selectedVariant != previousVariant -> "已自动切换核心为 ${selectedVariant.label}"
                     else -> null
                 }
-                if (runtimeState.value.status == ServiceStatus.Running && selectedVariant != null) {
+                if (dependencyCheckError != null) {
+                    runtimeRepo.addLog(
+                        LogLevel.Error,
+                        "工作目录依赖检测失败：${dependencyCheckError.message ?: "未知错误"}"
+                    )
+                    operationMessage = buildString {
+                        append(result.message)
+                        append("，依赖检测失败，已跳过自动重启：")
+                        append(dependencyCheckError.message ?: "未知错误")
+                    }
+                } else if (dependencyRepair != null) {
+                    runtimeRepo.addLog(
+                        LogLevel.Warn,
+                        "工作目录已切换，但 ${selectedVariant?.label ?: "当前核心"} 缺少运行时依赖，等待修复"
+                    )
+                    operationMessage = buildString {
+                        append(result.message)
+                        if (!variantMessage.isNullOrBlank()) {
+                            append("，")
+                            append(variantMessage)
+                        }
+                        append("，检测到缺失依赖，请点击修复依赖")
+                        if (!storageHint.isNullOrBlank()) {
+                            append("。")
+                            append(storageHint)
+                        }
+                    }
+                } else if (runtimeState.value.status == ServiceStatus.Running && selectedVariant != null) {
                     if (selectedVariant != previousVariant) {
                         runtimeRepo.addLog(LogLevel.Info, "已根据新目录自动切换核心到 ${selectedVariant.label}")
                     }
