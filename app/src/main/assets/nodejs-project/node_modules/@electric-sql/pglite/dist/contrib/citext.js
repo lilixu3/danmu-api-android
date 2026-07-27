@@ -1,2 +1,0 @@
-import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(n,s)=>({bundlePath:new URL("../citext.tar.gz",import.meta.url)}),a={name:"citext",setup:t};export{a as citext};
-//# sourceMappingURL=citext.js.map

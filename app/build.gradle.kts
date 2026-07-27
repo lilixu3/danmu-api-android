@@ -18,13 +18,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.67"
+    ?: "1.0.5.68"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 153
+    ?: 154
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -346,6 +346,30 @@ fun readBundledNodeDependencyNames(): List<String> {
     return dependencies
 }
 
+// danmu_api imports dan-any's pure in-memory implementation and adapters only.
+// The package also publishes a separate PGlite/Drizzle implementation that is not
+// part of the Android runtime path.
+val androidRuntimeExcludedNodeModules = setOf(
+    "@electric-sql/pglite",
+    "@electric-sql/pglite-tools",
+    "drizzle-orm"
+)
+
+private val retainedOpenccRuntimeFiles = setOf(
+    "opencc-js/package.json",
+    "opencc-js/LICENSE",
+    "opencc-js/LICENSES/Apache-2.0.txt",
+    "opencc-js/THIRD_PARTY_LICENSES.md",
+    "opencc-js/dist/esm-lib/core.js",
+    "opencc-js/dist/esm-lib/dict/STCharacters.js",
+    "opencc-js/dist/esm-lib/dict/TSCharacters.js",
+    "opencc-js/dist/esm-lib/dict/TSPhrases.js",
+    "opencc-js/dist/esm-lib/dict/TWVariants.js",
+    "opencc-js/dist/esm-lib/dict/TWVariantsPhrases.js",
+    "opencc-js/dist/esm-lib/to/cn.js",
+    "opencc-js/dist/esm-lib/to/tw.js"
+)
+
 fun readBundledNodeDependencyClosure(): List<String> {
     val lockFile = file("src/main/assets/nodejs-project/package-lock.json")
     if (!lockFile.exists()) {
@@ -370,7 +394,7 @@ fun readBundledNodeDependencyClosure(): List<String> {
     if (roots.isEmpty()) {
         throw GradleException("package-lock.json 未收录任何运行时依赖：${lockFile.absolutePath}")
     }
-    return roots
+    return roots.filterNot { it in androidRuntimeExcludedNodeModules }
 }
 
 fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
@@ -402,7 +426,9 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
                     relativePath.endsWith(".d.cts") ||
                     relativePath.endsWith(".d.mts") ||
                     redundantDocName.matches(file.name) ||
-                    relativePath in redundantPakoDistFiles
+                    relativePath in redundantPakoDistFiles ||
+                    (relativePath.startsWith("opencc-js/") &&
+                        relativePath !in retainedOpenccRuntimeFiles)
 
             if (shouldDelete) {
                 file.delete()
@@ -657,6 +683,7 @@ tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
 
 val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-project/runtime-polyfills.js",
+    "assets/nodejs-project/runtime_asset_layout.txt",
     "assets/nodejs-project/node_modules/node-fetch/package.json",
     "assets/nodejs-project/node_modules/pako/package.json",
     "assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js",
@@ -668,12 +695,14 @@ val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-project/node_modules/@dan-uni/dan-any/package.json",
     "assets/nodejs-project/node_modules/@dan-uni/dan-any/dist/adapters.mjs",
     "assets/nodejs-project/node_modules/@dan-uni/dan-any/dist/core/main/pure.mjs",
-    "assets/nodejs-project/node_modules/@electric-sql/pglite/package.json",
-    "assets/nodejs-project/node_modules/drizzle-orm/package.json",
     "assets/nodejs-project/node_modules/fast-xml-parser/package.json",
     "assets/nodejs-project/node_modules/opencc-js/package.json",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/core.js",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/STCharacters.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/TSCharacters.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/TSPhrases.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/TWVariants.js",
+    "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/TWVariantsPhrases.js",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/cn.js",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/tw.js",
     "assets/nodejs-project/node_modules/zod/package.json"

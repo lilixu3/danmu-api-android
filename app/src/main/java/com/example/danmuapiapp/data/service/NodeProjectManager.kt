@@ -30,6 +30,7 @@ object NodeProjectManager {
     private const val LEGACY_NODE_HANDLER_PATCH_MARK = "DanmuApiApp env path compatibility"
     private const val BUNDLED_PACKAGE_LOCK_ASSET = "nodejs-project/package-lock.json"
     private const val BUNDLED_PACKAGE_JSON_ASSET = "nodejs-project/package.json"
+    private const val BUNDLED_RUNTIME_LAYOUT_ASSET = "nodejs-project/runtime_asset_layout.txt"
     private const val OPTIONAL_REDIS_ENV_KEY = "LOCAL_REDIS_URL"
     private const val OPTIONAL_REDIS_ASSET_BASE = "nodejs-optional/redis/node_modules"
     private val runtimeBundledDependencyVersions = linkedMapOf(
@@ -159,6 +160,7 @@ object NodeProjectManager {
                 targetDir.exists() &&
                 existingVersion == currentVersion &&
                 entryFile.exists() &&
+                preserveBundledNodeModules &&
                 hasRequiredRuntimeDependencyFiles(nodeModulesDir)
             ) {
                 ensureRuntimeDirs(targetDir)
@@ -645,13 +647,19 @@ object NodeProjectManager {
         if (!nodeModulesDir.exists() || !nodeModulesDir.isDirectory) return false
         if (!hasRequiredRuntimeDependencyFiles(nodeModulesDir)) return false
 
-        val assetSignature = assetSha256(context, BUNDLED_PACKAGE_LOCK_ASSET)
+        val assetLayoutSignature = assetSha256(context, BUNDLED_RUNTIME_LAYOUT_ASSET)
+            ?: return false
+        val runtimeLayoutSignature = fileSha256(File(targetDir, "runtime_asset_layout.txt"))
+            ?: return false
+        if (assetLayoutSignature != runtimeLayoutSignature) return false
+
+        val assetPackageSignature = assetSha256(context, BUNDLED_PACKAGE_LOCK_ASSET)
             ?: assetSha256(context, BUNDLED_PACKAGE_JSON_ASSET)
             ?: return false
-        val runtimeSignature = fileSha256(File(targetDir, "package-lock.json"))
+        val runtimePackageSignature = fileSha256(File(targetDir, "package-lock.json"))
             ?: fileSha256(File(targetDir, "package.json"))
             ?: return false
-        return assetSignature == runtimeSignature
+        return assetPackageSignature == runtimePackageSignature
     }
 
     private fun hasOptionalRedisConfigured(targetProjectDir: File): Boolean {
