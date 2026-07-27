@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.FileObserver
 import android.os.Looper
 import android.util.Log
+import androidx.core.net.toUri
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.service.CoreVersionParser
@@ -42,7 +43,8 @@ class CoreRepositoryImpl @Inject constructor(
     private val httpClient: OkHttpClient,
     private val githubRemoteService: GithubRemoteService,
     private val githubProxyService: GithubProxyService,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val runtimeDependencyPackManager: RuntimeDependencyPackManager
 ) : CoreRepository {
 
     companion object {
@@ -78,6 +80,15 @@ class CoreRepositoryImpl @Inject constructor(
     private data class CoreRemoteSource(
         val release: GithubRelease,
         val metadata: CoreSourceMetadata? = null
+    )
+
+    private data class PendingCoreMutation(
+        val repair: CoreDependencyRepairRequest,
+        val stagingDir: File,
+        val targetDir: File,
+        val mode: RunMode,
+        val rootDirPath: String,
+        val sourceMetadata: CoreSourceMetadata?
     )
 
     private data class BranchHeadInfo(
@@ -120,6 +131,12 @@ class CoreRepositoryImpl @Inject constructor(
 
     private val _downloadProgress = MutableStateFlow(CoreDownloadProgress())
     override val downloadProgress: StateFlow<CoreDownloadProgress> = _downloadProgress.asStateFlow()
+    private val _pendingDependencyRepair = MutableStateFlow<CoreDependencyRepairRequest?>(null)
+    override val pendingDependencyRepair: StateFlow<CoreDependencyRepairRequest?> =
+        _pendingDependencyRepair.asStateFlow()
+    private val pendingMutationLock = Any()
+    @Volatile
+    private var pendingCoreMutation: PendingCoreMutation? = null
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var coreWatcher: CoreDirWatcher? = null
     private var coreRefreshJob: Job? = null
@@ -553,6 +570,9 @@ class CoreRepositoryImpl @Inject constructor(
             try {
                 val mode = currentRunMode()
                 val location = getCoreLocation(variant, mode)
+                if (_pendingDependencyRepair.value?.variant == variant) {
+                    clearPendingCoreMutation(deleteStaging = true)
+                }
                 runCatching { location.normalDir.deleteRecursively() }
                 if (mode != RunMode.Normal) {
                     deleteRootCoreDir(location.rootDirPath)
@@ -673,6 +693,161 @@ class CoreRepositoryImpl @Inject constructor(
                 emptyList()
             }
         }
+
+    override suspend fun repairPendingDependenciesOnline(): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val pending = runCatching { requirePendingCoreMutation() }
+                .getOrElse { return@withContext Result.failure(it) }
+            updateDownloadProgress(
+                variant = pending.repair.variant,
+                actionLabel = "修复依赖",
+                stageText = "正在检查签名运行时依赖",
+                progress = null,
+                downloadedBytes = 0L,
+                totalBytes = -1L
+            )
+            try {
+                val result = runtimeDependencyPackManager.installIfAvailable(
+                    coreDir = pending.stagingDir,
+                    variant = pending.repair.variant,
+                    onProgress = { stage, progress, downloadedBytes, totalBytes ->
+                        updateDownloadProgress(
+                            variant = pending.repair.variant,
+                            actionLabel = "修复依赖",
+                            stageText = stage,
+                            progress = progress,
+                            downloadedBytes = downloadedBytes,
+                            totalBytes = totalBytes
+                        )
+                    }
+                )
+                verifyCoreRuntimeDependencies(
+                    coreDir = pending.stagingDir,
+                    unavailableReason = result.unavailableReason
+                )
+                Result.success(Unit)
+            } catch (error: Exception) {
+                Result.failure(error)
+            } finally {
+                _downloadProgress.value = CoreDownloadProgress()
+            }
+        }
+
+    override suspend fun repairPendingDependenciesFromArchive(archiveUri: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val pending = runCatching { requirePendingCoreMutation() }
+                .getOrElse { return@withContext Result.failure(it) }
+            val temporaryArchive = runCatching {
+                File.createTempFile("runtime-import-", ".zip", context.cacheDir)
+            }.getOrElse { return@withContext Result.failure(it) }
+            updateDownloadProgress(
+                variant = pending.repair.variant,
+                actionLabel = "导入依赖",
+                stageText = "正在读取本地依赖包",
+                progress = null,
+                downloadedBytes = 0L,
+                totalBytes = -1L
+            )
+            try {
+                val input = context.contentResolver.openInputStream(archiveUri.toUri())
+                    ?: throw IOException("无法读取选择的依赖压缩包")
+                input.buffered().use { source ->
+                    FileOutputStream(temporaryArchive).use { target ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var total = 0L
+                        while (true) {
+                            val read = source.read(buffer)
+                            if (read < 0) break
+                            total += read
+                            if (total > RuntimeDependencyPackProtocol.MAX_ARCHIVE_BYTES) {
+                                throw IOException("依赖压缩包超过大小上限")
+                            }
+                            target.write(buffer, 0, read)
+                        }
+                    }
+                }
+                updateDownloadProgress(
+                    variant = pending.repair.variant,
+                    actionLabel = "导入依赖",
+                    stageText = "正在校验本地依赖闭包",
+                    progress = null,
+                    downloadedBytes = temporaryArchive.length(),
+                    totalBytes = temporaryArchive.length()
+                )
+                LocalRuntimeDependencyArchiveImporter.verifyAndInstall(
+                    archive = temporaryArchive,
+                    coreDir = pending.stagingDir,
+                    runtimeNodeModulesDir = File(RuntimePaths.normalProjectDir(context), "node_modules")
+                )
+                verifyCoreRuntimeDependencies(pending.stagingDir)
+                Result.success(Unit)
+            } catch (error: Exception) {
+                Result.failure(error)
+            } finally {
+                runCatching { temporaryArchive.delete() }
+                _downloadProgress.value = CoreDownloadProgress()
+            }
+        }
+
+    override suspend fun applyPendingCoreMutation(): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val pending = runCatching { requirePendingCoreMutation() }
+                .getOrElse { return@withContext Result.failure(it) }
+            try {
+                applyStagedCore(pending)
+                persistResolvedCustomSourceIfNeeded(
+                    variant = pending.repair.variant,
+                    metadata = pending.sourceMetadata
+                )
+                clearPendingCoreMutation(deleteStaging = false)
+                refreshCoreInfo()
+                refreshAllJob?.join()
+                Result.success(Unit)
+            } catch (error: Exception) {
+                clearPendingCoreMutation(deleteStaging = true)
+                Result.failure(error)
+            }
+        }
+
+    override suspend fun discardPendingCoreMutation() {
+        withContext(Dispatchers.IO) {
+            clearPendingCoreMutation(deleteStaging = true)
+        }
+    }
+
+    private fun requirePendingCoreMutation(): PendingCoreMutation {
+        val pending = synchronized(pendingMutationLock) { pendingCoreMutation }
+            ?: throw IOException("没有等待修复的核心更新")
+        if (!pending.stagingDir.isDirectory) {
+            clearPendingCoreMutation(deleteStaging = false)
+            throw IOException("待修复的候选核心已失效，请重新执行${pending.repair.actionLabel}")
+        }
+        return pending
+    }
+
+    private fun setPendingCoreMutation(pending: PendingCoreMutation) {
+        val previous = synchronized(pendingMutationLock) {
+            val old = pendingCoreMutation
+            pendingCoreMutation = pending
+            _pendingDependencyRepair.value = pending.repair
+            old
+        }
+        if (previous != null && previous.stagingDir != pending.stagingDir) {
+            runCatching { previous.stagingDir.deleteRecursively() }
+        }
+    }
+
+    private fun clearPendingCoreMutation(deleteStaging: Boolean) {
+        val removed = synchronized(pendingMutationLock) {
+            val old = pendingCoreMutation
+            pendingCoreMutation = null
+            _pendingDependencyRepair.value = null
+            old
+        }
+        if (deleteStaging && removed != null) {
+            runCatching { removed.stagingDir.deleteRecursively() }
+        }
+    }
 
     private fun fetchCommitHistory(
         repo: String,
@@ -1019,9 +1194,8 @@ class CoreRepositoryImpl @Inject constructor(
         val mode = currentRunMode()
         val location = getCoreLocation(variant, mode)
         val targetDir = location.normalDir
+        clearPendingCoreMutation(deleteStaging = true)
         val stagingDir = createCoreTempDir(targetDir, "staging")
-        var backupDir: File? = null
-        var targetReplaced = false
 
         updateDownloadProgress(
             variant = variant,
@@ -1117,36 +1291,64 @@ class CoreRepositoryImpl @Inject constructor(
             NodeProjectManager.normalizeCoreLayout(stagingDir)
             NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
             writeCoreSourceMetadata(stagingDir, sourceMetadata)
-            verifyCoreRuntimeDependencies(stagingDir)
 
             if (!NodeProjectManager.hasValidCore(stagingDir)) {
                 throw IOException("核心文件不完整，缺少关键入口文件")
             }
-
-            backupDir = replaceCoreDirectory(targetDir, stagingDir)
-            targetReplaced = true
-
-            if (mode != RunMode.Normal) {
-                syncCoreDirToRoot(targetDir, location.rootDirPath)
-                if (!rootHasValidCore(location.rootDirPath)) {
-                    throw IOException("Root 核心同步后仍缺少关键入口文件")
-                }
+            val pending = PendingCoreMutation(
+                repair = CoreDependencyRepairRequest(
+                    variant = variant,
+                    actionLabel = actionLabel,
+                    missingDependencies = collectMissingCoreRuntimeDependencies(stagingDir),
+                    candidateVersion = versionHint,
+                    onlineRepairSupported = RuntimeDependencyPackProtocol.supportsOnlineRepair(variant)
+                ),
+                stagingDir = stagingDir,
+                targetDir = targetDir,
+                mode = mode,
+                rootDirPath = location.rootDirPath,
+                sourceMetadata = sourceMetadata
+            )
+            if (pending.repair.missingDependencies.isNotEmpty()) {
+                setPendingCoreMutation(pending)
+                throw CoreDependencyRepairRequiredException(pending.repair)
             }
-
-            backupDir?.deleteRecursively()
-            backupDir = null
+            applyStagedCore(pending)
         } catch (e: Exception) {
-            if (targetReplaced) {
-                runCatching { restoreCoreDirectory(targetDir, backupDir) }
-                if (mode != RunMode.Normal && targetDir.exists()) {
-                    runCatching { syncCoreDirToRoot(targetDir, location.rootDirPath) }
-                }
-            } else {
+            if (e !is CoreDependencyRepairRequiredException) {
                 runCatching { stagingDir.deleteRecursively() }
             }
             throw e
         } finally {
             _downloadProgress.value = CoreDownloadProgress()
+        }
+    }
+
+    private fun applyStagedCore(pending: PendingCoreMutation) {
+        var backupDir: File? = null
+        var targetReplaced = false
+        try {
+            verifyCoreRuntimeDependencies(pending.stagingDir)
+            if (!NodeProjectManager.hasValidCore(pending.stagingDir)) {
+                throw IOException("候选核心文件不完整，缺少关键入口文件")
+            }
+            backupDir = replaceCoreDirectory(pending.targetDir, pending.stagingDir)
+            targetReplaced = true
+            if (pending.mode != RunMode.Normal) {
+                syncCoreDirToRoot(pending.targetDir, pending.rootDirPath)
+                if (!rootHasValidCore(pending.rootDirPath)) {
+                    throw IOException("Root 核心同步后仍缺少关键入口文件")
+                }
+            }
+            backupDir?.deleteRecursively()
+        } catch (error: Exception) {
+            if (targetReplaced) {
+                runCatching { restoreCoreDirectory(pending.targetDir, backupDir) }
+                if (pending.mode != RunMode.Normal && pending.targetDir.exists()) {
+                    runCatching { syncCoreDirToRoot(pending.targetDir, pending.rootDirPath) }
+                }
+            }
+            throw error
         }
     }
 
@@ -1487,17 +1689,33 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun verifyCoreRuntimeDependencies(coreDir: File) {
+    private fun collectMissingCoreRuntimeDependencies(coreDir: File): List<String> {
         val normalProjectDir = RuntimePaths.normalProjectDir(context)
         runCatching {
             NodeProjectManager.ensureProjectExtracted(context, normalProjectDir)
             NodeProjectManager.ensureOptionalRuntimeDependencies(context, normalProjectDir)
         }
-        val runtimeNodeModulesDir = File(normalProjectDir, "node_modules")
-        val missing = NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+        return NodeProjectManager.collectMissingRuntimeDepsForCore(
+            coreDir = coreDir,
+            runtimeNodeModulesDir = File(normalProjectDir, "node_modules")
+        )
+    }
+
+    private fun verifyCoreRuntimeDependencies(
+        coreDir: File,
+        unavailableReason: String? = null
+    ) {
+        val missing = collectMissingCoreRuntimeDependencies(coreDir)
         if (missing.isNotEmpty()) {
             throw IOException(
-                "当前 App 缺少该核心所需运行时依赖：${missing.joinToString(", ")}。请先升级 App 到带这些依赖的新版本后再更新核心。"
+                buildString {
+                    append("仍缺少运行时依赖：")
+                    append(missing.joinToString(", "))
+                    unavailableReason?.takeIf { it.isNotBlank() }?.let {
+                        append("。")
+                        append(it)
+                    }
+                }
             )
         }
     }

@@ -493,10 +493,12 @@ class HomeViewModel @Inject constructor(
                         runtimeRepo.startService()
                     }
                 },
-                onFailure = {
-                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${it.message}")
+                onFailure = { error ->
+                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${error.message}")
                     isInstallingCore = false
-                    if (githubProxyService.isUsingProxy()) {
+                    if (error is CoreDependencyRepairRequiredException) {
+                        appUpdateMessage = "${variantLabel(variant)}安装待修复，请到“核心”页点击修复依赖"
+                    } else if (githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Install(variant)
                         openProxyPickerDialog()
                     }
@@ -613,10 +615,12 @@ class HomeViewModel @Inject constructor(
                     ignoredUpdateVersionMap[variant] = null
                     isUpdatingCore = false
                 },
-                onFailure = {
-                    runtimeRepo.addLog(LogLevel.Error, "更新失败: ${it.message}")
+                onFailure = { error ->
+                    runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
                     isUpdatingCore = false
-                    if (githubProxyService.isUsingProxy()) {
+                    if (error is CoreDependencyRepairRequiredException) {
+                        appUpdateMessage = "${variantLabel(variant)}更新待修复，请到“核心”页点击修复依赖"
+                    } else if (githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Update(variant)
                         openProxyPickerDialog()
                     }
