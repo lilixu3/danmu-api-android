@@ -18,6 +18,7 @@ import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -44,6 +45,7 @@ class StartupSetupViewModel @Inject constructor(
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val downloadProgress = coreRepo.downloadProgress
+    val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val coreDisplayNames = settingsRepo.coreDisplayNames
     val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
@@ -54,6 +56,8 @@ class StartupSetupViewModel @Inject constructor(
         private set
     var isRunModeSwitching by mutableStateOf(false)
         private set
+    var isRepairingDependencies by mutableStateOf(false)
+        private set
 
     private val proxyPickerController = ProxyPickerController(
         githubProxyService = githubProxyService,
@@ -62,6 +66,24 @@ class StartupSetupViewModel @Inject constructor(
         proxyOptionsProvider = { proxyOptions }
     )
     private var pendingInstallVariant: ApiVariant? = null
+    private var pendingOnlineDependencyRepair = false
+    private val dependencyRepairController = CoreDependencyRepairController(
+        scope = viewModelScope,
+        repository = coreRepo,
+        autoShowRequiredPrompt = false,
+        setOperating = { isRepairingDependencies = it },
+        postMessage = { operationMessage = it },
+        onApplied = { request ->
+            coreRepo.refreshCoreInfo()
+            "${variantLabel(request.variant)}依赖检测通过，核心已准备好"
+        },
+        onDiscarded = { request ->
+            "已取消${variantLabel(request.variant)}${request.actionLabel}，可以重新下载核心"
+        }
+    )
+
+    val showDependencyRepairDialog: Boolean
+        get() = dependencyRepairController.showRepairDialog
 
     val showProxyPickerDialog: Boolean
         get() = proxyPickerController.uiState.isVisible
@@ -167,13 +189,18 @@ class StartupSetupViewModel @Inject constructor(
     fun dismissProxyPickerDialog() {
         proxyPickerController.dismiss()
         pendingInstallVariant = null
+        pendingOnlineDependencyRepair = false
     }
 
     fun confirmProxySelection() {
         val variant = pendingInstallVariant
+        val repairDependencies = pendingOnlineDependencyRepair
         proxyPickerController.confirm {
             pendingInstallVariant = null
-            if (variant != null) {
+            pendingOnlineDependencyRepair = false
+            if (repairDependencies) {
+                dependencyRepairController.repairOnlineNow()
+            } else if (variant != null) {
                 doInstallCore(variant)
             } else {
                 operationMessage = "GitHub 线路已保存"
@@ -225,7 +252,7 @@ class StartupSetupViewModel @Inject constructor(
                 },
                 onFailure = { error ->
                     operationMessage = if (error is CoreDependencyRepairRequiredException) {
-                        "${variantLabel(variant)}安装待修复；可暂时跳过，进入“核心”页修复依赖"
+                        "${variantLabel(variant)}核心已下载，请完成运行依赖检测"
                     } else {
                         "下载失败：${error.message ?: "请稍后重试"}"
                     }
@@ -237,6 +264,26 @@ class StartupSetupViewModel @Inject constructor(
             )
         }
     }
+
+    fun openDependencyRepairDialog() = dependencyRepairController.openRepairDialog()
+
+    fun dismissDependencyRepairDialog() = dependencyRepairController.dismissRepairDialog()
+
+    fun repairPendingDependenciesOnline() {
+        if (githubProxyService.hasUserSelectedProxy()) {
+            dependencyRepairController.repairOnlineNow()
+        } else {
+            pendingOnlineDependencyRepair = true
+            operationMessage = "在线修复前，请先选择 GitHub 线路"
+            proxyPickerController.open()
+        }
+    }
+
+    fun repairPendingDependenciesFromArchive(archiveUri: String) {
+        dependencyRepairController.repairFromArchive(archiveUri)
+    }
+
+    fun discardPendingCoreMutation() = dependencyRepairController.discardPendingMutation()
 
     private fun variantLabel(variant: ApiVariant): String {
         return coreDisplayNames.value.resolve(variant)

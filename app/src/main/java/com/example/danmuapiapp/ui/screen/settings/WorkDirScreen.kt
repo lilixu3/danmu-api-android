@@ -3,6 +3,8 @@ package com.example.danmuapiapp.ui.screen.settings
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
+import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 
 import android.content.Intent
 import android.net.Uri
@@ -28,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
@@ -57,6 +60,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.domain.model.RunMode
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
@@ -69,6 +73,7 @@ fun WorkDirScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val workDirInfo = viewModel.workDirInfo
@@ -195,7 +200,7 @@ fun WorkDirScreen(
                                     showWorkDirDialog = true
                                 },
                                 modifier = Modifier.weight(1f),
-                                enabled = !viewModel.isApplyingWorkDir,
+                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(18.dp))
@@ -205,7 +210,7 @@ fun WorkDirScreen(
                             OutlinedButton(
                                 onClick = { workDirPickerLauncher.launch(null) },
                                 modifier = Modifier.weight(1f),
-                                enabled = !viewModel.isApplyingWorkDir,
+                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(Icons.Rounded.FolderOpen, null, modifier = Modifier.size(18.dp))
@@ -218,7 +223,7 @@ fun WorkDirScreen(
                             OutlinedButton(
                                 onClick = viewModel::restoreDefaultWorkDir,
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = !viewModel.isApplyingWorkDir,
+                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp))
@@ -230,7 +235,38 @@ fun WorkDirScreen(
                 }
             }
 
-            AnimatedVisibility(visible = viewModel.isApplyingWorkDir) {
+            pendingDependencyRepair
+                ?.takeIf { it.origin == CoreDependencyRepairOrigin.WorkDirectory }
+                ?.let { request ->
+                    SettingsGroup(title = "运行依赖") {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "当前目录缺少：\n" +
+                                    request.missingDependencies.joinToString("\n") { "• $it" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            FilledTonalButton(
+                                onClick = viewModel::openDependencyRepairDialog,
+                                enabled = !viewModel.isApplyingWorkDir &&
+                                    !viewModel.isRepairingDependencies,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Rounded.Build, null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("修复依赖")
+                            }
+                        }
+                    }
+                }
+
+            AnimatedVisibility(
+                visible = viewModel.isApplyingWorkDir || viewModel.isRepairingDependencies
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -238,7 +274,11 @@ fun WorkDirScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        "正在切换工作目录...",
+                        if (viewModel.isRepairingDependencies) {
+                            "正在修复当前目录的运行时依赖..."
+                        } else {
+                            "正在切换工作目录..."
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -328,6 +368,34 @@ fun WorkDirScreen(
                     pendingWorkDirPathForPermission = null
                 }) { Text("取消") }
             }
+        )
+    }
+
+    CoreDependencyRepairHost(
+        request = pendingDependencyRepair,
+        showRequiredPrompt = viewModel.showDependencyRequiredPrompt,
+        showRepairDialog = viewModel.showDependencyRepairDialog,
+        onOpenRepair = viewModel::openDependencyRepairDialog,
+        onDismissRequiredPrompt = viewModel::dismissDependencyRequiredPrompt,
+        onOnlineRepair = viewModel::repairPendingDependenciesOnline,
+        onRepairFromArchive = viewModel::repairPendingDependenciesFromArchive,
+        onCancelMutation = viewModel::discardPendingCoreMutation,
+        onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
+    )
+
+    if (viewModel.showProxyPickerDialog) {
+        GithubProxyPickerDialog(
+            title = "选择 GitHub 线路",
+            subtitle = "在线修复依赖前请先测速并选择线路",
+            options = viewModel.proxyOptions,
+            selectedId = viewModel.proxySelectedId,
+            testingIds = viewModel.proxyTestingIds,
+            resultMap = viewModel.proxyLatencyMap,
+            onSelect = viewModel::selectProxy,
+            onRetest = viewModel::retestProxySpeed,
+            onConfirm = viewModel::confirmProxySelection,
+            onDismiss = viewModel::dismissProxyPickerDialog,
+            confirmText = "保存并修复"
         )
     }
 }

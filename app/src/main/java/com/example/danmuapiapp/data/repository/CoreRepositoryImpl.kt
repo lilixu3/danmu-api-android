@@ -82,13 +82,19 @@ class CoreRepositoryImpl @Inject constructor(
         val metadata: CoreSourceMetadata? = null
     )
 
+    private enum class PendingCoreMutationType {
+        ReplaceCore,
+        RepairInstalledDependencies
+    }
+
     private data class PendingCoreMutation(
         val repair: CoreDependencyRepairRequest,
         val stagingDir: File,
         val targetDir: File,
         val mode: RunMode,
         val rootDirPath: String,
-        val sourceMetadata: CoreSourceMetadata?
+        val sourceMetadata: CoreSourceMetadata?,
+        val type: PendingCoreMutationType = PendingCoreMutationType.ReplaceCore
     )
 
     private data class BranchHeadInfo(
@@ -794,14 +800,21 @@ class CoreRepositoryImpl @Inject constructor(
             val pending = runCatching { requirePendingCoreMutation() }
                 .getOrElse { return@withContext Result.failure(it) }
             try {
-                applyStagedCore(pending)
-                persistResolvedCustomSourceIfNeeded(
-                    variant = pending.repair.variant,
-                    metadata = pending.sourceMetadata
-                )
-                clearPendingCoreMutation(deleteStaging = false)
+                when (pending.type) {
+                    PendingCoreMutationType.ReplaceCore -> {
+                        applyStagedCore(pending)
+                        persistResolvedCustomSourceIfNeeded(
+                            variant = pending.repair.variant,
+                            metadata = pending.sourceMetadata
+                        )
+                    }
+                    PendingCoreMutationType.RepairInstalledDependencies -> {
+                        applyStagedDependencies(pending)
+                    }
+                }
                 refreshCoreInfo()
                 refreshAllJob?.join()
+                clearPendingCoreMutation(deleteStaging = true)
                 Result.success(Unit)
             } catch (error: Exception) {
                 clearPendingCoreMutation(deleteStaging = true)
@@ -812,6 +825,53 @@ class CoreRepositoryImpl @Inject constructor(
     override suspend fun discardPendingCoreMutation() {
         withContext(Dispatchers.IO) {
             clearPendingCoreMutation(deleteStaging = true)
+        }
+    }
+
+    override suspend fun prepareInstalledCoreDependencyRepair(
+        variant: ApiVariant
+    ): CoreDependencyRepairRequest? = withContext(Dispatchers.IO) {
+        val mode = currentRunMode()
+        if (mode != RunMode.Normal) return@withContext null
+
+        val location = getCoreLocation(variant, mode)
+        val coreDir = location.normalDir
+        clearPendingCoreMutation(deleteStaging = true)
+        if (!NodeProjectManager.hasValidCore(coreDir)) return@withContext null
+
+        val missing = collectMissingCoreRuntimeDependencies(coreDir)
+        if (missing.isEmpty()) return@withContext null
+
+        val stagingDir = createCoreTempDir(coreDir, "dependency-repair")
+        try {
+            val packageJson = File(coreDir, "package.json")
+            if (!packageJson.isFile) {
+                throw IOException("当前核心缺少依赖清单，无法执行依赖修复")
+            }
+            packageJson.copyTo(File(stagingDir, "package.json"), overwrite = true)
+            val request = CoreDependencyRepairRequest(
+                variant = variant,
+                actionLabel = "修复",
+                missingDependencies = missing,
+                candidateVersion = NodeProjectManager.readCoreVersion(coreDir),
+                onlineRepairSupported = RuntimeDependencyPackProtocol.supportsOnlineRepair(variant),
+                origin = CoreDependencyRepairOrigin.WorkDirectory
+            )
+            setPendingCoreMutation(
+                PendingCoreMutation(
+                    repair = request,
+                    stagingDir = stagingDir,
+                    targetDir = coreDir,
+                    mode = mode,
+                    rootDirPath = location.rootDirPath,
+                    sourceMetadata = null,
+                    type = PendingCoreMutationType.RepairInstalledDependencies
+                )
+            )
+            request
+        } catch (error: Exception) {
+            runCatching { stagingDir.deleteRecursively() }
+            throw error
         }
     }
 
@@ -1352,6 +1412,18 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun applyStagedDependencies(pending: PendingCoreMutation) {
+        verifyCoreRuntimeDependencies(pending.stagingDir)
+        if (!NodeProjectManager.hasValidCore(pending.targetDir)) {
+            throw IOException("当前工作目录中的核心已失效，请重新下载核心")
+        }
+        replaceInstalledCoreDependencies(
+            stagingCoreDir = pending.stagingDir,
+            installedCoreDir = pending.targetDir,
+            verifyInstalled = { verifyCoreRuntimeDependencies(pending.targetDir) }
+        )
+    }
+
     private fun buildDownloadUrlCandidates(zipUrl: String): List<String> {
         val preferDirectFirst = zipUrl.contains("://api.github.com/")
         return if (preferDirectFirst) {
@@ -1881,5 +1953,80 @@ internal fun copyDirectoryOrThrow(
     }
     if (!cleanupBlock(sourceDir)) {
         throw IOException("无法清理目录: ${sourceDir.absolutePath}")
+    }
+}
+
+internal fun replaceInstalledCoreDependencies(
+    stagingCoreDir: File,
+    installedCoreDir: File,
+    verifyInstalled: () -> Unit
+) {
+    val stagedNodeModules = File(stagingCoreDir, "node_modules")
+    if (!stagedNodeModules.isDirectory) {
+        throw IOException("待安装依赖缺少 node_modules 目录")
+    }
+    if (!installedCoreDir.isDirectory) {
+        throw IOException("当前核心目录不存在")
+    }
+
+    val targetNodeModules = File(installedCoreDir, "node_modules")
+    val backupNodeModules = File(
+        installedCoreDir,
+        ".node_modules-backup-${System.currentTimeMillis()}"
+    )
+    val metadataNames = listOf(
+        RuntimeDependencyPackProtocol.INSTALLED_MANIFEST_FILE,
+        LocalRuntimeDependencyArchiveImporter.LOCAL_IMPORT_AUDIT_FILE,
+        RuntimeDependencyPackProtocol.LEGACY_INSTALLED_LOCK_FILE
+    )
+    val previousMetadata = metadataNames.associateWith { name ->
+        File(installedCoreDir, name).takeIf { it.isFile }?.readBytes()
+    }
+
+    fun moveDirectory(source: File, target: File) {
+        if (source.renameTo(target)) return
+        copyDirectoryOrThrow(source, target)
+    }
+
+    var originalMoved = false
+    var keepBackup = false
+    try {
+        if (targetNodeModules.exists()) {
+            runCatching { backupNodeModules.deleteRecursively() }
+            moveDirectory(targetNodeModules, backupNodeModules)
+            originalMoved = true
+        }
+        moveDirectory(stagedNodeModules, targetNodeModules)
+
+        metadataNames.forEach { name ->
+            runCatching { File(installedCoreDir, name).delete() }
+            val stagedMetadata = File(stagingCoreDir, name)
+            if (stagedMetadata.isFile) {
+                stagedMetadata.copyTo(File(installedCoreDir, name), overwrite = true)
+            }
+        }
+        verifyInstalled()
+        runCatching { backupNodeModules.deleteRecursively() }
+    } catch (error: Exception) {
+        runCatching { targetNodeModules.deleteRecursively() }
+        if (originalMoved && backupNodeModules.exists()) {
+            runCatching { moveDirectory(backupNodeModules, targetNodeModules) }
+                .onFailure { restoreError ->
+                    keepBackup = true
+                    error.addSuppressed(restoreError)
+                }
+        }
+        metadataNames.forEach { name ->
+            val target = File(installedCoreDir, name)
+            runCatching { target.delete() }
+            previousMetadata[name]?.let { bytes ->
+                runCatching { target.writeBytes(bytes) }
+            }
+        }
+        throw error
+    } finally {
+        if (!keepBackup) {
+            runCatching { backupNodeModules.deleteRecursively() }
+        }
     }
 }

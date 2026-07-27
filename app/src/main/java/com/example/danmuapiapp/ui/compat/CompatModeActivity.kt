@@ -87,6 +87,8 @@ class CompatModeActivity : ComponentActivity() {
                         latencyMap = compatViewModel.proxyLatencyMap,
                         isVisible = compatViewModel.showProxyPickerDialog
                     ),
+                    showDependencyRequiredPrompt = compatViewModel.showDependencyRequiredPrompt,
+                    showDependencyRepairDialog = compatViewModel.showDependencyRepairDialog,
                     actions = CompatModeActions(
                         onStartService = compatViewModel::startService,
                         onRestartService = compatViewModel::restartService,
@@ -113,6 +115,13 @@ class CompatModeActivity : ComponentActivity() {
                         onRetestProxySpeed = compatViewModel::retestProxySpeed,
                         onConfirmProxySelection = compatViewModel::confirmProxySelection,
                         onDismissProxyPicker = compatViewModel::dismissProxyPickerDialog,
+                        onOpenDependencyRepair = compatViewModel::openDependencyRepairDialog,
+                        onDismissDependencyRequired = compatViewModel::dismissDependencyRequiredPrompt,
+                        onRepairDependenciesOnline = compatViewModel::repairPendingDependenciesOnline,
+                        onRepairDependenciesFromArchive =
+                            compatViewModel::repairPendingDependenciesFromArchive,
+                        onCancelPendingCoreMutation = compatViewModel::discardPendingCoreMutation,
+                        onDismissDependencyRepair = compatViewModel::dismissDependencyRepairDialog,
                         onExitToBackground = {
                             moveTaskToBack(true)
                         },

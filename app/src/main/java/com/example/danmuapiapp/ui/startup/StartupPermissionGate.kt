@@ -67,6 +67,7 @@ import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
@@ -74,6 +75,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.common.CustomCoreSettingsForm
 import com.example.danmuapiapp.ui.common.rememberCustomCoreSettingsFormState
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SettingsHintCard
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
@@ -112,6 +114,7 @@ object StartupPermissionGatePrefs {
 private enum class SetupStep {
     Mode,
     Core,
+    Dependency,
     Permission
 }
 
@@ -151,6 +154,7 @@ fun StartupPermissionGateHost(
     val coreInfoList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val customCoreSource by viewModel.customCoreSource.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
@@ -216,6 +220,10 @@ fun StartupPermissionGateHost(
     val shouldShowCoreStep = canConfigureSetup &&
         isCoreInfoLoading.not() &&
         currentCoreReady.not() &&
+        pendingDependencyRepair == null &&
+        coreDeferredThisLaunch.not()
+    val shouldShowDependencyStep = canConfigureSetup &&
+        pendingDependencyRepair != null &&
         coreDeferredThisLaunch.not()
     val shouldShowPermissionStep = runtimeState.runMode == RunMode.Normal &&
         (permissionState.notificationReady.not() || permissionState.batteryReady.not())
@@ -223,6 +231,7 @@ fun StartupPermissionGateHost(
     val pendingSteps = buildList {
         if (shouldShowModeStep) add(SetupStep.Mode)
         if (shouldShowCoreStep) add(SetupStep.Core)
+        if (shouldShowDependencyStep) add(SetupStep.Dependency)
         if (shouldShowPermissionStep) add(SetupStep.Permission)
     }
 
@@ -240,6 +249,7 @@ fun StartupPermissionGateHost(
             coreInfoList = coreInfoList,
             isCoreInfoLoading = isCoreInfoLoading,
             downloadProgress = downloadProgress,
+            pendingDependencyRepair = pendingDependencyRepair,
             permissionState = permissionState,
             pendingSteps = pendingSteps,
             currentStep = activeStep ?: pendingSteps.first(),
@@ -287,6 +297,7 @@ private fun StartupPermissionGateScreen(
     coreInfoList: List<CoreInfo>,
     isCoreInfoLoading: Boolean,
     downloadProgress: CoreDownloadProgress,
+    pendingDependencyRepair: CoreDependencyRepairRequest?,
     permissionState: StartupPermissionState,
     pendingSteps: List<SetupStep>,
     currentStep: SetupStep,
@@ -364,6 +375,7 @@ private fun StartupPermissionGateScreen(
     val stepSubtitle = when (currentStep) {
         SetupStep.Mode -> "先确定这台设备用普通模式还是 Root 模式。这里不会直接启动或停止服务。"
         SetupStep.Core -> "把当前要用的核心准备好。下载只处理核心文件，不会在这里启动服务。"
+        SetupStep.Dependency -> "检查核心运行依赖，缺失项修复并校验通过后才会进入下一步。"
         SetupStep.Permission -> "普通模式建议把这两项补齐，启动反馈会更清楚，后台也更稳。"
     }
 
@@ -407,6 +419,7 @@ private fun StartupPermissionGateScreen(
                         title = when (currentStep) {
                             SetupStep.Mode -> "先选运行模式"
                             SetupStep.Core -> "再准备核心"
+                            SetupStep.Dependency -> "补齐运行依赖"
                             SetupStep.Permission -> "最后补齐提醒"
                         },
                         subtitle = stepSubtitle
@@ -453,6 +466,15 @@ private fun StartupPermissionGateScreen(
                                 onSkipForNow = onSkipCoreForNow
                             )
 
+                            SetupStep.Dependency -> DependencyStepContent(
+                                compact = compact,
+                                request = pendingDependencyRepair,
+                                downloadProgress = downloadProgress,
+                                isRepairing = viewModel.isRepairingDependencies,
+                                onRepair = viewModel::openDependencyRepairDialog,
+                                onSkipForNow = onSkipCoreForNow
+                            )
+
                             SetupStep.Permission -> PermissionStepContent(
                                 compact = compact,
                                 permissionState = permissionState,
@@ -483,6 +505,18 @@ private fun StartupPermissionGateScreen(
             confirmText = "保存并继续"
         )
     }
+
+    CoreDependencyRepairHost(
+        request = pendingDependencyRepair,
+        showRequiredPrompt = false,
+        showRepairDialog = viewModel.showDependencyRepairDialog,
+        onOpenRepair = viewModel::openDependencyRepairDialog,
+        onDismissRequiredPrompt = {},
+        onOnlineRepair = viewModel::repairPendingDependenciesOnline,
+        onRepairFromArchive = viewModel::repairPendingDependenciesFromArchive,
+        onCancelMutation = viewModel::discardPendingCoreMutation,
+        onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
+    )
 }
 
 @Composable
@@ -874,6 +908,89 @@ private fun DownloadProgressCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+@Composable
+private fun DependencyStepContent(
+    compact: Boolean,
+    request: CoreDependencyRepairRequest?,
+    downloadProgress: CoreDownloadProgress,
+    isRepairing: Boolean,
+    onRepair: () -> Unit,
+    onSkipForNow: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 12.dp)
+    ) {
+        SetupNoticeCard(
+            title = "核心文件已下载，运行依赖尚未齐全",
+            summary = "依赖修复只处理当前候选核心；完成校验后会自动继续安装。",
+            compact = compact
+        )
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "待补充依赖",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = request?.missingDependencies
+                        ?.joinToString("\n") { "• $it" }
+                        .orEmpty()
+                        .ifBlank { "正在重新检测依赖..." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        if (downloadProgress.inProgress || isRepairing) {
+            DownloadProgressCard(
+                progress = downloadProgress.takeIf { it.inProgress }
+                    ?: CoreDownloadProgress(
+                        inProgress = true,
+                        actionLabel = "修复依赖",
+                        stageText = "正在校验运行时依赖"
+                    ),
+                compact = compact
+            )
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        GradientButton(
+            text = if (isRepairing) "正在修复依赖..." else "修复依赖",
+            onClick = onRepair,
+            enabled = request != null && !isRepairing,
+            modifier = Modifier.fillMaxWidth(),
+            colors = listOf(
+                MaterialTheme.colorScheme.primary,
+                MaterialTheme.colorScheme.secondary
+            )
+        )
+
+        TextButton(
+            onClick = onSkipForNow,
+            enabled = !isRepairing,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            Text("先去首页处理")
         }
     }
 }

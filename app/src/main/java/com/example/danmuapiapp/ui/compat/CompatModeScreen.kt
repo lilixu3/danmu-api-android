@@ -33,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -105,6 +106,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -131,6 +133,12 @@ data class CompatModeActions(
     val onRetestProxySpeed: () -> Unit,
     val onConfirmProxySelection: () -> Unit,
     val onDismissProxyPicker: () -> Unit,
+    val onOpenDependencyRepair: () -> Unit,
+    val onDismissDependencyRequired: () -> Unit,
+    val onRepairDependenciesOnline: () -> Unit,
+    val onRepairDependenciesFromArchive: (String) -> Unit,
+    val onCancelPendingCoreMutation: () -> Unit,
+    val onDismissDependencyRepair: () -> Unit,
     val onExitToBackground: () -> Unit,
     val onStopServiceAndExit: () -> Unit,
     val onExitCompatMode: () -> Unit
@@ -154,6 +162,8 @@ private enum class CompatPage {
 fun CompatModeScreen(
     uiState: CompatModeUiState,
     proxyPickerState: CompatProxyPickerState,
+    showDependencyRequiredPrompt: Boolean,
+    showDependencyRepairDialog: Boolean,
     actions: CompatModeActions
 ) {
     var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
@@ -250,6 +260,18 @@ fun CompatModeScreen(
                 confirmText = "保存线路"
             )
         }
+
+        CoreDependencyRepairHost(
+            request = uiState.pendingDependencyRepair,
+            showRequiredPrompt = showDependencyRequiredPrompt,
+            showRepairDialog = showDependencyRepairDialog,
+            onOpenRepair = actions.onOpenDependencyRepair,
+            onDismissRequiredPrompt = actions.onDismissDependencyRequired,
+            onOnlineRepair = actions.onRepairDependenciesOnline,
+            onRepairFromArchive = actions.onRepairDependenciesFromArchive,
+            onCancelMutation = actions.onCancelPendingCoreMutation,
+            onDismissRepairDialog = actions.onDismissDependencyRepair
+        )
 
         if (showExitDialog) {
             ExitConfirmDialog(
@@ -1375,12 +1397,14 @@ private fun CoreVariantCard(
 ) {
     val runtime = uiState.runtimeState
     val isActive = runtime.variant == info.variant
+    val hasPendingDependencyRepair = uiState.pendingDependencyRepair?.variant == info.variant
     val surfaceColor = if (isActive) {
         MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f)
     }
     val badge = when {
+        hasPendingDependencyRepair -> "待修复"
         isActive -> "使用中"
         info.sourceMismatch -> "需替换"
         info.hasVersionUpdate -> "可更新"
@@ -1388,6 +1412,7 @@ private fun CoreVariantCard(
         else -> "未安装"
     }
     val badgeColor = when {
+        hasPendingDependencyRepair -> MaterialTheme.colorScheme.error
         isActive -> MaterialTheme.colorScheme.primary
         info.sourceMismatch -> MaterialTheme.colorScheme.error
         info.hasVersionUpdate -> MaterialTheme.colorScheme.tertiary
@@ -1396,18 +1421,21 @@ private fun CoreVariantCard(
     }
     val sourceText = resolveVariantSource(uiState, info.variant)
     val mainText = when {
+        hasPendingDependencyRepair -> "修复依赖"
         !info.isInstalled -> "下载核心"
         info.sourceMismatch -> "重新下载"
         info.hasVersionUpdate -> "立即更新"
         else -> "检查更新"
     }
     val mainIcon = when {
+        hasPendingDependencyRepair -> Icons.Rounded.Build
         !info.isInstalled -> Icons.Rounded.CloudDownload
         info.sourceMismatch || info.hasVersionUpdate -> Icons.Rounded.Upgrade
         else -> Icons.Rounded.Refresh
     }
-    val mainPrimary = !info.isInstalled || info.sourceMismatch || info.hasVersionUpdate
-    val canDelete = info.isInstalled && !isActive
+    val mainPrimary = hasPendingDependencyRepair || !info.isInstalled ||
+        info.sourceMismatch || info.hasVersionUpdate
+    val canDelete = info.isInstalled && !isActive && !hasPendingDependencyRepair
     val activeProgress = uiState.downloadProgress.takeIf {
         it.inProgress && it.variant == info.variant
     }
@@ -1509,6 +1537,7 @@ private fun CoreVariantCard(
                     onClick = {
                         restorePrimaryActionFocus = true
                         when {
+                            hasPendingDependencyRepair -> actions.onOpenDependencyRepair()
                             !info.isInstalled -> actions.onInstallCore(info.variant)
                             info.needsAttention -> actions.onUpdateCore(info.variant)
                             else -> actions.onCheckCoreUpdate(info.variant)
