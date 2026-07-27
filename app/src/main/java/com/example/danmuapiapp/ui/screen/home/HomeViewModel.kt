@@ -26,6 +26,7 @@ import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
+import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import com.example.danmuapiapp.ui.screen.home.support.resolveAutoCoreUpdatePrompt
@@ -81,6 +82,7 @@ class HomeViewModel @Inject constructor(
     val runtimeState = runtimeRepo.runtimeState
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
+    val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val coreDisplayNames = settingsRepo.coreDisplayNames
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
@@ -115,6 +117,8 @@ class HomeViewModel @Inject constructor(
     var isSwitchingCore by mutableStateOf(false)
         private set
     var isUpdatingCore by mutableStateOf(false)
+        private set
+    var isRepairingDependencies by mutableStateOf(false)
         private set
     var isCheckingCoreUpdate by mutableStateOf(false)
         private set
@@ -179,6 +183,10 @@ class HomeViewModel @Inject constructor(
         get() = appUpdateInstaller.uiState.downloadedApk
     val showInstallAppUpdateDialog: Boolean
         get() = appUpdateInstaller.uiState.showInstallDialog
+    val showDependencyRequiredPrompt: Boolean
+        get() = dependencyRepairController.showRequiredPrompt
+    val showDependencyRepairDialog: Boolean
+        get() = dependencyRepairController.showRepairDialog
 
     private val ignoredUpdateVersionMap = mutableMapOf<ApiVariant, String?>()
     private val suppressedAutoUpdatePromptVersionMap = mutableMapOf<ApiVariant, String?>()
@@ -193,6 +201,22 @@ class HomeViewModel @Inject constructor(
         appUpdateService = appUpdateService,
         postMessage = { appUpdateMessage = it }
     )
+    private var pendingRepairContinuation: PendingRepairContinuation? = null
+    private val dependencyRepairController = CoreDependencyRepairController(
+        scope = viewModelScope,
+        repository = coreRepo,
+        setOperating = { isRepairingDependencies = it },
+        postMessage = { appUpdateMessage = it },
+        onApplied = ::onHomeDependenciesApplied,
+        onDiscarded = { request ->
+            pendingRepairContinuation = null
+            if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                "已取消依赖修复，当前工作目录保持不变"
+            } else {
+                "已取消${variantLabel(request.variant)}${request.actionLabel}，原核心保持不变"
+            }
+        }
+    )
     private var pendingProxyAction: PendingProxyAction? = null
     private var cacheRefreshJob: Job? = null
     private var requestRecordRefreshJob: Job? = null
@@ -205,6 +229,12 @@ class HomeViewModel @Inject constructor(
         data class Install(val variant: ApiVariant) : PendingProxyAction
         data class Update(val variant: ApiVariant) : PendingProxyAction
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+        data object RepairDependenciesOnline : PendingProxyAction
+    }
+
+    private sealed interface PendingRepairContinuation {
+        data class InstallAndStart(val variant: ApiVariant) : PendingRepairContinuation
+        data class Update(val variant: ApiVariant) : PendingRepairContinuation
     }
 
     var isClearingCache by mutableStateOf(false)
@@ -437,7 +467,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun tryStartService() {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
         val variant = runtimeState.value.variant
         viewModelScope.launch {
             val ready = withContext(Dispatchers.IO) {
@@ -461,12 +491,12 @@ class HomeViewModel @Inject constructor(
     }
 
     fun openCoreDownloadDialog() {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
         showNoCoreDialog = true
     }
 
     fun installAndStart(variant: ApiVariant) {
-        if (isSwitchingCore || isUpdatingCore) return
+        if (isSwitchingCore || isUpdatingCore || isRepairingDependencies) return
         showNoCoreDialog = false
         if (!githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Install(variant)
@@ -483,21 +513,15 @@ class HomeViewModel @Inject constructor(
             coreRepo.installCore(variant).fold(
                 onSuccess = {
                     isInstallingCore = false
-                    runtimeRepo.updateVariant(variant)
-                    runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 安装成功，已切换为当前核心")
-                    val status = runtimeState.value.status
-                    if (status == ServiceStatus.Running) {
-                        runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用新核心...")
-                        runtimeRepo.restartService()
-                    } else {
-                        runtimeRepo.startService()
-                    }
+                    pendingRepairContinuation = null
+                    completeInstallAndStart(variant)
                 },
                 onFailure = { error ->
                     runtimeRepo.addLog(LogLevel.Error, "安装失败: ${error.message}")
                     isInstallingCore = false
                     if (error is CoreDependencyRepairRequiredException) {
-                        appUpdateMessage = "${variantLabel(variant)}安装待修复，请到“核心”页点击修复依赖"
+                        pendingRepairContinuation = PendingRepairContinuation.InstallAndStart(variant)
+                        appUpdateMessage = "${variantLabel(variant)}安装已暂停，等待修复依赖"
                     } else if (githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Install(variant)
                         openProxyPickerDialog()
@@ -515,7 +539,9 @@ class HomeViewModel @Inject constructor(
     }
 
     fun quickCheckCurrentCoreUpdate() {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isCheckingCoreUpdate) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore ||
+            isCheckingCoreUpdate || isRepairingDependencies
+        ) return
 
         resetCoreUpdateCheckDialogState()
         val variant = runtimeState.value.variant
@@ -594,7 +620,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun updateCurrentVariant(variant: ApiVariant) {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
         if (!githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Update(variant)
             openProxyPickerDialog()
@@ -609,17 +635,16 @@ class HomeViewModel @Inject constructor(
             runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
             coreRepo.updateCore(variant).fold(
                 onSuccess = {
-                    runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 更新成功")
-                    maybeRestartAfterCoreUpdate(variant)
-                    settingsRepo.setIgnoredUpdateVersion(variant, null)
-                    ignoredUpdateVersionMap[variant] = null
+                    pendingRepairContinuation = null
+                    completeCoreUpdate(variant)
                     isUpdatingCore = false
                 },
                 onFailure = { error ->
                     runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
                     isUpdatingCore = false
                     if (error is CoreDependencyRepairRequiredException) {
-                        appUpdateMessage = "${variantLabel(variant)}更新待修复，请到“核心”页点击修复依赖"
+                        pendingRepairContinuation = PendingRepairContinuation.Update(variant)
+                        appUpdateMessage = "${variantLabel(variant)}更新已暂停，等待修复依赖"
                     } else if (githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Update(variant)
                         openProxyPickerDialog()
@@ -636,6 +661,74 @@ class HomeViewModel @Inject constructor(
         runtimeRepo.addLog(LogLevel.Info, "核心已更新，正在重启服务以应用变更...")
         runtimeRepo.restartService()
     }
+
+    private fun completeInstallAndStart(variant: ApiVariant) {
+        runtimeRepo.updateVariant(variant)
+        runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 安装成功，已切换为当前核心")
+        val status = runtimeState.value.status
+        if (status == ServiceStatus.Running) {
+            runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用新核心...")
+            runtimeRepo.restartService()
+        } else {
+            runtimeRepo.startService()
+        }
+    }
+
+    private fun completeCoreUpdate(variant: ApiVariant) {
+        runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 更新成功")
+        maybeRestartAfterCoreUpdate(variant)
+        settingsRepo.setIgnoredUpdateVersion(variant, null)
+        ignoredUpdateVersionMap[variant] = null
+    }
+
+    private suspend fun onHomeDependenciesApplied(request: CoreDependencyRepairRequest): String {
+        val continuation = pendingRepairContinuation
+        pendingRepairContinuation = null
+        when (continuation) {
+            is PendingRepairContinuation.InstallAndStart -> {
+                if (continuation.variant == request.variant) {
+                    completeInstallAndStart(request.variant)
+                    return "${variantLabel(request.variant)}安装成功，服务正在启动"
+                }
+            }
+            is PendingRepairContinuation.Update -> {
+                if (continuation.variant == request.variant) {
+                    completeCoreUpdate(request.variant)
+                    return "${variantLabel(request.variant)}更新成功"
+                }
+            }
+            null -> Unit
+        }
+
+        coreRepo.refreshCoreInfo()
+        maybeRestartAfterCoreUpdate(request.variant)
+        return if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+            "当前工作目录依赖已修复"
+        } else {
+            "${variantLabel(request.variant)}${request.actionLabel}成功"
+        }
+    }
+
+    fun dismissDependencyRequiredPrompt() = dependencyRepairController.dismissRequiredPrompt()
+
+    fun openDependencyRepairDialog() = dependencyRepairController.openRepairDialog()
+
+    fun dismissDependencyRepairDialog() = dependencyRepairController.dismissRepairDialog()
+
+    fun repairPendingDependenciesOnline() {
+        if (githubProxyService.hasUserSelectedProxy()) {
+            dependencyRepairController.repairOnlineNow()
+        } else {
+            pendingProxyAction = PendingProxyAction.RepairDependenciesOnline
+            openProxyPickerDialog()
+        }
+    }
+
+    fun repairPendingDependenciesFromArchive(archiveUri: String) {
+        dependencyRepairController.repairFromArchive(archiveUri)
+    }
+
+    fun discardPendingCoreMutation() = dependencyRepairController.discardPendingMutation()
 
     fun openForegroundAppUpdateMethodDialog() {
         if (appUpdatePromptLatestVersion.isNullOrBlank()) return
@@ -750,7 +843,9 @@ class HomeViewModel @Inject constructor(
 
     fun applyPortQuick(port: Int) {
         val state = runtimeState.value
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isCheckingCoreUpdate) {
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore ||
+            isCheckingCoreUpdate || isRepairingDependencies
+        ) {
             postMessage("当前有运行任务，稍后再修改端口")
             return
         }
@@ -783,7 +878,9 @@ class HomeViewModel @Inject constructor(
 
     fun applyTokenQuick(token: String) {
         val state = runtimeState.value
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isCheckingCoreUpdate) {
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore ||
+            isCheckingCoreUpdate || isRepairingDependencies
+        ) {
             postMessage("当前有运行任务，稍后再修改 Token")
             return
         }
@@ -813,7 +910,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun toggleService() {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
         when (runtimeState.value.status) {
             ServiceStatus.Running,
             ServiceStatus.Starting -> stopService()
@@ -832,7 +929,9 @@ class HomeViewModel @Inject constructor(
     }
 
     fun switchRunModeQuick(target: RunMode) {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isCheckingCoreUpdate) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore ||
+            isCheckingCoreUpdate || isRepairingDependencies
+        ) return
         if (runtimeState.value.runMode == target) return
 
         viewModelScope.launch {
@@ -859,7 +958,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun switchVariant(variant: ApiVariant) {
-        if (isSwitchingCore || isInstallingCore || isUpdatingCore) return
+        if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
 
         val current = runtimeState.value
         if (variant == current.variant) {
@@ -1005,6 +1104,9 @@ class HomeViewModel @Inject constructor(
                     is PendingProxyAction.Install -> doInstallAndStart(action.variant)
                     is PendingProxyAction.Update -> doUpdateCurrentVariant(action.variant)
                     is PendingProxyAction.CheckUpdate -> doQuickCheckCurrentCoreUpdate(action.variant)
+                    PendingProxyAction.RepairDependenciesOnline -> {
+                        dependencyRepairController.repairOnlineNow()
+                    }
                 }
             }
         }

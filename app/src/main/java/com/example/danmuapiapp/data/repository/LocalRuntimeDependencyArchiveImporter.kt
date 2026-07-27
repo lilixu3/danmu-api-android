@@ -19,7 +19,7 @@ import java.util.zip.ZipInputStream
 
 internal object LocalRuntimeDependencyArchiveImporter {
     private const val MAX_WRAPPER_DEPTH = 2
-    private const val LOCAL_IMPORT_AUDIT_FILE = ".danmuapiapp-runtime-import.json"
+    internal const val LOCAL_IMPORT_AUDIT_FILE = ".danmuapiapp-runtime-import.json"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Serializable

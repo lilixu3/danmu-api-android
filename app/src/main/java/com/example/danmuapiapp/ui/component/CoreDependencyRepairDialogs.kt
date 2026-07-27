@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.component
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +23,53 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
+
+@Composable
+fun CoreDependencyRepairHost(
+    request: CoreDependencyRepairRequest?,
+    showRequiredPrompt: Boolean,
+    showRepairDialog: Boolean,
+    onOpenRepair: () -> Unit,
+    onDismissRequiredPrompt: () -> Unit,
+    onOnlineRepair: () -> Unit,
+    onRepairFromArchive: (String) -> Unit,
+    onCancelMutation: () -> Unit,
+    onDismissRepairDialog: () -> Unit
+) {
+    val archiveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { onRepairFromArchive(it.toString()) }
+    }
+    request ?: return
+
+    if (showRequiredPrompt) {
+        CoreDependencyRequiredDialog(
+            request = request,
+            onRepair = onOpenRepair,
+            onDismiss = onDismissRequiredPrompt
+        )
+    }
+    if (showRepairDialog) {
+        CoreDependencyRepairDialog(
+            request = request,
+            onOnlineRepair = onOnlineRepair,
+            onImportArchive = {
+                archiveLauncher.launch(
+                    arrayOf(
+                        "application/zip",
+                        "application/octet-stream",
+                        "application/x-zip-compressed",
+                        "*/*"
+                    )
+                )
+            },
+            onCancelMutation = onCancelMutation,
+            onDismiss = onDismissRepairDialog
+        )
+    }
+}
 
 @Composable
 fun CoreDependencyRequiredDialog(
@@ -33,10 +82,24 @@ fun CoreDependencyRequiredDialog(
         style = AppBottomSheetStyle.Confirm,
         tone = AppBottomSheetTone.Warning,
         icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = null) },
-        title = { Text("${request.actionLabel}需要补充依赖") },
+        title = {
+            Text(
+                if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                    "当前目录需要补充依赖"
+                } else {
+                    "${request.actionLabel}需要补充依赖"
+                }
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("候选核心尚未替换正式核心。修复并校验通过后，将自动继续${request.actionLabel}。")
+                Text(
+                    if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                        "当前工作目录中的核心依赖不完整。修复并校验通过后，将继续使用这个目录。"
+                    } else {
+                        "候选核心尚未替换正式核心。修复并校验通过后，将自动继续${request.actionLabel}。"
+                    }
+                )
                 Text(
                     "缺失依赖",
                     style = MaterialTheme.typography.titleSmall
@@ -76,7 +139,11 @@ fun CoreDependencyRepairDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "请选择依赖来源。仅修复当前候选核心，不会改动 App 公共 node_modules。",
+                    if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                        "请选择依赖来源。只修复当前工作目录中的核心依赖，不会复制或替换核心文件。"
+                    } else {
+                        "请选择依赖来源。仅修复当前候选核心，不会改动 App 公共 node_modules。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -117,7 +184,13 @@ fun CoreDependencyRepairDialog(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("取消此次${request.actionLabel}")
+                    Text(
+                        if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
+                            "取消修复"
+                        } else {
+                            "取消此次${request.actionLabel}"
+                        }
+                    )
                 }
             }
         },

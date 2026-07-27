@@ -3,11 +3,7 @@ package com.example.danmuapiapp.ui.screen.core
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
-import com.example.danmuapiapp.ui.component.CoreDependencyRepairDialog
-import com.example.danmuapiapp.ui.component.CoreDependencyRequiredDialog
-
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -55,11 +51,6 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
     val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val activeVariant = runtimeState.variant
-    val dependencyArchiveLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let { viewModel.repairPendingDependenciesFromArchive(it.toString()) }
-    }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
@@ -130,33 +121,17 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
         }
     }
 
-    pendingDependencyRepair?.let { request ->
-        if (viewModel.showDependencyRequiredPrompt) {
-            CoreDependencyRequiredDialog(
-                request = request,
-                onRepair = viewModel::openDependencyRepairDialog,
-                onDismiss = viewModel::dismissDependencyRequiredPrompt
-            )
-        }
-        if (viewModel.showDependencyRepairDialog) {
-            CoreDependencyRepairDialog(
-                request = request,
-                onOnlineRepair = viewModel::repairPendingDependenciesOnline,
-                onImportArchive = {
-                    dependencyArchiveLauncher.launch(
-                        arrayOf(
-                            "application/zip",
-                            "application/octet-stream",
-                            "application/x-zip-compressed",
-                            "*/*"
-                        )
-                    )
-                },
-                onCancelMutation = viewModel::discardPendingCoreMutation,
-                onDismiss = viewModel::dismissDependencyRepairDialog
-            )
-        }
-    }
+    CoreDependencyRepairHost(
+        request = pendingDependencyRepair,
+        showRequiredPrompt = viewModel.showDependencyRequiredPrompt,
+        showRepairDialog = viewModel.showDependencyRepairDialog,
+        onOpenRepair = viewModel::openDependencyRepairDialog,
+        onDismissRequiredPrompt = viewModel::dismissDependencyRequiredPrompt,
+        onOnlineRepair = viewModel::repairPendingDependenciesOnline,
+        onRepairFromArchive = viewModel::repairPendingDependenciesFromArchive,
+        onCancelMutation = viewModel::discardPendingCoreMutation,
+        onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
+    )
 
     if (viewModel.showUpdateDialog) {
         UpdateResultDialog(viewModel, coreDisplayNames)
