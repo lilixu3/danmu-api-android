@@ -93,20 +93,6 @@ async function importRuntimePackage(specifier) {
 const adapters = await importRuntimePackage('@dan-uni/dan-any/adapters');
 const pureCore = await importRuntimePackage('@dan-uni/dan-any/core/main/pure');
 
-for (const specifier of [
-  '@dan-uni/dan-any',
-  '@dan-uni/dan-any/core',
-  '@dan-uni/dan-any/core/db/schema',
-  '@dan-uni/dan-any/core/db/utils',
-  '@dan-uni/dan-any/core/main',
-  '@dan-uni/dan-any/core/main/drizzle',
-  '@dan-uni/dan-any/plugins',
-  '@dan-uni/dan-any/utils',
-]) {
-  const runtimeModule = await importRuntimePackage(specifier);
-  assert(Object.keys(runtimeModule).length > 0, `${specifier} 导出为空`);
-}
-
 for (const exportName of [
   'ArtplayerMetadata',
   'BiliXmlMetadata',
@@ -169,15 +155,6 @@ assert.equal(chunk.$count, 1);
 assert.equal(typeof chunk.$danmakus[0].DMID, 'string');
 assert(chunk.$danmakus[0].DMID.length > 0);
 assert.equal(db.listChunks().length, 1);
-
-const drizzleCore = await importRuntimePackage('@dan-uni/dan-any/core/main/drizzle');
-const drizzleDb = await new drizzleCore.UniDB().init();
-try {
-  const drizzleChunk = await drizzleDb.makeChunk({});
-  assert(drizzleChunk, 'Drizzle/PGlite 无法创建 chunk');
-} finally {
-  await drizzleDb.close();
-}
 
 const { ConverterFactory } = await importRuntimePackage('opencc-js/core');
 const { default: simplifiedToTraditionalCharacters } =

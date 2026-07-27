@@ -1,2 +1,0 @@
-import{j as e}from"../chunk-QY3QWFKW.js";e();var t=async(n,s)=>({bundlePath:new URL("../dict_xsyn.tar.gz",import.meta.url)}),a={name:"dict_xsyn",setup:t};export{a as dict_xsyn};
-//# sourceMappingURL=dict_xsyn.js.map
