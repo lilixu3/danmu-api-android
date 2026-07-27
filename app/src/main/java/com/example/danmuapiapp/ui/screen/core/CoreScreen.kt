@@ -3,7 +3,11 @@ package com.example.danmuapiapp.ui.screen.core
 import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
 import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
 import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.CoreDependencyRepairDialog
+import com.example.danmuapiapp.ui.component.CoreDependencyRequiredDialog
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -25,6 +29,7 @@ import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubRelease
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
@@ -43,12 +48,18 @@ import java.util.Locale
 fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
     val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val activeVariant = runtimeState.variant
+    val dependencyArchiveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.repairPendingDependenciesFromArchive(it.toString()) }
+    }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
@@ -112,9 +123,38 @@ fun CoreScreen(viewModel: CoreViewModel = hiltViewModel()) {
                     downloadProgress = downloadProgress,
                     customRepo = customRepo,
                     customRepoBranch = customRepoBranch,
-                    coreDisplayNames = coreDisplayNames
+                    coreDisplayNames = coreDisplayNames,
+                    pendingDependencyRepair = pendingDependencyRepair
                 )
             }
+        }
+    }
+
+    pendingDependencyRepair?.let { request ->
+        if (viewModel.showDependencyRequiredPrompt) {
+            CoreDependencyRequiredDialog(
+                request = request,
+                onRepair = viewModel::openDependencyRepairDialog,
+                onDismiss = viewModel::dismissDependencyRequiredPrompt
+            )
+        }
+        if (viewModel.showDependencyRepairDialog) {
+            CoreDependencyRepairDialog(
+                request = request,
+                onOnlineRepair = viewModel::repairPendingDependenciesOnline,
+                onImportArchive = {
+                    dependencyArchiveLauncher.launch(
+                        arrayOf(
+                            "application/zip",
+                            "application/octet-stream",
+                            "application/x-zip-compressed",
+                            "*/*"
+                        )
+                    )
+                },
+                onCancelMutation = viewModel::discardPendingCoreMutation,
+                onDismiss = viewModel::dismissDependencyRepairDialog
+            )
         }
     }
 
@@ -165,7 +205,8 @@ private fun CoreVariantCard(
     downloadProgress: CoreDownloadProgress,
     customRepo: String,
     customRepoBranch: String,
-    coreDisplayNames: CoreVariantDisplayNames
+    coreDisplayNames: CoreVariantDisplayNames,
+    pendingDependencyRepair: CoreDependencyRepairRequest?
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val showGearMenu = vm.showGearMenu == info.variant
@@ -174,6 +215,7 @@ private fun CoreVariantCard(
     val variantLabel = coreDisplayNames.resolve(info.variant)
     val variantSource = resolveCoreVariantSourceText(info.variant, customRepo, customRepoBranch)
     val sourceUnknownLegacy = info.sourceStatus == CoreSourceStatus.UnknownLegacy
+    val hasPendingDependencyRepair = pendingDependencyRepair?.variant == info.variant
 
     GlassCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -223,12 +265,14 @@ private fun CoreVariantCard(
             }
             Surface(shape = RoundedCornerShape(8.dp),
                 color = when {
+                    hasPendingDependencyRepair -> MaterialTheme.colorScheme.secondaryContainer
                     info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
                     info.isInstalled -> MaterialTheme.colorScheme.primaryContainer
                     else -> MaterialTheme.colorScheme.surfaceContainerHighest
                 }) {
                 Text(
                     text = when {
+                        hasPendingDependencyRepair -> "${pendingDependencyRepair.actionLabel}待修复"
                         info.sourceMismatch -> "需替换"
                         sourceUnknownLegacy -> "需刷新"
                         info.hasVersionUpdate -> "有更新"
@@ -237,6 +281,7 @@ private fun CoreVariantCard(
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = when {
+                        hasPendingDependencyRepair -> MaterialTheme.colorScheme.onSecondaryContainer
                         info.needsAttention -> MaterialTheme.colorScheme.primary
                         info.isInstalled -> MaterialTheme.colorScheme.onPrimaryContainer
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -283,7 +328,20 @@ private fun CoreVariantCard(
                 }
             }
 
-            if (!info.isInstalled) {
+            if (hasPendingDependencyRepair) {
+                Button(
+                    onClick = vm::openDependencyRepairDialog,
+                    enabled = !vm.isOperating,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                ) {
+                    Icon(Icons.Rounded.Build, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("修复依赖")
+                }
+            } else if (!info.isInstalled) {
                 val needsCustomSource = info.variant == ApiVariant.Custom && variantSource.isBlank()
                 Button(
                     onClick = {

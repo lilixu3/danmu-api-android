@@ -30,6 +30,7 @@ class CoreViewModel @Inject constructor(
 
     val coreInfoList = coreRepo.coreInfoList
     val downloadProgress = coreRepo.downloadProgress
+    val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val runtimeState = runtimeRepo.runtimeState
     val coreDisplayNames = settingsRepo.coreDisplayNames
     val customCoreSource = settingsRepo.customCoreSource
@@ -40,6 +41,10 @@ class CoreViewModel @Inject constructor(
     var isOperating by mutableStateOf(false)
         private set
     var operationMessage by mutableStateOf<String?>(null)
+        private set
+    var showDependencyRequiredPrompt by mutableStateOf(false)
+        private set
+    var showDependencyRepairDialog by mutableStateOf(false)
         private set
     var showVariantSettingsDialog by mutableStateOf<ApiVariant?>(null)
         private set
@@ -76,6 +81,20 @@ class CoreViewModel @Inject constructor(
     init {
         coreRepo.refreshCoreInfo()
         observeRuntimeDrivenCoreRefresh()
+        observePendingDependencyRepair()
+    }
+
+    private fun observePendingDependencyRepair() {
+        viewModelScope.launch {
+            pendingDependencyRepair.collect { request ->
+                if (request == null) {
+                    showDependencyRequiredPrompt = false
+                    showDependencyRepairDialog = false
+                } else if (!showDependencyRepairDialog) {
+                    showDependencyRequiredPrompt = true
+                }
+            }
+        }
     }
 
     private fun observeRuntimeDrivenCoreRefresh() {
@@ -96,6 +115,7 @@ class CoreViewModel @Inject constructor(
         data class Reinstall(val variant: ApiVariant) : PendingProxyAction
         data class LoadRollbackHistory(val variant: ApiVariant) : PendingProxyAction
         data class Rollback(val variant: ApiVariant, val release: GithubRelease) : PendingProxyAction
+        data object RepairDependenciesOnline : PendingProxyAction
     }
 
     private enum class PostApplyRestartResult {
@@ -286,6 +306,94 @@ class CoreViewModel @Inject constructor(
         operationMessage = null
     }
 
+    fun dismissDependencyRequiredPrompt() {
+        showDependencyRequiredPrompt = false
+    }
+
+    fun openDependencyRepairDialog() {
+        if (pendingDependencyRepair.value == null) return
+        showDependencyRequiredPrompt = false
+        showDependencyRepairDialog = true
+    }
+
+    fun dismissDependencyRepairDialog() {
+        showDependencyRepairDialog = false
+    }
+
+    fun repairPendingDependenciesOnline() {
+        requireProxyAndRun(PendingProxyAction.RepairDependenciesOnline)
+    }
+
+    private fun doRepairPendingDependenciesOnline() {
+        performPendingDependencyRepair(
+            progressMessage = "正在在线修复运行时依赖...",
+            repairBlock = coreRepo::repairPendingDependenciesOnline
+        )
+    }
+
+    fun repairPendingDependenciesFromArchive(archiveUri: String) {
+        performPendingDependencyRepair(
+            progressMessage = "正在导入并校验运行时依赖...",
+            repairBlock = { coreRepo.repairPendingDependenciesFromArchive(archiveUri) }
+        )
+    }
+
+    private fun performPendingDependencyRepair(
+        progressMessage: String,
+        repairBlock: suspend () -> Result<Unit>
+    ) {
+        val request = pendingDependencyRepair.value ?: return
+        showDependencyRequiredPrompt = false
+        showDependencyRepairDialog = false
+        viewModelScope.launch {
+            isOperating = true
+            operationMessage = progressMessage
+            repairBlock().fold(
+                onSuccess = {
+                    operationMessage = "依赖校验通过，正在继续${request.actionLabel}..."
+                    applyRepairedPendingCore(request)
+                },
+                onFailure = { error ->
+                    operationMessage = "依赖修复失败：${error.message ?: "未知错误"}"
+                    showDependencyRepairDialog = pendingDependencyRepair.value != null
+                }
+            )
+            isOperating = false
+        }
+    }
+
+    private suspend fun applyRepairedPendingCore(request: CoreDependencyRepairRequest) {
+        coreRepo.applyPendingCoreMutation().fold(
+            onSuccess = {
+                val restartPlan = decideCoreApplyPlan(runtimeState.value, request.variant)
+                val restartResult = if (restartPlan.shouldRestartServiceAfterApply) {
+                    restartRuntimeAfterCoreMutation(request.variant)
+                } else {
+                    PostApplyRestartResult.None
+                }
+                val success = "${variantLabel(request.variant)}${request.actionLabel}成功"
+                operationMessage = when (restartResult) {
+                    PostApplyRestartResult.Restarting -> "$success，服务正在重启以应用变更"
+                    PostApplyRestartResult.StopTimeout -> "$success，但服务自动重启前停止超时，请稍后手动重启服务"
+                    PostApplyRestartResult.None -> success
+                }
+            },
+            onFailure = { error ->
+                operationMessage = "${request.actionLabel}失败：${error.message ?: "未知错误"}"
+            }
+        )
+    }
+
+    fun discardPendingCoreMutation() {
+        val request = pendingDependencyRepair.value ?: return
+        showDependencyRequiredPrompt = false
+        showDependencyRepairDialog = false
+        viewModelScope.launch {
+            coreRepo.discardPendingCoreMutation()
+            operationMessage = "已取消${variantLabel(request.variant)}${request.actionLabel}，原核心保持不变"
+        }
+    }
+
     private suspend fun performCoreMutation(
         variant: ApiVariant,
         actionMessage: String,
@@ -331,9 +439,14 @@ class CoreViewModel @Inject constructor(
                     }
                 }
             },
-            onFailure = {
-                operationMessage = "$failurePrefix: ${it.message}"
-                promptProxyReselectIfNeeded(pendingAction)
+            onFailure = { error ->
+                if (error is CoreDependencyRepairRequiredException) {
+                    operationMessage = "${variantLabel(variant)}${error.request.actionLabel}已暂停，等待修复依赖"
+                    showDependencyRequiredPrompt = true
+                } else {
+                    operationMessage = "$failurePrefix: ${error.message}"
+                    promptProxyReselectIfNeeded(pendingAction)
+                }
             }
         )
         isOperating = false
@@ -419,6 +532,7 @@ class CoreViewModel @Inject constructor(
             is PendingProxyAction.Reinstall -> doReinstallCore(action.variant)
             is PendingProxyAction.LoadRollbackHistory -> loadRollbackHistory(action.variant)
             is PendingProxyAction.Rollback -> doRollbackTo(action.variant, action.release)
+            PendingProxyAction.RepairDependenciesOnline -> doRepairPendingDependenciesOnline()
         }
     }
 

@@ -468,41 +468,51 @@ object NodeProjectManager {
     }
 
     fun collectMissingRuntimeDepsForCore(coreDir: File, runtimeNodeModulesDir: File): List<String> {
-        val dependencies = readCoreDependencies(coreDir)
+        val dependencies = runtimeDependenciesForCore(coreDir)
         if (dependencies.isEmpty()) return emptyList()
+        val coreNodeModulesDir = File(coreDir, "node_modules")
         return dependencies.mapNotNull { (name, version) ->
-            val pkgFile = File(runtimeNodeModulesDir, "$name/package.json")
-            val installedVersion = if (pkgFile.isFile) {
-                runCatching {
-                    json.parseToJsonElement(pkgFile.readText())
-                        .jsonObject["version"]
-                        ?.jsonPrimitive
-                        ?.content
-                        ?.trim()
-                }.getOrNull().orEmpty()
-            } else {
-                ""
-            }
-            val expectedVersion = version.removePrefix("^").removePrefix("~")
+            val installedVersion = sequenceOf(coreNodeModulesDir, runtimeNodeModulesDir)
+                .mapNotNull { nodeModulesDir ->
+                    val pkgFile = File(nodeModulesDir, "$name/package.json")
+                    if (!pkgFile.isFile) return@mapNotNull null
+                    runCatching {
+                        json.parseToJsonElement(pkgFile.readText())
+                            .jsonObject["version"]
+                            ?.jsonPrimitive
+                            ?.content
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                    }.getOrNull()
+                }
+                .firstOrNull { installed ->
+                    NpmVersionRange.isSatisfied(version, installed)
+                }
             when {
-                installedVersion.isNotBlank() && installedVersion == expectedVersion -> null
-                name in coreDependenciesManagedOutsideBaseRuntime -> null
+                installedVersion != null -> null
                 else -> "$name@$version"
             }
         }.sorted()
     }
+
+    fun runtimeDependenciesForCore(coreDir: File): Map<String, String> =
+        readCoreDependencies(coreDir).filterKeys { name ->
+            name !in coreDependenciesManagedOutsideBaseRuntime
+        }
 
     fun readCoreDependencies(coreDir: File): Map<String, String> {
         val pkgJson = File(coreDir, "package.json")
         if (!pkgJson.exists() || !pkgJson.isFile) return emptyMap()
         return runCatching {
             val obj = json.parseToJsonElement(pkgJson.readText()).jsonObject
-            val dependencies = obj["dependencies"] as? JsonObject ?: return@runCatching emptyMap()
             buildMap {
-                dependencies.forEach { (key, value) ->
-                    val version = (value as? JsonPrimitive)?.content?.trim().orEmpty()
-                    if (key.isNotBlank() && version.isNotBlank()) {
-                        put(key, version)
+                listOf("dependencies", "optionalDependencies").forEach { field ->
+                    val dependencies = obj[field] as? JsonObject ?: return@forEach
+                    dependencies.forEach { (key, value) ->
+                        val version = (value as? JsonPrimitive)?.content?.trim().orEmpty()
+                        if (key.isNotBlank() && version.isNotBlank()) {
+                            put(key, version)
+                        }
                     }
                 }
             }

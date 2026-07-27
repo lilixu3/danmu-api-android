@@ -10,6 +10,7 @@ import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequiredException
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.resolveCustomCoreConfig
@@ -222,9 +223,13 @@ class StartupSetupViewModel @Inject constructor(
                     coreRepo.refreshCoreInfo()
                     operationMessage = "${variantLabel(variant)} 已准备好"
                 },
-                onFailure = {
-                    operationMessage = "下载失败：${it.message ?: "请稍后重试"}"
-                    if (githubProxyService.isUsingProxy()) {
+                onFailure = { error ->
+                    operationMessage = if (error is CoreDependencyRepairRequiredException) {
+                        "${variantLabel(variant)}安装待修复；可暂时跳过，进入“核心”页修复依赖"
+                    } else {
+                        "下载失败：${error.message ?: "请稍后重试"}"
+                    }
+                    if (error !is CoreDependencyRepairRequiredException && githubProxyService.isUsingProxy()) {
                         pendingInstallVariant = variant
                         proxyPickerController.open()
                     }

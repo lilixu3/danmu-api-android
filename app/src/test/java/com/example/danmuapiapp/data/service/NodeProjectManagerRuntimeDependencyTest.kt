@@ -193,4 +193,46 @@ class NodeProjectManagerRuntimeDependencyTest {
             nodeModulesDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `核心本地 node_modules 应优先于公共运行目录并支持 caret 范围`() {
+        val root = Files.createTempDirectory("core-runtime-deps-local-pack").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            val runtimeNodeModulesDir = root.resolve("node_modules").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """{"dependencies":{"future-runtime-package":"^2.0.0"}}"""
+            )
+            coreDir.resolve("node_modules/future-runtime-package").mkdirs()
+            coreDir.resolve("node_modules/future-runtime-package/package.json").writeText(
+                """{"name":"future-runtime-package","version":"2.4.1"}"""
+            )
+
+            assertEquals(
+                emptyList<String>(),
+                NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `optionalDependencies 也参与核心运行时依赖检查`() {
+        val root = Files.createTempDirectory("core-runtime-deps-optional").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            val runtimeNodeModulesDir = root.resolve("node_modules").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """{"optionalDependencies":{"future-optional":"^1.0.0"}}"""
+            )
+
+            assertEquals(
+                listOf("future-optional@^1.0.0"),
+                NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

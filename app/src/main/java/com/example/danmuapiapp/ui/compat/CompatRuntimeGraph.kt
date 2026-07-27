@@ -5,6 +5,7 @@ import android.content.Context
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.repository.CoreRepositoryImpl
 import com.example.danmuapiapp.data.repository.EnvConfigRepositoryImpl
+import com.example.danmuapiapp.data.repository.RuntimeDependencyPackManager
 import com.example.danmuapiapp.data.repository.RuntimeRepositoryImpl
 import com.example.danmuapiapp.data.repository.SettingsRepositoryImpl
 import com.example.danmuapiapp.data.service.AppUpdateService
@@ -40,6 +41,12 @@ object CompatRuntimeGraph {
         val githubProxyService = GithubProxyService(context, httpClient)
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)
+        val runtimeDependencyPackManager = RuntimeDependencyPackManager(
+            context = context,
+            httpClient = httpClient,
+            githubRemoteService = githubRemoteService,
+            githubProxyService = githubProxyService
+        )
         val runtimeRepository = RuntimeRepositoryImpl(
             context = context,
             settingsRepository = settingsRepository,
@@ -50,7 +57,8 @@ object CompatRuntimeGraph {
             httpClient = httpClient,
             githubRemoteService = githubRemoteService,
             githubProxyService = githubProxyService,
-            settingsRepository = settingsRepository
+            settingsRepository = settingsRepository,
+            runtimeDependencyPackManager = runtimeDependencyPackManager
         )
         val appUpdateService = AppUpdateService(
             context = context,

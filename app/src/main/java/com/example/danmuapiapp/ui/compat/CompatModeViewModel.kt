@@ -13,6 +13,7 @@ import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
+import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequiredException
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubProxyOption
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -293,9 +294,13 @@ class CompatModeViewModel(
                         emitEvent("${resolveVariantLabel(variant)} 下载完成")
                     }
                 },
-                onFailure = {
-                    emitEvent("${resolveVariantLabel(variant)} 下载失败：${it.message ?: "未知错误"}")
-                    if (graph.githubProxyService.isUsingProxy()) {
+                onFailure = { error ->
+                    if (error is CoreDependencyRepairRequiredException) {
+                        emitEvent("${resolveVariantLabel(variant)}安装待修复，请在普通界面的“核心”页完成修复")
+                    } else {
+                        emitEvent("${resolveVariantLabel(variant)} 下载失败：${error.message ?: "未知错误"}")
+                    }
+                    if (error !is CoreDependencyRepairRequiredException && graph.githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Install(variant)
                         proxyPickerController.open()
                     }
@@ -328,9 +333,13 @@ class CompatModeViewModel(
                         emitEvent("${resolveVariantLabel(variant)} 更新完成")
                     }
                 },
-                onFailure = {
-                    emitEvent("${resolveVariantLabel(variant)} 更新失败：${it.message ?: "未知错误"}")
-                    if (graph.githubProxyService.isUsingProxy()) {
+                onFailure = { error ->
+                    if (error is CoreDependencyRepairRequiredException) {
+                        emitEvent("${resolveVariantLabel(variant)}更新待修复，请在普通界面的“核心”页完成修复")
+                    } else {
+                        emitEvent("${resolveVariantLabel(variant)} 更新失败：${error.message ?: "未知错误"}")
+                    }
+                    if (error !is CoreDependencyRepairRequiredException && graph.githubProxyService.isUsingProxy()) {
                         pendingProxyAction = PendingProxyAction.Update(variant)
                         proxyPickerController.open()
                     }
