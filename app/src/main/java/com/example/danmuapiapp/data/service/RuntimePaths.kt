@@ -9,6 +9,7 @@ import android.provider.DocumentsContract
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.net.toUri
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
 import android.Manifest
@@ -21,6 +22,9 @@ object RuntimePaths {
     private const val PREFS_WORK_DIR = "danmu_work_dir"
     private const val KEY_CUSTOM_BASE_PATH = "custom_path"
     private const val KEY_CUSTOM_BASE_URI = "custom_uri"
+    private const val PREFS_RUNTIME = "runtime"
+    private const val PREFS_LEGACY_RUNTIME_VARIANT = "danmu_api_variant"
+    private const val KEY_RUNTIME_VARIANT = "variant"
     private const val ROOT_RUNTIME_BASE = "/data/adb/danmuapi_runtime"
 
     data class WorkDirInfo(
@@ -155,6 +159,7 @@ object RuntimePaths {
 
         val oldCanonical = runCatching { oldBase.canonicalFile }.getOrElse { oldBase }
         val sameDir = oldCanonical == targetCanonical
+        val selectedVariantKey = selectedRuntimeVariantKey(context, oldBase)
         if (sameDir) {
             if (shouldUseDefault && oldCustom != null) {
                 clearCustomBasePath(context)
@@ -173,7 +178,11 @@ object RuntimePaths {
             }
 
             if (!sameDir) {
-                migrateNodeProjectData(oldBase = oldBase, newBase = targetCanonical)
+                migrateSelectedCoreAndConfig(
+                    oldBase = oldBase,
+                    newBase = targetCanonical,
+                    selectedVariantKey = selectedVariantKey
+                )
             }
 
             ApplyResult(true, if (shouldUseDefault) "已恢复为默认目录" else "已切换工作目录")
@@ -272,7 +281,11 @@ object RuntimePaths {
         return runCatching { dir.mkdirs() }.getOrDefault(false) && dir.isDirectory && dir.canWrite()
     }
 
-    private fun migrateNodeProjectData(oldBase: File, newBase: File) {
+    internal fun migrateSelectedCoreAndConfig(
+        oldBase: File,
+        newBase: File,
+        selectedVariantKey: String
+    ) {
         val oldRoot = File(oldBase, "nodejs-project")
         if (!oldRoot.exists()) return
 
@@ -280,21 +293,63 @@ object RuntimePaths {
         if (!newRoot.exists()) {
             runCatching { newRoot.mkdirs() }
         }
-        runCatching { File(newRoot, ".cache").mkdirs() }
 
         copyDirMerge(File(oldRoot, "config"), File(newRoot, "config"))
-        copyDirMerge(File(oldRoot, "logs"), File(newRoot, "logs"))
-        copyDirMerge(File(oldRoot, ".cache"), File(newRoot, ".cache"))
 
-        listOf("danmu_api_stable", "danmu_api_dev", "danmu_api_custom").forEach { name ->
-            val src = File(oldRoot, name)
-            val dst = File(newRoot, name)
-            if (!src.exists()) return@forEach
-            val dstHasWorker = File(dst, "worker.js").exists()
-            if (!dst.exists() || !dstHasWorker) {
-                runCatching { if (dst.exists()) dst.deleteRecursively() }
-                runCatching { src.copyRecursively(dst, overwrite = true) }
+        // 工作目录保持独立，只带走当前选中的核心，不迁移历史日志、缓存或备用核心。
+        val coreName = "danmu_api_${normalizeRuntimeVariantKey(selectedVariantKey)}"
+        val src = File(oldRoot, coreName)
+        val dst = File(newRoot, coreName)
+        if (src.exists() && !File(dst, "worker.js").exists()) {
+            runCatching { if (dst.exists()) dst.deleteRecursively() }
+            runCatching { src.copyRecursively(dst, overwrite = true) }
+        }
+    }
+
+    private fun selectedRuntimeVariantKey(context: Context, oldBase: File): String {
+        val runtimePrefs = context.getSharedPreferences(PREFS_RUNTIME, Context.MODE_PRIVATE)
+        val legacyPrefs = context.getSharedPreferences(PREFS_LEGACY_RUNTIME_VARIANT, Context.MODE_PRIVATE)
+        val envFile = File(oldBase, "nodejs-project/config/.env")
+        val envVariant = runCatching {
+            if (!envFile.exists() || !envFile.isFile) {
+                null
+            } else {
+                DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["DANMU_API_VARIANT"]
             }
+        }.getOrNull()
+
+        return resolveSelectedRuntimeVariantKey(
+            runtimeVariant = if (runtimePrefs.contains(KEY_RUNTIME_VARIANT)) {
+                runtimePrefs.safeGetString(KEY_RUNTIME_VARIANT)
+            } else {
+                null
+            },
+            legacyVariant = legacyPrefs.safeGetString(KEY_RUNTIME_VARIANT),
+            envVariant = envVariant
+        )
+    }
+
+    internal fun resolveSelectedRuntimeVariantKey(
+        runtimeVariant: String?,
+        legacyVariant: String?,
+        envVariant: String?
+    ): String {
+        return sequenceOf(runtimeVariant, legacyVariant, envVariant)
+            .mapNotNull(::normalizeRuntimeVariantKeyOrNull)
+            .firstOrNull()
+            ?: "stable"
+    }
+
+    private fun normalizeRuntimeVariantKey(raw: String?): String {
+        return normalizeRuntimeVariantKeyOrNull(raw) ?: "stable"
+    }
+
+    private fun normalizeRuntimeVariantKeyOrNull(raw: String?): String? {
+        return when (raw?.trim()?.lowercase()) {
+            "stable" -> "stable"
+            "dev", "develop", "development" -> "dev"
+            "custom" -> "custom"
+            else -> null
         }
     }
 
