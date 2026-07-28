@@ -528,7 +528,10 @@ class CompatModeViewModel(
     ): String {
         graph.coreRepository.refreshCoreInfo()
         val state = _uiState.value.runtimeState
-        return if (state.variant == request.variant && state.status == ServiceStatus.Running) {
+        return if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
+            graph.runtimeRepository.startService()
+            "${resolveVariantLabel(request.variant)}依赖已修复，服务正在启动"
+        } else if (state.variant == request.variant && state.status == ServiceStatus.Running) {
             graph.runtimeRepository.restartService()
             "${resolveVariantLabel(request.variant)}${request.actionLabel}成功，正在重启服务"
         } else {

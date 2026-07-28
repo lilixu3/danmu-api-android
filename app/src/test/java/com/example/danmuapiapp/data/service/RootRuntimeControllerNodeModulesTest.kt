@@ -10,6 +10,126 @@ import org.junit.Test
 class RootRuntimeControllerNodeModulesTest {
 
     @Test
+    fun `Root 核心同步完整校验后原子替换旧目录`() {
+        val tempDir = Files.createTempDirectory("root-core-atomic-sync").toFile()
+        try {
+            val source = tempDir.resolve("source").apply { mkdirs() }
+            val destination = tempDir.resolve("destination").apply { mkdirs() }
+            source.resolve("worker.js").writeText("new-worker\n")
+            source.resolve("configs").mkdirs()
+            source.resolve("configs/globals.js").writeText("new-globals\n")
+            source.resolve("node_modules/pkg").mkdirs()
+            source.resolve("node_modules/pkg/index.js").writeText("new-dependency\n")
+            destination.resolve("worker.js").writeText("old-worker\n")
+            destination.resolve("old-only.txt").writeText("old\n")
+
+            val script = RootRuntimeController.buildAtomicCoreSyncShell(
+                sourcePath = source.absolutePath,
+                destinationPath = destination.absolutePath,
+                operationToken = "test"
+            )
+
+            assertEquals(0, runShell(script))
+            assertEquals("new-worker\n", destination.resolve("worker.js").readText())
+            assertEquals("new-dependency\n", destination.resolve("node_modules/pkg/index.js").readText())
+            assertFalse(destination.resolve("old-only.txt").exists())
+            assertFalse(tempDir.listFiles().orEmpty().any { it.name.contains("backup-test") })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Root 启动快检会同时识别共享依赖和核心私有依赖`() {
+        val tempDir = Files.createTempDirectory("root-dependency-probe").toFile()
+        try {
+            val project = tempDir.resolve("nodejs-project")
+            val core = project.resolve("danmu_api_stable")
+            core.mkdirs()
+            core.resolve(NodeProjectManager.CORE_RUNTIME_REQUIREMENTS_FILE).writeText(
+                "shared-dep\n@scope/private-dep\n"
+            )
+            project.resolve("node_modules/shared-dep").mkdirs()
+            project.resolve("node_modules/shared-dep/package.json").writeText("{}\n")
+            core.resolve("node_modules/@scope/private-dep").mkdirs()
+            core.resolve("node_modules/@scope/private-dep/package.json").writeText("{}\n")
+
+            val script = RootRuntimeController.buildRootRuntimeDependencyProbeShell(
+                rootProjectPath = project.absolutePath,
+                variantKey = "stable"
+            )
+
+            assertEquals(0, runShell(script))
+            core.resolve("node_modules/@scope/private-dep/package.json").delete()
+            assertTrue(runShell(script) != 0)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Root 核心候选校验失败时保留旧目录`() {
+        val tempDir = Files.createTempDirectory("root-core-atomic-failure").toFile()
+        try {
+            val source = tempDir.resolve("source").apply { mkdirs() }
+            val destination = tempDir.resolve("destination").apply { mkdirs() }
+            source.resolve("not-worker.js").writeText("invalid\n")
+            destination.resolve("worker.js").writeText("old-worker\n")
+
+            val script = RootRuntimeController.buildAtomicCoreSyncShell(
+                sourcePath = source.absolutePath,
+                destinationPath = destination.absolutePath,
+                operationToken = "test"
+            )
+
+            assertTrue(runShell(script) != 0)
+            assertEquals("old-worker\n", destination.resolve("worker.js").readText())
+            assertFalse(tempDir.listFiles().orEmpty().any { it.name.contains(".new-test") })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Root 依赖同步写入指纹并在后续启动走快检`() {
+        val tempDir = Files.createTempDirectory("root-node-modules-fingerprint").toFile()
+        try {
+            val source = tempDir.resolve("source").apply { mkdirs() }
+            val destination = tempDir.resolve("destination").apply { mkdirs() }
+            source.resolve("pkg").mkdirs()
+            source.resolve("pkg/package.json").writeText("{\"version\":\"2.0.0\"}\n")
+            source.resolve("pkg/index.js").writeText("source\n")
+            destination.resolve("pkg").mkdirs()
+            destination.resolve("pkg/package.json").writeText("{\"version\":\"1.0.0\"}\n")
+
+            val first = RootRuntimeController.buildAtomicNodeModulesSyncShell(
+                sourcePath = source.absolutePath,
+                destinationPath = destination.absolutePath,
+                fingerprint = "fingerprint-v1",
+                operationToken = "first"
+            )
+            assertEquals(0, runShell(first))
+            assertEquals("source\n", destination.resolve("pkg/index.js").readText())
+            assertEquals(
+                "fingerprint-v1\n",
+                destination.resolve(".danmuapiapp-sync-fingerprint").readText()
+            )
+
+            source.resolve("pkg/index.js").writeText("changed-with-same-fingerprint\n")
+            val second = RootRuntimeController.buildAtomicNodeModulesSyncShell(
+                sourcePath = source.absolutePath,
+                destinationPath = destination.absolutePath,
+                fingerprint = "fingerprint-v1",
+                operationToken = "second"
+            )
+            assertEquals(0, runShell(second))
+            assertEquals("source\n", destination.resolve("pkg/index.js").readText())
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `Root node_modules integrity probe discovers packages from source tree`() {
         val script = RootRuntimeController.buildNodeModuleIntegrityProbeShell(
             srcNodeModulesVar = "SRC_NM",

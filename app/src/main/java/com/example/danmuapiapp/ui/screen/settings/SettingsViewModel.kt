@@ -714,13 +714,20 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun applyWorkDirPath(inputPath: String) {
+    fun applyWorkDirPath(inputPath: String, migrateSelectedCore: Boolean = false) {
         val path = inputPath.trim().ifBlank { null }
-        applyWorkDirInternal(path)
+        applyWorkDirInternal(
+            targetPath = path,
+            switchMode = if (migrateSelectedCore) {
+                RuntimePaths.WorkDirSwitchMode.MigrateSelectedCore
+            } else {
+                RuntimePaths.WorkDirSwitchMode.SwitchOnly
+            }
+        )
     }
 
     fun restoreDefaultWorkDir() {
-        applyWorkDirInternal(null)
+        applyWorkDirInternal(null, RuntimePaths.WorkDirSwitchMode.SwitchOnly)
     }
 
     fun applyWorkDirFromTreeUri(uri: Uri?) {
@@ -904,12 +911,15 @@ class SettingsViewModel @Inject constructor(
         operationMessage = message
     }
 
-    private fun applyWorkDirInternal(targetPath: String?) {
+    private fun applyWorkDirInternal(
+        targetPath: String?,
+        switchMode: RuntimePaths.WorkDirSwitchMode
+    ) {
         if (isApplyingWorkDir) return
         viewModelScope.launch {
             isApplyingWorkDir = true
             val result = withContext(Dispatchers.IO) {
-                RuntimePaths.applyCustomBaseDir(context, targetPath)
+                RuntimePaths.applyCustomBaseDir(context, targetPath, switchMode)
             }
             if (result.ok) {
                 val previousVariant = runtimeState.value.variant
@@ -921,12 +931,11 @@ class SettingsViewModel @Inject constructor(
                 }
                 withContext(Dispatchers.IO) {
                     runCatching {
-                        val projectDir = NodeProjectManager.ensureProjectExtracted(
-                            context,
-                            RuntimePaths.normalProjectDir(context)
-                        )
+                        val projectDir = RuntimePaths.normalProjectDir(context)
                         resolvedVariant = syncRuntimeVariantFromEnv(projectDir)
-                        NodeProjectManager.writeRuntimeEnv(context, projectDir)
+                        if (NodeProjectManager.hasProjectEntry(projectDir)) {
+                            NodeProjectManager.writeRuntimeEnv(context, projectDir)
+                        }
                     }
                 }
                 coreRepo.refreshCoreInfo()
@@ -937,7 +946,6 @@ class SettingsViewModel @Inject constructor(
                     if (selectedVariant != null) {
                         coreRepo.prepareInstalledCoreDependencyRepair(selectedVariant)
                     } else {
-                        coreRepo.discardPendingCoreMutation()
                         null
                     }
                 }
@@ -995,7 +1003,8 @@ class SettingsViewModel @Inject constructor(
                     }
                 } else {
                     if (runtimeState.value.status == ServiceStatus.Running && selectedVariant == null) {
-                        runtimeRepo.addLog(LogLevel.Warn, "工作目录已切换，但新目录没有可用核心，已跳过自动重启")
+                        runtimeRepo.addLog(LogLevel.Warn, "工作目录已切换，但新目录没有可用核心，正在停止旧目录服务")
+                        runtimeRepo.stopService()
                     }
                     operationMessage = buildString {
                         append(result.message)

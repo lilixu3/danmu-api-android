@@ -26,6 +26,7 @@ interface CoreRepository {
     val isCoreInfoLoading: StateFlow<Boolean>
     val downloadProgress: StateFlow<CoreDownloadProgress>
     val pendingDependencyRepair: StateFlow<CoreDependencyRepairRequest?>
+    val operationState: StateFlow<CoreOperationState>
     fun isCoreInstalled(variant: ApiVariant): Boolean
     fun isCoreReady(variant: ApiVariant): Boolean
     fun refreshCoreInfo()
@@ -37,11 +38,14 @@ interface CoreRepository {
     suspend fun deleteCore(variant: ApiVariant): Result<Unit>
     suspend fun rollbackCore(variant: ApiVariant, release: GithubRelease): Result<Unit>
     suspend fun fetchReleaseHistory(variant: ApiVariant): List<GithubRelease>
-    suspend fun repairPendingDependenciesOnline(): Result<Unit>
-    suspend fun repairPendingDependenciesFromArchive(archiveUri: String): Result<Unit>
-    suspend fun applyPendingCoreMutation(): Result<Unit>
-    suspend fun discardPendingCoreMutation()
-    suspend fun prepareInstalledCoreDependencyRepair(variant: ApiVariant): CoreDependencyRepairRequest?
+    suspend fun repairPendingDependenciesOnline(operationId: Long): Result<Unit>
+    suspend fun repairPendingDependenciesFromArchive(operationId: Long, archiveUri: String): Result<Unit>
+    suspend fun applyPendingCoreMutation(operationId: Long): Result<Unit>
+    suspend fun discardPendingCoreMutation(operationId: Long): Result<Unit>
+    suspend fun prepareInstalledCoreDependencyRepair(
+        variant: ApiVariant,
+        origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.WorkDirectory
+    ): CoreDependencyRepairRequest?
 }
 
 interface SettingsRepository {

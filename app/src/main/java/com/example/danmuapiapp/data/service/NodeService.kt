@@ -525,6 +525,21 @@ class NodeService : Service() {
                     targetProjectDir = projectDir,
                     preferredVariantKey = envVariant
                 )
+                when (val health = RuntimeDependencyHealthChecker.inspectSelectedCore(
+                    context = this@NodeService,
+                    projectDir = projectDir
+                )) {
+                    RuntimeDependencyHealthChecker.Status.Ready -> Unit
+                    RuntimeDependencyHealthChecker.Status.CoreUnavailable -> {
+                        throw IllegalStateException("当前核心未安装或文件不完整")
+                    }
+                    is RuntimeDependencyHealthChecker.Status.Missing -> {
+                        throw RuntimeDependenciesMissingException(
+                            variant = health.variant,
+                            missingDependencies = health.dependencies
+                        )
+                    }
+                }
                 projectDir
             }
             preparedDeferred.complete(prepared)

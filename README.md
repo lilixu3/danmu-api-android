@@ -149,7 +149,8 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 16 或更高版本（用于公告中心开发）
+- Node.js 18.20.4（正式 APK 的运行时兼容测试必须与内嵌 Node 一致）
+- 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
 
@@ -160,9 +161,14 @@ git clone https://github.com/lilixu3/danmu-api-android
 # 进入项目目录
 cd danmu-api-android
 
-# 构建发布版本
-./gradlew assembleRelease
+# 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v18.20.4
 ```
+
+正式构建只读取仓库内的 Node 运行时资产，不会隐式读取相邻的 `danmu_api`
+仓库或根目录 `node_modules.zip`。维护依赖资产时，显式运行
+`refreshBundledNodeModulesFromWorkspace` 或
+`refreshBundledNodeModulesFromArchive`，检查变更后再提交。
 
 ### 代码风格
 - 遵循 Kotlin 官方代码风格

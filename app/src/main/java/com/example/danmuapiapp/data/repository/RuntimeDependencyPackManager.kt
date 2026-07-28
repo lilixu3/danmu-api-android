@@ -8,6 +8,10 @@ import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NpmVersionRange
 import com.example.danmuapiapp.domain.model.ApiVariant
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import okhttp3.OkHttpClient
@@ -164,7 +168,7 @@ class RuntimeDependencyPackManager @Inject constructor(
             .build()
     }
 
-    internal fun installIfAvailable(
+    internal suspend fun installIfAvailable(
         coreDir: File,
         variant: ApiVariant,
         onProgress: (stage: String, progress: Float?, downloadedBytes: Long, totalBytes: Long) -> Unit =
@@ -185,6 +189,8 @@ class RuntimeDependencyPackManager @Inject constructor(
             fetchSignedManifest()
         } catch (error: PackIntegrityException) {
             throw error
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             return RuntimePackInstallResult(
                 unavailableReason = error.message ?: "签名运行时依赖清单暂时不可用"
@@ -217,7 +223,7 @@ class RuntimeDependencyPackManager @Inject constructor(
         }
     }
 
-    private fun fetchSignedManifest(): SignedRuntimePackManifest? {
+    private suspend fun fetchSignedManifest(): SignedRuntimePackManifest? {
         val manifestBytes = requestLimitedBytes(
             urls = githubRemoteService.rawUrlCandidates(
                 RuntimeDependencyPackProtocol.PACK_REPO,
@@ -243,27 +249,30 @@ class RuntimeDependencyPackManager @Inject constructor(
         return SignedRuntimePackManifest(manifestBytes, manifest)
     }
 
-    private fun requestLimitedBytes(urls: List<String>, maxBytes: Int): ByteArray? {
+    private suspend fun requestLimitedBytes(urls: List<String>, maxBytes: Int): ByteArray? {
         for (url in urls.distinct()) {
             repeat(2) { attempt ->
                 try {
+                    currentCoroutineContext().ensureActive()
                     val request = Request.Builder()
                         .url(url)
                         .header("User-Agent", USER_AGENT)
                         .apply { githubProxyService.applyGithubAuth(this, url) }
                         .build()
-                    metadataHttpClient.newCall(request).execute().use { response ->
+                    metadataHttpClient.newCall(request).executeCancellable().use { response ->
                         if (!response.isSuccessful) return@use
                         val body = response.body
                         if (body.contentLength() > maxBytes.toLong()) {
                             throw IOException("响应超过允许大小")
                         }
                         BufferedInputStream(body.byteStream()).use { input ->
-                            return readLimited(input, maxBytes)
+                            return readLimitedCancellable(input, maxBytes)
                         }
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (_: Exception) {
-                    if (attempt == 0) Thread.sleep(300L)
+                    if (attempt == 0) delay(300L)
                 }
             }
         }
@@ -334,7 +343,7 @@ class RuntimeDependencyPackManager @Inject constructor(
         }
     }
 
-    private fun downloadArchive(
+    private suspend fun downloadArchive(
         manifest: RuntimePackManifest,
         onProgress: (stage: String, progress: Float?, downloadedBytes: Long, totalBytes: Long) -> Unit
     ): File {
@@ -344,12 +353,13 @@ class RuntimeDependencyPackManager @Inject constructor(
             var downloaded = false
             for (url in githubRemoteService.withProxyCandidates(manifest.artifactUrl).distinct()) {
                 try {
+                    currentCoroutineContext().ensureActive()
                     val request = Request.Builder()
                         .url(url)
                         .header("User-Agent", USER_AGENT)
                         .apply { githubProxyService.applyGithubAuth(this, url) }
                         .build()
-                    httpClient.newCall(request).execute().use { response ->
+                    httpClient.newCall(request).executeCancellable().use { response ->
                         if (!response.isSuccessful) {
                             lastFailure = "HTTP ${response.code}"
                             return@use
@@ -364,6 +374,7 @@ class RuntimeDependencyPackManager @Inject constructor(
                             BufferedInputStream(body.byteStream()).use { input ->
                                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                                 while (true) {
+                                    currentCoroutineContext().ensureActive()
                                     val read = input.read(buffer)
                                     if (read < 0) break
                                     count += read
@@ -388,6 +399,8 @@ class RuntimeDependencyPackManager @Inject constructor(
                         }
                         downloaded = true
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (error: Exception) {
                     lastFailure = error.message ?: error::class.java.simpleName
                 }
@@ -397,10 +410,29 @@ class RuntimeDependencyPackManager @Inject constructor(
                 throw IOException("下载运行时依赖失败：${lastFailure ?: "网络异常"}")
             }
             return temporary
+        } catch (cancelled: CancellationException) {
+            runCatching { temporary.delete() }
+            throw cancelled
         } catch (error: Exception) {
             runCatching { temporary.delete() }
             throw error
         }
+    }
+
+    private suspend fun readLimitedCancellable(input: InputStream, maxBytes: Int): ByteArray {
+        require(maxBytes > 0) { "maxBytes 必须大于 0" }
+        val output = ByteArrayOutputStream(minOf(maxBytes, DEFAULT_BUFFER_SIZE * 4))
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) throw IOException("响应超过允许大小")
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 
     private fun cleanupLegacyArchiveCache() {
