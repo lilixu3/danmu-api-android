@@ -233,35 +233,39 @@ lint 指出 `NodeService.kt:269` 使用 `wakeLock.acquire()` 无 timeout，存�
 
 ---
 
-## 7. 构建链 sibling node_modules 风险先文档化并做前置诊断
+## 7. 构建链固定正式输入并移除 sibling 隐式依赖
 
-**状态：** TODO
+**状态：** DONE（2026-07-28）
 
 ### 问题
 
-`syncBundledNodeModulesFromWorkspace` 强依赖 `../danmu_api/node_modules`，新环境容易失败。本轮目标是发 APK，不做大改构建链，先保证当前环境可诊断、可验证。
+默认 `preBuild` 曾强依赖 `../danmu_api/node_modules`，并允许被忽略的
+`node_modules.zip` 与可选 Redis 目录改变 APK 内容，导致同一提交的构建输入不固定。
 
 ### 计划
 
-1. 增加追踪文档中的 release 前置检查。
-2. 构建前明确验证：
-   - `../danmu_api/node_modules` 存在；
-   - `app/src/main/assets/nodejs-project/node_modules/data-uri-to-buffer/dist/index.js` 存在。
-3. 若构建失败，不跳过 Gradle 依赖校验，按 release skill 恢复真实输入。
+1. 默认构建只校验仓库内的基础闭包与可选 Redis 闭包，不再读取 sibling 仓库或本地 ZIP。
+2. 维护资产必须显式运行 `refreshBundledNodeModulesFromWorkspace` 或
+   `refreshBundledNodeModulesFromArchive`。
+3. 原生运行时由 `native-runtime.sha256` 固定内容，构建前强制校验。
+4. Release 使用 Node 18.20.4 运行 smoke，并在产物生成后校验所有 ABI 的关键 APK 条目。
 
 ### 建议改法
 
-- 本轮不改 Gradle 构建逻辑，避免 release 前引入大范围构建链变更。
-- 在最终验证命令中加入文件存在检查和 APK zip 内容检查。
+- `preBuild` 只读校验正式输入，不再修改 `src/main/assets`。
+- Release 统一使用 `releaseCheck`，或执行 `assembleRelease` 并由 finalizer 校验 APK。
+- 内嵌 Node 兼容测试通过 `-PtargetNodeExecutable` 或 `DANMU_TARGET_NODE` 指定。
 
 ### 验收
 
-- [ ] 构建前置检查通过。
-- [ ] release APK 中关键 deep runtime entry 存在。
+- [x] Debug 构建不依赖 sibling `danmu_api`。
+- [x] 关键 deep runtime entry、依赖版本和闭包构建前校验。
+- [x] Release 自动挂接目标 Node 与 APK 内容门禁。
 
 ### 实际验证
 
-- 待填写。
+- `verifyBundledNodeModules`、Brotli/闭包/核心 smoke 与原生输入校验已接入 `preBuild`。
+- Node 18.20.4 兼容门禁需要发版机提供对应可执行文件后执行。
 
 ---
 
@@ -275,4 +279,4 @@ lint 指出 `NodeService.kt:269` 使用 `wakeLock.acquire()` 无 timeout，存�
 | 4 | 日志配置不覆盖 raw `.env` | DONE | 2026-06-18 | `RuntimeEnvDefaultsTest` + `:app:testDebugUnitTest` 通过 |
 | 5 | WakeLock timeout | DONE | 2026-06-18 | `NodeServiceWakeLockPolicyTest` + `:app:testDebugUnitTest` 通过 |
 | 6 | GitHub token 加密存储 | DONE | 2026-06-18 | `SettingsRepositoryImpl` / `GithubProxyService` 改为 `SecureStringStore`，`compileDebugKotlin` 随测试通过 |
-| 7 | 构建链前置诊断 | DONE | 2026-06-18 | 已核验 sibling `../danmu_api/node_modules` 与关键 deep runtime asset 存在，作为 release 前置检查 |
+| 7 | 构建链固定输入 | DONE | 2026-07-28 | 默认构建移除 sibling/ZIP 隐式输入，增加 Node 18、原生哈希与 APK 内容门禁 |

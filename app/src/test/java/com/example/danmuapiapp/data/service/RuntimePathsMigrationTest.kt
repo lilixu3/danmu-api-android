@@ -66,12 +66,16 @@ class RuntimePathsMigrationTest {
             createCore(oldProject, "stable", "stable-source")
             createCore(oldProject, "dev", "dev-source")
             createCore(oldProject, "custom", "custom-source")
+            oldProject.resolve("danmu_api_dev/node_modules/large-package").mkdirs()
+            oldProject.resolve("danmu_api_dev/node_modules/large-package/package.json")
+                .writeText("{\"version\":\"1.0.0\"}\n")
 
             RuntimePaths.migrateSelectedCoreAndConfig(oldBase, newBase, "development")
 
             val newProject = File(newBase, "nodejs-project")
             assertEquals("DANMU_API_VARIANT=dev\n", newProject.resolve("config/.env").readText())
             assertEquals("dev-source", newProject.resolve("danmu_api_dev/worker.js").readText())
+            assertFalse(newProject.resolve("danmu_api_dev/node_modules").exists())
             assertFalse(newProject.resolve("danmu_api_stable").exists())
             assertFalse(newProject.resolve("danmu_api_custom").exists())
             assertFalse(newProject.resolve("logs/old.log").exists())

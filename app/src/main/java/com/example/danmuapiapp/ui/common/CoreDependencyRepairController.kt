@@ -67,7 +67,9 @@ class CoreDependencyRepairController(
     fun repairFromArchive(archiveUri: String) {
         performRepair(
             progressMessage = "正在导入并校验运行时依赖...",
-            repairBlock = { repository.repairPendingDependenciesFromArchive(archiveUri) }
+            repairBlock = { operationId ->
+                repository.repairPendingDependenciesFromArchive(operationId, archiveUri)
+            }
         )
     }
 
@@ -80,8 +82,10 @@ class CoreDependencyRepairController(
             isRepairing = true
             setOperating(true)
             try {
-                repository.discardPendingCoreMutation()
-                postMessage(onDiscarded(request))
+                repository.discardPendingCoreMutation(request.operationId).fold(
+                    onSuccess = { postMessage(onDiscarded(request)) },
+                    onFailure = { postMessage("取消失败：${it.message ?: "任务状态已变化"}") }
+                )
             } finally {
                 isRepairing = false
                 setOperating(false)
@@ -91,7 +95,7 @@ class CoreDependencyRepairController(
 
     private fun performRepair(
         progressMessage: String,
-        repairBlock: suspend () -> Result<Unit>
+        repairBlock: suspend (Long) -> Result<Unit>
     ) {
         val request = pendingDependencyRepair.value ?: return
         if (!shouldHandle(request) || isRepairing) return
@@ -102,15 +106,18 @@ class CoreDependencyRepairController(
             setOperating(true)
             postMessage(progressMessage)
             try {
-                repairBlock().fold(
+                repairBlock(request.operationId).fold(
                     onSuccess = {
                         postMessage("依赖校验通过，正在继续${request.actionLabel}...")
-                        repository.applyPendingCoreMutation().fold(
+                        repository.applyPendingCoreMutation(request.operationId).fold(
                             onSuccess = {
-                                val message = runCatching { onApplied(request) }
-                                    .getOrElse { error ->
+                                val message = try {
+                                    onApplied(request)
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
                                         "依赖已修复，但后续操作失败：${error.message ?: "未知错误"}"
-                                    }
+                                }
                                 postMessage(message)
                             },
                             onFailure = { error ->

@@ -14,6 +14,7 @@ import com.example.danmuapiapp.data.repository.isRootPassiveLivenessLikely
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Root 模式控制器：负责独立 Root 进程的启动与停止。
@@ -36,6 +37,7 @@ object RootRuntimeController {
     private const val PROCESS_NAME = "danmuapi_rootnode"
     private const val PID_FILE_NAME = "root_node.pid"
     private const val STARTED_AT_FILE_NAME = "root_node_started_at_ms"
+    private const val ROOT_SYNC_TIMEOUT_MS = 90_000L
     private val mainClassName = RootNodeEntry::class.java.name
 
     private data class RuntimeEnvSnapshot(
@@ -63,6 +65,291 @@ object RootRuntimeController {
             [ -f "${'$'}FILE" ]
         """.trimIndent()
         return RootShell.exec(script, timeoutMs = 2500L).ok
+    }
+
+    internal fun buildAtomicCoreSyncShell(
+        sourcePath: String,
+        destinationPath: String,
+        operationToken: String
+    ): String {
+        return """
+            SRC=${shellQuote(sourcePath)}
+            DST=${shellQuote(destinationPath)}
+            NEW="${'$'}DST.new-${operationToken}"
+            BACKUP="${'$'}DST.backup-${operationToken}"
+            SRC_LIST="${'$'}DST.source-${operationToken}.cksum"
+            DST_LIST="${'$'}DST.target-${operationToken}.cksum"
+            HAD_DST=0
+            SWAPPED=0
+
+            cleanup_sync() {
+              STATUS=${'$'}?
+              trap - EXIT HUP INT TERM
+              rm -rf "${'$'}NEW" 2>/dev/null || true
+              rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" 2>/dev/null || true
+              if [ "${'$'}STATUS" -ne 0 ] && [ "${'$'}SWAPPED" = "1" ]; then
+                rm -rf "${'$'}DST" 2>/dev/null || true
+                if [ "${'$'}HAD_DST" = "1" ] && [ -e "${'$'}BACKUP" ]; then
+                  mv "${'$'}BACKUP" "${'$'}DST" 2>/dev/null || true
+                fi
+              fi
+              exit "${'$'}STATUS"
+            }
+            trap cleanup_sync EXIT HUP INT TERM
+
+            [ -d "${'$'}SRC" ] || exit 2
+            mkdir -p "${'$'}(dirname "${'$'}DST")" || exit 3
+            rm -rf "${'$'}NEW" "${'$'}BACKUP" || exit 4
+            mkdir -p "${'$'}NEW" || exit 5
+            if ! cp -a "${'$'}SRC/." "${'$'}NEW/" 2>/dev/null; then
+              rm -rf "${'$'}NEW" || exit 6
+              mkdir -p "${'$'}NEW" || exit 7
+              cp -r "${'$'}SRC/." "${'$'}NEW/" || exit 8
+            fi
+
+            ([ -f "${'$'}NEW/worker.js" ] || [ -f "${'$'}NEW/danmu_api/worker.js" ] || [ -f "${'$'}NEW/danmu-api/worker.js" ]) || exit 9
+            (cd "${'$'}SRC" && find . -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 10
+            (cd "${'$'}NEW" && find . -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 11
+            cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 12
+            rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 13
+
+            if [ -e "${'$'}DST" ]; then
+              mv "${'$'}DST" "${'$'}BACKUP" || exit 14
+              HAD_DST=1
+            fi
+            SWAPPED=1
+            mv "${'$'}NEW" "${'$'}DST" || exit 15
+            chmod -R u+rwX,go+rX "${'$'}DST" || exit 16
+            SWAPPED=0
+            rm -rf "${'$'}BACKUP" 2>/dev/null || true
+            trap - EXIT HUP INT TERM
+            exit 0
+        """.trimIndent()
+    }
+
+    internal fun buildAtomicProjectBootstrapShell(
+        sourcePath: String,
+        destinationPath: String,
+        operationToken: String
+    ): String {
+        return """
+            SRC=${shellQuote(sourcePath)}
+            DST=${shellQuote(destinationPath)}
+            NEW="${'$'}DST.new-${operationToken}"
+            BACKUP="${'$'}DST.backup-${operationToken}"
+            SRC_LIST="${'$'}DST.source-${operationToken}.cksum"
+            DST_LIST="${'$'}DST.target-${operationToken}.cksum"
+            HAD_DST=0
+            SWAPPED=0
+            cleanup_sync() {
+              STATUS=${'$'}?
+              trap - EXIT HUP INT TERM
+              rm -rf "${'$'}NEW" 2>/dev/null || true
+              rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" 2>/dev/null || true
+              if [ "${'$'}STATUS" -ne 0 ] && [ "${'$'}SWAPPED" = "1" ]; then
+                rm -rf "${'$'}DST" 2>/dev/null || true
+                if [ "${'$'}HAD_DST" = "1" ] && [ -e "${'$'}BACKUP" ]; then
+                  mv "${'$'}BACKUP" "${'$'}DST" 2>/dev/null || true
+                fi
+              fi
+              exit "${'$'}STATUS"
+            }
+            trap cleanup_sync EXIT HUP INT TERM
+
+            [ -f "${'$'}SRC/main.js" ] || exit 2
+            mkdir -p "${'$'}(dirname "${'$'}DST")" || exit 3
+            rm -rf "${'$'}NEW" "${'$'}BACKUP" || exit 4
+            mkdir -p "${'$'}NEW" || exit 5
+            if ! cp -a "${'$'}SRC/." "${'$'}NEW/" 2>/dev/null; then
+              rm -rf "${'$'}NEW" || exit 6
+              mkdir -p "${'$'}NEW" || exit 7
+              cp -r "${'$'}SRC/." "${'$'}NEW/" || exit 8
+            fi
+            rm -rf "${'$'}NEW/.cache" || exit 9
+            mkdir -p "${'$'}NEW/.cache" || exit 10
+            [ -f "${'$'}NEW/main.js" ] || exit 11
+
+            (cd "${'$'}SRC" && find . -path './.cache' -prune -o -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 12
+            (cd "${'$'}NEW" && find . -path './.cache' -prune -o -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 13
+            cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 14
+            rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
+
+            if [ -e "${'$'}DST" ]; then
+              mv "${'$'}DST" "${'$'}BACKUP" || exit 16
+              HAD_DST=1
+            fi
+            SWAPPED=1
+            mv "${'$'}NEW" "${'$'}DST" || exit 17
+            SWAPPED=0
+            rm -rf "${'$'}BACKUP" 2>/dev/null || true
+            trap - EXIT HUP INT TERM
+            exit 0
+        """.trimIndent()
+    }
+
+    fun syncCoreDirectoryFromNormal(sourceDir: File, destinationPath: String): OpResult {
+        val token = "${android.os.Process.myPid()}-${System.currentTimeMillis()}"
+        val result = RootShell.exec(
+            buildAtomicCoreSyncShell(
+                sourcePath = sourceDir.absolutePath,
+                destinationPath = destinationPath,
+                operationToken = token
+            ),
+            timeoutMs = ROOT_SYNC_TIMEOUT_MS
+        )
+        if (!result.ok) {
+            val detail = (result.stderr.ifBlank { result.stdout }).trim().take(500)
+                .ifBlank { "复制或完整性校验失败" }
+            return OpResult(false, "同步 Root 核心失败", detail)
+        }
+        return OpResult(true, "Root 核心已原子同步")
+    }
+
+    internal fun buildNodeModulesFingerprint(
+        nodeModulesDir: File,
+        identityFiles: List<File>
+    ): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        fun addFile(label: String, file: File) {
+            digest.update(label.toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+            if (file.isFile) {
+                file.inputStream().use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        digest.update(buffer, 0, read)
+                    }
+                }
+            }
+            digest.update(0.toByte())
+        }
+
+        identityFiles.sortedBy { it.absolutePath }.forEach { file ->
+            addFile("identity:${file.name}", file)
+        }
+        nodeModulesDir.listFiles().orEmpty()
+            .filter { it.isDirectory && !it.name.startsWith('.') }
+            .flatMap { entry ->
+                if (entry.name.startsWith('@')) {
+                    entry.listFiles().orEmpty().filter { it.isDirectory }
+                } else {
+                    listOf(entry)
+                }
+            }
+            .map { packageDir -> File(packageDir, "package.json") }
+            .filter { it.isFile }
+            .sortedBy { it.relativeTo(nodeModulesDir).invariantSeparatorsPath }
+            .forEach { packageJson ->
+                addFile(packageJson.relativeTo(nodeModulesDir).invariantSeparatorsPath, packageJson)
+            }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    internal fun buildAtomicNodeModulesSyncShell(
+        sourcePath: String,
+        destinationPath: String,
+        fingerprint: String,
+        operationToken: String
+    ): String {
+        return """
+            SRC=${shellQuote(sourcePath)}
+            DST=${shellQuote(destinationPath)}
+            EXPECTED=${shellQuote(fingerprint)}
+            MARKER="${'$'}DST/.danmuapiapp-sync-fingerprint"
+            [ -d "${'$'}SRC" ] || exit 0
+            if [ -f "${'$'}MARKER" ] && [ "${'$'}(cat "${'$'}MARKER" 2>/dev/null)" = "${'$'}EXPECTED" ]; then
+              exit 0
+            fi
+
+            NEW="${'$'}DST.new-${operationToken}"
+            BACKUP="${'$'}DST.backup-${operationToken}"
+            SRC_LIST="${'$'}DST.source-${operationToken}.cksum"
+            DST_LIST="${'$'}DST.target-${operationToken}.cksum"
+            HAD_DST=0
+            SWAPPED=0
+            cleanup_sync() {
+              STATUS=${'$'}?
+              trap - EXIT HUP INT TERM
+              rm -rf "${'$'}NEW" 2>/dev/null || true
+              rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" 2>/dev/null || true
+              if [ "${'$'}STATUS" -ne 0 ] && [ "${'$'}SWAPPED" = "1" ]; then
+                rm -rf "${'$'}DST" 2>/dev/null || true
+                if [ "${'$'}HAD_DST" = "1" ] && [ -e "${'$'}BACKUP" ]; then
+                  mv "${'$'}BACKUP" "${'$'}DST" 2>/dev/null || true
+                fi
+              fi
+              exit "${'$'}STATUS"
+            }
+            trap cleanup_sync EXIT HUP INT TERM
+
+            if [ -d "${'$'}DST" ]; then
+              (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 2
+              (cd "${'$'}DST" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 3
+              if cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST"; then
+                printf '%s\n' "${'$'}EXPECTED" > "${'$'}MARKER" || exit 4
+                rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 5
+                trap - EXIT HUP INT TERM
+                exit 0
+              fi
+              rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 6
+            fi
+
+            mkdir -p "${'$'}(dirname "${'$'}DST")" || exit 7
+            rm -rf "${'$'}NEW" "${'$'}BACKUP" || exit 8
+            mkdir -p "${'$'}NEW" || exit 9
+            if ! cp -a "${'$'}SRC/." "${'$'}NEW/" 2>/dev/null; then
+              rm -rf "${'$'}NEW" || exit 10
+              mkdir -p "${'$'}NEW" || exit 11
+              cp -r "${'$'}SRC/." "${'$'}NEW/" || exit 12
+            fi
+            rm -f "${'$'}NEW/.danmuapiapp-sync-fingerprint" 2>/dev/null || true
+
+            (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 13
+            (cd "${'$'}NEW" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 14
+            cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
+            printf '%s\n' "${'$'}EXPECTED" > "${'$'}NEW/.danmuapiapp-sync-fingerprint" || exit 16
+            rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 17
+
+            if [ -e "${'$'}DST" ]; then
+              mv "${'$'}DST" "${'$'}BACKUP" || exit 18
+              HAD_DST=1
+            fi
+            SWAPPED=1
+            mv "${'$'}NEW" "${'$'}DST" || exit 19
+            chmod -R u+rwX,go+rX "${'$'}DST" || exit 20
+            SWAPPED=0
+            rm -rf "${'$'}BACKUP" 2>/dev/null || true
+            trap - EXIT HUP INT TERM
+            exit 0
+        """.trimIndent()
+    }
+
+    private fun syncNodeModulesAtomically(
+        sourceDir: File,
+        destinationPath: String,
+        identityFiles: List<File>,
+        failureMessage: String
+    ): OpResult {
+        if (!sourceDir.isDirectory) return OpResult(true, "没有需要同步的本地依赖")
+        val fingerprint = buildNodeModulesFingerprint(sourceDir, identityFiles)
+        val token = "${android.os.Process.myPid()}-${System.currentTimeMillis()}"
+        val result = RootShell.exec(
+            buildAtomicNodeModulesSyncShell(
+                sourcePath = sourceDir.absolutePath,
+                destinationPath = destinationPath,
+                fingerprint = fingerprint,
+                operationToken = token
+            ),
+            timeoutMs = ROOT_SYNC_TIMEOUT_MS
+        )
+        if (!result.ok) {
+            val detail = (result.stderr.ifBlank { result.stdout }).trim().take(500)
+                .ifBlank { "复制或完整性校验失败" }
+            return OpResult(false, failureMessage, detail)
+        }
+        return OpResult(true, "Root 依赖已同步")
     }
 
     fun isRunningFast(port: Int): Boolean {
@@ -212,6 +499,16 @@ object RootRuntimeController {
                 "Root 运行时准备失败：${prepare.detail.ifBlank { prepare.message }}"
             )
             return OpResult(false, "Root 模式启动失败", prepare.detail.ifBlank { prepare.message })
+        }
+
+        val dependencyCheck = verifyRootRuntimeDependencies(context)
+        if (!dependencyCheck.ok) {
+            AppDiagnosticLogger.e(
+                context,
+                "RootRuntimeController",
+                "Root 运行时依赖检查失败：${dependencyCheck.detail.ifBlank { dependencyCheck.message }}"
+            )
+            return dependencyCheck
         }
 
         val rootProject = rootProjectDir(context)
@@ -603,17 +900,23 @@ object RootRuntimeController {
         return """
             SRC=${shellQuote(srcProjectPath)}
             DST=${shellQuote(dstProjectPath)}
-            mkdir -p "${'$'}DST" "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
+            mkdir -p "${'$'}DST" "${'$'}DST/config" "${'$'}DST/logs" || exit 2
 
             # 热启动只需要同步 App 托管的顶层包装文件；不要递归复制 node_modules/core/cache。
             # 使用普通 glob 兼容 Android toybox/mksh，避免依赖 find/rsync。
             for FILE in "${'$'}SRC"/* "${'$'}SRC"/.[!.]* "${'$'}SRC"/..?*; do
               [ -f "${'$'}FILE" ] || continue
               NAME="${'$'}{FILE##*/}"
-              cp -f "${'$'}FILE" "${'$'}DST/${'$'}NAME" 2>/dev/null || cat "${'$'}FILE" > "${'$'}DST/${'$'}NAME"
+              TMP="${'$'}DST/.wrapper-${'$'}$-${'$'}NAME"
+              rm -f "${'$'}TMP" 2>/dev/null || true
+              if ! cp -f "${'$'}FILE" "${'$'}TMP" 2>/dev/null; then
+                cat "${'$'}FILE" > "${'$'}TMP" || exit 3
+              fi
+              cmp -s "${'$'}FILE" "${'$'}TMP" || exit 4
+              mv -f "${'$'}TMP" "${'$'}DST/${'$'}NAME" || exit 5
             done
 
-            test -f "${'$'}DST/main.js"
+            test -f "${'$'}DST/main.js" || exit 6
         """.trimIndent()
     }
 
@@ -626,24 +929,19 @@ object RootRuntimeController {
         val dst = rootProjectDir(context)
 
         val script = if (bootstrap) {
-            // 首次引导：复制运行时文件，但不继承普通模式缓存。
-            """
-                SRC=${shellQuote(src)}
-                DST=${shellQuote(dst)}
-                rm -rf "${'$'}DST" 2>/dev/null || true
-                mkdir -p "${'$'}DST" 2>/dev/null || true
-                cp -a "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || true
-                rm -rf "${'$'}DST/.cache" 2>/dev/null || true
-                mkdir -p "${'$'}DST/.cache" 2>/dev/null || true
-                test -f "${'$'}DST/main.js"
-            """.trimIndent()
+            // 首次引导使用同目录 staging，完整校验后再切换，不破坏旧 Root 目录。
+            buildAtomicProjectBootstrapShell(
+                sourcePath = src,
+                destinationPath = dst,
+                operationToken = "${android.os.Process.myPid()}-${System.currentTimeMillis()}"
+            )
         } else {
             // 增量同步：只同步 App 托管的顶层包装文件，保留 Root 工作目录中的
             // config、danmu_api_*、node_modules 与 .cache。避免每次启动都复制整个 core/node_modules 到临时目录。
             buildRootProjectIncrementalSyncShell(srcProjectPath = src, dstProjectPath = dst)
         }
 
-        val result = RootShell.exec(script, timeoutMs = 25000L)
+        val result = RootShell.exec(script, timeoutMs = if (bootstrap) ROOT_SYNC_TIMEOUT_MS else 25_000L)
         if (!result.ok) {
             val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
             return OpResult(false, "同步 Root 运行目录失败", if (err.isBlank()) "未知错误" else err)
@@ -731,6 +1029,8 @@ object RootRuntimeController {
         val rootCoreDirPath = "${rootProjectDir(context)}/danmu_api_${variant.key}"
 
         if (rootCoreHasWorker(rootCoreDirPath)) {
+            val requirementsSync = syncRootCoreRequirements(normalCoreDir, rootCoreDirPath)
+            if (!requirementsSync.ok) return requirementsSync
             return syncRootCoreNodeModulesIfNeeded(normalCoreDir, rootCoreDirPath)
         }
 
@@ -743,23 +1043,98 @@ object RootRuntimeController {
             )
         }
 
-        val script = """
-            SRC=${shellQuote(normalCoreDir.absolutePath)}
-            DST=${shellQuote(rootCoreDirPath)}
-            rm -rf "${'$'}DST" 2>/dev/null || true
-            mkdir -p "${'$'}DST" 2>/dev/null || true
-            cp -a "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || cp -r "${'$'}SRC/." "${'$'}DST/" 2>/dev/null || true
-            chmod -R u+rwX,go+rX "${'$'}DST" 2>/dev/null || true
-            [ -f "${'$'}DST/worker.js" ] || [ -f "${'$'}DST/danmu_api/worker.js" ] || [ -f "${'$'}DST/danmu-api/worker.js" ]
-        """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 25_000L)
-        if (!result.ok) {
-            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
-            return OpResult(false, "补齐 Root 核心失败", if (err.isBlank()) "未知错误" else err)
-        }
+        val coreSync = syncCoreDirectoryFromNormal(normalCoreDir, rootCoreDirPath)
+        if (!coreSync.ok) return coreSync
         val depsSync = syncRootCoreNodeModulesIfNeeded(normalCoreDir, rootCoreDirPath)
         if (!depsSync.ok) return depsSync
         return OpResult(true, "同步完成")
+    }
+
+    private fun syncRootCoreRequirements(normalCoreDir: File, rootCoreDirPath: String): OpResult {
+        val source = File(normalCoreDir, NodeProjectManager.CORE_RUNTIME_REQUIREMENTS_FILE)
+        if (!source.isFile) return OpResult(true, "核心依赖清单无需同步")
+        val destination = "$rootCoreDirPath/${NodeProjectManager.CORE_RUNTIME_REQUIREMENTS_FILE}"
+        val script = """
+            SRC=${shellQuote(source.absolutePath)}
+            DST=${shellQuote(destination)}
+            TMP="${'$'}DST.tmp-${System.nanoTime()}"
+            [ -f "${'$'}SRC" ] || exit 0
+            [ -d "${'$'}(dirname "${'$'}DST")" ] || exit 2
+            cp "${'$'}SRC" "${'$'}TMP" || exit 3
+            cmp -s "${'$'}SRC" "${'$'}TMP" || exit 4
+            chmod 0644 "${'$'}TMP" || exit 5
+            mv "${'$'}TMP" "${'$'}DST" || exit 6
+        """.trimIndent()
+        val result = RootShell.exec(script, timeoutMs = 5000L)
+        if (!result.ok) {
+            val detail = (result.stderr.ifBlank { result.stdout }).trim().take(400)
+            return OpResult(
+                false,
+                "同步 Root 核心依赖清单失败",
+                detail.ifBlank { "Root 文件写入失败" }
+            )
+        }
+        return OpResult(true, "Root 核心依赖清单已同步")
+    }
+
+    internal fun buildRootRuntimeDependencyProbeShell(
+        rootProjectPath: String,
+        variantKey: String
+    ): String {
+        return """
+            PROJECT=${shellQuote(rootProjectPath)}
+            CORE=${shellQuote("$rootProjectPath/danmu_api_$variantKey")}
+            REQUIREMENTS="${'$'}CORE/${NodeProjectManager.CORE_RUNTIME_REQUIREMENTS_FILE}"
+            [ -f "${'$'}REQUIREMENTS" ] || exit 0
+            MISSING=0
+            while IFS= read -r DEP || [ -n "${'$'}DEP" ]; do
+              DEP="${'$'}(printf '%s' "${'$'}DEP" | tr -d '\r')"
+              [ -n "${'$'}DEP" ] || continue
+              if ! printf '%s' "${'$'}DEP" | grep -Eq '^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+${'$'}'; then
+                printf '%s\n' '__invalid_dependency_name__'
+                MISSING=1
+                continue
+              fi
+              if [ ! -f "${'$'}CORE/node_modules/${'$'}DEP/package.json" ] && \
+                 [ ! -f "${'$'}PROJECT/node_modules/${'$'}DEP/package.json" ]; then
+                printf '%s\n' "${'$'}DEP"
+                MISSING=1
+              fi
+            done < "${'$'}REQUIREMENTS"
+            [ "${'$'}MISSING" = "0" ]
+        """.trimIndent()
+    }
+
+    private fun verifyRootRuntimeDependencies(context: Context): OpResult {
+        val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
+        val variant = ApiVariant.entries.find { it.key == prefs.getString("variant", "stable") }
+            ?: ApiVariant.Stable
+        val result = RootShell.exec(
+            buildRootRuntimeDependencyProbeShell(rootProjectDir(context), variant.key),
+            timeoutMs = 5000L
+        )
+        if (result.ok) return OpResult(true, "Root 运行时依赖完整")
+
+        val missing = result.stdout.lineSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .filterNot { it == "__invalid_dependency_name__" }
+            .distinct()
+            .sorted()
+            .toList()
+        if (missing.isNotEmpty()) {
+            return OpResult(
+                false,
+                "Root 运行时依赖缺失",
+                RuntimeDependencyHealthChecker.missingMessage(missing)
+            )
+        }
+        val detail = (result.stderr.ifBlank { result.stdout }).trim().take(400)
+        return OpResult(
+            false,
+            "Root 运行时依赖检查失败",
+            detail.ifBlank { "Root 依赖清单无效或无法读取" }
+        )
     }
 
     private fun rootCoreHasWorker(rootCoreDirPath: String): Boolean {
@@ -858,77 +1233,30 @@ $indentedAction
     }
 
     private fun syncRootNodeModulesIfNeeded(context: Context, normalProjectDir: File): OpResult {
-        val srcProjectPath = normalProjectDir.absolutePath
-        val dstProjectPath = rootProjectDir(context)
-        val packageRepair = buildNodeModulePackageRepairShell(
-            srcNodeModulesVar = "SRC_NM",
-            dstNodeModulesVar = "DST_NM"
-        ).prependIndent("            ")
-        val integrityVerify = buildNodeModuleIntegrityVerifyShell(
-            srcNodeModulesVar = "SRC_NM",
-            dstNodeModulesVar = "DST_NM"
-        ).prependIndent("            ")
-
-        val script = """
-            SRC=${shellQuote(srcProjectPath)}
-            DST=${shellQuote(dstProjectPath)}
-            SRC_NM="${'$'}SRC/node_modules"
-            DST_NM="${'$'}DST/node_modules"
-
-            [ -d "${'$'}SRC_NM" ] || exit 0
-
-$packageRepair
-
-$integrityVerify
-
-            exit 0
-        """.trimIndent()
-
-        val result = RootShell.exec(script, timeoutMs = 25_000L)
-        if (!result.ok) {
-            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
-            val detail = if (err.isBlank()) "同步 Root 依赖失败（node_modules）" else err
-            return OpResult(false, "同步 Root 依赖失败", detail)
-        }
-        return OpResult(true, "Root 依赖已同步")
+        return syncNodeModulesAtomically(
+            sourceDir = File(normalProjectDir, "node_modules"),
+            destinationPath = "${rootProjectDir(context)}/node_modules",
+            identityFiles = listOf(
+                File(normalProjectDir, "package-lock.json"),
+                File(normalProjectDir, "package.json"),
+                File(normalProjectDir, ".app_version"),
+                File(normalProjectDir, "runtime_asset_layout.txt")
+            ),
+            failureMessage = "同步 Root 依赖失败"
+        )
     }
 
     private fun syncRootCoreNodeModulesIfNeeded(normalCoreDir: File, rootCoreDirPath: String): OpResult {
-        val srcCorePath = normalCoreDir.absolutePath
-        val dstCorePath = rootCoreDirPath
-        val packageRepair = buildNodeModulePackageRepairShell(
-            srcNodeModulesVar = "SRC_NM",
-            dstNodeModulesVar = "DST_NM"
-        ).prependIndent("            ")
-        val integrityVerify = buildNodeModuleIntegrityVerifyShell(
-            srcNodeModulesVar = "SRC_NM",
-            dstNodeModulesVar = "DST_NM"
-        ).prependIndent("            ")
-
-        val script = """
-            SRC=${shellQuote(srcCorePath)}
-            DST=${shellQuote(dstCorePath)}
-            SRC_NM="${'$'}SRC/node_modules"
-            DST_NM="${'$'}DST/node_modules"
-
-            [ -d "${'$'}SRC" ] || exit 0
-            [ -d "${'$'}DST" ] || exit 0
-            [ -d "${'$'}SRC_NM" ] || exit 0
-
-$packageRepair
-
-$integrityVerify
-
-            exit 0
-        """.trimIndent()
-
-        val result = RootShell.exec(script, timeoutMs = 25_000L)
-        if (!result.ok) {
-            val err = (result.stderr.ifBlank { result.stdout }).trim().take(400)
-            val detail = if (err.isBlank()) "同步 Root 核心依赖失败（core node_modules）" else err
-            return OpResult(false, "同步 Root 核心依赖失败", detail)
-        }
-        return OpResult(true, "Root 核心依赖已同步")
+        return syncNodeModulesAtomically(
+            sourceDir = File(normalCoreDir, "node_modules"),
+            destinationPath = "$rootCoreDirPath/node_modules",
+            identityFiles = listOf(
+                File(normalCoreDir, "package.json"),
+                File(normalCoreDir, ".danmuapiapp-runtime-pack.json"),
+                File(normalCoreDir, ".danmuapiapp-runtime-import.json")
+            ),
+            failureMessage = "同步 Root 核心依赖失败"
+        )
     }
     private fun readPid(context: Context): Int? {
         val f = pidFile(context)

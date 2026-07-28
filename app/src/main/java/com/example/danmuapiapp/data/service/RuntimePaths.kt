@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.safeGetString
@@ -18,6 +17,11 @@ import java.io.File
 
 @SuppressLint("ApplySharedPref")
 object RuntimePaths {
+
+    enum class WorkDirSwitchMode {
+        SwitchOnly,
+        MigrateSelectedCore
+    }
 
     private const val PREFS_WORK_DIR = "danmu_work_dir"
     private const val KEY_CUSTOM_BASE_PATH = "custom_path"
@@ -93,23 +97,24 @@ object RuntimePaths {
 
     fun isCustomEnabled(context: Context): Boolean = readCustomBasePath(context) != null
 
-    fun clearCustomBasePath(context: Context) {
-        context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE).edit(commit = true) {
-            remove(KEY_CUSTOM_BASE_PATH)
-            remove(KEY_CUSTOM_BASE_URI)
-        }
+    fun clearCustomBasePath(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_CUSTOM_BASE_PATH)
+            .remove(KEY_CUSTOM_BASE_URI)
+            .commit()
     }
 
-    fun setCustomBasePath(context: Context, path: String?) {
+    fun setCustomBasePath(context: Context, path: String?): Boolean {
         val prefs = context.getSharedPreferences(PREFS_WORK_DIR, Context.MODE_PRIVATE)
         val value = path?.trim().orEmpty()
-        prefs.edit(commit = true) {
-            if (value.isBlank()) {
-                remove(KEY_CUSTOM_BASE_PATH)
-            } else {
-                putString(KEY_CUSTOM_BASE_PATH, value)
-            }
+        val editor = prefs.edit()
+        if (value.isBlank()) {
+            editor.remove(KEY_CUSTOM_BASE_PATH)
+        } else {
+            editor.putString(KEY_CUSTOM_BASE_PATH, value)
         }
+        return editor.commit()
     }
 
     fun buildWorkDirInfo(context: Context): WorkDirInfo {
@@ -129,7 +134,11 @@ object RuntimePaths {
         )
     }
 
-    fun applyCustomBaseDir(context: Context, targetPath: String?): ApplyResult {
+    fun applyCustomBaseDir(
+        context: Context,
+        targetPath: String?,
+        switchMode: WorkDirSwitchMode = WorkDirSwitchMode.SwitchOnly
+    ): ApplyResult {
         if (currentRunMode(context) != RunMode.Normal) {
             return ApplyResult(false, "高权限模式工作目录固定在 ${rootBaseDir(context).absolutePath}")
         }
@@ -162,8 +171,11 @@ object RuntimePaths {
         val selectedVariantKey = selectedRuntimeVariantKey(context, oldBase)
         if (sameDir) {
             if (shouldUseDefault && oldCustom != null) {
-                clearCustomBasePath(context)
-                return ApplyResult(true, "已恢复为默认目录")
+                return if (clearCustomBasePath(context)) {
+                    ApplyResult(true, "已恢复为默认目录")
+                } else {
+                    ApplyResult(false, "无法保存工作目录设置")
+                }
             }
             if (!shouldUseDefault && oldCustom == targetCanonical.absolutePath) {
                 return ApplyResult(true, "已是当前目录")
@@ -171,13 +183,7 @@ object RuntimePaths {
         }
 
         return try {
-            if (shouldUseDefault) {
-                clearCustomBasePath(context)
-            } else {
-                setCustomBasePath(context, targetCanonical.absolutePath)
-            }
-
-            if (!sameDir) {
+            if (!sameDir && switchMode == WorkDirSwitchMode.MigrateSelectedCore) {
                 migrateSelectedCoreAndConfig(
                     oldBase = oldBase,
                     newBase = targetCanonical,
@@ -185,9 +191,25 @@ object RuntimePaths {
                 )
             }
 
-            ApplyResult(true, if (shouldUseDefault) "已恢复为默认目录" else "已切换工作目录")
+            val preferenceSaved = if (shouldUseDefault) {
+                clearCustomBasePath(context)
+            } else {
+                setCustomBasePath(context, targetCanonical.absolutePath)
+            }
+            if (!preferenceSaved) {
+                throw IllegalStateException("无法保存工作目录设置")
+            }
+
+            val suffix = if (!sameDir && switchMode == WorkDirSwitchMode.MigrateSelectedCore) {
+                "，已迁移当前核心（依赖将在使用前检测）"
+            } else {
+                ""
+            }
+            ApplyResult(
+                true,
+                (if (shouldUseDefault) "已恢复为默认目录" else "已切换工作目录") + suffix
+            )
         } catch (e: Exception) {
-            setCustomBasePath(context, oldCustom)
             ApplyResult(false, "切换失败：${e.message}")
         }
     }
@@ -287,22 +309,118 @@ object RuntimePaths {
         selectedVariantKey: String
     ) {
         val oldRoot = File(oldBase, "nodejs-project")
-        if (!oldRoot.exists()) return
+        if (!oldRoot.isDirectory) return
 
         val newRoot = File(newBase, "nodejs-project")
-        if (!newRoot.exists()) {
-            runCatching { newRoot.mkdirs() }
+        if (!newRoot.exists() && !newRoot.mkdirs()) {
+            throw IllegalStateException("无法创建目标运行目录：${newRoot.absolutePath}")
+        }
+        val token = "${System.currentTimeMillis()}-${System.nanoTime()}"
+        val sourceConfig = File(oldRoot, "config")
+        val targetConfig = File(newRoot, "config")
+        val stagedConfig = File(newRoot, ".config-migration-$token")
+        val coreName = "danmu_api_${normalizeRuntimeVariantKey(selectedVariantKey)}"
+        val sourceCore = File(oldRoot, coreName)
+        val targetCore = File(newRoot, coreName)
+        val stagedCore = File(newRoot, ".$coreName-migration-$token")
+        val configBackup = File(newRoot, ".config-backup-$token")
+        val coreBackup = File(newRoot, ".$coreName-backup-$token")
+
+        fun cleanStaging() {
+            listOf(stagedConfig, stagedCore).forEach { artifact ->
+                runCatching { artifact.deleteRecursively() }
+            }
         }
 
-        copyDirMerge(File(oldRoot, "config"), File(newRoot, "config"))
+        cleanStaging()
+        listOf(configBackup, coreBackup).forEach { artifact ->
+            runCatching { artifact.deleteRecursively() }
+        }
+        var replaceConfig = false
+        var replaceCore = false
+        var configApplied = false
+        var coreApplied = false
+        try {
+            if (targetConfig.isDirectory) {
+                copyDirectoryStrict(targetConfig, stagedConfig)
+                replaceConfig = true
+            }
+            if (sourceConfig.isDirectory) {
+                if (!stagedConfig.exists() && !stagedConfig.mkdirs()) {
+                    throw IllegalStateException("无法创建配置迁移目录")
+                }
+                copyDirectoryStrict(sourceConfig, stagedConfig, overwrite = false)
+                replaceConfig = true
+            }
 
-        // 工作目录保持独立，只带走当前选中的核心，不迁移历史日志、缓存或备用核心。
-        val coreName = "danmu_api_${normalizeRuntimeVariantKey(selectedVariantKey)}"
-        val src = File(oldRoot, coreName)
-        val dst = File(newRoot, coreName)
-        if (src.exists() && !File(dst, "worker.js").exists()) {
-            runCatching { if (dst.exists()) dst.deleteRecursively() }
-            runCatching { src.copyRecursively(dst, overwrite = true) }
+            // 只迁移当前核心源码；node_modules 由目标目录的统一依赖检查按需修复。
+            if (sourceCore.isDirectory && !File(targetCore, "worker.js").isFile) {
+                copyDirectoryStrict(
+                    source = sourceCore,
+                    target = stagedCore,
+                    skipTopLevelNames = setOf("node_modules")
+                )
+                if (!File(stagedCore, "worker.js").isFile) {
+                    throw IllegalStateException("迁移后的核心缺少 worker.js")
+                }
+                replaceCore = true
+            }
+
+            if (replaceConfig) {
+                if (targetConfig.exists() && !targetConfig.renameTo(configBackup)) {
+                    throw IllegalStateException("无法备份目标配置")
+                }
+                if (!stagedConfig.renameTo(targetConfig)) {
+                    configBackup.renameTo(targetConfig)
+                    throw IllegalStateException("无法应用迁移配置")
+                }
+                configApplied = true
+            }
+            if (replaceCore) {
+                if (targetCore.exists() && !targetCore.renameTo(coreBackup)) {
+                    throw IllegalStateException("无法备份目标核心")
+                }
+                if (!stagedCore.renameTo(targetCore)) {
+                    coreBackup.renameTo(targetCore)
+                    throw IllegalStateException("无法应用迁移核心")
+                }
+                coreApplied = true
+            }
+            configBackup.deleteRecursively()
+            coreBackup.deleteRecursively()
+        } catch (error: Exception) {
+            val rollbackErrors = mutableListOf<String>()
+            if (configBackup.exists()) {
+                if (targetConfig.exists() && !targetConfig.deleteRecursively()) {
+                    rollbackErrors += "无法移除未完成的目标配置"
+                } else if (!configBackup.renameTo(targetConfig)) {
+                    rollbackErrors += "无法恢复配置备份：${configBackup.absolutePath}"
+                }
+            } else if (configApplied) {
+                if (targetConfig.exists() && !targetConfig.deleteRecursively()) {
+                    rollbackErrors += "无法撤销新配置：${targetConfig.absolutePath}"
+                }
+            }
+            if (coreBackup.exists()) {
+                if (targetCore.exists() && !targetCore.deleteRecursively()) {
+                    rollbackErrors += "无法移除未完成的目标核心"
+                } else if (!coreBackup.renameTo(targetCore)) {
+                    rollbackErrors += "无法恢复核心备份：${coreBackup.absolutePath}"
+                }
+            } else if (coreApplied) {
+                if (targetCore.exists() && !targetCore.deleteRecursively()) {
+                    rollbackErrors += "无法撤销新核心：${targetCore.absolutePath}"
+                }
+            }
+            if (rollbackErrors.isNotEmpty()) {
+                throw IllegalStateException(
+                    "${error.message ?: "迁移失败"}；${rollbackErrors.joinToString("；")}",
+                    error
+                )
+            }
+            throw error
+        } finally {
+            cleanStaging()
         }
     }
 
@@ -353,16 +471,30 @@ object RuntimePaths {
         }
     }
 
-    private fun copyDirMerge(src: File, dst: File) {
-        if (!src.exists() || !src.isDirectory) return
-        if (!dst.exists()) runCatching { dst.mkdirs() }
-        val children = src.listFiles() ?: return
-        for (child in children) {
-            val target = File(dst, child.name)
+    private fun copyDirectoryStrict(
+        source: File,
+        target: File,
+        overwrite: Boolean = true,
+        skipTopLevelNames: Set<String> = emptySet()
+    ) {
+        if (!source.isDirectory) return
+        if (!target.exists() && !target.mkdirs()) {
+            throw IllegalStateException("无法创建目录：${target.absolutePath}")
+        }
+        val children = source.listFiles()
+            ?: throw IllegalStateException("无法读取目录：${source.absolutePath}")
+        children.forEach { child ->
+            if (child.name in skipTopLevelNames) return@forEach
+            val destination = File(target, child.name)
             if (child.isDirectory) {
-                copyDirMerge(child, target)
-            } else if (!target.exists()) {
-                runCatching { child.copyTo(target, overwrite = false) }
+                copyDirectoryStrict(child, destination, overwrite = overwrite)
+            } else if (overwrite || !destination.exists()) {
+                destination.parentFile?.let { parent ->
+                    if (!parent.exists() && !parent.mkdirs()) {
+                        throw IllegalStateException("无法创建目录：${parent.absolutePath}")
+                    }
+                }
+                child.copyTo(destination, overwrite = overwrite)
             }
         }
     }

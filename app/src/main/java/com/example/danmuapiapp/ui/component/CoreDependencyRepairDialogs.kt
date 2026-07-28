@@ -84,20 +84,23 @@ fun CoreDependencyRequiredDialog(
         icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = null) },
         title = {
             Text(
-                if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
-                    "当前目录需要补充依赖"
-                } else {
-                    "${request.actionLabel}需要补充依赖"
+                when (request.origin) {
+                    CoreDependencyRepairOrigin.WorkDirectory -> "当前目录需要补充依赖"
+                    CoreDependencyRepairOrigin.RuntimeStart -> "启动前需要修复依赖"
+                    CoreDependencyRepairOrigin.CoreMutation -> "${request.actionLabel}需要补充依赖"
                 }
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
-                        "当前工作目录中的核心依赖不完整。修复并校验通过后，将继续使用这个目录。"
-                    } else {
-                        "候选核心尚未替换正式核心。修复并校验通过后，将自动继续${request.actionLabel}。"
+                    when (request.origin) {
+                        CoreDependencyRepairOrigin.WorkDirectory ->
+                            "当前工作目录中的核心依赖不完整。修复并校验通过后，将继续使用这个目录。"
+                        CoreDependencyRepairOrigin.RuntimeStart ->
+                            "当前核心依赖不完整。修复并校验通过后，将继续启动服务。"
+                        CoreDependencyRepairOrigin.CoreMutation ->
+                            "候选核心尚未替换正式核心。修复并校验通过后，将自动继续${request.actionLabel}。"
                     }
                 )
                 Text(
@@ -139,10 +142,12 @@ fun CoreDependencyRepairDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
-                        "请选择依赖来源。只修复当前工作目录中的核心依赖，不会复制或替换核心文件。"
-                    } else {
-                        "请选择依赖来源。仅修复当前候选核心，不会改动 App 公共 node_modules。"
+                    when (request.origin) {
+                        CoreDependencyRepairOrigin.WorkDirectory,
+                        CoreDependencyRepairOrigin.RuntimeStart ->
+                            "请选择依赖来源。只修复当前核心的本地依赖，不会改动 App 公共 node_modules。"
+                        CoreDependencyRepairOrigin.CoreMutation ->
+                            "请选择依赖来源。仅修复当前候选核心，不会改动 App 公共 node_modules。"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -185,10 +190,10 @@ fun CoreDependencyRepairDialog(
                     )
                 ) {
                     Text(
-                        if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
-                            "取消修复"
-                        } else {
-                            "取消此次${request.actionLabel}"
+                        when (request.origin) {
+                            CoreDependencyRepairOrigin.WorkDirectory,
+                            CoreDependencyRepairOrigin.RuntimeStart -> "取消修复"
+                            CoreDependencyRepairOrigin.CoreMutation -> "取消此次${request.actionLabel}"
                         }
                     )
                 }

@@ -327,6 +327,21 @@ object RootAutoStartServiceScriptPartA {
                 [ -f "${'$'}DIR/worker.js" ] || [ -f "${'$'}DIR/danmu_api/worker.js" ] || [ -f "${'$'}DIR/danmu-api/worker.js" ]
               }
 
+              core_dependencies_ready() {
+                DIR="${'$'}1"
+                REQUIREMENTS="${'$'}DIR/.danmuapiapp-required-dependencies"
+                [ -f "${'$'}REQUIREMENTS" ] || { logd "dependency requirements missing; legacy core check skipped"; return 0; }
+                while IFS= read -r DEP || [ -n "${'$'}DEP" ]; do
+                  [ -n "${'$'}DEP" ] || continue
+                  if [ ! -f "${'$'}DIR/node_modules/${'$'}DEP/package.json" ] &&
+                     [ ! -f "${'$'}PROJ/node_modules/${'$'}DEP/package.json" ]; then
+                    log "runtime dependency missing: variant=${'$'}SELECTED_VARIANT package=${'$'}DEP"
+                    return 1
+                  fi
+                done < "${'$'}REQUIREMENTS"
+                return 0
+              }
+
               ensure_runtime
 
               [ -f "${'$'}ENTRY" ] || { log "entry missing: ${'$'}ENTRY"; return 1; }
@@ -337,6 +352,10 @@ object RootAutoStartServiceScriptPartA {
               CORE_DIR="${'$'}PROJ/danmu_api_${'$'}SELECTED_VARIANT"
               core_has_worker "${'$'}CORE_DIR" || {
                 log "selected core missing or incomplete: variant=${'$'}SELECTED_VARIANT dir=${'$'}CORE_DIR"
+                return 1
+              }
+              core_dependencies_ready "${'$'}CORE_DIR" || {
+                log "selected core dependencies incomplete; open app to repair"
                 return 1
               }
               logd "entry=${'$'}ENTRY"
