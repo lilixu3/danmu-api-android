@@ -10,6 +10,7 @@ import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
@@ -352,8 +353,11 @@ class CoreViewModel @Inject constructor(
             operationMessage = progressMessage
             repairBlock(request.operationId).fold(
                 onSuccess = {
-                    operationMessage = "依赖校验通过，正在继续${request.actionLabel}..."
-                    applyRepairedPendingCore(request)
+                    val latestRequest = pendingDependencyRepair.value
+                        ?.takeIf { it.operationId == request.operationId }
+                        ?: request
+                    operationMessage = "依赖校验通过，正在继续${latestRequest.actionLabel}..."
+                    applyRepairedPendingCore(latestRequest)
                 },
                 onFailure = { error ->
                     operationMessage = "依赖修复失败：${error.message ?: "未知错误"}"
@@ -367,9 +371,10 @@ class CoreViewModel @Inject constructor(
     private suspend fun applyRepairedPendingCore(request: CoreDependencyRepairRequest) {
         coreRepo.applyPendingCoreMutation(request.operationId).fold(
             onSuccess = {
-                if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
-                    runtimeRepo.startService()
-                    operationMessage = "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+                val continuation = runtimeRepo.continueAfterDependencyRepair(request)
+                if (continuation != null) {
+                    operationMessage =
+                        "${variantLabel(request.variant)}依赖已修复，$continuation"
                     return@fold
                 }
                 val restartPlan = decideCoreApplyPlan(runtimeState.value, request.variant)

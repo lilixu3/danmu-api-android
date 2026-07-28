@@ -12,6 +12,7 @@ object RuntimeDependencyHealthChecker {
     private const val PREFS_NAME = "runtime_dependency_health"
     private const val KEY_VARIANT = "variant"
     private const val KEY_MISSING = "missing"
+    private const val KEY_SUSPECTED_PACKAGE = "suspected_package"
     private const val KEY_DETECTED_AT = "detected_at"
 
     sealed interface Status {
@@ -26,7 +27,8 @@ object RuntimeDependencyHealthChecker {
     data class PendingIssue(
         val variant: ApiVariant,
         val missingDependencies: List<String>,
-        val detectedAt: Long
+        val detectedAt: Long,
+        val suspectedPackage: String? = null
     )
 
     fun inspectSelectedCore(
@@ -68,8 +70,31 @@ object RuntimeDependencyHealthChecker {
         return PendingIssue(
             variant = variant,
             missingDependencies = missing,
-            detectedAt = prefs.getLong(KEY_DETECTED_AT, 0L)
+            detectedAt = prefs.getLong(KEY_DETECTED_AT, 0L),
+            suspectedPackage = prefs.getString(KEY_SUSPECTED_PACKAGE, null)
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
         )
+    }
+
+    fun recordModuleNotFoundIssue(
+        context: Context,
+        projectDir: File,
+        message: String?,
+        preferredVariant: ApiVariant? = null
+    ): String? {
+        val packageName = RuntimeModuleNotFoundClassifier.extractPackageName(message) ?: return null
+        val variant = preferredVariant ?: resolveSelectedVariant(context, projectDir)
+        val coreDir = File(projectDir, "danmu_api_${variant.key}")
+        val requirement = NodeProjectManager.runtimeDependencyRequirementForCore(coreDir, packageName)
+            ?: return null
+        recordPendingIssue(
+            context = context,
+            variant = variant,
+            missing = listOf(requirement),
+            suspectedPackage = packageName
+        )
+        return packageName
     }
 
     fun clearPendingIssue(context: Context, variant: ApiVariant? = null) {
@@ -85,11 +110,17 @@ object RuntimeDependencyHealthChecker {
     private fun recordPendingIssue(
         context: Context,
         variant: ApiVariant,
-        missing: List<String>
+        missing: List<String>,
+        suspectedPackage: String? = null
     ) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit(commit = true) {
             putString(KEY_VARIANT, variant.key)
             putString(KEY_MISSING, missing.distinct().sorted().joinToString("\n"))
+            if (suspectedPackage.isNullOrBlank()) {
+                remove(KEY_SUSPECTED_PACKAGE)
+            } else {
+                putString(KEY_SUSPECTED_PACKAGE, suspectedPackage)
+            }
             putLong(KEY_DETECTED_AT, System.currentTimeMillis())
         }
     }

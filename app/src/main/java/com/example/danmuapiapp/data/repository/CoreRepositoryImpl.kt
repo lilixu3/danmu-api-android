@@ -183,7 +183,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun beginCoreOperation(variant: ApiVariant, actionLabel: String): Long {
+    private fun beginCoreOperation(variant: ApiVariant?, actionLabel: String): Long {
         synchronized(coreOperationLock) {
             val active = _operationState.value
             if (active.isActive) {
@@ -956,10 +956,52 @@ class CoreRepositoryImpl @Inject constructor(
                 )
         }
 
+    override suspend fun applyWorkDirectoryChange(
+        targetPath: String?,
+        migrateSelectedCore: Boolean
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val operationId = runCatching { beginCoreOperation(null, "切换工作目录") }
+            .getOrElse { return@withContext Result.failure(it) }
+        try {
+            val applyResult = mutationMutex.withLock {
+                RuntimePaths.applyCustomBaseDir(
+                    context = context,
+                    targetPath = targetPath,
+                    switchMode = if (migrateSelectedCore) {
+                        RuntimePaths.WorkDirSwitchMode.MigrateSelectedCore
+                    } else {
+                        RuntimePaths.WorkDirSwitchMode.SwitchOnly
+                    }
+                )
+            }
+            if (!applyResult.ok) {
+                throw IOException(applyResult.message)
+            }
+            finishCoreOperation(operationId)
+            Result.success(applyResult.message)
+        } catch (cancelled: CancellationException) {
+            finishCoreOperation(operationId)
+            throw cancelled
+        } catch (error: Exception) {
+            finishCoreOperation(operationId)
+            Result.failure(error)
+        }
+    }
+
     override suspend fun prepareInstalledCoreDependencyRepair(
         variant: ApiVariant,
-        origin: CoreDependencyRepairOrigin
+        origin: CoreDependencyRepairOrigin,
+        resumeAction: RuntimeDependencyResumeAction,
+        suspectedMissingPackage: String?
     ): CoreDependencyRepairRequest? = withContext(Dispatchers.IO) {
+        val effectiveResumeAction = if (
+            origin == CoreDependencyRepairOrigin.RuntimeStart &&
+            resumeAction == RuntimeDependencyResumeAction.None
+        ) {
+            RuntimeDependencyResumeAction.Start
+        } else {
+            resumeAction
+        }
         val mode = currentRunMode()
         val location = getCoreLocation(variant, mode)
         val coreDir = location.normalDir
@@ -967,11 +1009,16 @@ class CoreRepositoryImpl @Inject constructor(
         NodeProjectManager.writeRuntimeDependencyRequirements(coreDir)
 
         val projectDir = RuntimePaths.normalProjectDir(context)
-        val missing = if (NodeProjectManager.hasProjectEntry(projectDir)) {
+        val detectedMissing = if (NodeProjectManager.hasProjectEntry(projectDir)) {
             collectMissingCoreRuntimeDependencies(coreDir)
         } else {
             NodeProjectManager.collectMissingRuntimeDepsForCoreAgainstBundledRuntime(coreDir)
         }
+        val suspectedRequirement = NodeProjectManager.runtimeDependencyRequirementForCore(
+            coreDir = coreDir,
+            packageName = suspectedMissingPackage
+        )
+        val missing = (detectedMissing + listOfNotNull(suspectedRequirement)).distinct().sorted()
         if (missing.isEmpty()) {
             RuntimeDependencyHealthChecker.clearPendingIssue(context, variant)
             return@withContext null
@@ -980,7 +1027,36 @@ class CoreRepositoryImpl @Inject constructor(
         synchronized(coreOperationLock) {
             pendingCoreMutation?.takeIf {
                 it.repair.variant == variant && it.repair.missingDependencies == missing
-            }?.let { return@withContext it.repair }
+            }?.let { existing ->
+                if (existing.type != PendingCoreMutationType.RepairInstalledDependencies) {
+                    return@withContext existing.repair
+                }
+                val mergedResumeAction = when {
+                    existing.repair.resumeAction == RuntimeDependencyResumeAction.Restart ||
+                        effectiveResumeAction == RuntimeDependencyResumeAction.Restart -> {
+                        RuntimeDependencyResumeAction.Restart
+                    }
+                    existing.repair.resumeAction == RuntimeDependencyResumeAction.Start ||
+                        effectiveResumeAction == RuntimeDependencyResumeAction.Start -> {
+                        RuntimeDependencyResumeAction.Start
+                    }
+                    else -> RuntimeDependencyResumeAction.None
+                }
+                if (mergedResumeAction == existing.repair.resumeAction) {
+                    return@withContext existing.repair
+                }
+                val updatedRepair = existing.repair.copy(
+                    actionLabel = when (mergedResumeAction) {
+                        RuntimeDependencyResumeAction.Start -> "启动"
+                        RuntimeDependencyResumeAction.Restart -> "重启"
+                        RuntimeDependencyResumeAction.None -> "修复"
+                    },
+                    resumeAction = mergedResumeAction
+                )
+                pendingCoreMutation = existing.copy(repair = updatedRepair)
+                _pendingDependencyRepair.value = updatedRepair
+                return@withContext updatedRepair
+            }
         }
 
         val operationId = beginCoreOperation(variant, "修复依赖")
@@ -996,11 +1072,16 @@ class CoreRepositoryImpl @Inject constructor(
             val request = CoreDependencyRepairRequest(
                 operationId = operationId,
                 variant = variant,
-                actionLabel = "修复",
+                actionLabel = when (effectiveResumeAction) {
+                    RuntimeDependencyResumeAction.Start -> "启动"
+                    RuntimeDependencyResumeAction.Restart -> "重启"
+                    RuntimeDependencyResumeAction.None -> "修复"
+                },
                 missingDependencies = missing,
                 candidateVersion = NodeProjectManager.readCoreVersion(coreDir),
                 onlineRepairSupported = RuntimeDependencyPackProtocol.supportsOnlineRepair(variant),
-                origin = origin
+                origin = origin,
+                resumeAction = effectiveResumeAction
             )
             setPendingCoreMutation(
                 PendingCoreMutation(
@@ -1579,11 +1660,13 @@ class CoreRepositoryImpl @Inject constructor(
         replaceInstalledCoreDependencies(
             stagingCoreDir = pending.stagingDir,
             installedCoreDir = pending.targetDir,
+            afterInstall = {
+                if (pending.mode != RunMode.Normal) {
+                    syncCoreDirToRoot(pending.targetDir, pending.rootDirPath)
+                }
+            },
             verifyInstalled = { verifyCoreRuntimeDependencies(pending.targetDir) }
         )
-        if (pending.mode != RunMode.Normal) {
-            syncCoreDirToRoot(pending.targetDir, pending.rootDirPath)
-        }
     }
 
     private fun buildDownloadUrlCandidates(zipUrl: String): List<String> {
@@ -1673,7 +1756,8 @@ class CoreRepositoryImpl @Inject constructor(
         runCatching {
             prepareInstalledCoreDependencyRepair(
                 variant = issue.variant,
-                origin = CoreDependencyRepairOrigin.RuntimeStart
+                origin = CoreDependencyRepairOrigin.RuntimeStart,
+                suspectedMissingPackage = issue.suspectedPackage
             )
         }.onFailure { error ->
             logRecoverableWarning("恢复启动依赖修复提示失败", error)
@@ -2161,6 +2245,7 @@ internal fun copyDirectoryOrThrow(
 internal fun replaceInstalledCoreDependencies(
     stagingCoreDir: File,
     installedCoreDir: File,
+    afterInstall: () -> Unit = {},
     verifyInstalled: () -> Unit
 ) {
     val stagedNodeModules = File(stagingCoreDir, "node_modules")
@@ -2208,6 +2293,7 @@ internal fun replaceInstalledCoreDependencies(
             }
         }
         verifyInstalled()
+        afterInstall()
         runCatching { backupNodeModules.deleteRecursively() }
     } catch (error: Exception) {
         runCatching { targetNodeModules.deleteRecursively() }

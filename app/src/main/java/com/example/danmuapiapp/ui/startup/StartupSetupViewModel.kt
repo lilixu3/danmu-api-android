@@ -20,6 +20,7 @@ import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -75,9 +76,9 @@ class StartupSetupViewModel @Inject constructor(
         postMessage = { operationMessage = it },
         onApplied = { request ->
             coreRepo.refreshCoreInfo()
-            if (request.origin == com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin.RuntimeStart) {
-                runtimeRepo.startService()
-                "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+            val continuation = runtimeRepo.continueAfterDependencyRepair(request)
+            if (continuation != null) {
+                "${variantLabel(request.variant)}依赖已修复，$continuation"
             } else {
                 "${variantLabel(request.variant)}依赖检测通过，核心已准备好"
             }

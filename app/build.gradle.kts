@@ -1,6 +1,10 @@
 import java.util.Properties
 import java.util.zip.ZipFile
 import java.security.MessageDigest
+import java.net.HttpURLConnection
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import org.gradle.api.GradleException
 
 plugins {
@@ -40,8 +44,37 @@ if (unsupportedAbiFilters.isNotEmpty()) {
     )
 }
 val configuredAbiFilters = if (rawAbiFilters.isEmpty()) defaultReleaseAbis else rawAbiFilters
+val preparedNativeRuntimeDir = layout.buildDirectory.dir("prepared-native-runtime").get().asFile
 val requestedTaskNames = gradle.startParameter.taskNames.map { it.lowercase() }
 val isBundleTaskRequested = requestedTaskNames.any { it.contains("bundle") }
+val testMissingRuntimePackage = (findProperty("testMissingRuntimePackage") as? String)
+    ?.trim()
+    ?.takeIf(String::isNotBlank)
+if (testMissingRuntimePackage != null) {
+    if (testMissingRuntimePackage != "opencc-js") {
+        throw GradleException("testMissingRuntimePackage 仅允许 opencc-js")
+    }
+    if (requestedTaskNames.any { it.contains("release") || it.contains("bundle") }) {
+        throw GradleException("缺依赖测试开关只能用于 Debug APK，禁止用于 Release/AAB")
+    }
+}
+val missingRuntimeTestAssetsDir = layout.buildDirectory.dir("test-missing-runtime-assets").get().asFile
+val prepareMissingRuntimeTestAssetsTask = testMissingRuntimePackage?.let { missingPackage ->
+    tasks.register("prepareMissingRuntimeTestAssets") {
+        val sourceAssets = file("src/main/assets")
+        inputs.dir(sourceAssets)
+        inputs.property("missingRuntimePackage", missingPackage)
+        outputs.dir(missingRuntimeTestAssetsDir)
+        doLast {
+            delete(missingRuntimeTestAssetsDir)
+            copy {
+                from(sourceAssets)
+                exclude("nodejs-project/node_modules/$missingPackage/**")
+                into(missingRuntimeTestAssetsDir)
+            }
+        }
+    }
+}
 
 fun parseBooleanProperty(name: String): Boolean? {
     val rawValue = (findProperty(name) as? String)?.trim().orEmpty()
@@ -217,22 +250,17 @@ android {
 
     sourceSets {
         getByName("main") {
-            if (isTermuxHost) {
-                val termuxJniDirs = mutableListOf("${layout.buildDirectory.get().asFile}/termux-jni-libs/libnode/bin")
-                if (!enableNativeBuild) {
-                    termuxJniDirs += "${layout.buildDirectory.get().asFile}/termux-jni-libs/jni-current"
-                }
-                jniLibs.directories.clear()
-                jniLibs.directories.addAll(termuxJniDirs)
-            } else {
-                val jniDirs = mutableListOf("libnode/bin")
-                if (!enableNativeBuild) {
-                    // 使用当前包名重新编译的 JNI 桥接库，避免旧符号导致 UnsatisfiedLinkError
-                    jniDirs += "jni-current"
-                }
-                jniLibs.directories.clear()
-                jniLibs.directories.addAll(jniDirs)
+            if (testMissingRuntimePackage == "opencc-js") {
+                assets.directories.clear()
+                assets.directories.add(missingRuntimeTestAssetsDir.absolutePath)
             }
+            val jniDirs = mutableListOf(File(preparedNativeRuntimeDir, "libnode/bin").absolutePath)
+            if (!enableNativeBuild) {
+                // 使用当前包名重新编译的 JNI 桥接库，避免旧符号导致 UnsatisfiedLinkError。
+                jniDirs += File(preparedNativeRuntimeDir, "jni-current").absolutePath
+            }
+            jniLibs.directories.clear()
+            jniLibs.directories.addAll(jniDirs)
         }
     }
 }
@@ -740,17 +768,58 @@ val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-optional/redis/node_modules/@redis/client/package.json"
 )
 
+fun requiredPackagedNativeRuntimeEntries(abi: String) = listOf(
+    "lib/$abi/libnode.so",
+    "lib/$abi/libnative-lib.so",
+    "lib/$abi/libc++_shared.so",
+    "lib/$abi/libandroidx.graphics.path.so",
+    "lib/$abi/libdatastore_shared_counter.so"
+)
+
 tasks.register("verifyPackagedNodeModulesDebug") {
-    val apkFile = layout.buildDirectory.file("outputs/apk/debug/app-arm64-v8a-debug.apk")
-    dependsOn("assembleDebug")
-    inputs.file(apkFile)
+    val apkFiles = configuredAbiFilters.map { abi ->
+        layout.buildDirectory.file("outputs/apk/debug/app-$abi-debug.apk")
+    }
+    inputs.files(apkFiles)
     doLast {
-        val file = apkFile.get().asFile
-        if (!file.exists()) throw GradleException("未找到 debug APK：${file.absolutePath}")
-        ZipFile(file).use { zip ->
-            val missing = requiredPackagedNodeRuntimeEntries.filter { zip.getEntry(it) == null }
-            if (missing.isNotEmpty()) {
-                throw GradleException("Debug APK 缺少关键依赖文件：${missing.joinToString(", ")}")
+        apkFiles.zip(configuredAbiFilters).forEach { (provider, abi) ->
+            val file = provider.get().asFile
+            if (!file.exists()) throw GradleException("未找到 debug APK：${file.absolutePath}")
+            ZipFile(file).use { zip ->
+                val requiredNodeEntries = if (testMissingRuntimePackage == "opencc-js") {
+                    requiredPackagedNodeRuntimeEntries.filterNot {
+                        it.startsWith("assets/nodejs-project/node_modules/opencc-js/")
+                    }
+                } else {
+                    requiredPackagedNodeRuntimeEntries
+                }
+                val requiredEntries = requiredNodeEntries +
+                    requiredPackagedNativeRuntimeEntries(abi)
+                val missing = requiredEntries.filter { zip.getEntry(it) == null }
+                val forbiddenTestEntries = if (testMissingRuntimePackage == "opencc-js") {
+                    zip.entries().asSequence()
+                        .map { it.name }
+                        .filter { it.startsWith("assets/nodejs-project/node_modules/opencc-js/") }
+                        .take(3)
+                        .toList()
+                } else {
+                    emptyList()
+                }
+                val invalidNative = requiredPackagedNativeRuntimeEntries(abi).filter { entry ->
+                    val size = zip.getEntry(entry)?.size ?: -1L
+                    size <= 0L || (entry.endsWith("/libnode.so") && size < 10L * 1024L * 1024L)
+                }
+                if (missing.isNotEmpty() || invalidNative.isNotEmpty() || forbiddenTestEntries.isNotEmpty()) {
+                    throw GradleException(
+                        buildList {
+                            if (missing.isNotEmpty()) add("缺少：${missing.joinToString(", ")}")
+                            if (invalidNative.isNotEmpty()) add("内容异常：${invalidNative.joinToString(", ")}")
+                            if (forbiddenTestEntries.isNotEmpty()) {
+                                add("缺依赖测试包仍包含：${forbiddenTestEntries.joinToString(", ")}")
+                            }
+                        }.joinToString("；", prefix = "Debug APK（$abi）运行时校验失败：")
+                    )
+                }
             }
         }
     }
@@ -766,14 +835,19 @@ tasks.register("verifyPackagedNodeModulesRelease") {
             val file = provider.get().asFile
             if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
             ZipFile(file).use { zip ->
-                val requiredEntries = requiredPackagedNodeRuntimeEntries + listOf(
-                    "lib/$abi/libnode.so",
-                    "lib/$abi/libnative-lib.so"
-                )
+                val requiredEntries = requiredPackagedNodeRuntimeEntries +
+                    requiredPackagedNativeRuntimeEntries(abi)
                 val missing = requiredEntries.filter { zip.getEntry(it) == null }
-                if (missing.isNotEmpty()) {
+                val invalidNative = requiredPackagedNativeRuntimeEntries(abi).filter { entry ->
+                    val size = zip.getEntry(entry)?.size ?: -1L
+                    size <= 0L || (entry.endsWith("/libnode.so") && size < 10L * 1024L * 1024L)
+                }
+                if (missing.isNotEmpty() || invalidNative.isNotEmpty()) {
                     throw GradleException(
-                        "Release APK（$abi）缺少关键运行时文件：${missing.joinToString(", ")}"
+                        buildList {
+                            if (missing.isNotEmpty()) add("缺少：${missing.joinToString(", ")}")
+                            if (invalidNative.isNotEmpty()) add("内容异常：${invalidNative.joinToString(", ")}")
+                        }.joinToString("；", prefix = "Release APK（$abi）运行时校验失败：")
                     )
                 }
             }
@@ -787,54 +861,242 @@ val testBundledNodeLockClosureTask = tasks.named("testBundledNodeLockClosure")
 val testBundledCoreRuntimeDependenciesTask = tasks.named("testBundledCoreRuntimeDependencies")
 val verifyEmbeddedNodeCompatibilityTask = tasks.named("verifyEmbeddedNodeCompatibility")
 val nativeRuntimeChecksumFile = file("native-runtime.sha256")
-val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") {
-    inputs.file(nativeRuntimeChecksumFile)
-    doLast {
-        if (!nativeRuntimeChecksumFile.isFile) {
-            throw GradleException("缺少原生运行时校验清单：${nativeRuntimeChecksumFile.absolutePath}")
+val nativeRuntimeSourcesFile = file("native-runtime-sources.properties")
+
+fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
         }
-        val malformed = mutableListOf<String>()
-        val missing = mutableListOf<String>()
-        val mismatched = mutableListOf<String>()
-        nativeRuntimeChecksumFile.readLines(Charsets.UTF_8).forEachIndexed { index, rawLine ->
-            val line = rawLine.trim()
-            if (line.isBlank() || line.startsWith('#')) return@forEachIndexed
-            val separator = line.indexOf("  ")
-            if (separator <= 0) {
-                malformed += "第 ${index + 1} 行"
-                return@forEachIndexed
+    }
+    return digest.digest().joinToString("") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
+    }
+}
+
+fun readNativeRuntimeChecksums(): Map<String, String> {
+    if (!nativeRuntimeChecksumFile.isFile) {
+        throw GradleException("缺少原生运行时校验清单：${nativeRuntimeChecksumFile.absolutePath}")
+    }
+    val result = linkedMapOf<String, String>()
+    nativeRuntimeChecksumFile.readLines(Charsets.UTF_8).forEachIndexed { index, rawLine ->
+        val line = rawLine.trim()
+        if (line.isBlank() || line.startsWith('#')) return@forEachIndexed
+        val separator = line.indexOf("  ")
+        if (separator <= 0) {
+            throw GradleException("原生运行时校验清单第 ${index + 1} 行格式错误")
+        }
+        val expected = line.substring(0, separator).trim().lowercase()
+        val relativePath = line.substring(separator + 2).trim()
+        if (!expected.matches(Regex("[0-9a-f]{64}")) ||
+            relativePath.isBlank() || relativePath.startsWith('/') ||
+            ".." in relativePath.split('/') || result.put(relativePath, expected) != null
+        ) {
+            throw GradleException("原生运行时校验清单第 ${index + 1} 行内容非法")
+        }
+    }
+    return result
+}
+
+data class NativeRuntimeReleaseSource(
+    val abi: String,
+    val assetName: String,
+    val url: String,
+    val size: Long,
+    val sha256: String
+)
+
+fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeReleaseSource>> {
+    if (!nativeRuntimeSourcesFile.isFile) {
+        throw GradleException("缺少原生运行时来源清单：${nativeRuntimeSourcesFile.absolutePath}")
+    }
+    val props = Properties().apply {
+        nativeRuntimeSourcesFile.inputStream().use { load(it) }
+    }
+    fun required(key: String): String = props.getProperty(key)?.trim().orEmpty().takeIf { it.isNotBlank() }
+        ?: throw GradleException("原生运行时来源清单缺少 $key")
+
+    val releaseVersion = required("release.version")
+    val sources = defaultReleaseAbis.associateWith { abi ->
+        val sha = required("$abi.sha256").lowercase()
+        if (!sha.matches(Regex("[0-9a-f]{64}"))) {
+            throw GradleException("原生运行时来源清单中的 $abi.sha256 非法")
+        }
+        NativeRuntimeReleaseSource(
+            abi = abi,
+            assetName = required("$abi.asset"),
+            url = required("$abi.url"),
+            size = required("$abi.size").toLongOrNull()?.takeIf { it in 1..(128L * 1024L * 1024L) }
+                ?: throw GradleException("原生运行时来源清单中的 $abi.size 非法"),
+            sha256 = sha
+        )
+    }
+    return releaseVersion to sources
+}
+
+val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
+    inputs.files(nativeRuntimeChecksumFile, nativeRuntimeSourcesFile)
+    inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
+    outputs.dir(preparedNativeRuntimeDir)
+    doLast {
+        val checksums = readNativeRuntimeChecksums()
+        val (releaseVersion, allSources) = readNativeRuntimeReleaseSources()
+        val selectedChecksums = checksums.filterKeys { path ->
+            configuredAbiFilters.any { abi -> "/$abi/" in "/$path" }
+        }
+        val missingManifestEntries = configuredAbiFilters.flatMap { abi ->
+            listOf(
+                "libnode/bin/$abi/libnode.so",
+                "jni-current/$abi/libc++_shared.so",
+                "jni-current/$abi/libnative-lib.so"
+            )
+        }.filterNot(selectedChecksums::containsKey)
+        if (missingManifestEntries.isNotEmpty()) {
+            throw GradleException(
+                "原生运行时校验清单缺少：${missingManifestEntries.joinToString(", ")}"
+            )
+        }
+
+        delete(preparedNativeRuntimeDir)
+        preparedNativeRuntimeDir.mkdirs()
+
+        configuredAbiFilters.forEach { abi ->
+            val abiEntries = selectedChecksums.filterKeys { "/$abi/" in "/$it" }
+            val canUseLegacyFiles = abiEntries.all { (relativePath, expectedHash) ->
+                val legacyFile = file(relativePath)
+                legacyFile.isFile && sha256(legacyFile) == expectedHash
             }
-            val expected = line.substring(0, separator).trim().lowercase()
-            val relativePath = line.substring(separator + 2).trim()
-            if (!expected.matches(Regex("[0-9a-f]{64}")) ||
-                relativePath.isBlank() || relativePath.startsWith('/') || ".." in relativePath.split('/')
-            ) {
-                malformed += "第 ${index + 1} 行"
-                return@forEachIndexed
+
+            if (canUseLegacyFiles) {
+                abiEntries.forEach { (relativePath, _) ->
+                    val target = File(preparedNativeRuntimeDir, relativePath)
+                    target.parentFile.mkdirs()
+                    file(relativePath).copyTo(target, overwrite = true)
+                }
+                return@forEach
             }
-            val runtimeFile = file(relativePath)
-            if (!runtimeFile.isFile) {
-                missing += relativePath
-                return@forEachIndexed
-            }
-            val digest = MessageDigest.getInstance("SHA-256")
-            runtimeFile.inputStream().use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    digest.update(buffer, 0, count)
+
+            val source = allSources.getValue(abi)
+            val localReleaseApk = rootProject.file("dist/$releaseVersion/${source.assetName}")
+            val cacheApk = File(
+                gradle.gradleUserHomeDir,
+                "caches/danmu-native-runtime/$releaseVersion/${source.assetName}"
+            )
+            fun isValidApk(candidate: File): Boolean =
+                candidate.isFile && candidate.length() == source.size && sha256(candidate) == source.sha256
+
+            val apkFile = when {
+                isValidApk(localReleaseApk) -> localReleaseApk
+                isValidApk(cacheApk) -> cacheApk
+                gradle.startParameter.isOffline -> throw GradleException(
+                    "离线构建缺少 $abi 原生运行时缓存。请先联网执行 prepareNativeRuntime"
+                )
+                else -> {
+                    cacheApk.parentFile.mkdirs()
+                    val partFile = File(cacheApk.parentFile, "${cacheApk.name}.part")
+                    partFile.delete()
+                    try {
+                        val connection = (URI(source.url).toURL().openConnection() as HttpURLConnection).apply {
+                            instanceFollowRedirects = true
+                            connectTimeout = 20_000
+                            readTimeout = 60_000
+                            requestMethod = "GET"
+                            setRequestProperty("User-Agent", "DanmuApiApp-Gradle")
+                        }
+                        try {
+                            val responseCode = connection.responseCode
+                            if (responseCode !in 200..299) {
+                                throw GradleException("下载 $abi 原生运行时失败：HTTP $responseCode")
+                            }
+                            connection.inputStream.use { input ->
+                                partFile.outputStream().use { output ->
+                                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                    var total = 0L
+                                    while (true) {
+                                        val count = input.read(buffer)
+                                        if (count < 0) break
+                                        total += count
+                                        if (total > 128L * 1024L * 1024L) {
+                                            throw GradleException("下载的 $abi 原生运行时超过大小上限")
+                                        }
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
+                            }
+                        } finally {
+                            connection.disconnect()
+                        }
+                        if (!isValidApk(partFile)) {
+                            throw GradleException("下载的 $abi 原生运行时大小或 SHA-256 不匹配")
+                        }
+                        try {
+                            Files.move(
+                                partFile.toPath(),
+                                cacheApk.toPath(),
+                                StandardCopyOption.ATOMIC_MOVE,
+                                StandardCopyOption.REPLACE_EXISTING
+                            )
+                        } catch (_: Exception) {
+                            Files.move(
+                                partFile.toPath(),
+                                cacheApk.toPath(),
+                                StandardCopyOption.REPLACE_EXISTING
+                            )
+                        }
+                        cacheApk
+                    } finally {
+                        partFile.delete()
+                    }
                 }
             }
-            val actual = digest.digest().joinToString("") { byte ->
-                "%02x".format(byte.toInt() and 0xff)
+
+            ZipFile(apkFile).use { zip ->
+                abiEntries.forEach { (relativePath, expectedHash) ->
+                    val apkEntryName = "lib/$abi/${relativePath.substringAfterLast('/')}"
+                    val entry = zip.getEntry(apkEntryName)
+                        ?: throw GradleException("${source.assetName} 缺少 $apkEntryName")
+                    if (entry.isDirectory || entry.size <= 0L || entry.size > 64L * 1024L * 1024L) {
+                        throw GradleException("${source.assetName} 中的 $apkEntryName 大小异常")
+                    }
+                    val target = File(preparedNativeRuntimeDir, relativePath)
+                    target.parentFile.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        target.outputStream().use(input::copyTo)
+                    }
+                    if (sha256(target) != expectedHash) {
+                        throw GradleException("提取的原生运行时文件 SHA-256 不匹配：$relativePath")
+                    }
+                }
             }
-            if (actual != expected) mismatched += relativePath
         }
-        if (malformed.isNotEmpty() || missing.isNotEmpty() || mismatched.isNotEmpty()) {
+    }
+}
+
+val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") {
+    dependsOn(prepareNativeRuntimeTask)
+    inputs.files(nativeRuntimeChecksumFile, nativeRuntimeSourcesFile)
+    inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
+    doLast {
+        val checksums = readNativeRuntimeChecksums().filterKeys { path ->
+            configuredAbiFilters.any { abi -> "/$abi/" in "/$path" }
+        }
+        val missing = mutableListOf<String>()
+        val mismatched = mutableListOf<String>()
+        checksums.forEach { (relativePath, expected) ->
+            val runtimeFile = File(preparedNativeRuntimeDir, relativePath)
+            if (!runtimeFile.isFile) {
+                missing += relativePath
+            } else if (sha256(runtimeFile) != expected) {
+                mismatched += relativePath
+            }
+        }
+        if (missing.isNotEmpty() || mismatched.isNotEmpty()) {
             throw GradleException(
                 buildList {
-                    if (malformed.isNotEmpty()) add("格式错误：${malformed.joinToString()}")
                     if (missing.isNotEmpty()) add("缺少文件：${missing.joinToString()}")
                     if (mismatched.isNotEmpty()) add("哈希不匹配：${mismatched.joinToString()}")
                 }.joinToString("；", prefix = "原生运行时输入校验失败：")
@@ -858,6 +1120,7 @@ tasks.matching {
         it.name.contains("lintVital", ignoreCase = true)
 }.configureEach {
     dependsOn(verifyBundledNodeModulesTask)
+    prepareMissingRuntimeTestAssetsTask?.let { dependsOn(it) }
 }
 
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
@@ -865,6 +1128,13 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
 }
 
 val verifyPackagedNodeModulesReleaseTask = tasks.named("verifyPackagedNodeModulesRelease")
+val verifyPackagedNodeModulesDebugTask = tasks.named("verifyPackagedNodeModulesDebug")
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+    finalizedBy(verifyPackagedNodeModulesDebugTask)
+}
+verifyPackagedNodeModulesDebugTask.configure {
+    mustRunAfter("assembleDebug")
+}
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     finalizedBy(verifyPackagedNodeModulesReleaseTask)
 }
@@ -877,38 +1147,9 @@ tasks.register("releaseCheck") {
     dependsOn(verifyPackagedNodeModulesReleaseTask)
 }
 
-// Termux 下复制已固定哈希的 JNI 输入，绕过宿主架构不兼容的 AGP strip 工具链。
-tasks.register("prepareTermuxJniLibs") {
-    if (isTermuxHost) {
-        val outRoot = layout.buildDirectory.dir("termux-jni-libs").get().asFile
-        outputs.dir(outRoot)
-        doLast {
-            delete(outRoot)
-
-            val outLibnode = File(outRoot, "libnode/bin")
-            copy {
-                from(file("libnode/bin"))
-                into(outLibnode)
-            }
-            if (!enableNativeBuild) {
-                val outJniCurrent = File(outRoot, "jni-current")
-                copy {
-                    from(file("jni-current"))
-                    into(outJniCurrent)
-                }
-            }
-
-            // 输入库已预裁剪并由 SHA-256 清单固定。这里仅复制，避免宿主 llvm-strip
-            // 版本差异改变同一提交的 APK 内容。
-        }
-    }
-}
-
 tasks.matching {
     (it.name.startsWith("merge") && (it.name.endsWith("JniLibFolders") || it.name.endsWith("NativeLibs"))) ||
         (it.name.startsWith("strip") && it.name.endsWith("DebugSymbols"))
 }.configureEach {
-    if (isTermuxHost) {
-        dependsOn("prepareTermuxJniLibs")
-    }
+    dependsOn(prepareNativeRuntimeTask)
 }

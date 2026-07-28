@@ -29,6 +29,7 @@ import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import com.example.danmuapiapp.ui.screen.home.support.resolveAutoCoreUpdatePrompt
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -701,9 +702,9 @@ class HomeViewModel @Inject constructor(
         }
 
         coreRepo.refreshCoreInfo()
-        if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
-            runtimeRepo.startService()
-            return "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+        val runtimeContinuation = runtimeRepo.continueAfterDependencyRepair(request)
+        if (runtimeContinuation != null) {
+            return "${variantLabel(request.variant)}依赖已修复，$runtimeContinuation"
         }
         maybeRestartAfterCoreUpdate(request.variant)
         return if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {

@@ -8,6 +8,12 @@ enum class CoreDependencyRepairOrigin {
     RuntimeStart
 }
 
+enum class RuntimeDependencyResumeAction {
+    None,
+    Start,
+    Restart
+}
+
 data class CoreDependencyRepairRequest(
     val operationId: Long,
     val variant: ApiVariant,
@@ -15,7 +21,8 @@ data class CoreDependencyRepairRequest(
     val missingDependencies: List<String>,
     val candidateVersion: String? = null,
     val onlineRepairSupported: Boolean = variant != ApiVariant.Custom,
-    val origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.CoreMutation
+    val origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.CoreMutation,
+    val resumeAction: RuntimeDependencyResumeAction = RuntimeDependencyResumeAction.None
 )
 
 enum class CoreOperationPhase {

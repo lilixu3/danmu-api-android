@@ -140,4 +140,50 @@ class CoreDirectoryOpsTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `Root 后置同步失败时恢复 Normal 旧依赖`() {
+        val root = Files.createTempDirectory("installed-dependency-root-rollback").toFile()
+        val installedCore = root.resolve("danmu_api_stable").apply { mkdirs() }
+        val stagingCore = root.resolve("danmu_api_stable.dependency-repair").apply { mkdirs() }
+        installedCore.resolve("node_modules/old-package").mkdirs()
+        installedCore.resolve("node_modules/old-package/package.json").writeText("old\n")
+        installedCore.resolve(RuntimeDependencyPackProtocol.INSTALLED_MANIFEST_FILE)
+            .writeText("old manifest")
+        stagingCore.resolve("node_modules/new-package").mkdirs()
+        stagingCore.resolve("node_modules/new-package/package.json").writeText("new\n")
+        stagingCore.resolve(LocalRuntimeDependencyArchiveImporter.LOCAL_IMPORT_AUDIT_FILE)
+            .writeText("new audit")
+
+        try {
+            val result = runCatching {
+                replaceInstalledCoreDependencies(
+                    stagingCoreDir = stagingCore,
+                    installedCoreDir = installedCore,
+                    afterInstall = { throw IOException("模拟 Root 原子同步失败") },
+                    verifyInstalled = {
+                        assertTrue(installedCore.resolve("node_modules/new-package/package.json").isFile)
+                    }
+                )
+            }
+
+            assertTrue(result.isFailure)
+            assertEquals(
+                "old\n",
+                installedCore.resolve("node_modules/old-package/package.json").readText()
+            )
+            assertFalse(installedCore.resolve("node_modules/new-package").exists())
+            assertEquals(
+                "old manifest",
+                installedCore.resolve(RuntimeDependencyPackProtocol.INSTALLED_MANIFEST_FILE).readText()
+            )
+            assertFalse(
+                installedCore.resolve(LocalRuntimeDependencyArchiveImporter.LOCAL_IMPORT_AUDIT_FILE)
+                    .exists()
+            )
+            assertFalse(installedCore.listFiles().orEmpty().any { it.name.startsWith(".node_modules-backup-") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
