@@ -69,6 +69,24 @@ class RuntimePathsMigrationTest {
             oldProject.resolve("danmu_api_dev/node_modules/large-package").mkdirs()
             oldProject.resolve("danmu_api_dev/node_modules/large-package/package.json")
                 .writeText("{\"version\":\"1.0.0\"}\n")
+            oldProject.resolve("danmu_api_dev/.cache/bangumi-data-cache.json").apply {
+                parentFile?.mkdirs()
+                writeText("generated cache")
+            }
+            oldProject.resolve("danmu_api_dev/logs/runtime.log").apply {
+                parentFile?.mkdirs()
+                writeText("runtime log")
+            }
+            oldProject.resolve("danmu_api_dev/bangumi-data-cache").apply {
+                mkdirs()
+                resolve("data.json").writeText("generated cache")
+            }
+            oldProject.resolve("danmu_api_dev/bangumi-data-cache.json")
+                .writeText("generated cache")
+            oldProject.resolve("danmu_api_dev/utils/bangumi-data-util.js").apply {
+                parentFile?.mkdirs()
+                writeText("export const loadBangumiData = () => true\n")
+            }
 
             RuntimePaths.migrateSelectedCoreAndConfig(oldBase, newBase, "development")
 
@@ -76,6 +94,11 @@ class RuntimePathsMigrationTest {
             assertEquals("DANMU_API_VARIANT=dev\n", newProject.resolve("config/.env").readText())
             assertEquals("dev-source", newProject.resolve("danmu_api_dev/worker.js").readText())
             assertFalse(newProject.resolve("danmu_api_dev/node_modules").exists())
+            assertFalse(newProject.resolve("danmu_api_dev/.cache").exists())
+            assertFalse(newProject.resolve("danmu_api_dev/logs").exists())
+            assertFalse(newProject.resolve("danmu_api_dev/bangumi-data-cache").exists())
+            assertFalse(newProject.resolve("danmu_api_dev/bangumi-data-cache.json").exists())
+            assertTrue(newProject.resolve("danmu_api_dev/utils/bangumi-data-util.js").isFile)
             assertFalse(newProject.resolve("danmu_api_stable").exists())
             assertFalse(newProject.resolve("danmu_api_custom").exists())
             assertFalse(newProject.resolve("logs/old.log").exists())
@@ -86,6 +109,90 @@ class RuntimePathsMigrationTest {
         } finally {
             oldBase.deleteRecursively()
             newBase.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `目录写入探针会真实读写并清理临时文件`() {
+        val directory = Files.createTempDirectory("work-dir-write-probe").toFile()
+        try {
+            assertTrue(RuntimePaths.verifyDirectoryWritable(directory))
+            assertTrue(
+                directory.listFiles().orEmpty().none {
+                    it.name.startsWith(".danmu-write-probe-")
+                }
+            )
+
+            val regularFile = File(directory, "not-a-directory").apply { writeText("file") }
+            assertFalse(RuntimePaths.verifyDirectoryWritable(regularFile))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `偏好提交失败时完整恢复目标配置和核心`() {
+        val oldBase = Files.createTempDirectory("work-dir-rollback-old").toFile()
+        val newBase = Files.createTempDirectory("work-dir-rollback-new").toFile()
+        try {
+            val oldProject = File(oldBase, "nodejs-project")
+            oldProject.resolve("config/.env").apply {
+                parentFile?.mkdirs()
+                writeText("SOURCE_CONFIG=1\n")
+            }
+            oldProject.resolve("config/source-only.json").writeText("source")
+            createCore(oldProject, "dev", "source-core")
+
+            val newProject = File(newBase, "nodejs-project")
+            newProject.resolve("config/.env").apply {
+                parentFile?.mkdirs()
+                writeText("TARGET_CONFIG=1\n")
+            }
+            newProject.resolve("danmu_api_dev").apply { mkdirs() }
+                .resolve("legacy.txt").writeText("keep-target")
+
+            val result = runCatching {
+                RuntimePaths.performWorkDirMigrationTransaction(
+                    oldBase = oldBase,
+                    newBase = newBase,
+                    selectedVariantKey = "dev",
+                    commitPreference = { false }
+                )
+            }
+
+            assertTrue(result.isFailure)
+            assertEquals("TARGET_CONFIG=1\n", newProject.resolve("config/.env").readText())
+            assertFalse(newProject.resolve("config/source-only.json").exists())
+            assertEquals("keep-target", newProject.resolve("danmu_api_dev/legacy.txt").readText())
+            assertFalse(newProject.resolve("danmu_api_dev/worker.js").exists())
+            assertTrue(oldProject.resolve("danmu_api_dev/worker.js").isFile)
+            assertTrue(
+                newProject.listFiles().orEmpty().none {
+                    it.name.contains("-migration-") || it.name.contains("-backup-")
+                }
+            )
+        } finally {
+            oldBase.deleteRecursively()
+            newBase.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `迁移目录不能互相包含但同目录不算冲突`() {
+        val root = Files.createTempDirectory("work-dir-overlap").toFile()
+        try {
+            val child = File(root, "child").apply { mkdirs() }
+            val sibling = Files.createTempDirectory("work-dir-sibling").toFile()
+            try {
+                assertTrue(RuntimePaths.workDirectoriesOverlap(root, child))
+                assertTrue(RuntimePaths.workDirectoriesOverlap(child, root))
+                assertFalse(RuntimePaths.workDirectoriesOverlap(root, root))
+                assertFalse(RuntimePaths.workDirectoriesOverlap(root, sibling))
+            } finally {
+                sibling.deleteRecursively()
+            }
+        } finally {
+            root.deleteRecursively()
         }
     }
 

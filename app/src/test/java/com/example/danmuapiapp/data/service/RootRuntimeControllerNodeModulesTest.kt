@@ -111,9 +111,19 @@ class RootRuntimeControllerNodeModulesTest {
             assertEquals(0, runShell(first))
             assertEquals("source\n", destination.resolve("pkg/index.js").readText())
             assertEquals(
-                "fingerprint-v1\n",
-                destination.resolve(".danmuapiapp-sync-fingerprint").readText()
+                listOf("fingerprint-v1", "2"),
+                destination.resolve(".danmuapiapp-sync-fingerprint").readLines()
             )
+
+            destination.resolve("pkg/index.js").delete()
+            val repair = RootRuntimeController.buildAtomicNodeModulesSyncShell(
+                sourcePath = source.absolutePath,
+                destinationPath = destination.absolutePath,
+                fingerprint = "fingerprint-v1",
+                operationToken = "repair"
+            )
+            assertEquals(0, runShell(repair))
+            assertEquals("source\n", destination.resolve("pkg/index.js").readText())
 
             source.resolve("pkg/index.js").writeText("changed-with-same-fingerprint\n")
             val second = RootRuntimeController.buildAtomicNodeModulesSyncShell(

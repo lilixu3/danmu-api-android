@@ -108,11 +108,14 @@ class CoreDependencyRepairController(
             try {
                 repairBlock(request.operationId).fold(
                     onSuccess = {
-                        postMessage("依赖校验通过，正在继续${request.actionLabel}...")
+                        val latestRequest = pendingDependencyRepair.value
+                            ?.takeIf { it.operationId == request.operationId }
+                            ?: request
+                        postMessage("依赖校验通过，正在继续${latestRequest.actionLabel}...")
                         repository.applyPendingCoreMutation(request.operationId).fold(
                             onSuccess = {
                                 val message = try {
-                                    onApplied(request)
+                                    onApplied(latestRequest)
                                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
@@ -121,7 +124,7 @@ class CoreDependencyRepairController(
                                 postMessage(message)
                             },
                             onFailure = { error ->
-                                postMessage("${request.actionLabel}失败：${error.message ?: "未知错误"}")
+                                postMessage("${latestRequest.actionLabel}失败：${error.message ?: "未知错误"}")
                             }
                         )
                     },

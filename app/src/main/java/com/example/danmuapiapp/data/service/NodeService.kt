@@ -416,6 +416,11 @@ class NodeService : Service() {
                                     } else {
                                         AppDiagnosticLogger.e(this@NodeService, TAG, "Node crashed: $msg")
                                     }
+                                    RuntimeDependencyHealthChecker.recordModuleNotFoundIssue(
+                                        context = this@NodeService,
+                                        projectDir = projectDir,
+                                        message = startupFailure?.detail ?: msg
+                                    )
                                     recordRecoveryFailure()
                                     SystemHeartbeatScheduler.refresh(applicationContext)
                                     broadcastStatus(STATUS_ERROR, message = msg, error = msg)
