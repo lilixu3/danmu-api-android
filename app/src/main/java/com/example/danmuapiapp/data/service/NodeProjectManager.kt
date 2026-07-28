@@ -561,6 +561,17 @@ object NodeProjectManager {
             name !in coreDependenciesManagedOutsideBaseRuntime
         }
 
+    fun runtimeDependencyRequirementForCore(coreDir: File, packageName: String?): String? {
+        val normalized = packageName?.trim()?.takeIf {
+            it.matches(Regex("(?:@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]+"))
+        } ?: return null
+        val version = runtimeDependenciesForCore(coreDir)[normalized]
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return null
+        return "$normalized@$version"
+    }
+
     fun writeRuntimeDependencyRequirements(coreDir: File) {
         if (!coreDir.isDirectory) return
         val requirements = runtimeDependenciesForCore(coreDir).keys

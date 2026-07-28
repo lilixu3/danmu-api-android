@@ -27,6 +27,7 @@ import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CoreRepository
@@ -200,12 +201,19 @@ class RuntimeRepositoryImpl @Inject constructor(
                     normalPendingExplicitStart = false
                     markError(error, statusMessage = message ?: error)
                     addLog(LogLevel.Error, "服务错误: $error")
-                    if (error.startsWith("运行时依赖缺失：")) {
+                    val suspectedMissingPackage = RuntimeDependencyHealthChecker.recordModuleNotFoundIssue(
+                        context = context,
+                        projectDir = RuntimePaths.normalProjectDir(context),
+                        message = error,
+                        preferredVariant = _runtimeState.value.variant
+                    )
+                    if (error.startsWith("运行时依赖缺失：") || suspectedMissingPackage != null) {
                         scope.launch {
                             runCatching {
                                 coreRepository.prepareInstalledCoreDependencyRepair(
                                     variant = _runtimeState.value.variant,
-                                    origin = CoreDependencyRepairOrigin.RuntimeStart
+                                    origin = CoreDependencyRepairOrigin.RuntimeStart,
+                                    suspectedMissingPackage = suspectedMissingPackage
                                 )
                             }
                         }
@@ -725,27 +733,65 @@ class RuntimeRepositoryImpl @Inject constructor(
         publishMergedLogs()
     }
 
-    private suspend fun startServiceLocked(startingStatusMessage: String? = null) {
-        val state = _runtimeState.value
-        if (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting) return
-
+    private suspend fun ensureRuntimeDependenciesBeforeStart(
+        state: RuntimeState,
+        actionLabel: String,
+        resumeAction: RuntimeDependencyResumeAction
+    ): Boolean {
         val dependencyRepair = try {
             coreRepository.prepareInstalledCoreDependencyRepair(
                 variant = state.variant,
-                origin = CoreDependencyRepairOrigin.RuntimeStart
+                origin = CoreDependencyRepairOrigin.RuntimeStart,
+                resumeAction = resumeAction
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             val reason = error.message ?: "运行时依赖检测失败"
-            markError(reason)
-            addLog(LogLevel.Error, "启动前依赖检测失败：$reason")
-            return
+            if (state.status == ServiceStatus.Running) {
+                _runtimeState.update {
+                    it.copy(
+                        status = ServiceStatus.Running,
+                        errorMessage = null,
+                        statusMessage = "$actionLabel 前依赖检查失败：$reason"
+                    )
+                }
+            } else {
+                markError(reason)
+            }
+            addLog(LogLevel.Error, "$actionLabel 前依赖检测失败：$reason")
+            return false
         }
-        if (dependencyRepair != null) {
-            val reason = "当前核心缺少运行时依赖，请先修复依赖后再启动"
-            markError(reason)
-            addLog(LogLevel.Warn, "$reason：${dependencyRepair.missingDependencies.joinToString(", ")}")
+        if (dependencyRepair == null) return true
+
+        val reason = "当前核心缺少运行时依赖，$actionLabel 已暂停，请先修复依赖"
+        _runtimeState.update {
+            it.copy(
+                status = if (state.status == ServiceStatus.Running) {
+                    ServiceStatus.Running
+                } else {
+                    ServiceStatus.Stopped
+                },
+                errorMessage = null,
+                statusMessage = reason
+            )
+        }
+        addLog(LogLevel.Warn, "$reason：${dependencyRepair.missingDependencies.joinToString(", ")}")
+        return false
+    }
+
+    private suspend fun startServiceLocked(
+        startingStatusMessage: String? = null,
+        dependenciesAlreadyChecked: Boolean = false
+    ) {
+        val state = _runtimeState.value
+        if (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting) return
+        if (!dependenciesAlreadyChecked && !ensureRuntimeDependenciesBeforeStart(
+                state = state,
+                actionLabel = "启动",
+                resumeAction = RuntimeDependencyResumeAction.Start
+            )
+        ) {
             return
         }
 
@@ -914,11 +960,18 @@ class RuntimeRepositoryImpl @Inject constructor(
                     val detail = result.detail.ifBlank { result.message }
                     markError(detail)
                     addLog(LogLevel.Error, "Root 启动失败: $detail")
-                    if (detail.startsWith("运行时依赖缺失：")) {
+                    val suspectedMissingPackage = RuntimeDependencyHealthChecker.recordModuleNotFoundIssue(
+                        context = context,
+                        projectDir = RuntimePaths.normalProjectDir(context),
+                        message = detail,
+                        preferredVariant = state.variant
+                    )
+                    if (detail.startsWith("运行时依赖缺失：") || suspectedMissingPackage != null) {
                         try {
                             coreRepository.prepareInstalledCoreDependencyRepair(
                                 variant = state.variant,
-                                origin = CoreDependencyRepairOrigin.RuntimeStart
+                                origin = CoreDependencyRepairOrigin.RuntimeStart,
+                                suspectedMissingPackage = suspectedMissingPackage
                             )
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -1035,6 +1088,14 @@ class RuntimeRepositoryImpl @Inject constructor(
             startServiceLocked()
             return
         }
+        if (!ensureRuntimeDependenciesBeforeStart(
+                state = state,
+                actionLabel = "重启",
+                resumeAction = RuntimeDependencyResumeAction.Restart
+            )
+        ) {
+            return
+        }
 
         when (state.runMode) {
             RunMode.Normal -> {
@@ -1058,7 +1119,10 @@ class RuntimeRepositoryImpl @Inject constructor(
                         return
                     }
 
-                    startServiceLocked(startingStatusMessage = "正在重启服务…")
+                    startServiceLocked(
+                        startingStatusMessage = "正在重启服务…",
+                        dependenciesAlreadyChecked = true
+                    )
                     val started = waitForPort(
                         oldPort,
                         wantOpen = true,

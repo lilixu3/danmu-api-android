@@ -14,6 +14,9 @@ import com.example.danmuapiapp.domain.model.RunMode
 import android.Manifest
 import android.content.pm.PackageManager
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.UUID
 
 @SuppressLint("ApplySharedPref")
 object RuntimePaths {
@@ -30,6 +33,13 @@ object RuntimePaths {
     private const val PREFS_LEGACY_RUNTIME_VARIANT = "danmu_api_variant"
     private const val KEY_RUNTIME_VARIANT = "variant"
     private const val ROOT_RUNTIME_BASE = "/data/adb/danmuapi_runtime"
+    private val CORE_MIGRATION_EXCLUDED_NAMES = setOf(
+        "node_modules",
+        ".cache",
+        "logs",
+        "bangumi-data-cache",
+        "bangumi-data-cache.json"
+    )
 
     data class WorkDirInfo(
         val runMode: RunMode,
@@ -153,21 +163,27 @@ object RuntimePaths {
             normalizeBaseDir(File(targetPath))
         }
 
-        if (!ensureDirWritable(normalizedTarget)) {
+        val targetCanonical = runCatching { normalizedTarget.canonicalFile }.getOrElse { normalizedTarget }
+        val defaultCanonical = runCatching { defaultBase.canonicalFile }.getOrElse { defaultBase }
+        val oldCanonical = runCatching { oldBase.canonicalFile }.getOrElse { oldBase }
+        val sameDir = oldCanonical == targetCanonical
+        if (!sameDir && switchMode == WorkDirSwitchMode.MigrateSelectedCore &&
+            workDirectoriesOverlap(oldCanonical, targetCanonical)
+        ) {
+            return ApplyResult(false, "迁移时新旧工作目录不能互相包含，请选择独立目录")
+        }
+
+        if (!verifyDirectoryWritable(normalizedTarget)) {
             return ApplyResult(false, "目录不可用或无写入权限：${normalizedTarget.absolutePath}")
         }
 
-        val targetCanonical = runCatching { normalizedTarget.canonicalFile }.getOrElse { normalizedTarget }
-        val defaultCanonical = runCatching { defaultBase.canonicalFile }.getOrElse { defaultBase }
         val shouldUseDefault = targetCanonical == defaultCanonical
         val targetProjectDir = File(targetCanonical, "nodejs-project")
         val targetCacheDir = File(targetProjectDir, ".cache")
-        if (!ensureDirWritable(targetProjectDir) || !ensureDirWritable(targetCacheDir)) {
+        if (!verifyDirectoryWritable(targetProjectDir) || !verifyDirectoryWritable(targetCacheDir)) {
             return ApplyResult(false, "目录不可用或无写入权限：${targetCacheDir.absolutePath}")
         }
 
-        val oldCanonical = runCatching { oldBase.canonicalFile }.getOrElse { oldBase }
-        val sameDir = oldCanonical == targetCanonical
         val selectedVariantKey = selectedRuntimeVariantKey(context, oldBase)
         if (sameDir) {
             if (shouldUseDefault && oldCustom != null) {
@@ -184,20 +200,27 @@ object RuntimePaths {
 
         return try {
             if (!sameDir && switchMode == WorkDirSwitchMode.MigrateSelectedCore) {
-                migrateSelectedCoreAndConfig(
+                performWorkDirMigrationTransaction(
                     oldBase = oldBase,
                     newBase = targetCanonical,
-                    selectedVariantKey = selectedVariantKey
+                    selectedVariantKey = selectedVariantKey,
+                    commitPreference = {
+                        if (shouldUseDefault) {
+                            clearCustomBasePath(context)
+                        } else {
+                            setCustomBasePath(context, targetCanonical.absolutePath)
+                        }
+                    }
                 )
-            }
-
-            val preferenceSaved = if (shouldUseDefault) {
-                clearCustomBasePath(context)
             } else {
-                setCustomBasePath(context, targetCanonical.absolutePath)
-            }
-            if (!preferenceSaved) {
-                throw IllegalStateException("无法保存工作目录设置")
+                val preferenceSaved = if (shouldUseDefault) {
+                    clearCustomBasePath(context)
+                } else {
+                    setCustomBasePath(context, targetCanonical.absolutePath)
+                }
+                if (!preferenceSaved) {
+                    throw IllegalStateException("无法保存工作目录设置")
+                }
             }
 
             val suffix = if (!sameDir && switchMode == WorkDirSwitchMode.MigrateSelectedCore) {
@@ -210,7 +233,13 @@ object RuntimePaths {
                 (if (shouldUseDefault) "已恢复为默认目录" else "已切换工作目录") + suffix
             )
         } catch (e: Exception) {
-            ApplyResult(false, "切换失败：${e.message}")
+            val preferenceRestored = if (oldCustom == null) {
+                clearCustomBasePath(context)
+            } else {
+                setCustomBasePath(context, oldCustom)
+            }
+            val suffix = if (preferenceRestored) "" else "；原工作目录设置恢复失败，请重新选择"
+            ApplyResult(false, "切换失败：${e.message ?: "未知错误"}$suffix")
         }
     }
 
@@ -296,11 +325,28 @@ object RuntimePaths {
         }
     }
 
-    private fun ensureDirWritable(dir: File): Boolean {
-        if (dir.exists()) {
-            return dir.isDirectory && dir.canWrite()
-        }
-        return runCatching { dir.mkdirs() }.getOrDefault(false) && dir.isDirectory && dir.canWrite()
+    internal fun verifyDirectoryWritable(dir: File): Boolean {
+        return runCatching {
+            if (dir.exists()) {
+                if (!dir.isDirectory) return@runCatching false
+            } else if (!dir.mkdirs() || !dir.isDirectory) {
+                return@runCatching false
+            }
+
+            val expected = "danmu-api-work-dir-probe".toByteArray(Charsets.UTF_8)
+            val probe = File(dir, ".danmu-write-probe-${UUID.randomUUID()}")
+            try {
+                FileOutputStream(probe).use { output ->
+                    output.write(expected)
+                    output.flush()
+                }
+                probe.isFile && probe.readBytes().contentEquals(expected)
+            } finally {
+                if (probe.exists() && !probe.delete()) {
+                    throw IOException("无法清理目录写入探针：${probe.absolutePath}")
+                }
+            }
+        }.getOrDefault(false)
     }
 
     internal fun migrateSelectedCoreAndConfig(
@@ -308,8 +354,98 @@ object RuntimePaths {
         newBase: File,
         selectedVariantKey: String
     ) {
+        performWorkDirMigrationTransaction(
+            oldBase = oldBase,
+            newBase = newBase,
+            selectedVariantKey = selectedVariantKey,
+            commitPreference = { true }
+        )
+    }
+
+    internal fun performWorkDirMigrationTransaction(
+        oldBase: File,
+        newBase: File,
+        selectedVariantKey: String,
+        commitPreference: () -> Boolean
+    ) {
+        val receipt = prepareSelectedCoreAndConfigMigration(
+            oldBase = oldBase,
+            newBase = newBase,
+            selectedVariantKey = selectedVariantKey
+        )
+        try {
+            if (!commitPreference()) {
+                throw IOException("无法保存工作目录设置")
+            }
+            receipt.commit()
+        } catch (error: Exception) {
+            runCatching { receipt.rollback() }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    private class WorkDirMigrationReceipt(
+        private val targetConfig: File?,
+        private val configBackup: File?,
+        private val configApplied: Boolean,
+        private val targetCore: File?,
+        private val coreBackup: File?,
+        private val coreApplied: Boolean
+    ) {
+        fun commit() {
+            listOfNotNull(configBackup, coreBackup).forEach { backup ->
+                runCatching { backup.deleteRecursively() }
+            }
+        }
+
+        fun rollback() {
+            val errors = mutableListOf<Throwable>()
+            rollbackTarget(targetCore, coreBackup, coreApplied, "核心", errors)
+            rollbackTarget(targetConfig, configBackup, configApplied, "配置", errors)
+            if (errors.isNotEmpty()) {
+                throw IOException("工作目录迁移回滚不完整").also { error ->
+                    errors.forEach(error::addSuppressed)
+                }
+            }
+        }
+
+        private fun rollbackTarget(
+            target: File?,
+            backup: File?,
+            applied: Boolean,
+            label: String,
+            errors: MutableList<Throwable>
+        ) {
+            if (target == null) return
+            runCatching {
+                if (backup?.exists() == true) {
+                    if (target.exists() && !target.deleteRecursively()) {
+                        throw IOException("无法移除未完成的目标$label：${target.absolutePath}")
+                    }
+                    if (!backup.renameTo(target)) {
+                        throw IOException("无法恢复目标目录原有$label：${target.absolutePath}")
+                    }
+                } else if (applied && target.exists() && !target.deleteRecursively()) {
+                    throw IOException("无法撤销迁入$label：${target.absolutePath}")
+                }
+            }.onFailure(errors::add)
+        }
+    }
+
+    private fun prepareSelectedCoreAndConfigMigration(
+        oldBase: File,
+        newBase: File,
+        selectedVariantKey: String
+    ): WorkDirMigrationReceipt {
         val oldRoot = File(oldBase, "nodejs-project")
-        if (!oldRoot.isDirectory) return
+        if (!oldRoot.exists()) {
+            return WorkDirMigrationReceipt(null, null, false, null, null, false)
+        }
+        if (!oldRoot.isDirectory) {
+            throw IllegalStateException("原工作目录不是有效目录：${oldRoot.absolutePath}")
+        }
 
         val newRoot = File(newBase, "nodejs-project")
         if (!newRoot.exists() && !newRoot.mkdirs()) {
@@ -353,12 +489,12 @@ object RuntimePaths {
                 replaceConfig = true
             }
 
-            // 只迁移当前核心源码；node_modules 由目标目录的统一依赖检查按需修复。
+            // 只迁移当前核心源码；依赖、日志和运行缓存由目标目录重新生成或修复。
             if (sourceCore.isDirectory && !File(targetCore, "worker.js").isFile) {
                 copyDirectoryStrict(
                     source = sourceCore,
                     target = stagedCore,
-                    skipTopLevelNames = setOf("node_modules")
+                    skipTopLevelNames = CORE_MIGRATION_EXCLUDED_NAMES
                 )
                 if (!File(stagedCore, "worker.js").isFile) {
                     throw IllegalStateException("迁移后的核心缺少 worker.js")
@@ -386,8 +522,14 @@ object RuntimePaths {
                 }
                 coreApplied = true
             }
-            configBackup.deleteRecursively()
-            coreBackup.deleteRecursively()
+            return WorkDirMigrationReceipt(
+                targetConfig = targetConfig.takeIf { replaceConfig },
+                configBackup = configBackup.takeIf { it.exists() },
+                configApplied = configApplied,
+                targetCore = targetCore.takeIf { replaceCore },
+                coreBackup = coreBackup.takeIf { it.exists() },
+                coreApplied = coreApplied
+            )
         } catch (error: Exception) {
             val rollbackErrors = mutableListOf<String>()
             if (configBackup.exists()) {
@@ -422,6 +564,13 @@ object RuntimePaths {
         } finally {
             cleanStaging()
         }
+    }
+
+    internal fun workDirectoriesOverlap(first: File, second: File): Boolean {
+        val firstCanonical = runCatching { first.canonicalFile }.getOrElse { first.absoluteFile }
+        val secondCanonical = runCatching { second.canonicalFile }.getOrElse { second.absoluteFile }
+        if (firstCanonical == secondCanonical) return false
+        return isUnder(firstCanonical, secondCanonical) || isUnder(secondCanonical, firstCanonical)
     }
 
     private fun selectedRuntimeVariantKey(context: Context, oldBase: File): String {
@@ -494,7 +643,39 @@ object RuntimePaths {
                         throw IllegalStateException("无法创建目录：${parent.absolutePath}")
                     }
                 }
-                child.copyTo(destination, overwrite = overwrite)
+                copyFileStrictly(child, destination, overwrite)
+            }
+        }
+    }
+
+    private fun copyFileStrictly(source: File, target: File, overwrite: Boolean) {
+        if (!source.isFile) {
+            throw IOException("无法读取文件：${source.absolutePath}")
+        }
+        if (target.exists() && !overwrite) return
+        val parent = target.parentFile
+            ?: throw IOException("目标文件路径无效：${target.absolutePath}")
+        if (!parent.exists() && !parent.mkdirs()) {
+            throw IOException("无法创建目录：${parent.absolutePath}")
+        }
+
+        val temporary = File(parent, ".${target.name}.copy-${UUID.randomUUID()}")
+        try {
+            source.inputStream().buffered().use { input ->
+                FileOutputStream(temporary).buffered().use { output -> input.copyTo(output) }
+            }
+            if (!temporary.isFile || temporary.length() != source.length()) {
+                throw IOException("文件复制校验失败：${source.absolutePath}")
+            }
+            if (target.exists() && !target.delete()) {
+                throw IOException("无法替换目标文件：${target.absolutePath}")
+            }
+            if (!temporary.renameTo(target)) {
+                throw IOException("无法应用复制文件：${target.absolutePath}")
+            }
+        } finally {
+            if (temporary.exists()) {
+                runCatching { temporary.delete() }
             }
         }
     }

@@ -52,6 +52,7 @@ import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
+import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import com.example.danmuapiapp.ui.common.parseEnvContentMap
 import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -693,6 +694,10 @@ class SettingsViewModel @Inject constructor(
         request: CoreDependencyRepairRequest
     ): String {
         coreRepo.refreshCoreInfo()
+        val continuation = runtimeRepo.continueAfterDependencyRepair(request)
+        if (continuation != null) {
+            return "${request.variant.label}在当前工作目录中的依赖已修复，$continuation"
+        }
         val running = runtimeState.value.status == ServiceStatus.Running
         if (running) {
             runtimeRepo.addLog(LogLevel.Info, "工作目录依赖已修复，正在重启服务应用新目录")
@@ -918,10 +923,23 @@ class SettingsViewModel @Inject constructor(
         if (isApplyingWorkDir) return
         viewModelScope.launch {
             isApplyingWorkDir = true
-            val result = withContext(Dispatchers.IO) {
-                RuntimePaths.applyCustomBaseDir(context, targetPath, switchMode)
-            }
-            if (result.ok) {
+            try {
+                val result = coreRepo.applyWorkDirectoryChange(
+                    targetPath = targetPath,
+                    migrateSelectedCore = switchMode == RuntimePaths.WorkDirSwitchMode.MigrateSelectedCore
+                ).fold(
+                    onSuccess = { RuntimePaths.ApplyResult(ok = true, message = it) },
+                    onFailure = {
+                        RuntimePaths.ApplyResult(
+                            ok = false,
+                            message = it.message ?: "切换工作目录失败"
+                        )
+                    }
+                )
+                if (!result.ok) {
+                    operationMessage = result.message
+                    return@launch
+                }
                 val previousVariant = runtimeState.value.variant
                 var resolvedVariant: ApiVariant? = null
                 val storageHint = if (NormalModeRuntimeProfiles.current(context).slowStorageWorkDir) {
@@ -1018,10 +1036,9 @@ class SettingsViewModel @Inject constructor(
                         }
                     }
                 }
-            } else {
-                operationMessage = result.message
+            } finally {
+                isApplyingWorkDir = false
             }
-            isApplyingWorkDir = false
         }
     }
 

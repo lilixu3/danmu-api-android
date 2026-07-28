@@ -28,6 +28,7 @@ import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
+import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -528,9 +529,9 @@ class CompatModeViewModel(
     ): String {
         graph.coreRepository.refreshCoreInfo()
         val state = _uiState.value.runtimeState
-        return if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
-            graph.runtimeRepository.startService()
-            "${resolveVariantLabel(request.variant)}依赖已修复，服务正在启动"
+        val continuation = graph.runtimeRepository.continueAfterDependencyRepair(request)
+        return if (continuation != null) {
+            "${resolveVariantLabel(request.variant)}依赖已修复，$continuation"
         } else if (state.variant == request.variant && state.status == ServiceStatus.Running) {
             graph.runtimeRepository.restartService()
             "${resolveVariantLabel(request.variant)}${request.actionLabel}成功，正在重启服务"

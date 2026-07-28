@@ -42,9 +42,15 @@ interface CoreRepository {
     suspend fun repairPendingDependenciesFromArchive(operationId: Long, archiveUri: String): Result<Unit>
     suspend fun applyPendingCoreMutation(operationId: Long): Result<Unit>
     suspend fun discardPendingCoreMutation(operationId: Long): Result<Unit>
+    suspend fun applyWorkDirectoryChange(
+        targetPath: String?,
+        migrateSelectedCore: Boolean
+    ): Result<String>
     suspend fun prepareInstalledCoreDependencyRepair(
         variant: ApiVariant,
-        origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.WorkDirectory
+        origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.WorkDirectory,
+        resumeAction: RuntimeDependencyResumeAction = RuntimeDependencyResumeAction.None,
+        suspectedMissingPackage: String? = null
     ): CoreDependencyRepairRequest?
 }
 

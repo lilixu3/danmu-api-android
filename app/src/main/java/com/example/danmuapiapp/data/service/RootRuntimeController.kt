@@ -259,8 +259,15 @@ object RootRuntimeController {
             EXPECTED=${shellQuote(fingerprint)}
             MARKER="${'$'}DST/.danmuapiapp-sync-fingerprint"
             [ -d "${'$'}SRC" ] || exit 0
-            if [ -f "${'$'}MARKER" ] && [ "${'$'}(cat "${'$'}MARKER" 2>/dev/null)" = "${'$'}EXPECTED" ]; then
-              exit 0
+            if [ -f "${'$'}MARKER" ] && [ -d "${'$'}DST" ]; then
+              MARKER_FINGERPRINT=${'$'}(sed -n '1p' "${'$'}MARKER" 2>/dev/null)
+              MARKER_FILE_COUNT=${'$'}(sed -n '2p' "${'$'}MARKER" 2>/dev/null)
+              CURRENT_FILE_COUNT=${'$'}(find "${'$'}DST" -type f ! -name .danmuapiapp-sync-fingerprint 2>/dev/null | wc -l | tr -d '[:space:]')
+              if [ "${'$'}MARKER_FINGERPRINT" = "${'$'}EXPECTED" ] &&
+                 [ -n "${'$'}MARKER_FILE_COUNT" ] &&
+                 [ "${'$'}MARKER_FILE_COUNT" = "${'$'}CURRENT_FILE_COUNT" ]; then
+                exit 0
+              fi
             fi
 
             NEW="${'$'}DST.new-${operationToken}"
@@ -288,7 +295,8 @@ object RootRuntimeController {
               (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 2
               (cd "${'$'}DST" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 3
               if cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST"; then
-                printf '%s\n' "${'$'}EXPECTED" > "${'$'}MARKER" || exit 4
+                VERIFIED_FILE_COUNT=${'$'}(find "${'$'}DST" -type f ! -name .danmuapiapp-sync-fingerprint | wc -l | tr -d '[:space:]')
+                printf '%s\n%s\n' "${'$'}EXPECTED" "${'$'}VERIFIED_FILE_COUNT" > "${'$'}MARKER" || exit 4
                 rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 5
                 trap - EXIT HUP INT TERM
                 exit 0
@@ -309,7 +317,8 @@ object RootRuntimeController {
             (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 13
             (cd "${'$'}NEW" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 14
             cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
-            printf '%s\n' "${'$'}EXPECTED" > "${'$'}NEW/.danmuapiapp-sync-fingerprint" || exit 16
+            VERIFIED_FILE_COUNT=${'$'}(find "${'$'}NEW" -type f ! -name .danmuapiapp-sync-fingerprint | wc -l | tr -d '[:space:]')
+            printf '%s\n%s\n' "${'$'}EXPECTED" "${'$'}VERIFIED_FILE_COUNT" > "${'$'}NEW/.danmuapiapp-sync-fingerprint" || exit 16
             rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 17
 
             if [ -e "${'$'}DST" ]; then
