@@ -36,6 +36,24 @@ class NodeProjectManagerRuntimeDependencyTest {
     }
 
     @Test
+    fun `新工作目录解压前用内置版本预判依赖`() {
+        val root = Files.createTempDirectory("core-runtime-deps-bundled-fallback").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """{"dependencies":{"brotli":"^1.3.3","future-package":"^1.0.0"}}"""
+            )
+
+            assertEquals(
+                listOf("future-package@^1.0.0"),
+                NodeProjectManager.collectMissingRuntimeDepsForCoreAgainstBundledRuntime(coreDir)
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `核心声明未识别依赖时应阻止更新`() {
         val root = Files.createTempDirectory("core-runtime-deps-unknown").toFile()
         try {
@@ -159,6 +177,9 @@ class NodeProjectManagerRuntimeDependencyTest {
             runtimeNodeModulesDir.resolve("brotli/package.json").writeText(
                 """{"name":"brotli","version":"1.3.3"}"""
             )
+            runtimeNodeModulesDir.resolve("brotli/decompress.js").writeText("module.exports = {}\n")
+            runtimeNodeModulesDir.resolve("brotli/dec").mkdirs()
+            runtimeNodeModulesDir.resolve("brotli/dec/dictionary-data.js").writeText("module.exports = {}\n")
 
             assertEquals(
                 emptyList<String>(),
@@ -166,6 +187,35 @@ class NodeProjectManagerRuntimeDependencyTest {
                     coreDir = coreDir,
                     runtimeNodeModulesDir = runtimeNodeModulesDir
                 )
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `损坏的核心私有依赖不能由共享目录同名包掩盖`() {
+        val root = Files.createTempDirectory("core-runtime-deps-shadowed").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            val runtimeNodeModulesDir = root.resolve("node_modules").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """{"dependencies":{"brotli":"^1.3.3"}}"""
+            )
+            coreDir.resolve("node_modules/brotli").mkdirs()
+            coreDir.resolve("node_modules/brotli/package.json").writeText(
+                """{"name":"brotli","version":"1.3.3"}"""
+            )
+            runtimeNodeModulesDir.resolve("brotli/dec").mkdirs()
+            runtimeNodeModulesDir.resolve("brotli/package.json").writeText(
+                """{"name":"brotli","version":"1.3.3"}"""
+            )
+            runtimeNodeModulesDir.resolve("brotli/decompress.js").writeText("module.exports = {}\n")
+            runtimeNodeModulesDir.resolve("brotli/dec/dictionary-data.js").writeText("module.exports = {}\n")
+
+            assertEquals(
+                listOf("brotli@^1.3.3"),
+                NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
             )
         } finally {
             root.deleteRecursively()
@@ -230,6 +280,25 @@ class NodeProjectManagerRuntimeDependencyTest {
             assertEquals(
                 listOf("future-optional@^1.0.0"),
                 NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Root 开机快检清单只记录实际运行依赖并保持排序`() {
+        val root = Files.createTempDirectory("core-runtime-requirements").toFile()
+        try {
+            root.resolve("package.json").writeText(
+                """{"dependencies":{"z-runtime":"^1.0.0","redis":"^5.0.0","@scope/a":"1.2.3"},"optionalDependencies":{"a-runtime":"~2.0.0"}}"""
+            )
+
+            NodeProjectManager.writeRuntimeDependencyRequirements(root)
+
+            assertEquals(
+                "@scope/a\na-runtime\nz-runtime\n",
+                root.resolve(NodeProjectManager.CORE_RUNTIME_REQUIREMENTS_FILE).readText()
             )
         } finally {
             root.deleteRecursively()

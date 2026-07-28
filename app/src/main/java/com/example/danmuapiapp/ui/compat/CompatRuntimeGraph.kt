@@ -47,11 +47,6 @@ object CompatRuntimeGraph {
             githubRemoteService = githubRemoteService,
             githubProxyService = githubProxyService
         )
-        val runtimeRepository = RuntimeRepositoryImpl(
-            context = context,
-            settingsRepository = settingsRepository,
-            adminSessionRepository = adminSessionRepository
-        )
         val coreRepository = CoreRepositoryImpl(
             context = context,
             httpClient = httpClient,
@@ -59,6 +54,12 @@ object CompatRuntimeGraph {
             githubProxyService = githubProxyService,
             settingsRepository = settingsRepository,
             runtimeDependencyPackManager = runtimeDependencyPackManager
+        )
+        val runtimeRepository = RuntimeRepositoryImpl(
+            context = context,
+            settingsRepository = settingsRepository,
+            adminSessionRepository = adminSessionRepository,
+            coreRepository = coreRepository
         )
         val appUpdateService = AppUpdateService(
             context = context,

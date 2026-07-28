@@ -18,5 +18,7 @@ class RootAutoStartServiceScriptTest {
 
         assertTrue(script.contains("STARTED_AT_FILE=\"${'$'}RUNTIME/root_node_started_at_ms\""))
         assertTrue(script.contains("--started-at-file \"${'$'}STARTED_AT_FILE\""))
+        assertTrue(script.contains(".danmuapiapp-required-dependencies"))
+        assertTrue(script.contains("selected core dependencies incomplete; open app to repair"))
     }
 }

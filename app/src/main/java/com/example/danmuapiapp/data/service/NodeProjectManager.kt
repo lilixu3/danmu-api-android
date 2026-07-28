@@ -33,6 +33,7 @@ object NodeProjectManager {
     private const val BUNDLED_RUNTIME_LAYOUT_ASSET = "nodejs-project/runtime_asset_layout.txt"
     private const val OPTIONAL_REDIS_ENV_KEY = "LOCAL_REDIS_URL"
     private const val OPTIONAL_REDIS_ASSET_BASE = "nodejs-optional/redis/node_modules"
+    const val CORE_RUNTIME_REQUIREMENTS_FILE = ".danmuapiapp-required-dependencies"
     private val runtimeBundledDependencyVersions = linkedMapOf(
         "https-proxy-agent" to "7.0.6",
         "agent-base" to "7.1.4",
@@ -49,6 +50,27 @@ object NodeProjectManager {
         "base64-js" to "1.5.1",
         "@dan-uni/dan-any" to "2.3.9",
         "opencc-js" to "1.4.1"
+    )
+    private val runtimeDependencySentinelFiles = mapOf(
+        "https-proxy-agent" to listOf("dist/index.js"),
+        "agent-base" to listOf("dist/index.js"),
+        "debug" to listOf("src/index.js"),
+        "ms" to listOf("index.js"),
+        "data-uri-to-buffer" to listOf("dist/index.js"),
+        "fetch-blob" to listOf("index.js"),
+        "formdata-polyfill" to listOf("esm.min.js"),
+        "node-domexception" to listOf("index.js"),
+        "web-streams-polyfill" to listOf("dist/ponyfill.es2018.js"),
+        "node-fetch" to listOf("src/index.js"),
+        "pako" to listOf("index.js"),
+        "brotli" to listOf("decompress.js", "dec/dictionary-data.js"),
+        "base64-js" to listOf("index.js"),
+        "@dan-uni/dan-any" to listOf("dist/adapters.mjs", "dist/core/main/pure.mjs"),
+        "opencc-js" to listOf(
+            "dist/esm-lib/core.js",
+            "dist/esm-lib/dict/STCharacters.js",
+            "dist/esm-lib/to/cn.js"
+        )
     )
     private val coreDependenciesManagedOutsideBaseRuntime = setOf(
         // Android 入口不使用 Node server 的文件监听与 dotenv 加载链路。
@@ -468,24 +490,40 @@ object NodeProjectManager {
     }
 
     fun collectMissingRuntimeDepsForCore(coreDir: File, runtimeNodeModulesDir: File): List<String> {
+        return collectMissingRuntimeDepsForCore(coreDir) { name ->
+            val coreNodeModulesDir = File(coreDir, "node_modules")
+            val resolvedNodeModulesDir = if (File(coreNodeModulesDir, name).exists()) {
+                coreNodeModulesDir
+            } else {
+                runtimeNodeModulesDir
+            }
+            listOfNotNull(readInstalledPackageVersion(resolvedNodeModulesDir, name))
+        }
+    }
+
+    /**
+     * Used before a newly selected work directory has extracted the App runtime.
+     * Core-local packages take precedence; the bundled versions model what extraction will provide.
+     */
+    fun collectMissingRuntimeDepsForCoreAgainstBundledRuntime(coreDir: File): List<String> {
+        return collectMissingRuntimeDepsForCore(coreDir) { name ->
+            val coreNodeModulesDir = File(coreDir, "node_modules")
+            if (File(coreNodeModulesDir, name).exists()) {
+                listOfNotNull(readInstalledPackageVersion(coreNodeModulesDir, name))
+            } else {
+                listOfNotNull(runtimeBundledDependencyVersions[name])
+            }
+        }
+    }
+
+    private fun collectMissingRuntimeDepsForCore(
+        coreDir: File,
+        installedVersions: (String) -> List<String>
+    ): List<String> {
         val dependencies = runtimeDependenciesForCore(coreDir)
         if (dependencies.isEmpty()) return emptyList()
-        val coreNodeModulesDir = File(coreDir, "node_modules")
         return dependencies.mapNotNull { (name, version) ->
-            val installedVersion = sequenceOf(coreNodeModulesDir, runtimeNodeModulesDir)
-                .mapNotNull { nodeModulesDir ->
-                    val pkgFile = File(nodeModulesDir, "$name/package.json")
-                    if (!pkgFile.isFile) return@mapNotNull null
-                    runCatching {
-                        json.parseToJsonElement(pkgFile.readText())
-                            .jsonObject["version"]
-                            ?.jsonPrimitive
-                            ?.content
-                            ?.trim()
-                            ?.takeIf { it.isNotBlank() }
-                    }.getOrNull()
-                }
-                .firstOrNull { installed ->
+            val installedVersion = installedVersions(name).firstOrNull { installed ->
                     NpmVersionRange.isSatisfied(version, installed)
                 }
             when {
@@ -495,10 +533,54 @@ object NodeProjectManager {
         }.sorted()
     }
 
+    private fun readInstalledPackageVersion(nodeModulesDir: File, name: String): String? {
+        val pkgFile = File(nodeModulesDir, "$name/package.json")
+        if (!pkgFile.isFile) return null
+        val installedVersion = runCatching {
+            json.parseToJsonElement(pkgFile.readText())
+                .jsonObject["version"]
+                ?.jsonPrimitive
+                ?.content
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+        if (installedVersion == runtimeBundledDependencyVersions[name]) {
+            val packageDir = File(nodeModulesDir, name)
+            if (runtimeDependencySentinelFiles[name].orEmpty().any { relativePath ->
+                    !File(packageDir, relativePath).isFile
+                }
+            ) {
+                return null
+            }
+        }
+        return installedVersion
+    }
+
     fun runtimeDependenciesForCore(coreDir: File): Map<String, String> =
         readCoreDependencies(coreDir).filterKeys { name ->
             name !in coreDependenciesManagedOutsideBaseRuntime
         }
+
+    fun writeRuntimeDependencyRequirements(coreDir: File) {
+        if (!coreDir.isDirectory) return
+        val requirements = runtimeDependenciesForCore(coreDir).keys
+            .filter { name -> name.matches(Regex("(?:@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]+")) }
+            .sorted()
+            .joinToString(separator = "\n", postfix = "\n")
+        val target = File(coreDir, CORE_RUNTIME_REQUIREMENTS_FILE)
+        if (target.isFile && runCatching { target.readText(Charsets.UTF_8) }.getOrNull() == requirements) {
+            return
+        }
+        val temporary = File(coreDir, "$CORE_RUNTIME_REQUIREMENTS_FILE.tmp-${System.nanoTime()}")
+        temporary.writeText(requirements, Charsets.UTF_8)
+        if (!temporary.renameTo(target)) {
+            try {
+                temporary.copyTo(target, overwrite = true)
+            } finally {
+                temporary.delete()
+            }
+        }
+    }
 
     fun readCoreDependencies(coreDir: File): Map<String, String> {
         val pkgJson = File(coreDir, "package.json")

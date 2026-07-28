@@ -75,7 +75,12 @@ class StartupSetupViewModel @Inject constructor(
         postMessage = { operationMessage = it },
         onApplied = { request ->
             coreRepo.refreshCoreInfo()
-            "${variantLabel(request.variant)}依赖检测通过，核心已准备好"
+            if (request.origin == com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin.RuntimeStart) {
+                runtimeRepo.startService()
+                "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+            } else {
+                "${variantLabel(request.variant)}依赖检测通过，核心已准备好"
+            }
         },
         onDiscarded = { request ->
             "已取消${variantLabel(request.variant)}${request.actionLabel}，可以重新下载核心"

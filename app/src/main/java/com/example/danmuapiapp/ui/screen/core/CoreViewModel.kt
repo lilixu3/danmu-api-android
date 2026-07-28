@@ -334,13 +334,15 @@ class CoreViewModel @Inject constructor(
     fun repairPendingDependenciesFromArchive(archiveUri: String) {
         performPendingDependencyRepair(
             progressMessage = "正在导入并校验运行时依赖...",
-            repairBlock = { coreRepo.repairPendingDependenciesFromArchive(archiveUri) }
+            repairBlock = { operationId ->
+                coreRepo.repairPendingDependenciesFromArchive(operationId, archiveUri)
+            }
         )
     }
 
     private fun performPendingDependencyRepair(
         progressMessage: String,
-        repairBlock: suspend () -> Result<Unit>
+        repairBlock: suspend (Long) -> Result<Unit>
     ) {
         val request = pendingDependencyRepair.value ?: return
         showDependencyRequiredPrompt = false
@@ -348,7 +350,7 @@ class CoreViewModel @Inject constructor(
         viewModelScope.launch {
             isOperating = true
             operationMessage = progressMessage
-            repairBlock().fold(
+            repairBlock(request.operationId).fold(
                 onSuccess = {
                     operationMessage = "依赖校验通过，正在继续${request.actionLabel}..."
                     applyRepairedPendingCore(request)
@@ -363,8 +365,13 @@ class CoreViewModel @Inject constructor(
     }
 
     private suspend fun applyRepairedPendingCore(request: CoreDependencyRepairRequest) {
-        coreRepo.applyPendingCoreMutation().fold(
+        coreRepo.applyPendingCoreMutation(request.operationId).fold(
             onSuccess = {
+                if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
+                    runtimeRepo.startService()
+                    operationMessage = "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+                    return@fold
+                }
                 val restartPlan = decideCoreApplyPlan(runtimeState.value, request.variant)
                 val restartResult = if (restartPlan.shouldRestartServiceAfterApply) {
                     restartRuntimeAfterCoreMutation(request.variant)
@@ -389,8 +396,14 @@ class CoreViewModel @Inject constructor(
         showDependencyRequiredPrompt = false
         showDependencyRepairDialog = false
         viewModelScope.launch {
-            coreRepo.discardPendingCoreMutation()
-            operationMessage = "已取消${variantLabel(request.variant)}${request.actionLabel}，原核心保持不变"
+            coreRepo.discardPendingCoreMutation(request.operationId).fold(
+                onSuccess = {
+                    operationMessage = "已取消${variantLabel(request.variant)}${request.actionLabel}，原核心保持不变"
+                },
+                onFailure = {
+                    operationMessage = "取消失败：${it.message ?: "任务状态已变化"}"
+                }
+            )
         }
     }
 

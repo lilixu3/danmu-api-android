@@ -114,18 +114,9 @@ class DanmuQuickSettingsTileService : TileService() {
             )
         )
 
-        when (state.runMode) {
-            RunMode.Normal -> {
-                AppDiagnosticLogger.i(this, TAG, "控制中心请求启动普通模式")
-                runtimeRepository.addLog(LogLevel.Info, "控制中心请求启动普通模式")
-                runtimeRepository.startService()
-            }
-
-            RunMode.Root -> runRootOperation(
-                action = DanmuQuickSettingsTilePolicy.ClickAction.Start,
-                port = state.port
-            )
-        }
+        AppDiagnosticLogger.i(this, TAG, "控制中心请求启动${state.runMode.label}模式")
+        runtimeRepository.addLog(LogLevel.Info, "控制中心请求启动${state.runMode.label}模式")
+        runtimeRepository.startService()
     }
 
     private fun stopFromTile(state: RuntimeState) {
@@ -144,51 +135,23 @@ class DanmuQuickSettingsTileService : TileService() {
                 runtimeRepository.stopService()
             }
 
-            RunMode.Root -> runRootOperation(
-                action = DanmuQuickSettingsTilePolicy.ClickAction.Stop,
-                port = state.port
-            )
+            RunMode.Root -> stopRootFromTile(state.port)
         }
     }
 
-    private fun runRootOperation(
-        action: DanmuQuickSettingsTilePolicy.ClickAction,
-        port: Int
-    ) {
+    private fun stopRootFromTile(port: Int) {
         operationJob = serviceScope.launch {
             val result = withContext(Dispatchers.IO) {
-                when (action) {
-                    DanmuQuickSettingsTilePolicy.ClickAction.Start -> {
-                        AppDiagnosticLogger.i(this@DanmuQuickSettingsTileService, TAG, "控制中心请求启动 Root 模式")
-                        RootRuntimeController.start(
-                            context = applicationContext,
-                            port = port,
-                            quickMode = false
-                        )
-                    }
-
-                    DanmuQuickSettingsTilePolicy.ClickAction.Stop -> {
-                        AppDiagnosticLogger.i(this@DanmuQuickSettingsTileService, TAG, "控制中心请求停止 Root 模式")
-                        RootRuntimeController.stop(applicationContext, port)
-                    }
-
-                    DanmuQuickSettingsTilePolicy.ClickAction.Ignore -> {
-                        RootRuntimeController.OpResult(true, "已忽略重复操作")
-                    }
-                }
+                AppDiagnosticLogger.i(this@DanmuQuickSettingsTileService, TAG, "控制中心请求停止 Root 模式")
+                RootRuntimeController.stop(applicationContext, port)
             }
 
             val detail = result.detail.ifBlank { result.message }
             if (result.ok) {
                 runtimeRepository.addLog(LogLevel.Info, "控制中心 Root 操作完成：${result.message}")
-                val finalStatus = when (action) {
-                    DanmuQuickSettingsTilePolicy.ClickAction.Start -> ServiceStatus.Running
-                    DanmuQuickSettingsTilePolicy.ClickAction.Stop -> ServiceStatus.Stopped
-                    DanmuQuickSettingsTilePolicy.ClickAction.Ignore -> runtimeRepository.runtimeState.value.status
-                }
                 updateTile(
                     DanmuQuickSettingsTilePolicy.presentation(
-                        status = finalStatus,
+                        status = ServiceStatus.Stopped,
                         runMode = RunMode.Root,
                         port = port
                     )

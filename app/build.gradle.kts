@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.util.zip.ZipFile
+import java.security.MessageDigest
 import org.gradle.api.GradleException
 
 plugins {
@@ -443,12 +444,16 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
 val baseNodeModulesPackages = readBundledNodeDependencyClosure()
 val optionalRedisNodeModulesPackages = listOf(
     "redis",
-    "@redis",
+    "@redis/bloom",
+    "@redis/client",
+    "@redis/json",
+    "@redis/search",
+    "@redis/time-series",
     "cluster-key-slot"
 )
 
-// 生成基础运行时依赖与可选 redis 依赖包，避免每次更新都预解压完整依赖树。
-tasks.register("prepareNodeModules") {
+// 显式维护任务：从本地归档刷新受版本控制的运行时资产。普通构建不会调用它。
+tasks.register("refreshBundledNodeModulesFromArchive") {
     val zipFile = rootProject.file("node_modules.zip")
     val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
@@ -462,81 +467,43 @@ tasks.register("prepareNodeModules") {
     outputs.dirs(baseTargetDir, optionalRootDir)
     dependsOn("cleanupGarbageFiles")
     doLast {
+        if (!zipFile.isFile) {
+            throw GradleException("未找到依赖归档：${zipFile.absolutePath}")
+        }
         val sourceRoot = File(tempRootDir, "source")
         val sourceNodeModules = File(sourceRoot, "node_modules")
-        val splitRedisReady = File(optionalRedisTargetDir, "redis/package.json").exists()
-        val baseStillContainsRedis =
-            File(baseTargetDir, "redis/package.json").exists() || File(baseTargetDir, "@redis").exists()
 
         delete(tempRootDir)
         sourceRoot.mkdirs()
 
-        when {
-            zipFile.exists() -> {
-                copy {
-                    from(zipTree(zipFile)) {
-                        include("node_modules/**")
-                        includeEmptyDirs = false
-                        eachFile {
-                            val normalized = path.removePrefix("node_modules/")
-                            if (normalized == path || normalized.isBlank()) {
-                                exclude()
-                            } else {
-                                if (normalized.any { ch -> ch.code < 32 || ch.code == 127 }) {
-                                    throw GradleException("node_modules.zip 含非法文件名：$path")
-                                }
-                                path = normalized
-                            }
+        copy {
+            from(zipTree(zipFile)) {
+                include("node_modules/**")
+                includeEmptyDirs = false
+                eachFile {
+                    val normalized = path.removePrefix("node_modules/")
+                    if (normalized == path || normalized.isBlank()) {
+                        exclude()
+                    } else {
+                        if (normalized.any { ch -> ch.code < 32 || ch.code == 127 }) {
+                            throw GradleException("node_modules.zip 含非法文件名：$path")
                         }
                     }
-                    into(sourceRoot)
                 }
             }
-            splitRedisReady -> {
-                copy {
-                    from(baseTargetDir)
-                    into(sourceNodeModules)
-                }
-                copy {
-                    from(optionalRedisTargetDir)
-                    into(sourceNodeModules)
-                }
-            }
-            baseTargetDir.exists() && baseStillContainsRedis -> {
-                copy {
-                    from(baseTargetDir)
-                    into(sourceNodeModules)
-                }
-            }
-            baseTargetDir.exists() -> {
-                copy {
-                    from(baseTargetDir)
-                    into(sourceNodeModules)
-                }
-            }
-            else -> return@doLast
+            into(sourceRoot)
         }
 
-        val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
-        if (workspaceNodeModules.exists()) {
-            val missingBasePackages = baseNodeModulesPackages.filterNot { name ->
-                File(sourceNodeModules, "$name/package.json").isFile
-            }
-            copy {
-                from(workspaceNodeModules) {
-                    includeNodeModuleDirs(missingBasePackages + optionalRedisNodeModulesPackages)
-                    includeEmptyDirs = false
-                }
-                into(sourceNodeModules)
-            }
+        val missingPackages = (baseNodeModulesPackages + optionalRedisNodeModulesPackages)
+            .filterNot { name -> File(sourceNodeModules, "$name/package.json").isFile }
+        if (missingPackages.isNotEmpty()) {
+            throw GradleException("依赖归档闭包不完整：${missingPackages.joinToString(", ")}")
         }
 
         pruneNodeModuleRuntimeNoise(sourceNodeModules)
 
         delete(baseTargetDir)
         delete(optionalRootDir)
-
-        if (!sourceNodeModules.exists()) return@doLast
 
         copy {
             from(sourceNodeModules) {
@@ -560,7 +527,8 @@ tasks.register("prepareNodeModules") {
     }
 }
 
-tasks.register("syncBundledNodeModulesFromWorkspace") {
+// 显式维护任务：从核心工作区刷新依赖。普通构建不读取兄弟仓库。
+tasks.register("refreshBundledNodeModulesFromWorkspace") {
     val workspaceNodeModules = rootProject.file("../danmu_api/node_modules")
     val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val baseTargetDir = file("src/main/assets/nodejs-project/node_modules")
@@ -572,19 +540,22 @@ tasks.register("syncBundledNodeModulesFromWorkspace") {
         if (!workspaceNodeModules.exists()) {
             throw GradleException("未找到工作区依赖目录：${workspaceNodeModules.absolutePath}")
         }
-        baseTargetDir.mkdirs()
-        optionalRedisTargetDir.mkdirs()
-        val missingBasePackages = baseNodeModulesPackages.filterNot { name ->
-            File(baseTargetDir, "$name/package.json").isFile
-        }
-        if (missingBasePackages.isNotEmpty()) {
-            copy {
-                from(workspaceNodeModules) {
-                    includeNodeModuleDirs(missingBasePackages)
-                    includeEmptyDirs = false
-                }
-                into(baseTargetDir)
+        val missingPackages = (baseNodeModulesPackages + optionalRedisNodeModulesPackages)
+            .filterNot { name ->
+                File(workspaceNodeModules, "$name/package.json").isFile
             }
+        if (missingPackages.isNotEmpty()) {
+            throw GradleException("工作区依赖闭包不完整：${missingPackages.joinToString(", ")}")
+        }
+
+        delete(baseTargetDir)
+        delete(file("src/main/assets/nodejs-optional"))
+        copy {
+            from(workspaceNodeModules) {
+                includeNodeModuleDirs(baseNodeModulesPackages)
+                includeEmptyDirs = false
+            }
+            into(baseTargetDir)
         }
         copy {
             from(workspaceNodeModules) {
@@ -602,11 +573,11 @@ tasks.register("verifyBundledNodeModules") {
     val packageJsonFile = file("src/main/assets/nodejs-project/package.json")
     val packageLockFile = file("src/main/assets/nodejs-project/package-lock.json")
     val nodeModulesDir = file("src/main/assets/nodejs-project/node_modules")
-    dependsOn("prepareNodeModules")
-    dependsOn("syncBundledNodeModulesFromWorkspace")
+    val optionalRedisNodeModulesDir = file("src/main/assets/nodejs-optional/redis/node_modules")
     inputs.file(packageJsonFile)
     inputs.file(packageLockFile)
     inputs.dir(nodeModulesDir)
+    inputs.dir(optionalRedisNodeModulesDir)
     doLast {
         if (!packageJsonFile.exists()) {
             throw GradleException("缺少运行时依赖声明文件：${packageJsonFile.absolutePath}")
@@ -641,6 +612,12 @@ tasks.register("verifyBundledNodeModules") {
             val depPkg = file("src/main/assets/nodejs-project/node_modules/$name/package.json")
             if (!depPkg.exists()) {
                 missing += "$name（锁文件闭包）"
+            }
+        }
+        optionalRedisNodeModulesPackages.forEach { name ->
+            val depPkg = file("src/main/assets/nodejs-optional/redis/node_modules/$name/package.json")
+            if (!depPkg.exists()) {
+                missing += "$name（可选 Redis 运行时）"
             }
         }
 
@@ -681,6 +658,59 @@ tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
     commandLine("node", "node-tests/core-runtime-dependencies-smoke.mjs")
 }
 
+val embeddedNodeVersion = "18.20.4"
+val targetNodeExecutable = (findProperty("targetNodeExecutable") as? String)
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?: System.getenv("DANMU_TARGET_NODE")?.trim()?.takeIf { it.isNotBlank() }
+    ?: "node"
+
+tasks.register("verifyEmbeddedNodeCompatibility") {
+    val smokeScripts = listOf(
+        "node-tests/parse-dotenv-regression.js",
+        "node-tests/brotli-runtime-smoke.mjs",
+        "node-tests/bundled-node-lock-closure-smoke.mjs",
+        "node-tests/core-runtime-dependencies-smoke.mjs"
+    )
+    dependsOn("verifyBundledNodeModules")
+    inputs.files(smokeScripts.map(rootProject::file))
+    inputs.file("src/main/assets/nodejs-project/android-server.js")
+    inputs.property("targetNodeExecutable", targetNodeExecutable)
+    doLast {
+        fun runTargetNode(arguments: List<String>): String {
+            val process = try {
+                ProcessBuilder(listOf(targetNodeExecutable) + arguments)
+                    .directory(rootProject.projectDir)
+                    .redirectErrorStream(true)
+                    .start()
+            } catch (error: Exception) {
+                throw GradleException(
+                    "无法执行目标 Node：$targetNodeExecutable。请通过 -PtargetNodeExecutable 或 DANMU_TARGET_NODE 指定 Node $embeddedNodeVersion",
+                    error
+                )
+            }
+            val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                throw GradleException(
+                    "目标 Node 命令失败（exit=$exitCode）：${arguments.joinToString(" ")}\n${output.trim()}"
+                )
+            }
+            return output.trim()
+        }
+
+        val actualVersion = runTargetNode(listOf("--version")).removePrefix("v")
+        if (actualVersion != embeddedNodeVersion) {
+            throw GradleException(
+                "Release 必须使用与内嵌运行时一致的 Node $embeddedNodeVersion 执行 smoke，当前为 $actualVersion（$targetNodeExecutable）"
+            )
+        }
+        runTargetNode(listOf("--check", "app/src/main/assets/nodejs-project/android-server.js"))
+        smokeScripts.forEach { script -> runTargetNode(listOf(script)) }
+        println("Embedded Node compatibility smoke: OK ($actualVersion)")
+    }
+}
+
 val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-project/runtime-polyfills.js",
     "assets/nodejs-project/runtime_asset_layout.txt",
@@ -705,7 +735,9 @@ val requiredPackagedNodeRuntimeEntries = listOf(
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/dict/TWVariantsPhrases.js",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/cn.js",
     "assets/nodejs-project/node_modules/opencc-js/dist/esm-lib/to/tw.js",
-    "assets/nodejs-project/node_modules/zod/package.json"
+    "assets/nodejs-project/node_modules/zod/package.json",
+    "assets/nodejs-optional/redis/node_modules/redis/package.json",
+    "assets/nodejs-optional/redis/node_modules/@redis/client/package.json"
 )
 
 tasks.register("verifyPackagedNodeModulesDebug") {
@@ -725,30 +757,93 @@ tasks.register("verifyPackagedNodeModulesDebug") {
 }
 
 tasks.register("verifyPackagedNodeModulesRelease") {
-    val apkFile = layout.buildDirectory.file("outputs/apk/release/app-arm64-v8a-release.apk")
-    dependsOn("assembleRelease")
-    inputs.file(apkFile)
+    val apkFiles = configuredAbiFilters.map { abi ->
+        layout.buildDirectory.file("outputs/apk/release/app-$abi-release.apk")
+    }
+    inputs.files(apkFiles)
     doLast {
-        val file = apkFile.get().asFile
-        if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
-        ZipFile(file).use { zip ->
-            val missing = requiredPackagedNodeRuntimeEntries.filter { zip.getEntry(it) == null }
-            if (missing.isNotEmpty()) {
-                throw GradleException("Release APK 缺少关键依赖文件：${missing.joinToString(", ")}")
+        apkFiles.zip(configuredAbiFilters).forEach { (provider, abi) ->
+            val file = provider.get().asFile
+            if (!file.exists()) throw GradleException("未找到 release APK：${file.absolutePath}")
+            ZipFile(file).use { zip ->
+                val requiredEntries = requiredPackagedNodeRuntimeEntries + listOf(
+                    "lib/$abi/libnode.so",
+                    "lib/$abi/libnative-lib.so"
+                )
+                val missing = requiredEntries.filter { zip.getEntry(it) == null }
+                if (missing.isNotEmpty()) {
+                    throw GradleException(
+                        "Release APK（$abi）缺少关键运行时文件：${missing.joinToString(", ")}"
+                    )
+                }
             }
         }
     }
 }
 
-val prepareNodeModulesTask = tasks.named("prepareNodeModules")
-val syncBundledNodeModulesTask = tasks.named("syncBundledNodeModulesFromWorkspace")
 val verifyBundledNodeModulesTask = tasks.named("verifyBundledNodeModules")
 val testBundledBrotliRuntimeTask = tasks.named("testBundledBrotliRuntime")
 val testBundledNodeLockClosureTask = tasks.named("testBundledNodeLockClosure")
 val testBundledCoreRuntimeDependenciesTask = tasks.named("testBundledCoreRuntimeDependencies")
+val verifyEmbeddedNodeCompatibilityTask = tasks.named("verifyEmbeddedNodeCompatibility")
+val nativeRuntimeChecksumFile = file("native-runtime.sha256")
+val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") {
+    inputs.file(nativeRuntimeChecksumFile)
+    doLast {
+        if (!nativeRuntimeChecksumFile.isFile) {
+            throw GradleException("缺少原生运行时校验清单：${nativeRuntimeChecksumFile.absolutePath}")
+        }
+        val malformed = mutableListOf<String>()
+        val missing = mutableListOf<String>()
+        val mismatched = mutableListOf<String>()
+        nativeRuntimeChecksumFile.readLines(Charsets.UTF_8).forEachIndexed { index, rawLine ->
+            val line = rawLine.trim()
+            if (line.isBlank() || line.startsWith('#')) return@forEachIndexed
+            val separator = line.indexOf("  ")
+            if (separator <= 0) {
+                malformed += "第 ${index + 1} 行"
+                return@forEachIndexed
+            }
+            val expected = line.substring(0, separator).trim().lowercase()
+            val relativePath = line.substring(separator + 2).trim()
+            if (!expected.matches(Regex("[0-9a-f]{64}")) ||
+                relativePath.isBlank() || relativePath.startsWith('/') || ".." in relativePath.split('/')
+            ) {
+                malformed += "第 ${index + 1} 行"
+                return@forEachIndexed
+            }
+            val runtimeFile = file(relativePath)
+            if (!runtimeFile.isFile) {
+                missing += relativePath
+                return@forEachIndexed
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            runtimeFile.inputStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            val actual = digest.digest().joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            }
+            if (actual != expected) mismatched += relativePath
+        }
+        if (malformed.isNotEmpty() || missing.isNotEmpty() || mismatched.isNotEmpty()) {
+            throw GradleException(
+                buildList {
+                    if (malformed.isNotEmpty()) add("格式错误：${malformed.joinToString()}")
+                    if (missing.isNotEmpty()) add("缺少文件：${missing.joinToString()}")
+                    if (mismatched.isNotEmpty()) add("哈希不匹配：${mismatched.joinToString()}")
+                }.joinToString("；", prefix = "原生运行时输入校验失败：")
+            )
+        }
+    }
+}
 tasks.named("preBuild").configure {
-    dependsOn(prepareNodeModulesTask)
-    dependsOn(syncBundledNodeModulesTask)
+    dependsOn(verifyNativeRuntimeInputsTask)
     dependsOn(verifyBundledNodeModulesTask)
     dependsOn(testBundledBrotliRuntimeTask)
     dependsOn(testBundledNodeLockClosureTask)
@@ -762,12 +857,27 @@ tasks.matching {
         (it.name.startsWith("generate") && it.name.endsWith("LintVitalReportModel")) ||
         it.name.contains("lintVital", ignoreCase = true)
 }.configureEach {
-    dependsOn(prepareNodeModulesTask)
-    dependsOn(syncBundledNodeModulesTask)
     dependsOn(verifyBundledNodeModulesTask)
 }
 
-// Termux 下预裁剪 JNI so，避免 AGP strip 工具链与宿主架构不兼容导致体积异常
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(verifyEmbeddedNodeCompatibilityTask)
+}
+
+val verifyPackagedNodeModulesReleaseTask = tasks.named("verifyPackagedNodeModulesRelease")
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    finalizedBy(verifyPackagedNodeModulesReleaseTask)
+}
+verifyPackagedNodeModulesReleaseTask.configure {
+    mustRunAfter("assembleRelease")
+}
+tasks.register("releaseCheck") {
+    dependsOn("assembleRelease")
+    dependsOn(verifyEmbeddedNodeCompatibilityTask)
+    dependsOn(verifyPackagedNodeModulesReleaseTask)
+}
+
+// Termux 下复制已固定哈希的 JNI 输入，绕过宿主架构不兼容的 AGP strip 工具链。
 tasks.register("prepareTermuxJniLibs") {
     if (isTermuxHost) {
         val outRoot = layout.buildDirectory.dir("termux-jni-libs").get().asFile
@@ -788,36 +898,8 @@ tasks.register("prepareTermuxJniLibs") {
                 }
             }
 
-            val stripPathCandidates = listOf(
-                System.getenv("LLVM_STRIP")?.trim().orEmpty(),
-                (System.getenv("PREFIX")?.trim().orEmpty() + "/bin/llvm-strip").trim(),
-                "/data/data/com.termux/files/usr/bin/llvm-strip",
-                "llvm-strip"
-            ).filter { it.isNotBlank() }
-
-            val stripTool = stripPathCandidates.firstOrNull { candidate ->
-                if (candidate.contains('/')) File(candidate).exists() else true
-            } ?: "llvm-strip"
-
-            val soFiles = outRoot.walkTopDown()
-                .filter { it.isFile && it.extension == "so" }
-                .toList()
-            soFiles.forEach { so ->
-                runCatching {
-                    val process = ProcessBuilder(
-                        stripTool,
-                        "--strip-unneeded",
-                        so.absolutePath
-                    ).redirectErrorStream(true).start()
-                    process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val exit = process.waitFor()
-                    if (exit != 0) {
-                        throw GradleException("strip exit=$exit")
-                    }
-                }.onFailure {
-                    println("警告：预裁剪失败 ${so.absolutePath} -> ${it.message}")
-                }
-            }
+            // 输入库已预裁剪并由 SHA-256 清单固定。这里仅复制，避免宿主 llvm-strip
+            // 版本差异改变同一提交的 APK 内容。
         }
     }
 }

@@ -43,6 +43,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -81,7 +84,9 @@ fun WorkDirScreen(
     var showWorkDirDialog by remember { mutableStateOf(false) }
     var showAllFilesAccessDialog by remember { mutableStateOf(false) }
     var pendingWorkDirPathForPermission by remember { mutableStateOf<String?>(null) }
+    var pendingMigrationForPermission by remember { mutableStateOf(false) }
     var workDirInput by remember { mutableStateOf("") }
+    var migrateSelectedCore by remember { mutableStateOf(false) }
 
     val workDirPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -102,24 +107,21 @@ fun WorkDirScreen(
             viewModel.postMessage("无法解析所选目录，请改用手动输入")
             return@rememberLauncherForActivityResult
         }
-        if (RuntimePaths.needsAllFilesAccess(context, resolvedPath) &&
-            !RuntimePaths.isAllFilesAccessGranted(context)
-        ) {
-            pendingWorkDirPathForPermission = resolvedPath
-            showAllFilesAccessDialog = true
-            return@rememberLauncherForActivityResult
-        }
-        viewModel.applyWorkDirPath(resolvedPath)
+        workDirInput = resolvedPath
+        migrateSelectedCore = false
+        showWorkDirDialog = true
     }
 
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
         val pendingPath = pendingWorkDirPathForPermission
+        val pendingMigration = pendingMigrationForPermission
         pendingWorkDirPathForPermission = null
+        pendingMigrationForPermission = false
         if (pendingPath.isNullOrBlank()) return@rememberLauncherForActivityResult
         if (RuntimePaths.isAllFilesAccessGranted(context)) {
-            viewModel.applyWorkDirPath(pendingPath)
+            viewModel.applyWorkDirPath(pendingPath, pendingMigration)
         } else {
             viewModel.postMessage("未授予完整存储权限，无法使用该目录")
         }
@@ -197,6 +199,7 @@ fun WorkDirScreen(
                                 onClick = {
                                     workDirInput = workDirInfo.customBaseDir?.absolutePath
                                         ?: workDirInfo.normalBaseDir.absolutePath
+                                    migrateSelectedCore = false
                                     showWorkDirDialog = true
                                 },
                                 modifier = Modifier.weight(1f),
@@ -305,6 +308,17 @@ fun WorkDirScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        listOf(false to "仅切换", true to "迁移当前核心").forEachIndexed { index, option ->
+                            SegmentedButton(
+                                selected = migrateSelectedCore == option.first,
+                                onClick = { migrateSelectedCore = option.first },
+                                shape = SegmentedButtonDefaults.itemShape(index, 2)
+                            ) {
+                                Text(option.second)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -316,9 +330,10 @@ fun WorkDirScreen(
                             !RuntimePaths.isAllFilesAccessGranted(context)
                         ) {
                             pendingWorkDirPathForPermission = targetPath
+                            pendingMigrationForPermission = migrateSelectedCore
                             showAllFilesAccessDialog = true
                         } else {
-                            viewModel.applyWorkDirPath(targetPath)
+                            viewModel.applyWorkDirPath(targetPath, migrateSelectedCore)
                         }
                     },
                     enabled = workDirInput.trim().isNotBlank()
@@ -335,6 +350,7 @@ fun WorkDirScreen(
             onDismissRequest = {
                 showAllFilesAccessDialog = false
                 pendingWorkDirPathForPermission = null
+                pendingMigrationForPermission = false
             },
             style = AppBottomSheetStyle.Confirm,
             tone = AppBottomSheetTone.Warning,
@@ -353,11 +369,13 @@ fun WorkDirScreen(
                         runCatching { allFilesAccessLauncher.launch(appIntent) }.getOrElse {
                             runCatching { allFilesAccessLauncher.launch(fallbackIntent) }.onFailure {
                                 pendingWorkDirPathForPermission = null
+                                pendingMigrationForPermission = false
                                 viewModel.postMessage("无法打开存储权限设置页")
                             }
                         }
                     } else {
                         pendingWorkDirPathForPermission = null
+                        pendingMigrationForPermission = false
                         viewModel.postMessage("当前系统无需完整存储权限")
                     }
                 }) { Text("去授权") }
@@ -366,6 +384,7 @@ fun WorkDirScreen(
                 TextButton(onClick = {
                     showAllFilesAccessDialog = false
                     pendingWorkDirPathForPermission = null
+                    pendingMigrationForPermission = false
                 }) { Text("取消") }
             }
         )

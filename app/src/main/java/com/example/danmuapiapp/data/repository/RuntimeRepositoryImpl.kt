@@ -29,6 +29,7 @@ import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
+import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -57,7 +58,8 @@ import javax.inject.Singleton
 class RuntimeRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val adminSessionRepository: AdminSessionRepository
+    private val adminSessionRepository: AdminSessionRepository,
+    private val coreRepository: CoreRepository
 ) : RuntimeRepository {
 
     companion object {
@@ -198,6 +200,16 @@ class RuntimeRepositoryImpl @Inject constructor(
                     normalPendingExplicitStart = false
                     markError(error, statusMessage = message ?: error)
                     addLog(LogLevel.Error, "服务错误: $error")
+                    if (error.startsWith("运行时依赖缺失：")) {
+                        scope.launch {
+                            runCatching {
+                                coreRepository.prepareInstalledCoreDependencyRepair(
+                                    variant = _runtimeState.value.variant,
+                                    origin = CoreDependencyRepairOrigin.RuntimeStart
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -717,6 +729,26 @@ class RuntimeRepositoryImpl @Inject constructor(
         val state = _runtimeState.value
         if (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting) return
 
+        val dependencyRepair = try {
+            coreRepository.prepareInstalledCoreDependencyRepair(
+                variant = state.variant,
+                origin = CoreDependencyRepairOrigin.RuntimeStart
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val reason = error.message ?: "运行时依赖检测失败"
+            markError(reason)
+            addLog(LogLevel.Error, "启动前依赖检测失败：$reason")
+            return
+        }
+        if (dependencyRepair != null) {
+            val reason = "当前核心缺少运行时依赖，请先修复依赖后再启动"
+            markError(reason)
+            addLog(LogLevel.Warn, "$reason：${dependencyRepair.missingDependencies.joinToString(", ")}")
+            return
+        }
+
         if (state.runMode == RunMode.Normal) {
             val recovered = recoverStaleNormalProcessIfNeeded(state.port)
             if (!recovered) return
@@ -882,6 +914,18 @@ class RuntimeRepositoryImpl @Inject constructor(
                     val detail = result.detail.ifBlank { result.message }
                     markError(detail)
                     addLog(LogLevel.Error, "Root 启动失败: $detail")
+                    if (detail.startsWith("运行时依赖缺失：")) {
+                        try {
+                            coreRepository.prepareInstalledCoreDependencyRepair(
+                                variant = state.variant,
+                                origin = CoreDependencyRepairOrigin.RuntimeStart
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            addLog(LogLevel.Error, "创建 Root 依赖修复任务失败：${error.message ?: "未知错误"}")
+                        }
+                    }
                 }
             }
         }

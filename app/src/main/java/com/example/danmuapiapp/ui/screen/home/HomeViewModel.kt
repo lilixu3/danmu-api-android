@@ -701,6 +701,10 @@ class HomeViewModel @Inject constructor(
         }
 
         coreRepo.refreshCoreInfo()
+        if (request.origin == CoreDependencyRepairOrigin.RuntimeStart) {
+            runtimeRepo.startService()
+            return "${variantLabel(request.variant)}依赖已修复，服务正在启动"
+        }
         maybeRestartAfterCoreUpdate(request.variant)
         return if (request.origin == CoreDependencyRepairOrigin.WorkDirectory) {
             "当前工作目录依赖已修复"

@@ -4,10 +4,12 @@ import java.io.IOException
 
 enum class CoreDependencyRepairOrigin {
     CoreMutation,
-    WorkDirectory
+    WorkDirectory,
+    RuntimeStart
 }
 
 data class CoreDependencyRepairRequest(
+    val operationId: Long,
     val variant: ApiVariant,
     val actionLabel: String,
     val missingDependencies: List<String>,
@@ -15,6 +17,22 @@ data class CoreDependencyRepairRequest(
     val onlineRepairSupported: Boolean = variant != ApiVariant.Custom,
     val origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.CoreMutation
 )
+
+enum class CoreOperationPhase {
+    Idle,
+    Running,
+    AwaitingDependencyRepair
+}
+
+data class CoreOperationState(
+    val operationId: Long = 0L,
+    val variant: ApiVariant? = null,
+    val actionLabel: String = "",
+    val phase: CoreOperationPhase = CoreOperationPhase.Idle
+) {
+    val isActive: Boolean
+        get() = phase != CoreOperationPhase.Idle
+}
 
 class CoreDependencyRepairRequiredException(
     val request: CoreDependencyRepairRequest
