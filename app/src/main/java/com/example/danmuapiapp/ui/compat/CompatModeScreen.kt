@@ -54,7 +54,6 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -105,6 +104,9 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import java.util.Locale
@@ -369,8 +371,10 @@ private fun ExitConfirmDialog(
     onBackground: () -> Unit,
     onStopAndExit: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Warning,
         title = { Text("退出弹幕 API？") },
         text = {
             Text(
@@ -399,13 +403,14 @@ private fun ExitCompatModeDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Warning,
         icon = {
             Icon(
                 imageVector = Icons.Rounded.WarningAmber,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error
+                contentDescription = null
             )
         },
         title = { Text("退出兼容模式？") },

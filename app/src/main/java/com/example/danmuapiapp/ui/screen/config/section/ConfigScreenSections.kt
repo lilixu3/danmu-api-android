@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.config
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor

@@ -25,22 +25,73 @@ class InjectedPlaybackDialogPolicyTest {
     }
 
     @Test
-    fun `播放底部弹窗应保持 AlertDialog 窗口宽度约束不能被全屏 fallback 放大`() {
+    fun `播放弹窗应使用共享居中窗口并移除底部抽屉分支`() {
+        val source = readManualSearchDialogSource()
+        val dialogSource = readDialogSource()
+        val showMethod = source.substringAfter("void show(Activity activity)")
+            .substringBefore("private ScrollView buildContentScroll")
+
+        assertTrue(showMethod.contains("DanmuDialog.create(activity, root)"))
+        assertTrue(showMethod.contains("DanmuDialog.showCentered(dialog, activity,"))
+        assertTrue(dialogSource.contains("window.setGravity(Gravity.CENTER)"))
+        assertTrue(dialogSource.contains("window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)"))
+        assertFalse(source.contains("topRoundedSheet"))
+        assertFalse(source.contains("Gravity.BOTTOM"))
+        assertFalse(source.contains("DIALOG_STYLE"))
+        assertFalse(source.contains("dialogStyle"))
+    }
+
+    @Test
+    fun `播放弹窗横屏应双列并列而竖屏按阶段切换`() {
         val source = readManualSearchDialogSource()
         val showMethod = source.substringAfter("void show(Activity activity)")
-            .substringBefore("private ScrollView buildSheetScroll")
+            .substringBefore("private ScrollView buildContentScroll")
 
-        assertTrue(showMethod.contains("root.setBackground(t.topRoundedSheet(activity))"))
-        assertTrue(showMethod.contains("new AlertDialog.Builder(activity)"))
-        assertTrue(showMethod.contains(".setView(root)"))
-        assertTrue(showMethod.contains(".create()"))
-        assertTrue(showMethod.contains("window.setLayout((int) (width * 0.82f), ViewGroup.LayoutParams.WRAP_CONTENT)"))
+        assertTrue(source.contains("DanmuDialog.isLandscape(activity)"))
+        assertTrue("横屏两列必须同时可见，不能沿用竖屏的阶段互斥可见性",
+            showMethod.contains("if (!landscape) {"))
+        assertTrue(showMethod.contains("MAX_WIDTH_LANDSCAPE_DP : MAX_WIDTH_PORTRAIT_DP"))
+        assertTrue("横屏分集网格列数上限要比竖屏宽",
+            source.contains("clamp(columns, 4, landscape ? 12 : 8)"))
+    }
 
-        assertFalse("底部 AlertDialog fallback 不能设置成全屏窗口，否则截图中面板会被放大到约 95% 并贴住右侧边缘",
-            showMethod.contains("WindowManager.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT"))
-        assertFalse(source.contains("buildPlaybackSheetSurface"))
-        assertFalse(source.contains("resolvePlaybackSheetPanelWidth"))
-        assertFalse(source.contains("material_bottom_sheet_max_width"))
+    @Test
+    fun `播放弹窗常驻搜索框且遥控器可遍历分集网格`() {
+        val source = readManualSearchDialogSource()
+        val uiSource = readUiSource()
+
+        assertTrue("搜索框在任何阶段都要留在原位，返回不应重建输入区",
+            source.contains("root.addView(searchRow"))
+        assertTrue(source.contains("DanmuUi.wireGridFocus(episodeGrid, columns)"))
+        assertTrue(uiSource.contains("cell.setNextFocusLeftId"))
+        assertTrue(uiSource.contains("cell.setNextFocusUpId"))
+        assertTrue(source.contains("DanmuDialog.focusFirst(dialog, searchButton)"))
+    }
+
+    @Test
+    fun `推送进度应通过回调回传而不是持有弹窗控件`() {
+        val source = readManualSearchDialogSource()
+        val coordinatorSource = readPushCoordinatorSource()
+
+        assertTrue(source.contains("PushFeedback feedback"))
+        assertTrue(coordinatorSource.contains("void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, PushFeedback feedback)"))
+        assertTrue(coordinatorSource.contains("void autoPushCurrent(Activity activity, int fallbackPort, PushFeedback feedback)"))
+        assertTrue("推送记录弹窗应搬出推送协调器", coordinatorSource.contains("List<String> pushHistorySnapshot()"))
+        assertFalse("推送协调器不应再直接构建弹窗视图", coordinatorSource.contains("DanmuDialog.root(activity"))
+        assertFalse(coordinatorSource.contains("TextView statusText"))
+        assertFalse(coordinatorSource.contains("TextView notifyDot"))
+    }
+
+    @Test
+    fun `播放弹窗异步结果应绑定当前请求与弹窗生命周期`() {
+        val source = readManualSearchDialogSource()
+
+        assertTrue(source.contains("private static final class SearchDialogState"))
+        assertTrue(source.contains("dialog.setOnDismissListener(d -> state.active = false)"))
+        assertTrue(source.contains("requestId != state.searchRequestId"))
+        assertTrue(source.contains("requestId != state.detailRequestId"))
+        assertFalse(source.contains("final int[] selectedEpisodeIndex"))
+        assertFalse(source.contains("final boolean[] searching"))
     }
 
     @Test
@@ -119,6 +170,18 @@ class InjectedPlaybackDialogPolicyTest {
 
     private fun readManualSearchDialogSource(): String {
         return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedManualSearchDialog.java")
+    }
+
+    private fun readDialogSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuDialog.java")
+    }
+
+    private fun readUiSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuUi.java")
+    }
+
+    private fun readPushCoordinatorSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedPushCoordinator.java")
     }
 
     private fun readSource(relativePath: String): String {

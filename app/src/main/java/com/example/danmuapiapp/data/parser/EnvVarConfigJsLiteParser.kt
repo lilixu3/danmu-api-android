@@ -52,7 +52,16 @@ internal class EnvVarConfigJsLiteParser(
         skipWsAndComments()
         if (peek(']')) { i++; return out }
         while (i < n) {
-            out.add(parseValue())
+            skipWsAndComments()
+            if (src.startsWith("...", i)) {
+                i += 3
+                when (val spreadValue = parseValue()) {
+                    is Iterable<*> -> out.addAll(spreadValue)
+                    is Array<*> -> out.addAll(spreadValue)
+                }
+            } else {
+                out.add(parseValue())
+            }
             skipWsAndComments()
             if (peek(',')) {
                 i++; skipWsAndComments()

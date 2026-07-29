@@ -19,7 +19,6 @@ final class DanmuXposedSettingsStore {
     private static final String KEY_SHELL_PORT = "shell_port";
     private static final String KEY_UI_DARK_THEME = "ui_dark_theme";
     private static final String KEY_EPISODE_SHOW_TITLES = "episode_show_titles";
-    private static final String KEY_DIALOG_STYLE = "dialog_style";
 
     private DanmuXposedSettingsStore() {
     }
@@ -43,7 +42,6 @@ final class DanmuXposedSettingsStore {
             int fontSize = safeParseInt(prefs.getString(KEY_FONT_SIZE, ""));
             int storedPort = prefs.getInt(KEY_SHELL_PORT, normalizedFallbackPort);
             boolean darkTheme = prefs.getBoolean(KEY_UI_DARK_THEME, false);
-            int dialogStyle = prefs.getInt(KEY_DIALOG_STYLE, InjectionSettings.DIALOG_STYLE_CENTER);
             int corePort = 0;
             String coreToken = "";
             SharedPreferences remotePrefs = remotePreferences(remoteProvider);
@@ -54,12 +52,11 @@ final class DanmuXposedSettingsStore {
                 fontSize = safeParseInt(remotePrefs.getString(KEY_FONT_SIZE, fontSize > 0 ? String.valueOf(fontSize) : ""));
                 storedPort = remotePrefs.getInt(KEY_SHELL_PORT, storedPort);
                 darkTheme = remotePrefs.getBoolean(KEY_UI_DARK_THEME, darkTheme);
-                dialogStyle = remotePrefs.getInt(KEY_DIALOG_STYLE, dialogStyle);
                 corePort = remotePrefs.getInt(KEY_CORE_PORT, 0);
                 coreToken = normalizeToken(remotePrefs.getString(KEY_CORE_TOKEN, ""));
             }
             int port = normalizePortOrFallback(storedPort, normalizedFallbackPort);
-            return new InjectionSettings(injectionEnabled, autoPush, offset, fontSize > 0 ? fontSize : -1, port, darkTheme, corePort, coreToken, dialogStyle);
+            return new InjectionSettings(injectionEnabled, autoPush, offset, fontSize > 0 ? fontSize : -1, port, darkTheme, corePort, coreToken);
         } catch (Throwable throwable) {
             return defaultSettings(normalizedFallbackPort);
         }
@@ -160,7 +157,6 @@ final class DanmuXposedSettingsStore {
             .putString(KEY_FONT_SIZE, formattedFontSize)
             .putInt(KEY_SHELL_PORT, settings.shellPort)
             .putBoolean(KEY_UI_DARK_THEME, settings.darkTheme)
-            .putInt(KEY_DIALOG_STYLE, settings.dialogStyle)
             .commit();
     }
 
@@ -172,7 +168,7 @@ final class DanmuXposedSettingsStore {
     }
 
     private static InjectionSettings defaultSettings(int normalizedFallbackPort) {
-        return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "", InjectionSettings.DIALOG_STYLE_CENTER);
+        return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "");
     }
 
     private static SharedPreferences remotePreferences(RemotePreferencesProvider remoteProvider) {

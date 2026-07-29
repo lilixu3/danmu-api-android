@@ -10,6 +10,7 @@
         <exclude domain="file" path="nodejs-project/danmu_api_dev" />
         <exclude domain="file" path="nodejs-project/danmu_api_custom" />
         <exclude domain="file" path="nodejs-project/node_modules" />
+        <exclude domain="sharedpref" path="runtime_identity.xml" />
     </cloud-backup>
 
     <device-transfer>
@@ -21,6 +22,7 @@
         <exclude domain="file" path="nodejs-project/danmu_api_dev" />
         <exclude domain="file" path="nodejs-project/danmu_api_custom" />
         <exclude domain="file" path="nodejs-project/node_modules" />
+        <exclude domain="sharedpref" path="runtime_identity.xml" />
     </device-transfer>
 
 </data-extraction-rules>

@@ -77,10 +77,10 @@ fun CoreDependencyRequiredDialog(
     onRepair: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Confirm,
-        tone = AppBottomSheetTone.Warning,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Warning,
         icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = null) },
         title = {
             Text(
@@ -133,10 +133,10 @@ fun CoreDependencyRepairDialog(
     onCancelMutation: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Info,
         icon = { Icon(Icons.Rounded.Build, contentDescription = null) },
         title = { Text("修复运行时依赖") },
         text = {

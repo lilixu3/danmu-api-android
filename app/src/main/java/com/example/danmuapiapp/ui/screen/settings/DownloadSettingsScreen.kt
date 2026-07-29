@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -544,16 +544,14 @@ private fun CustomThrottleEditorDialog(
     onResetDefault: () -> Unit,
     onSave: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         title = { Text("编辑自定义流控") },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(

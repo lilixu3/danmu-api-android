@@ -5,6 +5,7 @@ import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 internal enum class RuntimeOwnership {
     OwnedExact,
     OwnedLegacy,
+    RecoverableSameHome,
     Unknown,
     Foreign
 }
@@ -16,24 +17,26 @@ internal fun determineRuntimeOwnershipFromHealth(
 ): RuntimeOwnership {
     val normalizedExpectedIdentity = expectedIdentity.trim()
     val actualIdentity = RuntimeIdentityStore.extractHealthIdentity(body).orEmpty().trim()
-    if (actualIdentity.isNotBlank()) {
-        return if (normalizedExpectedIdentity.isNotBlank() && actualIdentity == normalizedExpectedIdentity) {
-            RuntimeOwnership.OwnedExact
-        } else {
-            RuntimeOwnership.Foreign
-        }
-    }
-
     val expectedHomeAliases = runtimeHomeAliases(expectedHome)
-    if (expectedHomeAliases.isEmpty()) return RuntimeOwnership.Foreign
-
     val homes = listOf(
         extractHealthString(body, "resolvedHome"),
         extractHealthString(body, "envHome"),
         extractHealthString(body, "cwd")
     ).flatMap(::runtimeHomeAliases)
+    val sameHome = expectedHomeAliases.isNotEmpty() && homes.any { it in expectedHomeAliases }
 
-    return if (homes.any { it in expectedHomeAliases }) {
+    if (actualIdentity.isNotBlank()) {
+        return when {
+            normalizedExpectedIdentity.isNotBlank() && actualIdentity == normalizedExpectedIdentity -> {
+                RuntimeOwnership.OwnedExact
+            }
+            sameHome -> RuntimeOwnership.RecoverableSameHome
+            else -> RuntimeOwnership.Foreign
+        }
+    }
+
+    if (expectedHomeAliases.isEmpty()) return RuntimeOwnership.Foreign
+    return if (sameHome) {
         RuntimeOwnership.OwnedLegacy
     } else {
         RuntimeOwnership.Foreign
@@ -42,6 +45,10 @@ internal fun determineRuntimeOwnershipFromHealth(
 
 internal fun isRuntimeOwnershipOwned(ownership: RuntimeOwnership): Boolean {
     return ownership == RuntimeOwnership.OwnedExact || ownership == RuntimeOwnership.OwnedLegacy
+}
+
+internal fun isRuntimeOwnershipAcceptedForRoot(ownership: RuntimeOwnership): Boolean {
+    return isRuntimeOwnershipOwned(ownership) || ownership == RuntimeOwnership.RecoverableSameHome
 }
 
 internal fun normalizeRuntimeHome(path: String?): String {

@@ -1,9 +1,9 @@
 package com.example.danmuapiapp.ui.screen.home
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
-import com.example.danmuapiapp.ui.component.AppPanelDialog
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppModalPanel
 
 import android.Manifest
 import android.app.Activity
@@ -36,11 +36,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -175,6 +176,17 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
+private enum class HomeOverlay {
+    RunModePicker,
+    RuntimeInfo,
+    QuickPort,
+    QuickToken,
+    CoreUpdateConfirm,
+    DownloadQueue,
+    UnreadAnnouncements,
+    CacheQuick
+}
+
 @Composable
 fun HomeScreen(
     onOpenDanmuDownload: () -> Unit = {},
@@ -213,19 +225,12 @@ fun HomeScreen(
         )
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showRunModePickerDialog by remember { mutableStateOf(false) }
+    var activeOverlay by remember { mutableStateOf<HomeOverlay?>(null) }
     var pendingRunModeTarget by remember { mutableStateOf<RunMode?>(null) }
-    var showRuntimeInfoDialog by remember { mutableStateOf(false) }
-    var showQuickPortDialog by remember { mutableStateOf(false) }
     var quickPortText by remember { mutableStateOf("") }
     var quickPortError by remember { mutableStateOf<String?>(null) }
-    var showQuickTokenDialog by remember { mutableStateOf(false) }
     var quickTokenText by remember { mutableStateOf("") }
     var quickTokenError by remember { mutableStateOf<String?>(null) }
-    var showCoreUpdateConfirmDialog by remember { mutableStateOf(false) }
-    var showDownloadQueueSheet by remember { mutableStateOf(false) }
-    var showUnreadAnnouncementListDialog by remember { mutableStateOf(false) }
-    var showCacheQuickDialog by remember { mutableStateOf(false) }
     var isBatteryWhitelisted by remember {
         mutableStateOf(NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context))
     }
@@ -337,15 +342,15 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(state.port, showQuickPortDialog) {
-        if (!showQuickPortDialog) {
+    LaunchedEffect(state.port, activeOverlay) {
+        if (activeOverlay != HomeOverlay.QuickPort) {
             quickPortText = state.port.toString()
             quickPortError = null
         }
     }
 
-    LaunchedEffect(state.token, showQuickTokenDialog) {
-        if (!showQuickTokenDialog) {
+    LaunchedEffect(state.token, activeOverlay) {
+        if (activeOverlay != HomeOverlay.QuickToken) {
             quickTokenText = state.token
             quickTokenError = null
         }
@@ -378,14 +383,15 @@ fun HomeScreen(
             downloadViewModel.dismissMessage()
         }
     }
-    LaunchedEffect(viewModel.showUpdatePromptDialog) {
-        if (viewModel.showUpdatePromptDialog && showCoreUpdateConfirmDialog) {
-            showCoreUpdateConfirmDialog = false
+    LaunchedEffect(viewModel.showUpdatePromptDialog, viewModel.showProxyPickerDialog) {
+        val coreUpdateFlowAdvanced = viewModel.showUpdatePromptDialog || viewModel.showProxyPickerDialog
+        if (coreUpdateFlowAdvanced && activeOverlay == HomeOverlay.CoreUpdateConfirm) {
+            activeOverlay = null
             viewModel.resetCoreUpdateCheckDialogState()
         }
     }
-    LaunchedEffect(showDownloadQueueSheet, queueDialogGroups) {
-        if (!showDownloadQueueSheet) return@LaunchedEffect
+    LaunchedEffect(activeOverlay, queueDialogGroups) {
+        if (activeOverlay != HomeOverlay.DownloadQueue) return@LaunchedEffect
         val validKeys = queueDialogGroups.map { it.key }.toSet()
         if (validKeys.isEmpty()) {
             expandedQueueGroupKeys = emptySet()
@@ -442,7 +448,7 @@ fun HomeScreen(
         when (unreadAnnouncementCount) {
             0 -> Unit
             1 -> viewModel.openAnnouncementDetails(unreadAnnouncements.first())
-            else -> showUnreadAnnouncementListDialog = true
+            else -> activeOverlay = HomeOverlay.UnreadAnnouncements
         }
     }
 
@@ -508,7 +514,7 @@ fun HomeScreen(
                     isQueueDownloading = isQueueDownloading,
                     isQueuePaused = isQueuePaused,
                     queueSummary = queueSummary,
-                    onOpenDownloadSheet = { showDownloadQueueSheet = true },
+                    onOpenDownloadDialog = { activeOverlay = HomeOverlay.DownloadQueue },
                     onOpenUnreadAnnouncements = ::openUnreadAnnouncementsEntry
                 )
 
@@ -532,10 +538,10 @@ fun HomeScreen(
                     onToggleRunMode = {
                         val options = RunMode.entries.filter { it != state.runMode }
                         pendingRunModeTarget = options.firstOrNull()
-                        showRunModePickerDialog = true
+                        activeOverlay = HomeOverlay.RunModePicker
                     },
                     onOpenVariantPicker = viewModel::openVariantPicker,
-                    onOpenRuntimeInfo = { showRuntimeInfoDialog = true }
+                    onOpenRuntimeInfo = { activeOverlay = HomeOverlay.RuntimeInfo }
                 )
 
                 SnapshotStrip(
@@ -545,14 +551,14 @@ fun HomeScreen(
                     cacheTileValue = cacheTileValue,
                     cacheTileBadge = cacheTileBadge,
                     cacheTileAccent = cacheTileAccent,
-                    onOpenCacheQuick = { showCacheQuickDialog = true },
+                    onOpenCacheQuick = { activeOverlay = HomeOverlay.CacheQuick },
                     token = state.token,
                     maskedToken = maskedToken,
                     tokenVisible = tokenVisible,
                     onEditToken = {
                         quickTokenText = state.token
                         quickTokenError = null
-                        showQuickTokenDialog = true
+                        activeOverlay = HomeOverlay.QuickToken
                     },
                     port = state.port,
                     coreVersionText = coreVersionText,
@@ -562,11 +568,11 @@ fun HomeScreen(
                     onEditPort = {
                         quickPortText = state.port.toString()
                         quickPortError = null
-                        showQuickPortDialog = true
+                        activeOverlay = HomeOverlay.QuickPort
                     },
                     onCheckCoreUpdate = {
                         viewModel.resetCoreUpdateCheckDialogState()
-                        showCoreUpdateConfirmDialog = true
+                        activeOverlay = HomeOverlay.CoreUpdateConfirm
                     },
                 )
 
@@ -698,7 +704,7 @@ fun HomeScreen(
         onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
     )
 
-    if (showRuntimeInfoDialog) {
+    if (activeOverlay == HomeOverlay.RuntimeInfo) {
         ServiceRuntimeInfoDialog(
             status = state.status,
             uptime = uptimeText,
@@ -711,11 +717,11 @@ fun HomeScreen(
             token = state.token,
             maskedToken = maskedToken,
             tokenVisible = tokenVisible,
-            onDismiss = { showRuntimeInfoDialog = false }
+            onDismiss = { activeOverlay = null }
         )
     }
 
-    if (showQuickPortDialog) {
+    if (activeOverlay == HomeOverlay.QuickPort) {
         QuickPortDialog(
             isBusy = isBusy,
             status = state.status,
@@ -727,16 +733,16 @@ fun HomeScreen(
                 quickPortText = it
                 quickPortError = null
             },
-            onDismiss = { showQuickPortDialog = false },
+            onDismiss = { activeOverlay = null },
             onApply = { port ->
                 viewModel.applyPortQuick(port)
-                showQuickPortDialog = false
+                activeOverlay = null
             },
             onPortError = { quickPortError = it }
         )
     }
 
-    if (showQuickTokenDialog) {
+    if (activeOverlay == HomeOverlay.QuickToken) {
         QuickTokenDialog(
             isBusy = isBusy,
             status = state.status,
@@ -747,16 +753,16 @@ fun HomeScreen(
                 quickTokenText = it
                 quickTokenError = null
             },
-            onDismiss = { showQuickTokenDialog = false },
+            onDismiss = { activeOverlay = null },
             onApply = { token ->
                 viewModel.applyTokenQuick(token)
-                showQuickTokenDialog = false
+                activeOverlay = null
             },
             onTokenError = { quickTokenError = it }
         )
     }
 
-    if (showCoreUpdateConfirmDialog) {
+    if (activeOverlay == HomeOverlay.CoreUpdateConfirm) {
         CoreUpdateConfirmDialog(
             variantLabel = currentVariantLabel,
             currentVersion = currentCoreVersion,
@@ -765,13 +771,13 @@ fun HomeScreen(
             resultMessage = viewModel.coreUpdateCheckDialogMessage,
             resultIsError = viewModel.coreUpdateCheckDialogIsError,
             onDismiss = {
-                showCoreUpdateConfirmDialog = false
+                activeOverlay = null
                 viewModel.resetCoreUpdateCheckDialogState()
             },
             onConfirm = {
                 viewModel.quickCheckCurrentCoreUpdate()
                 if (viewModel.showProxyPickerDialog) {
-                    showCoreUpdateConfirmDialog = false
+                    activeOverlay = null
                     viewModel.resetCoreUpdateCheckDialogState()
                 }
             }
@@ -779,7 +785,7 @@ fun HomeScreen(
     }
 
     if (viewModel.showVariantPicker) {
-        VariantPickerSheet(
+        VariantPickerDialog(
             currentVariant = state.variant,
             coreList = coreList,
             isCoreInfoLoading = isCoreInfoLoading,
@@ -821,15 +827,15 @@ fun HomeScreen(
         )
     }
 
-    if (showRunModePickerDialog) {
+    if (activeOverlay == HomeOverlay.RunModePicker) {
         val availableModes = RunMode.entries.filter { it != state.runMode }
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = {
-                showRunModePickerDialog = false
+                activeOverlay = null
                 pendingRunModeTarget = null
             },
-            style = AppBottomSheetStyle.Selection,
-            tone = AppBottomSheetTone.Brand,
+            style = AppDialogStyle.Selection,
+            tone = AppDialogTone.Brand,
             icon = { Icon(Icons.Rounded.PowerSettingsNew, null) },
             title = { Text("切换运行模式") },
             text = {
@@ -890,7 +896,7 @@ fun HomeScreen(
                     enabled = !isHeroChipBusy && pendingRunModeTarget != null,
                     onClick = {
                         val target = pendingRunModeTarget ?: return@TextButton
-                        showRunModePickerDialog = false
+                        activeOverlay = null
                         pendingRunModeTarget = null
                         viewModel.switchRunModeQuick(target)
                     }
@@ -900,7 +906,7 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = {
-                    showRunModePickerDialog = false
+                    activeOverlay = null
                     pendingRunModeTarget = null
                 }) {
                     Text("取消")
@@ -910,10 +916,10 @@ fun HomeScreen(
     }
 
     if (viewModel.showAppUpdatePromptDialog && !viewModel.appUpdatePromptLatestVersion.isNullOrBlank()) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdatePrompt,
-            style = AppBottomSheetStyle.Status,
-            tone = AppBottomSheetTone.Info,
+            style = AppDialogStyle.Status,
+            tone = AppDialogTone.Info,
             icon = { Icon(Icons.Rounded.SystemUpdate, null) },
             title = { Text("发现应用更新") },
             text = {
@@ -943,16 +949,16 @@ fun HomeScreen(
         )
     }
 
-    if (showUnreadAnnouncementListDialog && unreadAnnouncementCount > 1) {
+    if (activeOverlay == HomeOverlay.UnreadAnnouncements && unreadAnnouncementCount > 1) {
         UnreadAnnouncementListDialog(
             announcements = unreadAnnouncements,
-            onDismissRequest = { showUnreadAnnouncementListDialog = false },
+            onDismissRequest = { activeOverlay = null },
             onOpenAnnouncement = { announcement ->
-                showUnreadAnnouncementListDialog = false
+                activeOverlay = null
                 viewModel.openAnnouncementDetails(announcement)
             },
             onAcknowledgeAll = {
-                showUnreadAnnouncementListDialog = false
+                activeOverlay = null
                 viewModel.acknowledgeAllUnreadAnnouncements()
             }
         )
@@ -996,10 +1002,10 @@ fun HomeScreen(
     }
 
     if (viewModel.showAppUpdateMethodDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = viewModel::dismissForegroundAppUpdateMethodDialog,
-            style = AppBottomSheetStyle.Selection,
-            tone = AppBottomSheetTone.Info,
+            style = AppDialogStyle.Selection,
+            tone = AppDialogTone.Info,
             title = { Text("选择更新方式") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1050,10 +1056,10 @@ fun HomeScreen(
     }
 
     if (viewModel.isDownloadingAppUpdate) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = {},
-            style = AppBottomSheetStyle.Status,
-            tone = AppBottomSheetTone.Neutral,
+            style = AppDialogStyle.Status,
+            tone = AppDialogTone.Neutral,
             title = { Text("正在下载更新") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1081,10 +1087,10 @@ fun HomeScreen(
 
     if (viewModel.showInstallAppUpdateDialog && viewModel.downloadedAppUpdate != null) {
         val apk = viewModel.downloadedAppUpdate!!
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = viewModel::dismissInstallAppUpdateDialog,
-            style = AppBottomSheetStyle.Form,
-            tone = AppBottomSheetTone.Brand,
+            style = AppDialogStyle.Form,
+            tone = AppDialogTone.Brand,
             title = { Text("下载完成") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1122,8 +1128,8 @@ fun HomeScreen(
         )
     }
 
-    if (showDownloadQueueSheet) {
-        DownloadQueueSheet(
+    if (activeOverlay == HomeOverlay.DownloadQueue) {
+        DownloadQueueDialog(
             queueSummary = queueSummary,
             queueLiveProgress = queueLiveProgress,
             queueStatusText = queueStatusText,
@@ -1135,9 +1141,9 @@ fun HomeScreen(
             queueDialogGroups = queueDialogGroups,
             expandedQueueGroupKeys = expandedQueueGroupKeys,
             onExpandedQueueGroupKeysChange = { expandedQueueGroupKeys = it },
-            onDismiss = { showDownloadQueueSheet = false },
+            onDismiss = { activeOverlay = null },
             onOpenDownloadPage = {
-                showDownloadQueueSheet = false
+                activeOverlay = null
                 onOpenDanmuDownload()
             },
             onTogglePauseResume = {
@@ -1152,10 +1158,10 @@ fun HomeScreen(
     }
 
     if (viewModel.showCacheAdminRequiredDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = viewModel::dismissCacheAdminRequiredDialog,
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Warning,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
             icon = { Icon(Icons.Rounded.AdminPanelSettings, null) },
             title = { Text("需要管理员模式") },
             text = {
@@ -1172,7 +1178,7 @@ fun HomeScreen(
         )
     }
 
-    if (showCacheQuickDialog) {
+    if (activeOverlay == HomeOverlay.CacheQuick) {
         CacheQuickDialog(
             cacheStats = cacheStats,
             cacheEntries = viewModel.cacheEntries.collectAsStateWithLifecycle().value,
@@ -1181,10 +1187,10 @@ fun HomeScreen(
             onRefresh = viewModel::refreshCache,
             onQuickClear = viewModel::quickClearCache,
             onOpenCacheManagement = {
-                showCacheQuickDialog = false
+                activeOverlay = null
                 onOpenCacheManagement()
             },
-            onDismiss = { showCacheQuickDialog = false }
+            onDismiss = { activeOverlay = null }
         )
     }
 }
@@ -1216,16 +1222,16 @@ private fun openHomeNotificationSettings(context: Context): Boolean {
     }
 }
 
-private fun AppAnnouncement.sheetTone(): AppBottomSheetTone {
+private fun AppAnnouncement.dialogTone(): AppDialogTone {
     return when (severity) {
-        AnnouncementSeverity.Info -> AppBottomSheetTone.Info
-        AnnouncementSeverity.Success -> AppBottomSheetTone.Success
-        AnnouncementSeverity.Warning -> AppBottomSheetTone.Warning
-        AnnouncementSeverity.Danger -> AppBottomSheetTone.Danger
+        AnnouncementSeverity.Info -> AppDialogTone.Info
+        AnnouncementSeverity.Success -> AppDialogTone.Success
+        AnnouncementSeverity.Warning -> AppDialogTone.Warning
+        AnnouncementSeverity.Danger -> AppDialogTone.Danger
     }
 }
 
-private fun AppAnnouncement.sheetIcon(): ImageVector {
+private fun AppAnnouncement.dialogIcon(): ImageVector {
     return when (severity) {
         AnnouncementSeverity.Info -> Icons.Rounded.SystemUpdate
         AnnouncementSeverity.Success -> Icons.Rounded.CheckCircle
@@ -1266,40 +1272,40 @@ private data class AnnouncementTonePalette(
 )
 
 @Composable
-private fun rememberAnnouncementTonePalette(tone: AppBottomSheetTone): AnnouncementTonePalette {
+private fun rememberAnnouncementTonePalette(tone: AppDialogTone): AnnouncementTonePalette {
     val c = MaterialTheme.colorScheme
     return when (tone) {
-        AppBottomSheetTone.Neutral -> AnnouncementTonePalette(
+        AppDialogTone.Neutral -> AnnouncementTonePalette(
             iconContainer = c.surfaceContainerHighest,
             iconTint = c.onSurfaceVariant,
             accent = c.onSurfaceVariant,
             statusTint = c.surfaceContainerHigh
         )
-        AppBottomSheetTone.Brand -> AnnouncementTonePalette(
+        AppDialogTone.Brand -> AnnouncementTonePalette(
             iconContainer = c.primaryContainer,
             iconTint = c.primary,
             accent = c.primary,
             statusTint = c.primaryContainer
         )
-        AppBottomSheetTone.Success -> AnnouncementTonePalette(
+        AppDialogTone.Success -> AnnouncementTonePalette(
             iconContainer = c.tertiaryContainer,
             iconTint = c.tertiary,
             accent = c.tertiary,
             statusTint = c.tertiaryContainer
         )
-        AppBottomSheetTone.Warning -> AnnouncementTonePalette(
+        AppDialogTone.Warning -> AnnouncementTonePalette(
             iconContainer = c.secondaryContainer,
             iconTint = c.onSecondaryContainer,
             accent = c.secondary,
             statusTint = c.secondaryContainer
         )
-        AppBottomSheetTone.Danger -> AnnouncementTonePalette(
+        AppDialogTone.Danger -> AnnouncementTonePalette(
             iconContainer = c.errorContainer,
             iconTint = c.error,
             accent = c.error,
             statusTint = c.errorContainer
         )
-        AppBottomSheetTone.Info -> AnnouncementTonePalette(
+        AppDialogTone.Info -> AnnouncementTonePalette(
             iconContainer = c.secondaryContainer,
             iconTint = c.secondary,
             accent = c.secondary,
@@ -1309,7 +1315,7 @@ private fun rememberAnnouncementTonePalette(tone: AppBottomSheetTone): Announcem
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 private fun AnnouncementCenterDialog(
     announcement: AppAnnouncement,
     onDismissRequest: () -> Unit,
@@ -1320,7 +1326,7 @@ private fun AnnouncementCenterDialog(
     onSnooze: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val tonePalette = rememberAnnouncementTonePalette(announcement.sheetTone())
+    val tonePalette = rememberAnnouncementTonePalette(announcement.dialogTone())
     val previewText = announcement.previewText()
     val dialogBodyText = announcement.dialogBodyText()
     val summaryText = announcement.summaryText(previewText)
@@ -1330,265 +1336,255 @@ private fun AnnouncementCenterDialog(
     val showSnoozeAction = !announcement.forcePopup &&
         !announcement.isShortTerm() &&
         announcement.allowSnoozeToday
-    AppPanelDialog(
+    AppModalPanel(
         onDismissRequest = {
             if (!announcement.forcePopup) onDismissRequest()
         },
-        showDragHandle = !announcement.forcePopup,
-        sheetMaxHeightFraction = 0.85f,
-        popupMaxHeightFraction = 0.85f,
-        horizontalPadding = 18.dp,
-        sheetTopPadding = if (announcement.forcePopup) 16.dp else 4.dp,
-        sheetBottomPadding = 10.dp,
-        popupVerticalPadding = if (announcement.forcePopup) 20.dp else 18.dp,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-            // ── Header: icon + title + meta ──
+        // ── Header: icon + title + meta ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = tonePalette.iconContainer
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = tonePalette.iconContainer
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier.size(40.dp),
-                            contentAlignment = Alignment.Center
+                        Icon(
+                            announcement.dialogIcon(),
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = tonePalette.iconTint
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = tonePalette.accent.copy(alpha = 0.12f)
                         ) {
-                            Icon(
-                                announcement.sheetIcon(),
-                                contentDescription = null,
-                                modifier = Modifier.size(22.dp),
-                                tint = tonePalette.iconTint
+                            Text(
+                                text = announcement.severityLabel(),
+                                modifier = Modifier.padding(
+                                    horizontal = 8.dp,
+                                    vertical = 2.dp
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = tonePalette.accent
                             )
                         }
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Text(
-                            text = announcement.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = tonePalette.accent.copy(alpha = 0.12f)
-                            ) {
-                                Text(
-                                    text = announcement.severityLabel(),
-                                    modifier = Modifier.padding(
-                                        horizontal = 8.dp,
-                                        vertical = 2.dp
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = tonePalette.accent
-                                )
-                            }
-                            announcement.publishedAt?.let { date ->
-                                Text(
-                                    text = date,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            }
+                        announcement.publishedAt?.let { date ->
+                            Text(
+                                text = date,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
                         }
                     }
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (showSnoozeAction) {
-                        FilledTonalIconButton(
-                            onClick = onSnooze,
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
-                                contentColor = tonePalette.accent
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.NotificationsOff,
-                                contentDescription = "今日不提醒"
-                            )
-                        }
-                    }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (showSnoozeAction) {
                     FilledTonalIconButton(
-                        onClick = onMarkRead,
+                        onClick = onSnooze,
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
                             contentColor = tonePalette.accent
                         )
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = "标记已读"
+                            imageVector = Icons.Rounded.NotificationsOff,
+                            contentDescription = "今日不提醒"
                         )
                     }
-                    if (!announcement.forcePopup) {
-                        IconButton(onClick = onClose) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "关闭"
-                            )
-                        }
-                    }
                 }
-            }
-
-            // ── Accent line ──
-            Box(
-                modifier = Modifier
-                    .height(2.dp)
-                    .widthIn(max = 120.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(tonePalette.accent.copy(alpha = 0.22f))
-            )
-
-            // ── Scrollable content ──
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Cover image
-                announcement.coverImageUrl?.let { url ->
-                    val context = LocalContext.current
-                    val normalizedUrl = remember(url) {
-                        url.trim().let { u ->
-                            if (u.startsWith("//")) "https:$u" else u
-                        }
-                    }
-                    if (normalizedUrl.isNotBlank()) {
-                        val request = remember(context, normalizedUrl) {
-                            ImageRequest.Builder(context)
-                                .data(normalizedUrl)
-                                .crossfade(true)
-                                .build()
-                        }
-                        val painter = rememberAsyncImagePainter(model = request)
-                        val imageState = painter.state
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 180.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(colorScheme.surfaceContainerHighest),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (imageState is AsyncImagePainter.State.Loading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp,
-                                    color = tonePalette.accent
-                                )
-                            }
-                            Image(
-                                painter = painter,
-                                contentDescription = announcement.title,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 180.dp),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    }
-                }
-
-                // Summary
-                if (summaryText != null) {
-                    Text(
-                        text = summaryText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colorScheme.onSurfaceVariant
+                FilledTonalIconButton(
+                    onClick = onMarkRead,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
+                        contentColor = tonePalette.accent
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = "标记已读"
                     )
                 }
-
-                // Preview text card
-                if (dialogBodyText.isNotBlank()) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        color = tonePalette.statusTint.copy(alpha = 0.36f),
-                        border = BorderStroke(
-                            1.dp,
-                            tonePalette.accent.copy(alpha = 0.16f)
+                if (!announcement.forcePopup) {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "关闭"
                         )
-                    ) {
-                        Text(
-                            text = dialogBodyText,
-                            modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colorScheme.onSurface.copy(alpha = 0.88f)
-                        )
-                    }
-                }
-            }
-
-            if (hasBusinessActions) {
-                HorizontalDivider(
-                    color = colorScheme.outlineVariant.copy(alpha = 0.32f)
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    secondaryAction?.let { action ->
-                        OutlinedButton(
-                            onClick = onSecondaryAction,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.OpenInNew,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(action.text)
-                        }
-                    }
-
-                    primaryAction?.let { action ->
-                        Button(
-                            onClick = onPrimaryAction,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = appPrimaryButtonColors()
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.OpenInNew,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(action.text)
-                        }
                     }
                 }
             }
         }
+
+        // ── Accent line ──
+        Box(
+            modifier = Modifier
+                .height(2.dp)
+                .widthIn(max = 120.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(tonePalette.accent.copy(alpha = 0.22f))
+        )
+
+        // ── Scrollable content ──
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Cover image
+            announcement.coverImageUrl?.let { url ->
+                val context = LocalContext.current
+                val normalizedUrl = remember(url) {
+                    url.trim().let { u ->
+                        if (u.startsWith("//")) "https:$u" else u
+                    }
+                }
+                if (normalizedUrl.isNotBlank()) {
+                    val request = remember(context, normalizedUrl) {
+                        ImageRequest.Builder(context)
+                            .data(normalizedUrl)
+                            .crossfade(true)
+                            .build()
+                    }
+                    val painter = rememberAsyncImagePainter(model = request)
+                    val imageState = painter.state
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 180.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (imageState is AsyncImagePainter.State.Loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = tonePalette.accent
+                            )
+                        }
+                        Image(
+                            painter = painter,
+                            contentDescription = announcement.title,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+
+            // Summary
+            if (summaryText != null) {
+                Text(
+                    text = summaryText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Preview text card
+            if (dialogBodyText.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = tonePalette.statusTint.copy(alpha = 0.36f),
+                    border = BorderStroke(
+                        1.dp,
+                        tonePalette.accent.copy(alpha = 0.16f)
+                    )
+                ) {
+                    Text(
+                        text = dialogBodyText,
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorScheme.onSurface.copy(alpha = 0.88f)
+                    )
+                }
+            }
+        }
+
+        if (hasBusinessActions) {
+            HorizontalDivider(
+                color = colorScheme.outlineVariant.copy(alpha = 0.32f)
+            )
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                secondaryAction?.let { action ->
+                    OutlinedButton(
+                        onClick = onSecondaryAction,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.text)
+                    }
+                }
+
+                primaryAction?.let { action ->
+                    Button(
+                        onClick = onPrimaryAction,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = appPrimaryButtonColors()
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.text)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1598,10 +1594,10 @@ private fun UnreadAnnouncementListDialog(
     onOpenAnnouncement: (AppAnnouncement) -> Unit,
     onAcknowledgeAll: () -> Unit,
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismissRequest,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Info,
         icon = { Icon(Icons.Rounded.NotificationsActive, null) },
         title = { Text("未读公告") },
         text = {

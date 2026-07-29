@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -276,10 +276,10 @@ fun BackupRestoreScreen(
 
     // ── Import confirm dialog ──
     if (showImportConfirmDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showImportConfirmDialog = false },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Warning,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
             title = { Text("确认导入 .env") },
             text = { Text("导入将覆盖当前配置，是否继续？") },
             confirmButton = {
@@ -305,10 +305,10 @@ fun BackupRestoreScreen(
 
     // ── WebDAV restore confirm dialog ──
     if (showWebDavRestoreConfirmDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showWebDavRestoreConfirmDialog = false },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Warning,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
             title = { Text("确认云端恢复") },
             text = { Text("将从 WebDAV 下载并覆盖当前 .env，是否继续？") },
             confirmButton = {
@@ -354,10 +354,10 @@ private fun WebDavConfigDialog(
     onDismiss: () -> Unit
 ) {
     var showPassword by remember { mutableStateOf(false) }
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         title = { Text("WebDAV 设置") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

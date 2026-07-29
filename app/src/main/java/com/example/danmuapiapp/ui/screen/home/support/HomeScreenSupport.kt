@@ -1,9 +1,8 @@
 package com.example.danmuapiapp.ui.screen.home
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
-import com.example.danmuapiapp.ui.component.AppPanelDialog
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.app.Activity
 import android.content.Context
@@ -27,7 +26,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
@@ -44,10 +42,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -166,10 +162,10 @@ internal fun UpdatePromptDialog(
 ) {
     if (variantLabel.isNullOrBlank()) return
     if (!sourceMismatch && !sourceUnknownLegacy && latestVersion.isNullOrBlank()) return
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onIgnore,
-        style = AppBottomSheetStyle.Confirm,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Brand,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
         title = {
             Text(
@@ -219,10 +215,10 @@ internal fun NoCoreDialog(
     onDismiss: () -> Unit,
     onInstall: (ApiVariant) -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Warning,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Warning,
         icon = { Icon(Icons.Rounded.DownloadForOffline, null) },
         title = { Text("核心未安装") },
         text = {
@@ -277,7 +273,7 @@ internal fun NoCoreDialog(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-internal fun VariantPickerSheet(
+internal fun VariantPickerDialog(
     currentVariant: ApiVariant,
     coreList: List<com.example.danmuapiapp.domain.model.CoreInfo>,
     isCoreInfoLoading: Boolean,
@@ -288,123 +284,118 @@ internal fun VariantPickerSheet(
     onSelect: (ApiVariant) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppPanelDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        horizontalPadding = 20.dp
-    ) {
-        Text(
-            "切换 API 核心",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        if (isBusy) {
-            Text(
-                "正在切换，请稍候…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 10.dp)
-            )
-        }
-        ApiVariant.entries.forEach { variant ->
-            val info = coreList.find { it.variant == variant }
-            val isSelected = variant == currentVariant
-            val variantLabel = coreDisplayNames.resolve(variant)
-            val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-            Card(
-                onClick = { if (!isBusy) onSelect(variant) },
-                enabled = !isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    }
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        variantIcon(variant),
-                        null,
-                        tint = variantAccent(variant),
-                        modifier = Modifier.size(24.dp)
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Brand,
+        icon = { Icon(Icons.Rounded.SwapHoriz, contentDescription = null) },
+        title = { Text("切换 API 核心") },
+        supportingText = {
+            Text(if (isBusy) "正在切换，请稍候" else "选择要启用的核心来源")
+        },
+        text = {
+            ApiVariant.entries.forEach { variant ->
+                val info = coreList.find { it.variant == variant }
+                val isSelected = variant == currentVariant
+                val variantLabel = coreDisplayNames.resolve(variant)
+                val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
+                Card(
+                    onClick = { if (!isBusy) onSelect(variant) },
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        }
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(variantLabel, style = MaterialTheme.typography.titleMedium)
-                        if (info?.version != null) {
-                            val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
-                                com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
-                                    info.version,
-                                    info.availableVersion
-                                )
-                            } else {
-                                com.example.danmuapiapp.domain.model.formatCoreVersionValue(info.version)
-                            }
-                            Text(
-                                vText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (info.hasVersionUpdate) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                        if (sourceText.isNotBlank()) {
-                            Text(
-                                sourceText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(7.dp),
-                        color = when {
-                            isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
-                            info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
-                            info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                            else -> MaterialTheme.colorScheme.errorContainer
-                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = when {
-                                isCoreInfoLoading -> "加载中"
-                                info?.sourceMismatch == true -> "需替换"
-                                info?.sourceStatus == CoreSourceStatus.UnknownLegacy -> "需刷新"
-                                info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
-                                info?.isInstalled == true -> "已安装"
-                                else -> "未安装"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = when {
-                                isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
-                                info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primary
-                                info?.isInstalled == true -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.error
-                            },
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                    if (isSelected) {
                         Icon(
-                            Icons.Rounded.CheckCircle,
+                            variantIcon(variant),
                             null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
+                            tint = variantAccent(variant),
+                            modifier = Modifier.size(24.dp)
                         )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(variantLabel, style = MaterialTheme.typography.titleMedium)
+                            if (info?.version != null) {
+                                val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
+                                    com.example.danmuapiapp.domain.model.formatCoreVersionTransition(
+                                        info.version,
+                                        info.availableVersion
+                                    )
+                                } else {
+                                    com.example.danmuapiapp.domain.model.formatCoreVersionValue(info.version)
+                                }
+                                Text(
+                                    vText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (info.hasVersionUpdate) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                            if (sourceText.isNotBlank()) {
+                                Text(
+                                    sourceText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(7.dp),
+                            color = when {
+                                isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primaryContainer
+                                info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                else -> MaterialTheme.colorScheme.errorContainer
+                            }
+                        ) {
+                            Text(
+                                text = when {
+                                    isCoreInfoLoading -> "加载中"
+                                    info?.sourceMismatch == true -> "需替换"
+                                    info?.sourceStatus == CoreSourceStatus.UnknownLegacy -> "需刷新"
+                                    info?.isInstalled == true && info.hasVersionUpdate -> "有更新"
+                                    info?.isInstalled == true -> "已安装"
+                                    else -> "未安装"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when {
+                                    isCoreInfoLoading -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    info?.isInstalled == true && info.needsAttention -> MaterialTheme.colorScheme.primary
+                                    info?.isInstalled == true -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.error
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                        if (isSelected) {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
         }
-    }
+    )
 }
 
 internal fun variantIcon(variant: ApiVariant): ImageVector {

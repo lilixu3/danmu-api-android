@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.core
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -427,10 +427,10 @@ private fun CoreVariantCard(
     }
 
     if (showDeleteConfirm) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Danger,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Danger,
             title = { Text("确认删除") },
             text = { Text("确定要删除 $variantLabel 吗？") },
             confirmButton = {
@@ -464,10 +464,10 @@ private fun UpdateResultDialog(
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
     val sourceUnknownLegacy = info?.sourceStatus == CoreSourceStatus.UnknownLegacy
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = vm::dismissUpdateDialog,
-        style = AppBottomSheetStyle.Status,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Status,
+        tone = AppDialogTone.Brand,
         icon = {
             Icon(
                 if (info?.needsAttention == true) Icons.Rounded.SystemUpdate else Icons.Rounded.CheckCircle,
@@ -527,17 +527,15 @@ private fun RollbackDialog(
     onSelect: (ApiVariant, GithubRelease) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Info,
         icon = { Icon(Icons.Rounded.History, null) },
         title = { Text("回退版本") },
         text = {
             Column(
-                modifier = Modifier
-                    .heightIn(max = 360.dp)
-                    .verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxWidth()
             ) {
                 if (isLoading) {
                     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -596,10 +594,10 @@ private fun VariantSettingsDialog(
     )
     var displayNameText by remember(variant, currentDisplayName) { mutableStateOf(currentDisplayName) }
 
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         icon = { Icon(if (isCustom) Icons.Rounded.Tune else Icons.Rounded.Edit, null) },
         title = { Text(if (isCustom) "编辑自定义核心" else "编辑显示名称") },
         text = {

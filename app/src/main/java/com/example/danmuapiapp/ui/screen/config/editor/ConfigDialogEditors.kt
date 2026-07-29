@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.config
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
@@ -74,10 +74,10 @@ internal fun EnvVarEditDialog(
     var showDeleteConfirm by remember(def.key) { mutableStateOf(false) }
 
     if (showDeleteConfirm) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Danger,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Danger,
             title = { Text("确认删除") },
             text = { Text("确定要从 .env 中删除 ${def.key} 吗？") },
             confirmButton = {
@@ -94,10 +94,10 @@ internal fun EnvVarEditDialog(
 
     val normalizedKey = remember(def.key) { def.key.trim().uppercase(Locale.getDefault()) }
 
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         title = {
             Column {
                 Text(def.key, style = MaterialTheme.typography.titleMedium)
@@ -1349,10 +1349,10 @@ internal fun PlatformMultiSelectDialog(
         mutableStateOf(canonicalizePlatformSelection(initialSelected, options))
     }
 
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Info,
         title = { Text("选择平台") },
         text = {
             Column(

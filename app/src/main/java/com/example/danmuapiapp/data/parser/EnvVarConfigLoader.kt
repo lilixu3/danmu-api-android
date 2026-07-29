@@ -13,10 +13,23 @@ import java.io.File
 
 object EnvVarConfigLoader {
 
+    // envs.js imports these executable metadata values, so the lightweight parser
+    // resolves the identifier from the core's output-format protocol here.
+    private val DAN_ANY_OUTPUT_FORMATS = listOf(
+        "artplayer.json",
+        "baha.json",
+        "bili.xml",
+        "danuni.json",
+        "danuni.binpb",
+        "ddplay.json",
+        "dplayer.json",
+        "vod.json",
+    )
+
     fun loadCatalog(context: Context): List<EnvVarDef> {
         val variant = selectedVariant(context)
         val content = readEnvsJs(context, variant) ?: return emptyList()
-        return runCatching { parseEnvsJs(content) }.getOrElse { emptyList() }
+        return runCatching { parseCatalogContent(content) }.getOrElse { emptyList() }
     }
 
     fun loadDefaultValues(context: Context): Map<String, String> {
@@ -106,7 +119,7 @@ object EnvVarConfigLoader {
         return if (result.ok) result.stdout else null
     }
 
-    private fun parseEnvsJs(content: String): List<EnvVarDef> {
+    internal fun parseCatalogContent(content: String): List<EnvVarDef> {
         val allowedSources = extractStaticArray(content, "ALLOWED_SOURCES")
         val allowedPlatforms = extractStaticArray(content, "ALLOWED_PLATFORMS")
         val vodPlatforms = extractStaticArray(content, "VOD_ALLOWED_PLATFORMS")
@@ -117,6 +130,7 @@ object EnvVarConfigLoader {
             "this.ALLOWED_PLATFORMS" to allowedPlatforms,
             "this.VOD_ALLOWED_PLATFORMS" to vodPlatforms,
             "this.MERGE_ALLOWED_SOURCES" to mergeSources,
+            "danAnyFormats" to DAN_ANY_OUTPUT_FORMATS,
         )
 
         val start = content.indexOf("const envVarConfig")

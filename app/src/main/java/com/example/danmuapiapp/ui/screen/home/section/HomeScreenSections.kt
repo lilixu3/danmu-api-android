@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.home
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.app.Activity
 import android.content.Context
@@ -79,7 +79,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -94,7 +93,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -104,7 +102,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -167,7 +164,7 @@ internal fun HomeTopHeader(
     isQueueDownloading: Boolean = false,
     isQueuePaused: Boolean = false,
     queueSummary: DownloadQueueSummary = DownloadQueueSummary(),
-    onOpenDownloadSheet: () -> Unit = {},
+    onOpenDownloadDialog: () -> Unit = {},
     onOpenUnreadAnnouncements: () -> Unit = {}
 ) {
     val downloadText = when {
@@ -258,7 +255,7 @@ internal fun HomeTopHeader(
                 color = downloadAccent,
                 maxLines = 1,
                 modifier = Modifier
-                    .clickable(onClick = onOpenDownloadSheet)
+                    .clickable(onClick = onOpenDownloadDialog)
                     .basicMarquee(
                         iterations = Int.MAX_VALUE,
                         velocity = 30.dp
@@ -713,10 +710,10 @@ internal fun ServiceRuntimeInfoDialog(
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
 
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Status,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Status,
+        tone = AppDialogTone.Info,
         icon = { Icon(Icons.Rounded.HourglassBottom, null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("服务运行信息") },
         text = {

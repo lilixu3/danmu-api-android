@@ -22,7 +22,7 @@ class HomeDialogPresentationPolicyTest {
         }
 
         assertTrue(
-            "页面弹窗应通过共享自适应弹窗入口，以遵循全局居中/底部弹窗设置；仍直接使用 ModalBottomSheet 的文件：$offenders",
+            "页面弹窗应统一使用共享居中弹窗入口；仍直接使用 ModalBottomSheet 的文件：$offenders",
             offenders.isEmpty()
         )
     }

@@ -75,9 +75,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import java.net.URI
 
@@ -111,7 +111,7 @@ fun PushDanmuScreen(
     var danmuOffsetRaw by rememberSaveable { mutableStateOf("0") }
     var danmuFontSizeRaw by rememberSaveable { mutableStateOf("") }
     var danmuFontSizeInitialized by rememberSaveable { mutableStateOf(false) }
-    var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(envDanmuFontSize) {
         if (!danmuFontSizeInitialized) {
@@ -164,7 +164,7 @@ fun PushDanmuScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(onClick = { showSettingsSheet = true }, modifier = Modifier.size(38.dp)) {
+            IconButton(onClick = { showSettingsDialog = true }, modifier = Modifier.size(38.dp)) {
                 Icon(Icons.Rounded.Settings, "目标与设置", Modifier.size(20.dp))
             }
         }
@@ -190,7 +190,7 @@ fun PushDanmuScreen(
                         envDanmuFontSize = envDanmuFontSize,
                         isSearching = viewModel.isSearching,
                         onSearch = { viewModel.searchAnime(sourceBase, keyword) },
-                        onOpenSettings = { showSettingsSheet = true }
+                        onOpenSettings = { showSettingsDialog = true }
                     )
                 }
             } else {
@@ -207,7 +207,7 @@ fun PushDanmuScreen(
                         envDanmuFontSize = envDanmuFontSize,
                         episodeCount = viewModel.episodeCandidates.size,
                         onBackToResults = viewModel::backToAnimeList,
-                        onOpenSettings = { showSettingsSheet = true }
+                        onOpenSettings = { showSettingsDialog = true }
                     )
                 }
             }
@@ -316,8 +316,8 @@ fun PushDanmuScreen(
         }
     }
 
-    if (showSettingsSheet) {
-        SettingsSheet(
+    if (showSettingsDialog) {
+        PushSettingsDialog(
             targetPrefix = targetPrefix,
             onTargetChange = { targetPrefix = it },
             sourceBase = sourceBase,
@@ -347,15 +347,15 @@ fun PushDanmuScreen(
                     android.content.ClipData.newPlainText("推送目标", device.targetTemplate)
                 )
             },
-            onDismiss = { showSettingsSheet = false }
+            onDismiss = { showSettingsDialog = false }
         )
     }
 
     if (viewModel.errorMessage != null) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { viewModel.clearError() },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Danger,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
@@ -779,7 +779,7 @@ private fun EpisodePushRow(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SettingsSheet(
+private fun PushSettingsDialog(
     targetPrefix: String,
     onTargetChange: (String) -> Unit,
     sourceBase: String,
@@ -801,17 +801,14 @@ private fun SettingsSheet(
     onCopyDevice: (PushLanDeviceCandidate) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         title = { Text("目标与设置") },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
@@ -838,7 +835,7 @@ private fun SettingsSheet(
                     }
                 }
 
-                SheetBlock(title = "推送目标") {
+                DialogSection(title = "推送目标") {
                     OutlinedTextField(
                         value = targetPrefix,
                         onValueChange = onTargetChange,
@@ -866,7 +863,7 @@ private fun SettingsSheet(
                     }
                 }
 
-                SheetBlock(title = "局域网设备") {
+                DialogSection(title = "局域网设备") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -913,7 +910,7 @@ private fun SettingsSheet(
                     }
                 }
 
-                SheetBlock(title = "弹幕源") {
+                DialogSection(title = "弹幕源") {
                     OutlinedTextField(
                         value = sourceBase,
                         onValueChange = onSourceBaseChange,
@@ -949,7 +946,7 @@ private fun SettingsSheet(
 }
 
 @Composable
-private fun SheetBlock(
+private fun DialogSection(
     title: String,
     content: @Composable () -> Unit
 ) {

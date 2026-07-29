@@ -140,6 +140,20 @@ class RootRuntimeControllerNodeModulesTest {
     }
 
     @Test
+    fun `Root 依赖完整性校验批量执行 cksum`() {
+        val script = RootRuntimeController.buildAtomicNodeModulesSyncShell(
+            sourcePath = "/tmp/source",
+            destinationPath = "/tmp/destination",
+            fingerprint = "fingerprint-v1",
+            operationToken = "test"
+        )
+
+        assertTrue(script.contains("-exec cksum {} +"))
+        assertFalse(script.contains("-exec cksum {} \\;"))
+        assertEquals(1, Regex("find \\. -type f.*SRC_LIST").findAll(script).count())
+    }
+
+    @Test
     fun `Root node_modules integrity probe discovers packages from source tree`() {
         val script = RootRuntimeController.buildNodeModuleIntegrityProbeShell(
             srcNodeModulesVar = "SRC_NM",

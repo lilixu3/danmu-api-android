@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.UserManager
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
+import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.DeviceCompatMode
 import dagger.hilt.android.HiltAndroidApp
@@ -23,6 +24,10 @@ class DanmuApiApplication : Application() {
 
         // 标准做法：未解锁阶段不访问 CE 存储，避免 Direct Boot 期间崩溃。
         if (!isUserUnlockedSafe()) return
+
+        // The injected process cannot read this app's runtime preferences directly.
+        // Publish port/token as soon as libxposed binds, independent of the settings UI.
+        VideoShellInjectionConfigPublisher.start(this)
 
         runCatching {
             val prefs = getSharedPreferences(AppAppearancePrefs.PREFS_UI_LEGACY, MODE_PRIVATE)

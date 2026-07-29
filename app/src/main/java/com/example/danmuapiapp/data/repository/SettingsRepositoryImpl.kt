@@ -12,7 +12,6 @@ import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.DEFAULT_CUSTOM_CORE_BRANCH
-import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
@@ -87,18 +86,6 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private val _hideFromRecents = MutableStateFlow(AppAppearancePrefs.readHideFromRecents(uiPrefs))
     override val hideFromRecents: StateFlow<Boolean> = _hideFromRecents.asStateFlow()
-
-    private val _dialogPresentation = MutableStateFlow(
-        DialogPresentationPreference.fromStorageValue(settingsPrefs.safeGetString("dialog_presentation"))
-    )
-    override val dialogPresentation: StateFlow<DialogPresentationPreference> =
-        _dialogPresentation.asStateFlow()
-
-    private val _bottomSheetGesturesEnabled = MutableStateFlow(
-        settingsPrefs.safeGetBoolean("bottom_sheet_gestures_enabled", true)
-    )
-    override val bottomSheetGesturesEnabled: StateFlow<Boolean> =
-        _bottomSheetGesturesEnabled.asStateFlow()
 
     private val _coreDisplayNames = MutableStateFlow(resolveCoreDisplayNames())
     override val coreDisplayNames: StateFlow<CoreVariantDisplayNames> = _coreDisplayNames.asStateFlow()
@@ -217,16 +204,6 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setHideFromRecents(enabled: Boolean) {
         AppAppearancePrefs.writeHideFromRecents(uiPrefs, enabled)
         _hideFromRecents.value = enabled
-    }
-
-    override fun setDialogPresentation(mode: DialogPresentationPreference) {
-        settingsPrefs.edit { putString("dialog_presentation", mode.storageValue) }
-        _dialogPresentation.value = mode
-    }
-
-    override fun setBottomSheetGesturesEnabled(enabled: Boolean) {
-        settingsPrefs.edit { putBoolean("bottom_sheet_gestures_enabled", enabled) }
-        _bottomSheetGesturesEnabled.value = enabled
     }
 
     override fun setVariantDisplayName(variant: ApiVariant, name: String) {

@@ -6,9 +6,6 @@ import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.joinNonBlank;
 import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,28 +22,11 @@ interface FilterSelectListener {
     void onSelect(String source);
 }
 
-final class SettingsOverlayState {
-    final View hostPageContainer;
-    final View hostPageRoot;
-    final View backgroundAnchor;
-    Runnable hostChangeGuard;
-    ViewTreeObserver.OnPreDrawListener preDrawGuard;
+/** Push progress sink, so push logic never holds a reference to a dialog's views. */
+interface PushFeedback {
+    void onStatus(String status);
 
-    SettingsOverlayState(View hostPageContainer, View hostPageRoot, View backgroundAnchor) {
-        this.hostPageContainer = hostPageContainer;
-        this.hostPageRoot = hostPageRoot;
-        this.backgroundAnchor = backgroundAnchor;
-    }
-}
-
-final class SettingsRowViews {
-    final LinearLayout row;
-    final TextView value;
-
-    SettingsRowViews(LinearLayout row, TextView value) {
-        this.row = row;
-        this.value = value;
-    }
+    void onPushInfo(String info);
 }
 
 final class Anchor {
@@ -235,9 +215,6 @@ final class PushGuard {
 }
 
 final class InjectionSettings {
-    static final int DIALOG_STYLE_CENTER = 0;
-    static final int DIALOG_STYLE_BOTTOM_SHEET = 1;
-
     final boolean injectionEnabled;
     final boolean autoPushEnabled;
     final double offsetSec;
@@ -246,17 +223,12 @@ final class InjectionSettings {
     final boolean darkTheme;
     final int corePort;
     final String coreToken;
-    final int dialogStyle;
 
     InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme) {
-        this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, 0, "", DIALOG_STYLE_CENTER);
+        this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, 0, "");
     }
 
     InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme, int corePort, String coreToken) {
-        this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, corePort, coreToken, DIALOG_STYLE_CENTER);
-    }
-
-    InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme, int corePort, String coreToken, int dialogStyle) {
         this.injectionEnabled = injectionEnabled;
         this.autoPushEnabled = autoPushEnabled;
         this.offsetSec = Math.abs(offsetSec) < 1e-6 ? 0.0d : offsetSec;
@@ -265,7 +237,6 @@ final class InjectionSettings {
         this.darkTheme = darkTheme;
         this.corePort = corePort > 0 && corePort <= 65535 ? corePort : 0;
         this.coreToken = coreToken == null ? "" : coreToken.trim();
-        this.dialogStyle = dialogStyle == DIALOG_STYLE_BOTTOM_SHEET ? DIALOG_STYLE_BOTTOM_SHEET : DIALOG_STYLE_CENTER;
     }
 
     String pushParamHint() {

@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -77,9 +78,9 @@ import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.LogTagClassifier
 import com.example.danmuapiapp.domain.model.RuntimeState
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
@@ -107,8 +108,8 @@ fun ApiTestScreen(
     var danmuTab by rememberSaveable { mutableIntStateOf(0) }
     var endpointExpanded by remember { mutableStateOf(false) }
     var endpointIndex by rememberSaveable { mutableIntStateOf(0) }
-    var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
-    var showLogSheet by rememberSaveable { mutableStateOf(false) }
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var showLogDialog by rememberSaveable { mutableStateOf(false) }
     var initialLogScope by rememberSaveable { mutableIntStateOf(0) }
     var pendingLogExportText by remember { mutableStateOf("") }
     val saveLogLauncher = rememberLauncherForActivityResult(
@@ -129,7 +130,7 @@ fun ApiTestScreen(
     val openLogs: (Int) -> Unit = { scope ->
         initialLogScope = scope
         viewModel.refreshLogs()
-        showLogSheet = true
+        showLogDialog = true
     }
     var baseUrl by rememberSaveable(runtimeState.localUrl, runtimeState.lanUrl) {
         mutableStateOf(
@@ -209,7 +210,7 @@ fun ApiTestScreen(
                 Text("日志", style = MaterialTheme.typography.labelLarge)
             }
             FilledTonalIconButton(
-                onClick = { showSettingsSheet = true },
+                onClick = { showSettingsDialog = true },
                 modifier = Modifier.size(38.dp)
             ) {
                 Icon(Icons.Rounded.Settings, "连接设置", Modifier.size(18.dp))
@@ -327,8 +328,8 @@ fun ApiTestScreen(
         }
     }
 
-    if (showSettingsSheet) {
-        ConnectionSettingsSheet(
+    if (showSettingsDialog) {
+        ConnectionSettingsDialog(
             baseUrl = baseUrl,
             onBaseUrlChange = { baseUrl = it },
             localBaseUrl = RuntimeUrlParser.extractBase(runtimeState.localUrl),
@@ -339,17 +340,17 @@ fun ApiTestScreen(
             onUseLan = {
                 baseUrl = RuntimeUrlParser.extractBase(runtimeState.lanUrl)
             },
-            onDismissRequest = { showSettingsSheet = false }
+            onDismissRequest = { showSettingsDialog = false }
         )
     }
 
-    if (showLogSheet) {
-        ApiLogSheet(
+    if (showLogDialog) {
+        ApiLogDialog(
             logs = logs,
             runtimeState = runtimeState,
             sinceMs = viewModel.lastApiActionStartedAtMs,
             initialScope = initialLogScope,
-            onDismissRequest = { showLogSheet = false },
+            onDismissRequest = { showLogDialog = false },
             onRefresh = viewModel::refreshLogs,
             onCopy = { text ->
                 clipboard.nativeClipboard.setPrimaryClip(
@@ -367,10 +368,10 @@ fun ApiTestScreen(
     }
 
     if (viewModel.errorMessage != null) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = viewModel::dismissError,
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Danger,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Danger,
             title = { Text("请求失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
@@ -383,7 +384,7 @@ fun ApiTestScreen(
 }
 
 @Composable
-private fun ConnectionSettingsSheet(
+private fun ConnectionSettingsDialog(
     baseUrl: String,
     onBaseUrlChange: (String) -> Unit,
     localBaseUrl: String,
@@ -392,10 +393,10 @@ private fun ConnectionSettingsSheet(
     onUseLan: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismissRequest,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
         title = {
             Text(
@@ -489,7 +490,7 @@ private fun SettingsPresetButton(
 }
 
 @Composable
-private fun ApiLogSheet(
+private fun ApiLogDialog(
     logs: List<LogEntry>,
     runtimeState: RuntimeState,
     sinceMs: Long?,
@@ -522,10 +523,10 @@ private fun ApiLogSheet(
         buildLogExportText(visibleLogs, scopeLabel, runtimeState)
     }
 
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismissRequest,
-        style = AppBottomSheetStyle.Form,
-        tone = AppBottomSheetTone.Brand,
+        style = AppDialogStyle.Form,
+        tone = AppDialogTone.Brand,
         icon = { Icon(Icons.Rounded.GraphicEq, contentDescription = null) },
         title = {
             Text(
@@ -534,89 +535,94 @@ private fun ApiLogSheet(
                 fontWeight = FontWeight.SemiBold
             )
         },
+        scrollContent = false,
         text = {
-            Text(
-                text = "不用离开当前调试页，可直接查看、复制、导出或分享日志。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 4.dp)
             ) {
-                FilterChip(
-                    selected = selectedScope == 0,
-                    onClick = { selectedScope = 0 },
-                    label = { Text("本次 ${currentLogs.size}") }
-                )
-                FilterChip(
-                    selected = selectedScope == 1,
-                    onClick = { selectedScope = 1 },
-                    label = { Text("全部 ${logs.size}") }
-                )
-                FilterChip(
-                    selected = selectedScope == 2,
-                    onClick = { selectedScope = 2 },
-                    label = { Text("错误/警告 ${problemLogs.size}") }
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.weight(1f)
-                ) { Text("刷新") }
-                OutlinedButton(
-                    onClick = { onCopy(LogExportFormatter.toClipboardText(visibleLogs)) },
-                    enabled = visibleLogs.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) { Text("复制") }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { onSave(exportText) },
-                    enabled = visibleLogs.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) { Text("导出 txt") }
-                OutlinedButton(
-                    onClick = { onShare(LogExportFormatter.defaultFileName(), exportText) },
-                    enabled = visibleLogs.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) { Text("分享 txt") }
-            }
-            Surface(
-                modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = apiTestSubPanelColor(),
-                border = BorderStroke(1.dp, apiTestOutlineColor())
-            ) {
-                if (visibleLogs.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
-                        contentAlignment = Alignment.Center
+                item {
+                    Text(
+                        text = "不用离开当前调试页，可直接查看、复制、导出或分享日志。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        FilterChip(
+                            selected = selectedScope == 0,
+                            onClick = { selectedScope = 0 },
+                            label = { Text("本次 ${currentLogs.size}") }
+                        )
+                        FilterChip(
+                            selected = selectedScope == 1,
+                            onClick = { selectedScope = 1 },
+                            label = { Text("全部 ${logs.size}") }
+                        )
+                        FilterChip(
+                            selected = selectedScope == 2,
+                            onClick = { selectedScope = 2 },
+                            label = { Text("错误/警告 ${problemLogs.size}") }
+                        )
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(onClick = onRefresh, modifier = Modifier.weight(1f)) {
+                            Text("刷新")
+                        }
+                        OutlinedButton(
+                            onClick = { onCopy(LogExportFormatter.toClipboardText(visibleLogs)) },
+                            enabled = visibleLogs.isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("复制") }
+                    }
+                }
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onSave(exportText) },
+                            enabled = visibleLogs.isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("导出 txt") }
+                        OutlinedButton(
+                            onClick = { onShare(LogExportFormatter.defaultFileName(), exportText) },
+                            enabled = visibleLogs.isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("分享 txt") }
+                    }
+                }
+                if (visibleLogs.isEmpty()) {
+                    item {
                         Text(
                             text = if (selectedScope == 0) "暂无本次请求日志，可点刷新或切到全部日志" else "暂无日志",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
                         )
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        itemsIndexed(
-                            items = visibleLogs.takeLast(200),
-                            key = { index, entry -> "${entry.timestamp}-${entry.level}-${entry.message.hashCode()}-$index" }
-                        ) { _, entry ->
-                            ApiLogRow(entry)
-                        }
+                    itemsIndexed(
+                        items = visibleLogs.takeLast(200),
+                        key = { index, entry -> "${entry.timestamp}-${entry.level}-${entry.message.hashCode()}-$index" }
+                    ) { _, entry ->
+                        ApiLogRow(entry)
                     }
                 }
             }

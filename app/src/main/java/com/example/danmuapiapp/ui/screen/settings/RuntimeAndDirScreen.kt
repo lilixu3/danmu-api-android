@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.content.Intent
 import android.provider.Settings
@@ -410,10 +410,10 @@ fun RuntimeAndDirScreen(
     }
 
     if (showEnableRootAutoStartDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showEnableRootAutoStartDialog = false },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Brand,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Brand,
             title = { Text("开启开机自启") },
             text = {
                 Text("将安装 Magisk/KernelSU 模块，开机后以 Root 触发一次启动，不轮询保活，更省电。")
@@ -431,10 +431,10 @@ fun RuntimeAndDirScreen(
     }
 
     if (showDisableRootAutoStartDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showDisableRootAutoStartDialog = false },
-            style = AppBottomSheetStyle.Selection,
-            tone = AppBottomSheetTone.Warning,
+            style = AppDialogStyle.Selection,
+            tone = AppDialogTone.Warning,
             title = { Text("关闭开机自启") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -462,10 +462,10 @@ fun RuntimeAndDirScreen(
     }
 
     if (showKeepAliveGuideDialog && state.runMode == RunMode.Normal) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showKeepAliveGuideDialog = false },
-            style = AppBottomSheetStyle.Selection,
-            tone = AppBottomSheetTone.Info,
+            style = AppDialogStyle.Selection,
+            tone = AppDialogTone.Info,
             title = { Text("保活建议") },
             text = {
                 val guideButtonColors = ButtonDefaults.outlinedButtonColors(
