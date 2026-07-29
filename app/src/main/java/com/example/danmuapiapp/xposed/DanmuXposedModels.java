@@ -220,21 +220,23 @@ final class InjectionSettings {
     final double offsetSec;
     final int fontSize;
     final int shellPort;
-    final boolean darkTheme;
+    final DanmuThemeMode themeMode;
     final int corePort;
     final String coreToken;
 
-    InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme) {
-        this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, darkTheme, 0, "");
+    InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize,
+                      int shellPort, DanmuThemeMode themeMode) {
+        this(injectionEnabled, autoPushEnabled, offsetSec, fontSize, shellPort, themeMode, 0, "");
     }
 
-    InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize, int shellPort, boolean darkTheme, int corePort, String coreToken) {
+    InjectionSettings(boolean injectionEnabled, boolean autoPushEnabled, double offsetSec, int fontSize,
+                      int shellPort, DanmuThemeMode themeMode, int corePort, String coreToken) {
         this.injectionEnabled = injectionEnabled;
         this.autoPushEnabled = autoPushEnabled;
         this.offsetSec = Math.abs(offsetSec) < 1e-6 ? 0.0d : offsetSec;
         this.fontSize = fontSize > 0 ? fontSize : -1;
         this.shellPort = shellPort > 0 && shellPort <= 65535 ? shellPort : 9978;
-        this.darkTheme = darkTheme;
+        this.themeMode = themeMode == null ? DanmuThemeMode.FOLLOW_HOST : themeMode;
         this.corePort = corePort > 0 && corePort <= 65535 ? corePort : 0;
         this.coreToken = coreToken == null ? "" : coreToken.trim();
     }

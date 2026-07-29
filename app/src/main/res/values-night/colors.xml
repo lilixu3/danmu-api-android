@@ -16,7 +16,8 @@
 
     <color name="surface_card">#10192B</color>
     <color name="surface_card_weak">#0D1424</color>
-    <color name="surface_sheet">#10192B</color>
+    <color name="surface_sheet">#1F2D47</color>
+    <color name="dialog_outline_variant">#435574</color>
 
     <color name="accent_soft">#20355A</color>
     <color name="accent_stroke">#3A7DCFFF</color>

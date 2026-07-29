@@ -27,7 +27,8 @@
     -->
     <color name="surface_card">#FFFFFF</color>
     <color name="surface_card_weak">#F5F9FF</color>
-    <color name="surface_sheet">#FFFFFF</color>
+    <color name="surface_sheet">#FAFBFD</color>
+    <color name="dialog_outline_variant">#D3DAE4</color>
 
     <!-- Accent helpers -->
     <color name="accent_soft">#E1F5FE</color>

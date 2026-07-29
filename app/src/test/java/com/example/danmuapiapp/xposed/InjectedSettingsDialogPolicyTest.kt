@@ -68,7 +68,7 @@ class InjectedSettingsDialogPolicyTest {
     }
 
     @Test
-    fun `设置项应复用注入设置存储且键与默认值不变`() {
+    fun `设置项应复用注入设置存储并兼容旧主题键`() {
         val source = readSettingsDialogSource()
         val storeSource = readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedSettingsStore.java")
 
@@ -77,10 +77,18 @@ class InjectedSettingsDialogPolicyTest {
         assertTrue(source.contains("host.readEpisodeShowTitles(activity)"))
         assertTrue(source.contains("host.saveEpisodeShowTitles(activity, next)"))
 
-        assertTrue(storeSource.contains("prefs.getBoolean(KEY_UI_DARK_THEME, false)"))
         assertTrue(storeSource.contains("\"app_danmu_injection\""))
+        assertTrue(storeSource.contains("\"ui_theme_mode\""))
         assertTrue(storeSource.contains("\"ui_dark_theme\""))
         assertTrue(storeSource.contains("\"episode_show_titles\""))
+        assertTrue(storeSource.contains("DanmuThemeMode.FOLLOW_HOST"))
+        assertTrue(storeSource.contains("DanmuThemeMode.fromLegacyDarkTheme"))
+
+        assertTrue(source.contains("DanmuDialog.showSingleChoice"))
+        assertTrue(source.contains("DanmuThemeMode.labels()"))
+        assertTrue(readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuThemeMode.java")
+            .contains("FOLLOW_HOST(0, \"跟随宿主\")"))
+        assertTrue(source.contains("state.withThemeMode(next)"))
 
         assertTrue(source.contains("port > 0 && port <= 65535"))
         assertTrue(source.contains("size >= 8 && size <= 80"))
@@ -89,6 +97,23 @@ class InjectedSettingsDialogPolicyTest {
         assertTrue(source.contains("\"时间轴偏移\""))
         assertTrue(source.contains("\"界面主题\""))
         assertTrue(source.contains("\"集详情显示\""))
+    }
+
+    @Test
+    fun `注入弹窗应共享中性色板并分离选中与焦点状态`() {
+        val themeSource = readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuTheme.java")
+        val modeSource = readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuThemeMode.java")
+
+        assertTrue(themeSource.contains("DialogColorTokens.DARK_DIALOG"))
+        assertTrue(themeSource.contains("selectionRect"))
+        assertTrue(themeSource.contains("selectionFocusLayer"))
+        assertTrue(themeSource.contains("accentFocusLayer"))
+        assertFalse(themeSource.contains("gradientRect"))
+        assertFalse(themeSource.contains("accentEnd"))
+        assertFalse(themeSource.contains("0xFFFFC44D"))
+
+        assertTrue(modeSource.contains("android.R.attr.isLightTheme"))
+        assertTrue(modeSource.contains("Configuration.UI_MODE_NIGHT_MASK"))
     }
 
     private fun readXposedSource(): String {

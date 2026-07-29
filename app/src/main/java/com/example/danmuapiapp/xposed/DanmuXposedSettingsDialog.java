@@ -26,6 +26,8 @@ final class DanmuXposedSettingsDialog {
 
     private static final int[] FONT_SIZE_OPTIONS = {-1, 20, 24, 28, 32};
     private static final String[] FONT_SIZE_LABELS = {"默认", "20", "24", "28", "32", "自定义"};
+    private static final DanmuThemeMode[] THEME_MODES = DanmuThemeMode.values();
+    private static final String[] THEME_MODE_LABELS = DanmuThemeMode.labels();
 
     interface Host {
         InjectionSettings readInjectionSettings(Context context, int fallbackPort);
@@ -68,7 +70,7 @@ final class DanmuXposedSettingsDialog {
         root.addView(scroll, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        Row themeRow = addRow(activity, theme, rows, "界面主题", state.darkTheme ? "黑色" : "白色");
+        Row themeRow = addRow(activity, theme, rows, "界面主题", state.themeMode.label);
         Row titleModeRow = addRow(activity, theme, rows, "集详情显示", state.showTitles ? "带标题" : "数字格");
         Row offsetRow = addRow(activity, theme, rows, "时间轴偏移", formatOffsetSeconds(state.offsetSec));
         Row fontRow = addRow(activity, theme, rows, "弹幕大小", fontSizeLabel(state.fontSize));
@@ -84,14 +86,16 @@ final class DanmuXposedSettingsDialog {
         AlertDialog dialog = DanmuDialog.create(activity, root);
         close.setOnClickListener(v -> dialog.dismiss());
 
-        themeRow.view.setOnClickListener(v -> {
-            boolean next = !state.darkTheme;
-            if (!persist(activity, state.withDarkTheme(next), "界面主题")) return;
-            state.darkTheme = next;
-            themeRow.value.setText(next ? "黑色" : "白色");
-            dialog.dismiss();
-            if (onChanged != null) onChanged.run();
-        });
+        themeRow.view.setOnClickListener(v -> DanmuDialog.showSingleChoice(
+            activity, theme, "界面主题", THEME_MODE_LABELS, state.themeMode.ordinal(),
+            index -> {
+                DanmuThemeMode next = THEME_MODES[index];
+                if (!persist(activity, state.withThemeMode(next), "界面主题")) return;
+                state.themeMode = next;
+                themeRow.value.setText(next.label);
+                dialog.dismiss();
+                if (onChanged != null) onChanged.run();
+            }));
 
         titleModeRow.view.setOnClickListener(v -> {
             boolean next = !state.showTitles;
@@ -231,7 +235,7 @@ final class DanmuXposedSettingsDialog {
         double offsetSec;
         int fontSize;
         int shellPort;
-        boolean darkTheme;
+        DanmuThemeMode themeMode;
         boolean showTitles;
 
         State(InjectionSettings base, boolean showTitles) {
@@ -239,29 +243,29 @@ final class DanmuXposedSettingsDialog {
             this.offsetSec = base.offsetSec;
             this.fontSize = base.fontSize;
             this.shellPort = base.shellPort;
-            this.darkTheme = base.darkTheme;
+            this.themeMode = base.themeMode;
             this.showTitles = showTitles;
         }
 
-        InjectionSettings snapshot(double offset, int font, int port, boolean dark) {
+        InjectionSettings snapshot(double offset, int font, int port, DanmuThemeMode mode) {
             return new InjectionSettings(
-                base.injectionEnabled, base.autoPushEnabled, offset, font, port, dark,
+                base.injectionEnabled, base.autoPushEnabled, offset, font, port, mode,
                 base.corePort, base.coreToken);
         }
 
         InjectionSettings withOffset(double value) {
-            return snapshot(value, fontSize, shellPort, darkTheme);
+            return snapshot(value, fontSize, shellPort, themeMode);
         }
 
         InjectionSettings withFontSize(int value) {
-            return snapshot(offsetSec, value, shellPort, darkTheme);
+            return snapshot(offsetSec, value, shellPort, themeMode);
         }
 
         InjectionSettings withShellPort(int value) {
-            return snapshot(offsetSec, fontSize, value, darkTheme);
+            return snapshot(offsetSec, fontSize, value, themeMode);
         }
 
-        InjectionSettings withDarkTheme(boolean value) {
+        InjectionSettings withThemeMode(DanmuThemeMode value) {
             return snapshot(offsetSec, fontSize, shellPort, value);
         }
     }

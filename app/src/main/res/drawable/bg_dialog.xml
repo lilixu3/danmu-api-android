@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Dialog surface (Settings-like):
-  - Use the same surface token as Settings bottom sheet
-  - No outer stroke (dialogs are floating; the 1dp border can look like an "ugly line")
-  - Corner radius aligned with BottomSheet top radius for visual consistency
+  Legacy Material dialog surface. Compose and injected dialogs consume the same palette
+  through DialogColorTokens.
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="?attr/colorSurface" />
+    <solid android:color="@color/surface_sheet" />
     <corners android:radius="28dp" />
 </shape>

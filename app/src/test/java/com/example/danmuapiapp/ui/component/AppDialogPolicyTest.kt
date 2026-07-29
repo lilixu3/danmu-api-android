@@ -25,6 +25,18 @@ class AppDialogPolicyTest {
     }
 
     @Test
+    fun `共享弹窗配色应服从应用主题并使用统一语义色`() {
+        val source = readSource("app/src/main/java/com/example/danmuapiapp/ui/component/AppDialog.kt")
+        val themeSource = readSource("app/src/main/java/com/example/danmuapiapp/ui/theme/Theme.kt")
+
+        assertTrue(themeSource.contains("LocalAppDarkTheme provides darkTheme"))
+        assertTrue(source.contains("DialogColorTokens"))
+        assertTrue(source.contains("dialogColorScheme(parentColors, LocalAppDarkTheme.current)"))
+        assertTrue(source.contains("tonalElevation = 0.dp"))
+        assertFalse("应用强制暗色时不能再误读系统主题", source.contains("isSystemInDarkTheme"))
+    }
+
+    @Test
     fun `主代码不应残留旧弹窗实现与展示偏好`() {
         val mainDir = resolveRepoRoot().resolve("app/src/main/java")
         val source = Files.walk(mainDir).use { paths ->
