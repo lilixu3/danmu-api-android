@@ -22,7 +22,7 @@ final class DanmuDialog {
     private static final int DEFAULT_MAX_WIDTH_DP = 560;
     private static final int MIN_WIDTH_DP = 300;
     private static final float MAX_HEIGHT_RATIO = 0.88f;
-    private static final float DIM_AMOUNT = 0.62f;
+    private static final float DIM_AMOUNT = 0.58f;
 
     private DanmuDialog() {}
 

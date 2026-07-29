@@ -5,9 +5,9 @@
   making the menu unreadable (white bg + light text).
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="?attr/colorSurface" />
+    <solid android:color="@color/surface_sheet" />
     <corners android:radius="16dp" />
     <stroke
         android:width="1dp"
-        android:color="?attr/colorOutlineVariant" />
+        android:color="@color/dialog_outline_variant" />
 </shape>

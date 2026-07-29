@@ -7,6 +7,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.TypedValue;
 
+import com.example.danmuapiapp.ui.theme.DialogColorTokens;
+
 /**
  * Design tokens for injected dialogs: spacing, radii, type scale and the light/dark
  * palettes. Focus colours are separate from accent colours so a D-pad focus ring stays
@@ -58,7 +60,6 @@ final class DanmuTheme {
 
     // ---- Accent (selection / primary action) ----
     final int accent;
-    final int accentEnd;      // gradient partner for accent
     final int accentStrong;
     final int accentText;
     final int accentSoft;
@@ -78,51 +79,49 @@ final class DanmuTheme {
     private DanmuTheme(boolean dark) {
         this.dark = dark;
         if (dark) {
-            dialogBackground = 0xFF0E1117;
-            surface = 0xFF191F29;
-            surfaceAlt = 0xFF141A23;
-            surfaceActive = 0xFF2A3442;
-            stroke = 0x14FFFFFF;
-            strokeStrong = 0x2EFFFFFF;
-            textPrimary = 0xFFF2F5FA;
-            textSecondary = 0xFFA9B4C4;
-            textMuted = 0xFF6F7B8C;
-            accent = 0xFF4F7CFF;
-            accentEnd = 0xFF7C5CFF;
-            accentStrong = 0xFF8AA9FF;
-            accentText = 0xFFFFFFFF;
-            accentSoft = 0x2E4F7CFF;
-            accentSoftText = 0xFFA9C2FF;
-            focusRing = 0xFFFFC44D;
-            focusFill = 0x33FFC44D;
-            focusText = 0xFFFFE1A3;
-            success = 0xFF22C55E;
-            successSoft = 0x2622C55E;
-            successText = 0xFF86EFAC;
-            danger = 0xFFF87171;
+            dialogBackground = DialogColorTokens.DARK_DIALOG;
+            surface = DialogColorTokens.DARK_SURFACE_CONTAINER;
+            surfaceAlt = DialogColorTokens.DARK_SURFACE_HIGH;
+            surfaceActive = DialogColorTokens.DARK_SURFACE_ACTIVE;
+            stroke = DialogColorTokens.DARK_OUTLINE_VARIANT;
+            strokeStrong = DialogColorTokens.DARK_OUTLINE;
+            textPrimary = DialogColorTokens.DARK_TEXT_PRIMARY;
+            textSecondary = DialogColorTokens.DARK_TEXT_SECONDARY;
+            textMuted = DialogColorTokens.DARK_TEXT_MUTED;
+            accent = DialogColorTokens.DARK_PRIMARY;
+            accentStrong = DialogColorTokens.DARK_PRIMARY_PRESSED;
+            accentText = DialogColorTokens.DARK_ON_PRIMARY;
+            accentSoft = DialogColorTokens.DARK_PRIMARY_CONTAINER;
+            accentSoftText = DialogColorTokens.DARK_ON_PRIMARY_CONTAINER;
+            focusRing = DialogColorTokens.DARK_FOCUS_RING;
+            focusFill = DialogColorTokens.DARK_FOCUS_FILL;
+            focusText = DialogColorTokens.DARK_TEXT_PRIMARY;
+            success = DialogColorTokens.DARK_SUCCESS;
+            successSoft = DialogColorTokens.DARK_SUCCESS_CONTAINER;
+            successText = DialogColorTokens.DARK_SUCCESS;
+            danger = DialogColorTokens.DARK_ERROR;
         } else {
-            dialogBackground = 0xFFFFFFFF;
-            surface = 0xFFFFFFFF;
-            surfaceAlt = 0xFFF4F6FA;
-            surfaceActive = 0xFFE4E9F2;
-            stroke = 0xFFE6EAF2;
-            strokeStrong = 0xFFCBD4E3;
-            textPrimary = 0xFF0F1626;
-            textSecondary = 0xFF525F73;
-            textMuted = 0xFF8B96A8;
-            accent = 0xFF3B62F6;
-            accentEnd = 0xFF7A45E8;
-            accentStrong = 0xFF2E4FD6;
-            accentText = 0xFFFFFFFF;
-            accentSoft = 0xFFEDF1FE;
-            accentSoftText = 0xFF2743B8;
-            focusRing = 0xFFB45309;
-            focusFill = 0xFFFDF3D8;
-            focusText = 0xFF7C4A05;
-            success = 0xFF16A34A;
-            successSoft = 0xFFE7F6EC;
-            successText = 0xFF15803D;
-            danger = 0xFFDC2626;
+            dialogBackground = DialogColorTokens.LIGHT_DIALOG;
+            surface = DialogColorTokens.LIGHT_SURFACE_CONTAINER;
+            surfaceAlt = DialogColorTokens.LIGHT_SURFACE_HIGH;
+            surfaceActive = DialogColorTokens.LIGHT_SURFACE_ACTIVE;
+            stroke = DialogColorTokens.LIGHT_OUTLINE_VARIANT;
+            strokeStrong = DialogColorTokens.LIGHT_OUTLINE;
+            textPrimary = DialogColorTokens.LIGHT_TEXT_PRIMARY;
+            textSecondary = DialogColorTokens.LIGHT_TEXT_SECONDARY;
+            textMuted = DialogColorTokens.LIGHT_TEXT_MUTED;
+            accent = DialogColorTokens.LIGHT_PRIMARY;
+            accentStrong = DialogColorTokens.LIGHT_PRIMARY_PRESSED;
+            accentText = DialogColorTokens.LIGHT_ON_PRIMARY;
+            accentSoft = DialogColorTokens.LIGHT_PRIMARY_CONTAINER;
+            accentSoftText = DialogColorTokens.LIGHT_ON_PRIMARY_CONTAINER;
+            focusRing = DialogColorTokens.LIGHT_FOCUS_RING;
+            focusFill = DialogColorTokens.LIGHT_FOCUS_FILL;
+            focusText = DialogColorTokens.LIGHT_TEXT_PRIMARY;
+            success = DialogColorTokens.LIGHT_SUCCESS;
+            successSoft = DialogColorTokens.LIGHT_SUCCESS_CONTAINER;
+            successText = DialogColorTokens.LIGHT_SUCCESS;
+            danger = DialogColorTokens.LIGHT_ERROR;
         }
     }
 
@@ -148,16 +147,12 @@ final class DanmuTheme {
         return roundRect(fill, radiusDp, 0, 0, context);
     }
 
-    /** Diagonal two-stop fill; used for accent surfaces so selection reads as a solid object. */
-    GradientDrawable gradientRect(int start, int end, float radiusDp, Context context) {
-        GradientDrawable d = new GradientDrawable(
-            GradientDrawable.Orientation.TL_BR, new int[]{start, end});
-        d.setCornerRadius(dp(context, radiusDp));
-        return d;
+    GradientDrawable accentRect(float radiusDp, Context context) {
+        return roundRect(accent, radiusDp, context);
     }
 
-    GradientDrawable accentRect(float radiusDp, Context context) {
-        return gradientRect(accent, accentEnd, radiusDp, context);
+    GradientDrawable selectionRect(float radiusDp, Context context) {
+        return roundRect(accentSoft, radiusDp, accent, STROKE_HAIRLINE, context);
     }
 
     /**
@@ -182,9 +177,9 @@ final class DanmuTheme {
         StateListDrawable states = new StateListDrawable();
         states.addState(
             new int[]{android.R.attr.state_focused, android.R.attr.state_selected},
-            selectedFocusLayer(radiusDp, context));
+            selectionFocusLayer(radiusDp, context));
         states.addState(new int[]{android.R.attr.state_focused}, focusLayer(fill, radiusDp, context));
-        states.addState(new int[]{android.R.attr.state_selected}, accentRect(radiusDp, context));
+        states.addState(new int[]{android.R.attr.state_selected}, selectionRect(radiusDp, context));
         states.addState(
             new int[]{android.R.attr.state_pressed},
             roundRect(surfaceActive, radiusDp, strokeStrong, STROKE_HAIRLINE, context));
@@ -192,10 +187,10 @@ final class DanmuTheme {
         return states;
     }
 
-    /** Background for the primary action: accent gradient with a focus ring on top. */
+    /** Background for the primary action: one solid brand color with a focus ring on top. */
     Drawable accentFocusable(float radiusDp, Context context) {
         StateListDrawable states = new StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_focused}, selectedFocusLayer(radiusDp, context));
+        states.addState(new int[]{android.R.attr.state_focused}, accentFocusLayer(radiusDp, context));
         states.addState(
             new int[]{android.R.attr.state_pressed},
             roundRect(accentStrong, radiusDp, accentStrong, STROKE_HAIRLINE, context));
@@ -207,20 +202,17 @@ final class DanmuTheme {
         return roundRect(blend(focusFill, fill), radiusDp, focusRing, STROKE_FOCUS, context);
     }
 
-    private Drawable selectedFocusLayer(float radiusDp, Context context) {
-        GradientDrawable d = accentRect(radiusDp, context);
-        d.setStroke(dp(context, STROKE_FOCUS), focusRing);
-        return d;
+    private Drawable selectionFocusLayer(float radiusDp, Context context) {
+        return roundRect(accentSoft, radiusDp, focusRing, STROKE_FOCUS, context);
     }
 
-    /** Index badge fill: tinted on a plain surface, translucent on a selected accent fill. */
+    private Drawable accentFocusLayer(float radiusDp, Context context) {
+        return roundRect(accent, radiusDp, focusRing, STROKE_FOCUS, context);
+    }
+
+    /** Index badge fill stays softly tinted in every parent state. */
     Drawable badgeFill(float radiusDp, Context context) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(
-            new int[]{android.R.attr.state_selected},
-            roundRect(0x33FFFFFF, radiusDp, context));
-        states.addState(new int[]{}, roundRect(accentSoft, radiusDp, context));
-        return states;
+        return roundRect(accentSoft, radiusDp, context);
     }
 
     /** Text colour that follows selected/focused state, for widgets restyled by state alone. */
@@ -231,7 +223,7 @@ final class DanmuTheme {
                 new int[]{android.R.attr.state_focused},
                 new int[]{}
             },
-            new int[]{accentText, focusText, normal});
+            new int[]{accentSoftText, focusText, normal});
     }
 
     /** Alpha-composites {@code over} onto opaque {@code under}. */
