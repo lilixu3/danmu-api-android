@@ -65,7 +65,7 @@ public class DanmuXposedModule extends XposedModule {
             DanmuXposedModule.this.log(level, TAG, message, throwable);
         }
     }, episodeRepository);
-    private final DanmuXposedSettingsOverlay settingsOverlay = new DanmuXposedSettingsOverlay(new DanmuXposedSettingsOverlay.Host() {
+    private final DanmuXposedSettingsDialog settingsDialog = new DanmuXposedSettingsDialog(new DanmuXposedSettingsDialog.Host() {
         @Override
         public InjectionSettings readInjectionSettings(Context context, int fallbackPort) {
             return DanmuXposedModule.this.readInjectionSettings(context, fallbackPort);
@@ -87,40 +87,8 @@ public class DanmuXposedModule extends XposedModule {
         }
 
         @Override
-        public void installBackInterceptor(Method method, DanmuXposedSettingsOverlay.BackCloseHandler handler) throws Throwable {
-            hook(method).intercept(chain -> {
-                Object thisObject = chain.getThisObject();
-                if (thisObject instanceof Activity && handler.closeActiveSettingsOverlay((Activity) thisObject)) {
-                    return null;
-                }
-                return chain.proceed();
-            });
-        }
-
-        @Override
         public void warn(String message) {
             log(Log.WARN, TAG, message);
-        }
-    });
-    private final DanmuXposedSettingsRowInjector settingsRowInjector = new DanmuXposedSettingsRowInjector(new DanmuXposedSettingsRowInjector.Host() {
-        @Override
-        public boolean isActivityActiveForInjection(Activity activity) {
-            return pushCoordinator.isActivityActiveForInjection(activity);
-        }
-
-        @Override
-        public InjectionSettings readInjectionSettings(Context context, int fallbackPort) {
-            return DanmuXposedModule.this.readInjectionSettings(context, fallbackPort);
-        }
-
-        @Override
-        public void showInjectionSettingsDialog(Activity activity, View backgroundAnchor, int[] shellPortRef) {
-            DanmuXposedModule.this.showInjectionSettingsDialog(activity, backgroundAnchor, shellPortRef);
-        }
-
-        @Override
-        public void log(int level, String message) {
-            DanmuXposedModule.this.log(level, TAG, message);
         }
     });
     private final DanmuXposedManualSearchDialog manualSearchDialog = new DanmuXposedManualSearchDialog(new DanmuXposedManualSearchDialog.Host() {
@@ -150,23 +118,18 @@ public class DanmuXposedModule extends XposedModule {
         }
 
         @Override
-        public void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, TextView statusText, TextView pushInfoText) {
-            pushCoordinator.pushCandidate(activity, candidate, shellPort, statusText, pushInfoText);
+        public void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, PushFeedback feedback) {
+            pushCoordinator.pushCandidate(activity, candidate, shellPort, feedback);
         }
 
         @Override
-        public void autoPushCurrent(Activity activity, int fallbackPort, TextView statusText, TextView pushInfoText) {
-            pushCoordinator.autoPushCurrent(activity, fallbackPort, statusText, pushInfoText);
+        public void autoPushCurrent(Activity activity, int fallbackPort, PushFeedback feedback) {
+            pushCoordinator.autoPushCurrent(activity, fallbackPort, feedback);
         }
 
         @Override
         public ShellMedia readShellMedia(int preferredPort) {
             return pushCoordinator.readShellMedia(preferredPort);
-        }
-
-        @Override
-        public String formatPushTimeChip() {
-            return pushCoordinator.formatPushTimeChip();
         }
 
         @Override
@@ -185,8 +148,14 @@ public class DanmuXposedModule extends XposedModule {
         }
 
         @Override
-        public void showPushHistoryDialog(Activity activity, DanmuTheme theme, View notifyButton, TextView notifyDot) {
-            pushCoordinator.showPushHistoryDialog(activity, theme, notifyButton, notifyDot);
+        public void showPushHistoryDialog(Activity activity, DanmuTheme theme) {
+            DanmuXposedPushHistoryDialog.show(activity, theme, pushCoordinator.pushHistorySnapshot());
+            pushCoordinator.markPushHistoryViewed();
+        }
+
+        @Override
+        public void showSettingsDialog(Activity activity, DanmuTheme theme, int shellPort, Runnable onChanged) {
+            settingsDialog.show(activity, theme, shellPort, onChanged);
         }
 
         @Override
@@ -365,10 +334,7 @@ public class DanmuXposedModule extends XposedModule {
             if (window == null) return;
             View decor = window.getDecorView();
             if (decor == null) return;
-            decor.post(() -> {
-                injectButton(activity);
-                injectSettingsRow(activity);
-            });
+            decor.post(() -> injectButton(activity));
         } catch (Throwable throwable) {
             log(Log.WARN, TAG, "schedule inject failed: " + throwable.getMessage());
         }
@@ -404,7 +370,6 @@ public class DanmuXposedModule extends XposedModule {
                             return;
                         }
                         injectButton(activity);
-                        injectSettingsRow(activity);
                         if (findTaggedButton(currentGroup) != null) {
                             pushCoordinator.startAutoPushLoopOnce(activity);
                             clearInjectionWatch(activity);
@@ -520,13 +485,6 @@ public class DanmuXposedModule extends XposedModule {
         });
     }
 
-    // 把"APP弹幕设置"作为一行注入到宿主设置面板（HomeActivity 里"播放设置"行后面）。
-    // 识别：先按行容器资源 id 命中，兜底按文字"播放设置"上溯到可点击行；两条都要求该行含锚点文字。
-    // 样式：直接克隆"播放设置"行的真实背景 Drawable（渐变一起带过来），不自己调色。
-    private void injectSettingsRow(Activity activity) {
-        settingsRowInjector.inject(activity);
-    }
-
     private void showManualSearchDialog(Activity activity) {
         manualSearchDialog.show(activity);
     }
@@ -577,10 +535,6 @@ public class DanmuXposedModule extends XposedModule {
             this::getRemotePreferencesOrNull,
             message -> log(Log.WARN, TAG, message)
         );
-    }
-
-    private void showInjectionSettingsDialog(Activity activity, View backgroundAnchor, int[] shellPortRef) {
-        settingsOverlay.showInjectionSettingsOverlay(activity, backgroundAnchor, shellPortRef);
     }
 
     private boolean addButtonToDecor(ViewGroup decor, View button, Anchor anchor) {

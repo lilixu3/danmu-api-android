@@ -1,9 +1,9 @@
 package com.example.danmuapiapp.ui.screen.download
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
-import com.example.danmuapiapp.ui.component.AppPanelDialog
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppModalPanel
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -342,16 +342,10 @@ private fun DanmuPreviewDialog(
     state: DanmuPreviewDialogState,
     onDismiss: () -> Unit
 ) {
-    AppPanelDialog(
+    AppModalPanel(
         onDismissRequest = onDismiss,
-        sheetGesturesEnabled = false,
-        showDragHandle = false,
-        minHeight = 480.dp,
-        sheetMaxHeightFraction = 0.92f,
-        popupMaxHeightFraction = 0.9f,
-        horizontalPadding = 12.dp,
-        sheetTopPadding = 0.dp,
-        sheetBottomPadding = 6.dp,
+        expanded = true,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.Start
     ) {

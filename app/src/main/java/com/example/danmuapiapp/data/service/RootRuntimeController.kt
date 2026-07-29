@@ -4,7 +4,7 @@ import android.content.Context
 import android.os.Looper
 import com.example.danmuapiapp.data.repository.RuntimeOwnership
 import com.example.danmuapiapp.data.repository.determineRuntimeOwnershipFromHealth
-import com.example.danmuapiapp.data.repository.isRuntimeOwnershipOwned
+import com.example.danmuapiapp.data.repository.isRuntimeOwnershipAcceptedForRoot
 import com.example.danmuapiapp.domain.model.ApiVariant
 import java.io.File
 import java.net.HttpURLConnection
@@ -108,8 +108,8 @@ object RootRuntimeController {
             fi
 
             ([ -f "${'$'}NEW/worker.js" ] || [ -f "${'$'}NEW/danmu_api/worker.js" ] || [ -f "${'$'}NEW/danmu-api/worker.js" ]) || exit 9
-            (cd "${'$'}SRC" && find . -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 10
-            (cd "${'$'}NEW" && find . -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 11
+            (cd "${'$'}SRC" && find . -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 10
+            (cd "${'$'}NEW" && find . -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 11
             cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 12
             rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 13
 
@@ -169,8 +169,8 @@ object RootRuntimeController {
             mkdir -p "${'$'}NEW/.cache" || exit 10
             [ -f "${'$'}NEW/main.js" ] || exit 11
 
-            (cd "${'$'}SRC" && find . -path './.cache' -prune -o -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 12
-            (cd "${'$'}NEW" && find . -path './.cache' -prune -o -type f -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 13
+            (cd "${'$'}SRC" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 12
+            (cd "${'$'}NEW" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 13
             cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 14
             rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
 
@@ -291,9 +291,9 @@ object RootRuntimeController {
             }
             trap cleanup_sync EXIT HUP INT TERM
 
+            (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} + | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 2
             if [ -d "${'$'}DST" ]; then
-              (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 2
-              (cd "${'$'}DST" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 3
+              (cd "${'$'}DST" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 3
               if cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST"; then
                 VERIFIED_FILE_COUNT=${'$'}(find "${'$'}DST" -type f ! -name .danmuapiapp-sync-fingerprint | wc -l | tr -d '[:space:]')
                 printf '%s\n%s\n' "${'$'}EXPECTED" "${'$'}VERIFIED_FILE_COUNT" > "${'$'}MARKER" || exit 4
@@ -301,7 +301,7 @@ object RootRuntimeController {
                 trap - EXIT HUP INT TERM
                 exit 0
               fi
-              rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 6
+              rm -f "${'$'}DST_LIST" || exit 6
             fi
 
             mkdir -p "${'$'}(dirname "${'$'}DST")" || exit 7
@@ -314,8 +314,7 @@ object RootRuntimeController {
             fi
             rm -f "${'$'}NEW/.danmuapiapp-sync-fingerprint" 2>/dev/null || true
 
-            (cd "${'$'}SRC" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 13
-            (cd "${'$'}NEW" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} \; | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 14
+            (cd "${'$'}NEW" && find . -type f ! -name .danmuapiapp-sync-fingerprint -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 14
             cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
             VERIFIED_FILE_COUNT=${'$'}(find "${'$'}NEW" -type f ! -name .danmuapiapp-sync-fingerprint | wc -l | tr -d '[:space:]')
             printf '%s\n%s\n' "${'$'}EXPECTED" "${'$'}VERIFIED_FILE_COUNT" > "${'$'}NEW/.danmuapiapp-sync-fingerprint" || exit 16
@@ -365,15 +364,15 @@ object RootRuntimeController {
         return isPortOpen("127.0.0.1", port, 220)
     }
 
-    private fun isRuntimeOwnedByApp(context: Context, port: Int): Boolean {
-        return isRuntimeOwnershipOwned(readRuntimeOwnership(context, port))
+    fun isRuntimeOwnedByAppPassive(context: Context, port: Int): Boolean {
+        return isRuntimeOwnershipAcceptedForRoot(readRuntimeOwnership(context, port))
     }
 
     private fun readRuntimeOwnership(context: Context, port: Int): RuntimeOwnership {
         if (port !in 1..65535) return RuntimeOwnership.Foreign
         val expectedIdentity = RuntimeIdentityStore.ensureInstanceId(context).trim()
         val expectedHome = RuntimePaths.rootProjectDir(context).absolutePath
-        val body = readRuntimeHealthBody(port) ?: return RuntimeOwnership.Foreign
+        val body = readRuntimeHealthBody(port) ?: return RuntimeOwnership.Unknown
         return determineRuntimeOwnershipFromHealth(
             body = body,
             expectedIdentity = expectedIdentity,
@@ -399,7 +398,7 @@ object RootRuntimeController {
     }
 
     fun isRunning(context: Context, port: Int): Boolean {
-        if (isRuntimeOwnedByApp(context, port)) return true
+        if (isRuntimeOwnedByAppPassive(context, port)) return true
 
         val pid = readPid(context) ?: return false
         if (Looper.getMainLooper().thread === Thread.currentThread()) {
@@ -448,6 +447,13 @@ object RootRuntimeController {
         )
     }
 
+    /** Cheap startup hint that never opens a socket or a Root shell. */
+    fun hasPersistedRuntimeHint(context: Context): Boolean {
+        return readPid(context) != null && (
+            getProcessStartedAtMs(context) != null || pidFile(context).lastModified() > 0L
+        )
+    }
+
     /**
      * 兼容旧调用签名，避免增参后出现 NoSuchMethodError。
      */
@@ -461,7 +467,7 @@ object RootRuntimeController {
         quickMode: Boolean = false,
         skipSync: Boolean = false
     ): OpResult {
-        if (isRuntimeOwnedByApp(context, port)) {
+        if (isRuntimeOwnedByAppPassive(context, port)) {
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -477,7 +483,7 @@ object RootRuntimeController {
             return OpResult(false, "Root 授权失败", "请确认设备已 Root，并允许本应用获取 Root 权限")
         }
 
-        if (isRuntimeOwnedByApp(context, port)) {
+        if (isRunning(context, port)) {
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -486,10 +492,20 @@ object RootRuntimeController {
         }
 
         if (isRunningFast(port)) {
+            val ownership = readRuntimeOwnership(context, port)
+            val explicitlyForeign = ownership == RuntimeOwnership.Foreign
             return OpResult(
                 ok = false,
-                message = "Root 端口已被其他实例占用",
-                detail = "端口 $port 已有其他实例在运行，请先停止外部进程后再启动"
+                message = if (explicitlyForeign) {
+                    "Root 端口已被其他实例占用"
+                } else {
+                    "无法确认 Root 端口归属"
+                },
+                detail = if (explicitlyForeign) {
+                    "端口 $port 已有其他实例在运行，请先停止外部进程后再启动"
+                } else {
+                    "端口 $port 正在监听，但健康检查暂时不可用；请稍后重试，避免重复启动"
+                }
             )
         }
 

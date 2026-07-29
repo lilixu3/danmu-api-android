@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.data.repository
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuntimeOwnershipPolicyTest {
@@ -17,14 +19,16 @@ class RuntimeOwnershipPolicyTest {
     }
 
     @Test
-    fun `新版 health identity 不匹配时即使 home 相同也应判定为外部实例`() {
+    fun `新版 health identity 不匹配但 home 相同时应判定为 Root 可恢复实例`() {
         val ownership = determineRuntimeOwnershipFromHealth(
             body = """{"runtimeIdentity":"other","resolvedHome":"/data/user/0/pkg/files/nodejs-project"}""",
             expectedIdentity = "abc123",
             expectedHome = "/data/user/0/pkg/files/nodejs-project"
         )
 
-        assertEquals(RuntimeOwnership.Foreign, ownership)
+        assertEquals(RuntimeOwnership.RecoverableSameHome, ownership)
+        assertTrue(isRuntimeOwnershipAcceptedForRoot(ownership))
+        assertFalse(isRuntimeOwnershipOwned(ownership))
     }
 
     @Test

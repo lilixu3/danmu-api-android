@@ -33,7 +33,6 @@ import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
-import com.example.danmuapiapp.domain.model.DialogPresentationPreference
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -97,8 +96,6 @@ class SettingsViewModel @Inject constructor(
     val nightMode = settingsRepo.nightMode
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
-    val dialogPresentation = settingsRepo.dialogPresentation
-    val bottomSheetGesturesEnabled = settingsRepo.bottomSheetGesturesEnabled
     val fileLogEnabled = settingsRepo.fileLogEnabled
     val adminSessionState = adminSessionRepository.sessionState
     val proxyOptions = githubProxyService.proxyOptions()
@@ -445,20 +442,6 @@ class SettingsViewModel @Inject constructor(
                 StatusBarManager.TILE_ADD_REQUEST_ERROR_APP_NOT_IN_FOREGROUND -> "请保持应用在前台后重试"
                 else -> "添加控制中心按钮失败：$result"
             }
-        }
-    }
-
-    fun setDialogPresentation(mode: DialogPresentationPreference) {
-        settingsRepo.setDialogPresentation(mode)
-        operationMessage = "弹窗样式已改为${mode.label}"
-    }
-
-    fun setBottomSheetGesturesEnabled(enabled: Boolean) {
-        settingsRepo.setBottomSheetGesturesEnabled(enabled)
-        operationMessage = if (enabled) {
-            "底部弹窗拖拽手势已开启"
-        } else {
-            "底部弹窗拖拽手势已关闭"
         }
     }
 

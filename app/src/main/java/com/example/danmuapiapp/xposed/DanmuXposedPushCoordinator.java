@@ -10,19 +10,17 @@ import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeDisp
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeSearchTitle;
 
 import android.app.Activity;
-import android.app.Dialog;
+import android.app.AlertDialog;
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -74,7 +72,6 @@ final class DanmuXposedPushCoordinator {
     private final LinkedHashMap<String, Long> recentPushes = new LinkedHashMap<>();
     private final LinkedList<String> pushHistory = new LinkedList<>();
     private static final int MAX_PUSH_HISTORY = 6;
-    private volatile String lastPushSummary = "";
     private static final String STATUS_NOT_READY = "not_ready";
     private static final long PUSH_IN_FLIGHT_TTL_MS = 20_000L;
     private static final long PUSH_RECENT_TTL_MS = 8_000L;
@@ -116,13 +113,13 @@ final class DanmuXposedPushCoordinator {
         playbackSessionSerial = bundle.getLong("playbackSessionSerial", playbackSessionSerial);
     }
 
-    void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, TextView statusText, TextView pushInfoText) {
-        statusText.setText("正在推送：" + candidate.label);
+    void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, PushFeedback feedback) {
+        feedback.onStatus("正在推送：" + candidate.label);
         new Thread(() -> {
             BridgeRow row = pushEpisodeCandidate(activity.getApplicationContext(), candidate.handle, shellPort);
             activity.runOnUiThread(() -> {
-                statusText.setText(row.message);
-                if (pushInfoText != null) pushInfoText.setText(formatLastPushInfo(activity));
+                feedback.onStatus(row.message);
+                feedback.onPushInfo(formatLastPushInfo(activity));
                 if ("error".equals(row.status)) {
                     Toast.makeText(activity, row.message, Toast.LENGTH_SHORT).show();
                 }
@@ -160,18 +157,18 @@ final class DanmuXposedPushCoordinator {
         }
     }
 
-    void autoPushCurrent(Activity activity, int fallbackPort, TextView statusText, TextView pushInfoText) {
-        statusText.setText("正在自动匹配当前播放…");
+    void autoPushCurrent(Activity activity, int fallbackPort, PushFeedback feedback) {
+        feedback.onStatus("正在自动匹配当前播放…");
         new Thread(() -> {
             ShellMedia media = readShellMedia(fallbackPort);
             if (media == null || media.title.isEmpty()) {
-                activity.runOnUiThread(() -> statusText.setText("未读取到当前播放信息，无法自动推送"));
+                activity.runOnUiThread(() -> feedback.onStatus("未读取到当前播放信息，无法自动推送"));
                 return;
             }
             BridgeRow row = queryBridgeAutoPush(activity.getApplicationContext(), media.port > 0 ? media : media.withPort(fallbackPort));
             activity.runOnUiThread(() -> {
-                statusText.setText(row.message);
-                if (pushInfoText != null) pushInfoText.setText(formatLastPushInfo(activity));
+                feedback.onStatus(row.message);
+                feedback.onPushInfo(formatLastPushInfo(activity));
                 Toast.makeText(activity, row.message, Toast.LENGTH_SHORT).show();
             });
         }, "DanmuManualAutoPush").start();
@@ -523,7 +520,6 @@ final class DanmuXposedPushCoordinator {
         lastPushInfo = message == null ? "" : message;
         lastPushUrl = url == null ? "" : url;
         lastPushAtMs = System.currentTimeMillis();
-        lastPushSummary = buildPushSummary(message);
         synchronized (pushHistory) {
             pushHistory.addFirst(message == null ? "" : message);
             while (pushHistory.size() > MAX_PUSH_HISTORY) {
@@ -533,30 +529,6 @@ final class DanmuXposedPushCoordinator {
                 pushHistory.remove(last);
             }
         }
-    }
-
-    private String buildPushSummary(String message) {
-        if (message == null || message.trim().isEmpty()) return "";
-        String msg = message.trim();
-        int colonIdx = msg.indexOf("：");
-        if (colonIdx > 0 && colonIdx < msg.length() - 1) {
-            String label = msg.substring(colonIdx + 1).trim();
-            int parenIdx = label.indexOf("（");
-            if (parenIdx > 0) {
-                return label.substring(0, parenIdx) + label.substring(parenIdx);
-            }
-            return label;
-        }
-        return msg;
-    }
-
-    String formatPushTimeChip() {
-        if (lastPushAtMs <= 0L || lastPushSummary.isEmpty()) return "暂无推送";
-        long agoMs = Math.max(0L, System.currentTimeMillis() - lastPushAtMs);
-        long agoSec = agoMs / 1000L;
-        if (agoSec < 60L) return "刚刚";
-        if (agoSec < 3600L) return (agoSec / 60L) + "分钟前";
-        return (agoSec / 3600L) + "小时前";
     }
 
     String formatLastPushInfo(Context context) {
@@ -580,78 +552,10 @@ final class DanmuXposedPushCoordinator {
         lastViewedPushAtMs = System.currentTimeMillis();
     }
 
-    void showPushHistoryDialog(Activity activity, DanmuTheme t, View notifyButton, TextView notifyDot) {
-        lastViewedPushAtMs = System.currentTimeMillis();
-        notifyDot.setVisibility(View.GONE);
-
-        Dialog dlg = new Dialog(activity);
-        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout root = new LinearLayout(activity);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(activity, DanmuTheme.SPACE_5), dp(activity, DanmuTheme.SPACE_4),
-            dp(activity, DanmuTheme.SPACE_5), dp(activity, DanmuTheme.SPACE_4));
-        root.setBackground(t.roundRect(t.sheetBg, DanmuTheme.RADIUS_LG, t.stroke, 1, activity));
-
-        TextView title = DanmuUi.text(activity, t, "推送历史", DanmuTheme.TEXT_TITLE, t.textPrimary, true);
-        root.addView(title, matchWrapWithBottom(activity, DanmuTheme.SPACE_4));
-
-        ArrayList<String> entries;
+    List<String> pushHistorySnapshot() {
         synchronized (pushHistory) {
-            entries = new ArrayList<>(pushHistory);
+            return new ArrayList<>(pushHistory);
         }
-        if (entries.isEmpty()) {
-            LinearLayout empty = DanmuUi.emptyState(activity, t, "暂无推送", "收到推送后会记录在这里");
-            root.addView(empty, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        } else {
-            for (int i = 0; i < entries.size(); i++) {
-                String entry = entries.get(i);
-                if (entry == null || entry.trim().isEmpty()) continue;
-
-                LinearLayout row = new LinearLayout(activity);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setBackground(t.roundRect(t.surfaceAlt, DanmuTheme.RADIUS_SM, t.stroke, 1, activity));
-                row.setPadding(dp(activity, DanmuTheme.SPACE_3), dp(activity, DanmuTheme.SPACE_3),
-                    dp(activity, DanmuTheme.SPACE_3), dp(activity, DanmuTheme.SPACE_3));
-
-                TextView badge = DanmuUi.text(activity, t, String.valueOf(i + 1),
-                    DanmuTheme.TEXT_CAPTION, t.accentSoftText, true);
-                badge.setBackground(t.roundRect(t.accentSoft, DanmuTheme.RADIUS_SM, activity));
-                int badgeSize = dp(activity, 22);
-                LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(badgeSize, badgeSize);
-                badgeLp.rightMargin = dp(activity, DanmuTheme.SPACE_3);
-                badge.setGravity(Gravity.CENTER);
-                row.addView(badge, badgeLp);
-
-                TextView tv = DanmuUi.text(activity, t, entry, DanmuTheme.TEXT_BODY, t.textPrimary, false);
-                row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rowLp.bottomMargin = dp(activity, DanmuTheme.SPACE_2);
-                root.addView(row, rowLp);
-            }
-        }
-
-        Button closeBtn = DanmuUi.ghostButton(activity, t, "关闭");
-        LinearLayout.LayoutParams closeBtnLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 36));
-        closeBtnLp.topMargin = dp(activity, DanmuTheme.SPACE_4);
-        closeBtnLp.gravity = Gravity.END;
-        root.addView(closeBtn, closeBtnLp);
-        closeBtn.setOnClickListener(v -> dlg.dismiss());
-
-        dlg.setContentView(root);
-        Window w = dlg.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawableResource(android.R.color.transparent);
-            int width = activity.getResources().getDisplayMetrics().widthPixels;
-            w.setLayout((int) (width * 0.80f), WindowManager.LayoutParams.WRAP_CONTENT);
-            w.setGravity(Gravity.CENTER);
-        }
-        dlg.show();
     }
 
     void notifyAutoPush(String message) {

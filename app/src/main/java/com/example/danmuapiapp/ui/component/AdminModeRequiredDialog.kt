@@ -53,10 +53,10 @@ internal fun AdminModeRequiredDialog(
     onOpenAdminMode: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Confirm,
-        tone = AppBottomSheetTone.Warning,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Warning,
         icon = { Icon(Icons.Rounded.AdminPanelSettings, null) },
         title = { Text(prompt.title) },
         text = {
