@@ -38,6 +38,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
+import com.example.danmuapiapp.data.service.VideoShellInjectionRemoteConfig
+import com.example.danmuapiapp.data.service.VideoShellXposedServiceRegistry
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
@@ -45,21 +48,19 @@ import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 import io.github.libxposed.service.XposedService
-import io.github.libxposed.service.XposedServiceHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.CopyOnWriteArraySet
 
-private const val REMOTE_PREF_GROUP = "app_danmu_injection"
-private const val KEY_INJECTION_ENABLED = "injection_enabled"
-private const val KEY_AUTO_PUSH_ENABLED = "auto_push_enabled"
-private const val KEY_CORE_PORT = "core_port"
-private const val KEY_CORE_TOKEN = "core_token"
-private const val RUNTIME_PREF_GROUP = "runtime"
-private const val MIN_SUPPORTED_API_VERSION = 101
-private const val API_102_VERSION = 102
-private val TARGET_PACKAGES = setOf("com.fongmi.android.tv", "com.github.tvbox.osc")
+private const val REMOTE_PREF_GROUP = VideoShellInjectionRemoteConfig.PREF_GROUP
+private const val KEY_INJECTION_ENABLED = VideoShellInjectionRemoteConfig.KEY_INJECTION_ENABLED
+private const val KEY_AUTO_PUSH_ENABLED = VideoShellInjectionRemoteConfig.KEY_AUTO_PUSH_ENABLED
+private const val KEY_CORE_PORT = VideoShellInjectionRemoteConfig.KEY_CORE_PORT
+private const val KEY_CORE_TOKEN = VideoShellInjectionRemoteConfig.KEY_CORE_TOKEN
+private const val RUNTIME_PREF_GROUP = VideoShellInjectionRemoteConfig.RUNTIME_PREF_GROUP
+private const val MIN_SUPPORTED_API_VERSION = VideoShellInjectionRemoteConfig.MIN_SUPPORTED_API_VERSION
+private const val API_102_VERSION = VideoShellInjectionRemoteConfig.API_102_VERSION
+private val TARGET_PACKAGES = VideoShellInjectionRemoteConfig.TARGET_PACKAGES
 
 private data class VideoShellInjectionState(
     val loading: Boolean = true,
@@ -490,11 +491,7 @@ private fun syncRuntimeAccessToRemotePreferences(
     context: android.content.Context,
     remotePrefs: android.content.SharedPreferences
 ) {
-    val access = resolveRuntimeAccess(context)
-    remotePrefs.edit()
-        .putInt(KEY_CORE_PORT, access.port)
-        .putString(KEY_CORE_TOKEN, access.runtimeToken)
-        .apply()
+    VideoShellInjectionConfigPublisher.publishToPreferences(context, remotePrefs)
 }
 
 private fun hasRemotePreferencesCapability(service: XposedService): Boolean {
@@ -527,71 +524,3 @@ private data class SaveResult(
     val ok: Boolean,
     val message: String
 )
-
-private object VideoShellXposedServiceRegistry {
-    @Volatile
-    private var registered = false
-    private val services = CopyOnWriteArraySet<XposedService>()
-    private val listeners = CopyOnWriteArraySet<() -> Unit>()
-
-    fun currentService(): XposedService? {
-        ensureRegistered()
-        return selectBestService()
-    }
-
-    fun addListener(listener: () -> Unit): () -> Unit {
-        listeners.add(listener)
-        ensureRegistered()
-        if (selectBestService() != null) runCatching { listener() }
-        return { listeners.remove(listener) }
-    }
-
-    private fun ensureRegistered() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || registered) return
-        synchronized(this) {
-            if (registered) return
-            registered = true
-            runCatching {
-                XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
-                    override fun onServiceBind(service: XposedService) {
-                        services.add(service)
-                        notifyListeners()
-                    }
-
-                    override fun onServiceDied(service: XposedService) {
-                        services.remove(service)
-                        notifyListeners()
-                    }
-                })
-            }.onFailure {
-                registered = false
-            }
-        }
-    }
-
-    private fun selectBestService(): XposedService? {
-        return services.maxByOrNull { service -> serviceScore(service) }
-    }
-
-    private fun serviceScore(service: XposedService): Int {
-        var score = 0
-        val apiVersion = runCatching { service.apiVersion }.getOrDefault(-1)
-        if (apiVersion >= MIN_SUPPORTED_API_VERSION) {
-            score += 1_000 + apiVersion.coerceAtMost(999)
-        } else if (apiVersion > 0) {
-            score += apiVersion
-        }
-        val scopeReady = runCatching { service.scope.any { it in TARGET_PACKAGES } }.getOrDefault(false)
-        if (scopeReady) score += 200
-        val prefsReady = apiVersion >= MIN_SUPPORTED_API_VERSION && scopeReady && hasRemotePreferencesCapability(service) &&
-            runCatching { service.getRemotePreferences(REMOTE_PREF_GROUP) }.isSuccess
-        if (prefsReady) score += 50
-        return score
-    }
-
-    private fun notifyListeners() {
-        listeners.forEach { listener ->
-            runCatching { listener() }
-        }
-    }
-}

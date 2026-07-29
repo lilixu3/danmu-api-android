@@ -1,8 +1,8 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 
@@ -292,10 +292,10 @@ fun WorkDirScreen(
     }
 
     if (showWorkDirDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = { showWorkDirDialog = false },
-            style = AppBottomSheetStyle.Form,
-            tone = AppBottomSheetTone.Brand,
+            style = AppDialogStyle.Form,
+            tone = AppDialogTone.Brand,
             title = { Text("设置工作目录") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -346,14 +346,14 @@ fun WorkDirScreen(
     }
 
     if (showAllFilesAccessDialog) {
-        AppBottomSheetDialog(
+        AppDialog(
             onDismissRequest = {
                 showAllFilesAccessDialog = false
                 pendingWorkDirPathForPermission = null
                 pendingMigrationForPermission = false
             },
-            style = AppBottomSheetStyle.Confirm,
-            tone = AppBottomSheetTone.Warning,
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
             title = { Text("需要完整存储权限") },
             text = {
                 Text("Android 11 及以上系统访问此目录需要“所有文件访问权限”，授权后会自动继续切换。")

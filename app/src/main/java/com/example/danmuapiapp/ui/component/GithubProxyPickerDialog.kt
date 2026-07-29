@@ -34,17 +34,14 @@ fun GithubProxyPickerDialog(
     onDismiss: () -> Unit,
     confirmText: String = "使用并继续"
 ) {
-    AppBottomSheetDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        style = AppBottomSheetStyle.Selection,
-        tone = AppBottomSheetTone.Info,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Info,
         title = { Text(title) },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
@@ -113,4 +110,3 @@ fun GithubProxyPickerDialog(
         }
     )
 }
-

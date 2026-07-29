@@ -1,11 +1,11 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.danmuapiapp.ui.screen.home
 
-import com.example.danmuapiapp.ui.component.AppBottomSheetDialog
-import com.example.danmuapiapp.ui.component.AppBottomSheetStyle
-import com.example.danmuapiapp.ui.component.AppBottomSheetTone
-import com.example.danmuapiapp.ui.component.AppPanelDialog
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppModalPanel
 
 import android.app.Activity
 import android.content.Context
@@ -29,11 +29,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -41,7 +41,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -153,7 +152,7 @@ import java.util.Locale
 import kotlin.math.max
 
 @Composable
-internal fun DownloadQueueSheet(
+internal fun DownloadQueueDialog(
     queueSummary: DownloadQueueSummary,
     queueLiveProgress: Float,
     queueStatusText: String,
@@ -181,9 +180,9 @@ internal fun DownloadQueueSheet(
         MaterialTheme.colorScheme.tertiary
     }
 
-    AppPanelDialog(
+    AppModalPanel(
         onDismissRequest = onDismiss,
-        horizontalPadding = 18.dp,
+        expanded = true,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
@@ -310,12 +309,12 @@ internal fun DownloadQueueSheet(
             QueueMetricBadge(modifier = Modifier.weight(1f), label = "失败", value = queueSummary.failed)
         }
 
-        val sheetScroll = rememberScrollState()
+        val queueScroll = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 320.dp)
-                .verticalScroll(sheetScroll),
+                .weight(1f)
+                .verticalScroll(queueScroll),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (queueDialogGroups.isEmpty()) {
@@ -349,11 +348,10 @@ internal fun DownloadQueueSheet(
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             DialogActionButton(
                 text = "下载页",

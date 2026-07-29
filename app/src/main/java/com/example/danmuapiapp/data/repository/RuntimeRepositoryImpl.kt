@@ -28,6 +28,7 @@ import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
+import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CoreRepository
@@ -299,10 +300,12 @@ class RuntimeRepositoryImpl @Inject constructor(
             persistSelectedVariant(variant, commit = false)
         }
 
-        val normalRuntimeAlive = isNormalRuntimeReachable(port)
+        // Constructor runs on the app main thread. Use local process markers here and
+        // leave HTTP/Root ownership reconciliation to the existing IO coroutine.
+        val normalRuntimeAlive = mode == RunMode.Normal && isNormalProcessRunning()
         val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
         val running = if (mode == RunMode.Root) {
-            isRootRuntimeOwnedByApp(port)
+            RootRuntimeController.hasPersistedRuntimeHint(context)
         } else {
             normalRuntimeAlive
         }
@@ -643,7 +646,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         applyPort: Boolean,
         applyToken: Boolean
     ) {
-        prefs.edit {
+        prefs.edit(commit = true) {
             if (applyPort) {
                 putInt("port", port)
             }
@@ -671,6 +674,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 lanUrl = buildLanUrl(lanIp, nextPort, nextToken)
             )
         }
+        VideoShellInjectionConfigPublisher.publishAsync(context)
     }
 
     private fun syncRuntimeEnvFromPrefs(mode: RunMode) {
@@ -1261,6 +1265,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 statusMessage = statusMessage ?: "接口已就绪，可直接在局域网访问"
             )
         }
+        VideoShellInjectionConfigPublisher.publishAsync(context)
         startUptimeCounter(startedAt)
         // 运行态改为事件驱动刷新时，这里启动热更新监听。
         handleWorkDirHotReload(_runtimeState.value)
@@ -2368,7 +2373,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isRootRuntimeOwnedByApp(port: Int): Boolean {
-        return isPortOpen(port) && isRuntimeOwnedByApp(port, RunMode.Root)
+        return RootRuntimeController.isRuntimeOwnedByAppPassive(context, port)
     }
 
     private fun isRuntimeOwnedByApp(port: Int, mode: RunMode): Boolean {

@@ -49,7 +49,7 @@ final class DanmuXposedBridgeClient {
             }
         }
         if (lastEmpty != null) return new DirectSearch("", lastEmpty);
-        throw last == null ? new IllegalStateException("App 端未同步弹幕 API 核心端口，请打开影视壳注入设置页重新检查") : last;
+        throw last == null ? new IllegalStateException("尚未收到弹幕 API 连接配置，请打开 DanmuApiApp 并确认服务与 LSPosed 注入已启用") : last;
     }
 
     List<EpisodeCandidate> loadEpisodesForAnime(AnimeRef anime, int targetEpisodeNumber) throws Exception {
@@ -82,7 +82,7 @@ final class DanmuXposedBridgeClient {
         ArrayList<String> bases = new ArrayList<>();
         InjectionSettings settings = settingsReader == null ? null : settingsReader.read(context, 9978);
         if (settings == null || settings.corePort <= 0 || settings.corePort > 65535) {
-            throw new IllegalStateException("App 端未同步弹幕 API 核心端口，请打开影视壳注入设置页重新检查");
+            throw new IllegalStateException("尚未收到弹幕 API 连接配置，请打开 DanmuApiApp 并确认服务与 LSPosed 注入已启用");
         }
         String base = "http://127.0.0.1:" + settings.corePort;
         String configured = settings.coreToken.isEmpty() ? base : base + "/" + urlEncode(settings.coreToken);

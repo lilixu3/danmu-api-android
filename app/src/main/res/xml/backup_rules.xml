@@ -23,4 +23,7 @@
     <!-- Extracted node_modules: can be re-extracted from assets. -->
     <exclude domain="file" path="nodejs-project/node_modules" />
 
+    <!-- Never restore one installation's runtime ownership marker into another. -->
+    <exclude domain="sharedpref" path="runtime_identity.xml" />
+
 </full-backup-content>
