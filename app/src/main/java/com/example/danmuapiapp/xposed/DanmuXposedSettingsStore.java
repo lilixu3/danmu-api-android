@@ -17,6 +17,8 @@ final class DanmuXposedSettingsStore {
     private static final String KEY_OFFSET_SEC = "offset_sec";
     private static final String KEY_FONT_SIZE = "font_size";
     private static final String KEY_SHELL_PORT = "shell_port";
+    private static final String KEY_UI_THEME_MODE = "ui_theme_mode";
+    /** Kept for migration and compatibility with a host process still running older module code. */
     private static final String KEY_UI_DARK_THEME = "ui_dark_theme";
     private static final String KEY_EPISODE_SHOW_TITLES = "episode_show_titles";
 
@@ -41,7 +43,7 @@ final class DanmuXposedSettingsStore {
             double offset = safeParseDouble(prefs.getString(KEY_OFFSET_SEC, "0"), 0.0d);
             int fontSize = safeParseInt(prefs.getString(KEY_FONT_SIZE, ""));
             int storedPort = prefs.getInt(KEY_SHELL_PORT, normalizedFallbackPort);
-            boolean darkTheme = prefs.getBoolean(KEY_UI_DARK_THEME, false);
+            DanmuThemeMode themeMode = readThemeMode(prefs, DanmuThemeMode.FOLLOW_HOST);
             int corePort = 0;
             String coreToken = "";
             SharedPreferences remotePrefs = remotePreferences(remoteProvider);
@@ -51,12 +53,13 @@ final class DanmuXposedSettingsStore {
                 offset = safeParseDouble(remotePrefs.getString(KEY_OFFSET_SEC, formatOffsetSeconds(offset)), offset);
                 fontSize = safeParseInt(remotePrefs.getString(KEY_FONT_SIZE, fontSize > 0 ? String.valueOf(fontSize) : ""));
                 storedPort = remotePrefs.getInt(KEY_SHELL_PORT, storedPort);
-                darkTheme = remotePrefs.getBoolean(KEY_UI_DARK_THEME, darkTheme);
+                themeMode = readThemeMode(remotePrefs, themeMode);
                 corePort = remotePrefs.getInt(KEY_CORE_PORT, 0);
                 coreToken = normalizeToken(remotePrefs.getString(KEY_CORE_TOKEN, ""));
             }
             int port = normalizePortOrFallback(storedPort, normalizedFallbackPort);
-            return new InjectionSettings(injectionEnabled, autoPush, offset, fontSize > 0 ? fontSize : -1, port, darkTheme, corePort, coreToken);
+            return new InjectionSettings(injectionEnabled, autoPush, offset,
+                fontSize > 0 ? fontSize : -1, port, themeMode, corePort, coreToken);
         } catch (Throwable throwable) {
             return defaultSettings(normalizedFallbackPort);
         }
@@ -72,8 +75,10 @@ final class DanmuXposedSettingsStore {
         try {
             String formattedOffset = formatOffsetSeconds(settings.offsetSec);
             String formattedFontSize = settings.fontSize > 0 ? String.valueOf(settings.fontSize) : "";
+            boolean legacyDarkTheme = settings.themeMode.resolveDark(context);
             SharedPreferences localPrefs = context.getSharedPreferences(PREFS_INJECTION, Context.MODE_PRIVATE);
-            boolean localOk = commitInjectionSettings(localPrefs, formattedOffset, formattedFontSize, settings);
+            boolean localOk = commitInjectionSettings(
+                localPrefs, formattedOffset, formattedFontSize, settings, legacyDarkTheme);
             boolean remoteAttempted = false;
             boolean remoteOk = false;
             SharedPreferences remotePrefs = null;
@@ -85,7 +90,8 @@ final class DanmuXposedSettingsStore {
             if (remotePrefs != null) {
                 remoteAttempted = true;
                 try {
-                    remoteOk = commitInjectionSettings(remotePrefs, formattedOffset, formattedFontSize, settings);
+                    remoteOk = commitInjectionSettings(
+                        remotePrefs, formattedOffset, formattedFontSize, settings, legacyDarkTheme);
                     if (!remoteOk) warn(logger, "save injection settings failed: remote commit returned false");
                 } catch (Throwable remoteEx) {
                     warn(logger, "save injection settings remote write failed: " + remoteEx.getMessage());
@@ -150,13 +156,20 @@ final class DanmuXposedSettingsStore {
         }
     }
 
-    private static boolean commitInjectionSettings(SharedPreferences prefs, String formattedOffset, String formattedFontSize, InjectionSettings settings) {
+    private static boolean commitInjectionSettings(
+        SharedPreferences prefs,
+        String formattedOffset,
+        String formattedFontSize,
+        InjectionSettings settings,
+        boolean legacyDarkTheme
+    ) {
         if (prefs == null || settings == null) return false;
         return prefs.edit()
             .putString(KEY_OFFSET_SEC, formattedOffset)
             .putString(KEY_FONT_SIZE, formattedFontSize)
             .putInt(KEY_SHELL_PORT, settings.shellPort)
-            .putBoolean(KEY_UI_DARK_THEME, settings.darkTheme)
+            .putInt(KEY_UI_THEME_MODE, settings.themeMode.persistedValue)
+            .putBoolean(KEY_UI_DARK_THEME, legacyDarkTheme)
             .commit();
     }
 
@@ -168,7 +181,25 @@ final class DanmuXposedSettingsStore {
     }
 
     private static InjectionSettings defaultSettings(int normalizedFallbackPort) {
-        return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort, false, 0, "");
+        return new InjectionSettings(true, true, 0.0d, -1, normalizedFallbackPort,
+            DanmuThemeMode.FOLLOW_HOST, 0, "");
+    }
+
+    private static DanmuThemeMode readThemeMode(SharedPreferences prefs, DanmuThemeMode fallback) {
+        if (prefs == null) return fallback;
+        try {
+            if (prefs.contains(KEY_UI_THEME_MODE)) {
+                return DanmuThemeMode.fromPersistedValue(prefs.getInt(
+                    KEY_UI_THEME_MODE, fallback.persistedValue));
+            }
+            if (prefs.contains(KEY_UI_DARK_THEME)) {
+                return DanmuThemeMode.fromLegacyDarkTheme(
+                    prefs.getBoolean(KEY_UI_DARK_THEME, false));
+            }
+        } catch (ClassCastException ignored) {
+            // Ignore a malformed value and preserve the last valid local/remote choice.
+        }
+        return fallback;
     }
 
     private static SharedPreferences remotePreferences(RemotePreferencesProvider remoteProvider) {

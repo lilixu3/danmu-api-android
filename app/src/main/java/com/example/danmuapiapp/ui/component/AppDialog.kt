@@ -1,7 +1,6 @@
 package com.example.danmuapiapp.ui.component
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,6 +26,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.danmuapiapp.ui.theme.DialogColorTokens
+import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 
 /** Layout contract for the structured application dialogs. */
 enum class AppDialogStyle {
@@ -64,7 +66,7 @@ private data class DialogTonePalette(
 @Composable
 private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
     val colors = MaterialTheme.colorScheme
-    val dark = isSystemInDarkTheme()
+    val dark = LocalAppDarkTheme.current
     return when (tone) {
         AppDialogTone.Neutral -> DialogTonePalette(
             foreground = colors.onSurfaceVariant,
@@ -77,15 +79,27 @@ private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
         )
 
         AppDialogTone.Success -> if (dark) {
-            DialogTonePalette(Color(0xFF72D6A3), Color(0xFF173B2B))
+            DialogTonePalette(
+                Color(DialogColorTokens.DARK_SUCCESS),
+                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER)
+            )
         } else {
-            DialogTonePalette(Color(0xFF176B45), Color(0xFFDDF4E7))
+            DialogTonePalette(
+                Color(DialogColorTokens.LIGHT_SUCCESS),
+                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER)
+            )
         }
 
         AppDialogTone.Warning -> if (dark) {
-            DialogTonePalette(Color(0xFFFFC56F), Color(0xFF493108))
+            DialogTonePalette(
+                Color(DialogColorTokens.DARK_WARNING),
+                Color(DialogColorTokens.DARK_WARNING_CONTAINER)
+            )
         } else {
-            DialogTonePalette(Color(0xFF855100), Color(0xFFFFE9C5))
+            DialogTonePalette(
+                Color(DialogColorTokens.LIGHT_WARNING),
+                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER)
+            )
         }
 
         AppDialogTone.Danger -> DialogTonePalette(
@@ -93,11 +107,10 @@ private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
             container = colors.errorContainer
         )
 
-        AppDialogTone.Info -> if (dark) {
-            DialogTonePalette(Color(0xFF9CCBFF), Color(0xFF173A5C))
-        } else {
-            DialogTonePalette(Color(0xFF1B6098), Color(0xFFDCEEFF))
-        }
+        AppDialogTone.Info -> DialogTonePalette(
+            foreground = colors.onPrimaryContainer,
+            container = colors.primaryContainer
+        )
     }
 }
 
@@ -124,7 +137,6 @@ fun AppDialog(
     dismissButton: (@Composable () -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null
 ) {
-    val palette = dialogTonePalette(tone)
     val maxWidth = when (style) {
         AppDialogStyle.Confirm -> 440.dp
         AppDialogStyle.Form,
@@ -137,6 +149,7 @@ fun AppDialog(
         maxWidth = maxWidth,
         modifier = modifier
     ) {
+        val palette = dialogTonePalette(tone)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -265,6 +278,11 @@ private fun AppDialogFrame(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    val parentColors = MaterialTheme.colorScheme
+    val parentTypography = MaterialTheme.typography
+    val parentShapes = MaterialTheme.shapes
+    val dialogColors = dialogColorScheme(parentColors, LocalAppDarkTheme.current)
+
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
@@ -272,30 +290,84 @@ private fun AppDialogFrame(
             decorFitsSystemWindows = false
         )
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center
+        MaterialTheme(
+            colorScheme = dialogColors,
+            typography = parentTypography,
+            shapes = parentShapes
         ) {
-            Surface(
-                modifier = modifier
-                    .widthIn(max = maxWidth)
-                    .fillMaxWidth()
-                    .heightIn(max = maxHeight),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                tonalElevation = 2.dp,
-                shadowElevation = 10.dp,
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f)
-                ),
-                content = content
-            )
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    modifier = modifier
+                        .widthIn(max = maxWidth)
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 12.dp,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    content = content
+                )
+            }
         }
+    }
+}
+
+private fun dialogColorScheme(base: ColorScheme, dark: Boolean): ColorScheme {
+    return if (dark) {
+        base.copy(
+            primary = Color(DialogColorTokens.DARK_PRIMARY),
+            onPrimary = Color(DialogColorTokens.DARK_ON_PRIMARY),
+            primaryContainer = Color(DialogColorTokens.DARK_PRIMARY_CONTAINER),
+            onPrimaryContainer = Color(DialogColorTokens.DARK_ON_PRIMARY_CONTAINER),
+            surface = Color(DialogColorTokens.DARK_DIALOG),
+            onSurface = Color(DialogColorTokens.DARK_TEXT_PRIMARY),
+            surfaceVariant = Color(DialogColorTokens.DARK_SURFACE_ACTIVE),
+            onSurfaceVariant = Color(DialogColorTokens.DARK_TEXT_SECONDARY),
+            surfaceContainerLowest = Color(DialogColorTokens.DARK_SURFACE_LOWEST),
+            surfaceContainerLow = Color(DialogColorTokens.DARK_DIALOG),
+            surfaceContainer = Color(DialogColorTokens.DARK_SURFACE_CONTAINER),
+            surfaceContainerHigh = Color(DialogColorTokens.DARK_SURFACE_HIGH),
+            surfaceContainerHighest = Color(DialogColorTokens.DARK_SURFACE_ACTIVE),
+            outline = Color(DialogColorTokens.DARK_OUTLINE),
+            outlineVariant = Color(DialogColorTokens.DARK_OUTLINE_VARIANT),
+            error = Color(DialogColorTokens.DARK_ERROR),
+            onError = Color(DialogColorTokens.DARK_ON_ERROR),
+            errorContainer = Color(DialogColorTokens.DARK_ERROR_CONTAINER),
+            onErrorContainer = Color(DialogColorTokens.DARK_ON_ERROR_CONTAINER)
+        )
+    } else {
+        base.copy(
+            primary = Color(DialogColorTokens.LIGHT_PRIMARY),
+            onPrimary = Color(DialogColorTokens.LIGHT_ON_PRIMARY),
+            primaryContainer = Color(DialogColorTokens.LIGHT_PRIMARY_CONTAINER),
+            onPrimaryContainer = Color(DialogColorTokens.LIGHT_ON_PRIMARY_CONTAINER),
+            surface = Color(DialogColorTokens.LIGHT_DIALOG),
+            onSurface = Color(DialogColorTokens.LIGHT_TEXT_PRIMARY),
+            surfaceVariant = Color(DialogColorTokens.LIGHT_SURFACE_ACTIVE),
+            onSurfaceVariant = Color(DialogColorTokens.LIGHT_TEXT_SECONDARY),
+            surfaceContainerLowest = Color.White,
+            surfaceContainerLow = Color(DialogColorTokens.LIGHT_DIALOG),
+            surfaceContainer = Color(DialogColorTokens.LIGHT_SURFACE_CONTAINER),
+            surfaceContainerHigh = Color(DialogColorTokens.LIGHT_SURFACE_HIGH),
+            surfaceContainerHighest = Color(DialogColorTokens.LIGHT_SURFACE_ACTIVE),
+            outline = Color(DialogColorTokens.LIGHT_OUTLINE),
+            outlineVariant = Color(DialogColorTokens.LIGHT_OUTLINE_VARIANT),
+            error = Color(DialogColorTokens.LIGHT_ERROR),
+            onError = Color(DialogColorTokens.LIGHT_ON_ERROR),
+            errorContainer = Color(DialogColorTokens.LIGHT_ERROR_CONTAINER),
+            onErrorContainer = Color(DialogColorTokens.LIGHT_ON_ERROR_CONTAINER)
+        )
     }
 }

@@ -116,7 +116,7 @@ final class DanmuXposedManualSearchDialog {
     void show(Activity activity) {
         try {
             InjectionSettings bootSettings = host.readInjectionSettings(activity, 9978);
-            final DanmuTheme t = DanmuTheme.of(bootSettings.darkTheme);
+            final DanmuTheme t = DanmuTheme.of(bootSettings.themeMode.resolveDark(activity));
             final boolean landscape = DanmuDialog.isLandscape(activity);
             SearchDialogState state = new SearchDialogState(
                 bootSettings.shellPort, host.readEpisodeShowTitles(activity), landscape);
