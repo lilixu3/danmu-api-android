@@ -23,6 +23,8 @@ import java.util.Locale;
 
 final class DanmuXposedPlaybackControls {
     private static final String BUTTON_TAG = "com.example.danmuapiapp.APP_DANMU_BUTTON";
+    private static final String NEWBOX_PLAYBACK_ACTIVITY =
+        "com.github.tvbox.osc.ui.activity.DetailActivity";
 
     private static final String[] ACTIVITY_HINTS = {
         "video", "player", "playback"
@@ -35,10 +37,12 @@ final class DanmuXposedPlaybackControls {
         "片头", "片尾", "弹幕", "弹幕搜索", "选集", "更多", "下集"
     };
     private static final String[] SHELL_CONTROL_ANCHOR_IDS = {
-        "danmaku", "ending", "episodes", "opening", "video", "audio", "text"
+        "danmaku", "ending", "episodes", "opening", "video", "audio", "text",
+        "danmu", "play_time_end", "play_time_start", "choose_series", "play_refresh",
+        "play_scale", "play_speed"
     };
     private static final String[] CONTAINER_ANCHOR_IDS = {
-        "bottom"
+        "bottom", "bottom_container", "container_playing_setting"
     };
 
     private DanmuXposedPlaybackControls() {
@@ -131,7 +135,7 @@ final class DanmuXposedPlaybackControls {
 
     static Anchor findAnchor(View root) {
         if (!(root instanceof ViewGroup)) return null;
-        // FongMi / OK影视 的底栏按钮都有稳定资源 ID，优先命中同一条底部控制行。
+        // FongMi / OK影视 / NewBox 的底栏按钮都有稳定资源 ID，优先命中同一条控制行。
         Anchor byControlId = findShellControlIdAnchor((ViewGroup) root);
         if (byControlId != null) return byControlId;
         // 兜底：如果某个壳只暴露 bottom 容器，继续在容器内按短文本控制项找同父锚点。
@@ -143,6 +147,7 @@ final class DanmuXposedPlaybackControls {
 
     private static boolean isKnownPlaybackActivityName(String className) {
         if (className == null || className.isEmpty()) return false;
+        if (NEWBOX_PLAYBACK_ACTIVITY.equals(className)) return true;
         if (className.endsWith(".VideoActivity")) return true;
         String lower = className.toLowerCase(Locale.ROOT);
         for (String hint : ACTIVITY_HINTS) {
