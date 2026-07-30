@@ -87,11 +87,22 @@ class InjectedPlaybackDialogPolicyTest {
         val source = readManualSearchDialogSource()
 
         assertTrue(source.contains("private static final class SearchDialogState"))
+        assertTrue(source.contains("private static final class DialogSessionSnapshot"))
+        assertTrue(source.contains("restoreCachedSession("))
         assertTrue(source.contains("dialog.setOnDismissListener(d -> state.active = false)"))
         assertTrue(source.contains("requestId != state.searchRequestId"))
         assertTrue(source.contains("requestId != state.detailRequestId"))
         assertFalse(source.contains("final int[] selectedEpisodeIndex"))
         assertFalse(source.contains("final boolean[] searching"))
+    }
+
+    @Test
+    fun `同一播放应复用弹窗搜索会话而换片后重新搜索`() {
+        assertTrue(DanmuXposedManualSearchDialog.canReuseSession("凡人修仙传", "手动关键词", "凡人修仙传"))
+        assertTrue(DanmuXposedManualSearchDialog.canReuseSession("", "凡人修仙传", "凡人修仙传"))
+        assertTrue(DanmuXposedManualSearchDialog.canReuseSession("NewBox", "unused", "newbox"))
+        assertFalse(DanmuXposedManualSearchDialog.canReuseSession("凡人修仙传", "凡人", "仙逆"))
+        assertFalse(DanmuXposedManualSearchDialog.canReuseSession("", "凡人修仙传", ""))
     }
 
     @Test
@@ -137,24 +148,39 @@ class InjectedPlaybackDialogPolicyTest {
     }
 
     @Test
-    fun `播放页识别和锚点应收窄到官方 VideoActivity 控制栏`() {
+    fun `播放页识别应覆盖官方 VideoActivity 和 NewBox DetailActivity 控制栏`() {
         val source = readPlaybackControlsSource()
         val hintsBlock = source.substringAfter("private static final String[] ACTIVITY_HINTS")
             .substringBefore("private static final String[] ANCHOR_TEXTS")
+        val idBlock = source.substringAfter("private static final String[] SHELL_CONTROL_ANCHOR_IDS")
+            .substringBefore("private static final String[] CONTAINER_ANCHOR_IDS")
+        val containerBlock = source.substringAfter("private static final String[] CONTAINER_ANCHOR_IDS")
+            .substringBefore("private DanmuXposedPlaybackControls")
 
         assertTrue(source.contains("private static boolean isKnownPlaybackActivityName"))
         assertTrue(source.contains("className.endsWith(\".VideoActivity\")"))
+        assertTrue(source.contains("com.github.tvbox.osc.ui.activity.DetailActivity"))
         assertTrue(source.contains("anchor == null || anchor.parent == null"))
         assertTrue(source.contains("\"episodes\""))
+        assertTrue(idBlock.contains("\"danmu\""))
+        assertTrue(idBlock.contains("\"play_time_end\""))
+        assertTrue(idBlock.contains("\"play_refresh\""))
+        assertTrue(containerBlock.contains("\"bottom_container\""))
+        assertTrue(containerBlock.contains("\"container_playing_setting\""))
         assertFalse("不能只靠 vod 这类宽泛命中判断播放页", hintsBlock.contains("\"vod\""))
     }
 
     @Test
     fun `清理无效兜底并在控制栏重建后重新调度注入`() {
         val source = readXposedSource()
+        val coordinatorSource = readPushCoordinatorSource()
+        val mediaReaderSource = readShellMediaReaderSource()
 
         assertTrue(source.contains("button.addOnAttachStateChangeListener"))
         assertTrue(source.contains("scheduleInject(activity)"))
+        assertTrue(coordinatorSource.contains("shellMediaReader.read(currentActivity(), preferredPort)"))
+        assertTrue(mediaReaderSource.contains("tv_info_name1"))
+        assertTrue(mediaReaderSource.contains("com.github.tvbox.osc.bean.VodInfo"))
         assertFalse(source.contains("skip floating injection"))
         assertFalse(source.contains("final boolean fromResource"))
         assertFalse(source.contains("private ShellMedia readShellMedia()"))
@@ -182,6 +208,10 @@ class InjectedPlaybackDialogPolicyTest {
 
     private fun readPushCoordinatorSource(): String {
         return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedPushCoordinator.java")
+    }
+
+    private fun readShellMediaReaderSource(): String {
+        return readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedShellMediaReader.java")
     }
 
     private fun readSource(relativePath: String): String {

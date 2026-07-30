@@ -165,15 +165,18 @@ final class AnimeRef {
     final String animeId;
     final String bangumiId;
     final String title;
+    final String year;
     final int episodeCount;
     final String source;
     final String type;
 
-    AnimeRef(String coreBase, String animeId, String bangumiId, String title, int episodeCount, String source, String type) {
+    AnimeRef(String coreBase, String animeId, String bangumiId, String title, String year,
+             int episodeCount, String source, String type) {
         this.coreBase = coreBase == null ? "" : coreBase;
         this.animeId = animeId == null ? "" : animeId;
         this.bangumiId = bangumiId == null ? "" : bangumiId;
         this.title = title == null ? "" : title;
+        this.year = year == null ? "" : year;
         this.episodeCount = episodeCount;
         this.source = source == null ? "" : source;
         this.type = type == null ? "" : type;

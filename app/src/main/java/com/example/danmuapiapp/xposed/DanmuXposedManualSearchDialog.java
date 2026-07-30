@@ -61,6 +61,7 @@ final class DanmuXposedManualSearchDialog {
         final boolean landscape;
         String searchMessage = "";
         String episodeMessage = "";
+        String currentMediaTitle = "";
         String currentDramaTitle = "";
         String currentEpisode = "";
         String selectedSource = "";
@@ -72,6 +73,51 @@ final class DanmuXposedManualSearchDialog {
             this.shellPort = shellPort;
             this.showTitles = showTitles;
             this.landscape = landscape;
+        }
+    }
+
+    /** Last completed manual-search session. It deliberately contains no Activity or View references. */
+    private static final class DialogSessionSnapshot {
+        final String mediaTitle;
+        final String keyword;
+        final int stage;
+        final int mode;
+        final int selectedEpisodeIndex;
+        final int selectedDramaIndex;
+        final String currentDramaTitle;
+        final String currentEpisode;
+        final String selectedSource;
+        final String searchMessage;
+        final String episodeMessage;
+        final ArrayList<CandidateHandle> animeHandles;
+        final ArrayList<SourceFilter> sourceFilters;
+        final ArrayList<CandidateHandle> episodeHandles;
+
+        DialogSessionSnapshot(
+            String keyword,
+            SearchDialogState state,
+            List<CandidateHandle> animeHandles,
+            List<SourceFilter> sourceFilters,
+            List<CandidateHandle> episodeHandles
+        ) {
+            this.mediaTitle = safe(state.currentMediaTitle);
+            this.keyword = safe(keyword).trim();
+            this.stage = state.stage;
+            this.mode = state.mode;
+            this.selectedEpisodeIndex = state.selectedEpisodeIndex;
+            this.selectedDramaIndex = state.selectedDramaIndex;
+            this.currentDramaTitle = safe(state.currentDramaTitle);
+            this.currentEpisode = safe(state.currentEpisode);
+            this.selectedSource = safe(state.selectedSource);
+            this.searchMessage = safe(state.searchMessage);
+            this.episodeMessage = safe(state.episodeMessage);
+            this.animeHandles = new ArrayList<>(animeHandles);
+            this.sourceFilters = new ArrayList<>(sourceFilters);
+            this.episodeHandles = new ArrayList<>(episodeHandles);
+        }
+
+        private static String safe(String value) {
+            return value == null ? "" : value;
         }
     }
 
@@ -108,6 +154,7 @@ final class DanmuXposedManualSearchDialog {
     }
 
     private final Host host;
+    private DialogSessionSnapshot cachedSession;
 
     DanmuXposedManualSearchDialog(Host host) {
         this.host = host;
@@ -311,9 +358,17 @@ final class DanmuXposedManualSearchDialog {
                     : dramaTitle + " · " + compactHandles.size() + " 集");
             };
 
+            final Runnable persistSession = () -> saveCachedSession(
+                keywordInput.getText() == null ? "" : keywordInput.getText().toString(),
+                state, animeHandles, sourceFilters, compactHandles);
+            final Runnable onEpisodeSelectionChanged = () -> {
+                refreshEpisodeHeader.run();
+                persistSession.run();
+            };
+
             final Runnable renderEpisodeGrid = () -> {
                 renderEpisodeGrid(activity, t, episodeGrid, compactHandles, episodeItemViews,
-                    state, feedback, refreshEpisodeHeader);
+                    state, feedback, onEpisodeSelectionChanged);
                 episodeEmpty.setVisibility(compactHandles.isEmpty() ? View.VISIBLE : View.GONE);
                 episodeGrid.setVisibility(compactHandles.isEmpty() ? View.GONE : View.VISIBLE);
                 refreshEpisodeHeader.run();
@@ -349,6 +404,7 @@ final class DanmuXposedManualSearchDialog {
                 state.stage = STAGE_DRAMA;
                 state.renderContent.run();
                 state.applyStageStatus.run();
+                persistSession.run();
             });
 
             // Repaints selection without rebuilding rows, so the focused row keeps focus.
@@ -365,6 +421,7 @@ final class DanmuXposedManualSearchDialog {
                 dramaRowIndexes.clear();
                 renderPlatformFilters(activity, t, platformFilterRow, sourceFilters, state.selectedSource, source -> {
                     state.selectedSource = source == null ? "" : source;
+                    persistSession.run();
                     state.renderDramaList.run();
                     platformFilterScroll.post(() -> {
                         if (state.selectedSource.isEmpty()) platformFilterScroll.smoothScrollTo(0, 0);
@@ -406,7 +463,8 @@ final class DanmuXposedManualSearchDialog {
                         state.currentDramaTitle = parts[0];
                         applyDramaSelection.run();
                         loadAnimeDetail(activity, candidate, state, episodeScroll, compactHandles,
-                            searchButton, statusText, feedback, renderEpisodeGrid, episodeItemViews);
+                            searchButton, statusText, feedback, renderEpisodeGrid, episodeItemViews,
+                            persistSession);
                     });
                     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -441,12 +499,14 @@ final class DanmuXposedManualSearchDialog {
                     Toast.makeText(activity, "先输入剧名", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                cachedSession = null;
                 state.mode = MODE_ANIME;
                 compactHandles.clear();
                 episodeItemViews.clear();
                 state.selectedEpisodeIndex = 0;
                 state.selectedDramaIndex = -1;
                 state.currentDramaTitle = "";
+                state.episodeMessage = "";
                 episodeGrid.removeAllViews();
                 episodeEmpty.setVisibility(View.VISIBLE);
                 episodeGrid.setVisibility(View.GONE);
@@ -484,6 +544,7 @@ final class DanmuXposedManualSearchDialog {
                         }
                         state.renderDramaList.run();
                         state.renderContent.run();
+                        persistSession.run();
                     });
                 }, "DanmuSearchAnime").start();
             };
@@ -497,6 +558,17 @@ final class DanmuXposedManualSearchDialog {
                     host.autoPushCurrent(activity, state.shellPort, feedback);
                 }
             });
+
+            DialogSessionSnapshot openingSnapshot = cachedSession;
+            if (openingSnapshot != null && restoreCachedSession(
+                null, state, animeLabels, animeHandles, sourceFilters, compactHandles)) {
+                keywordInput.setText(openingSnapshot.keyword);
+                keywordInput.setSelection(keywordInput.getText().length());
+                renderEpisodeGrid.run();
+                state.renderDramaList.run();
+                state.renderContent.run();
+                state.applyStageStatus.run();
+            }
 
             dialog.setOnShowListener(d -> {
                 host.markPushHistoryViewed();
@@ -512,12 +584,25 @@ final class DanmuXposedManualSearchDialog {
                         if (media != null) {
                             state.shellPort = media.port;
                             state.currentEpisode = media.displayEpisode();
-                            if (keywordInput.getText() == null || keywordInput.getText().toString().trim().isEmpty()) {
-                                String normalized = normalizeDisplayTitle(media.title);
-                                keywordInput.setText(normalized.isEmpty() ? media.title : normalized);
+                            String normalized = normalizeDisplayTitle(media.title);
+                            String mediaTitle = normalized.isEmpty() ? media.title.trim() : normalized;
+                            if (!mediaTitle.isEmpty() && restoreCachedSession(
+                                mediaTitle, state, animeLabels, animeHandles, sourceFilters, compactHandles)) {
+                                DialogSessionSnapshot restored = cachedSession;
+                                keywordInput.setText(restored == null ? mediaTitle : restored.keyword);
                                 keywordInput.setSelection(keywordInput.getText().length());
+                                renderEpisodeGrid.run();
+                                state.renderDramaList.run();
+                                state.renderContent.run();
+                                state.applyStageStatus.run();
+                                scrollEpisodeGridToIndex(activity, episodeScroll, state.selectedEpisodeIndex,
+                                    state.gridColumns, state.gridRowHeightDp);
+                            } else if (!mediaTitle.isEmpty()) {
+                                state.currentMediaTitle = mediaTitle;
+                                keywordInput.setText(mediaTitle);
+                                keywordInput.setSelection(keywordInput.getText().length());
+                                searchAction.run();
                             }
-                            if (!media.title.isEmpty()) searchAction.run();
                         }
                     });
                 }, "DanmuReadMedia").start();
@@ -532,6 +617,92 @@ final class DanmuXposedManualSearchDialog {
         }
     }
 
+    private void saveCachedSession(
+        String keyword,
+        SearchDialogState state,
+        List<CandidateHandle> animeHandles,
+        List<SourceFilter> sourceFilters,
+        List<CandidateHandle> episodeHandles
+    ) {
+        String cleanKeyword = keyword == null ? "" : keyword.trim();
+        if (state.searching || cleanKeyword.isEmpty() || animeHandles.isEmpty()) return;
+        cachedSession = new DialogSessionSnapshot(
+            cleanKeyword, state, animeHandles, sourceFilters, episodeHandles);
+    }
+
+    private boolean restoreCachedSession(
+        String currentMediaTitle,
+        SearchDialogState state,
+        ArrayList<String> animeLabels,
+        ArrayList<CandidateHandle> animeHandles,
+        ArrayList<SourceFilter> sourceFilters,
+        ArrayList<CandidateHandle> episodeHandles
+    ) {
+        DialogSessionSnapshot snapshot = cachedSession;
+        if (snapshot == null || snapshot.keyword.isEmpty() || snapshot.animeHandles.isEmpty()) return false;
+        if (currentMediaTitle != null && !canReuseSession(
+            snapshot.mediaTitle, snapshot.keyword, currentMediaTitle)) {
+            return false;
+        }
+
+        String activeEpisode = state.currentEpisode.isEmpty()
+            ? snapshot.currentEpisode : state.currentEpisode;
+        state.currentMediaTitle = currentMediaTitle == null || currentMediaTitle.trim().isEmpty()
+            ? snapshot.mediaTitle : currentMediaTitle.trim();
+        state.currentEpisode = activeEpisode;
+        state.currentDramaTitle = snapshot.currentDramaTitle;
+        state.selectedSource = snapshot.selectedSource;
+        state.searchMessage = snapshot.searchMessage;
+        state.episodeMessage = snapshot.episodeMessage;
+        state.searching = false;
+
+        animeLabels.clear();
+        animeHandles.clear();
+        sourceFilters.clear();
+        episodeHandles.clear();
+        animeHandles.addAll(snapshot.animeHandles);
+        sourceFilters.addAll(snapshot.sourceFilters);
+        episodeHandles.addAll(snapshot.episodeHandles);
+        for (CandidateHandle candidate : animeHandles) {
+            animeLabels.add(candidate.label);
+        }
+
+        state.selectedDramaIndex = snapshot.selectedDramaIndex >= 0
+            ? clamp(snapshot.selectedDramaIndex, 0, animeHandles.size() - 1) : -1;
+        if (episodeHandles.isEmpty()) {
+            state.mode = MODE_ANIME;
+            state.stage = STAGE_DRAMA;
+            state.selectedEpisodeIndex = 0;
+        } else {
+            state.mode = snapshot.mode == MODE_EPISODE ? MODE_EPISODE : MODE_ANIME;
+            state.stage = snapshot.stage == STAGE_EPISODE ? STAGE_EPISODE : STAGE_DRAMA;
+            state.selectedEpisodeIndex = findEpisodeIndex(
+                episodeHandles, activeEpisode, snapshot.selectedEpisodeIndex);
+        }
+        return true;
+    }
+
+    static boolean canReuseSession(String cachedMediaTitle, String cachedKeyword, String currentMediaTitle) {
+        String current = currentMediaTitle == null ? "" : currentMediaTitle.trim();
+        if (current.isEmpty()) return false;
+        String media = cachedMediaTitle == null ? "" : cachedMediaTitle.trim();
+        if (!media.isEmpty()) return media.equalsIgnoreCase(current);
+        String keyword = cachedKeyword == null ? "" : cachedKeyword.trim();
+        return !keyword.isEmpty() && keyword.equalsIgnoreCase(current);
+    }
+
+    private int findEpisodeIndex(List<CandidateHandle> handles, String episodeHint, int fallbackIndex) {
+        if (handles == null || handles.isEmpty()) return 0;
+        int episodeNumber = extractEpisodeNumber(episodeHint == null ? "" : episodeHint);
+        if (episodeNumber > 0) {
+            for (int i = 0; i < handles.size(); i++) {
+                CandidateHandle candidate = handles.get(i);
+                if (candidate != null && extractEpisodeNumber(candidate.label) == episodeNumber) return i;
+            }
+        }
+        return clamp(fallbackIndex, 0, handles.size() - 1);
+    }
+
     private void loadAnimeDetail(
         Activity activity,
         CandidateHandle anime,
@@ -542,8 +713,16 @@ final class DanmuXposedManualSearchDialog {
         TextView statusText,
         PushFeedback feedback,
         Runnable renderEpisodeGrid,
-        ArrayList<TextView> episodeItemViews
+        ArrayList<TextView> episodeItemViews,
+        Runnable persistSession
     ) {
+        state.mode = MODE_ANIME;
+        state.selectedEpisodeIndex = 0;
+        state.episodeMessage = "";
+        compactHandles.clear();
+        episodeItemViews.clear();
+        renderEpisodeGrid.run();
+        persistSession.run();
         statusText.setText("正在加载剧集：" + anime.label);
         searchButton.setEnabled(false);
         long requestId = ++state.detailRequestId;
@@ -558,7 +737,8 @@ final class DanmuXposedManualSearchDialog {
                     state.mode = MODE_EPISODE;
                     compactHandles.clear();
                     compactHandles.addAll(result.candidates);
-                    int targetIndex = clamp(result.selectedIndex, 0, result.candidates.size() - 1);
+                    int targetIndex = findEpisodeIndex(
+                        result.candidates, state.currentEpisode, result.selectedIndex);
                     state.selectedEpisodeIndex = targetIndex;
                     feedback.onPushInfo(host.formatLastPushInfo(activity));
                     renderEpisodeGrid.run();
@@ -567,12 +747,15 @@ final class DanmuXposedManualSearchDialog {
                     scrollEpisodeGridToIndex(activity, episodeScroll, targetIndex,
                         state.gridColumns, state.gridRowHeightDp);
                     focusEpisodeCell(episodeItemViews, targetIndex);
+                    persistSession.run();
                 } else {
                     state.mode = MODE_ANIME;
                     state.selectedEpisodeIndex = 0;
+                    state.episodeMessage = "";
                     compactHandles.clear();
                     renderEpisodeGrid.run();
                     state.renderContent.run();
+                    persistSession.run();
                 }
             });
         }, "DanmuAnimeDetail").start();

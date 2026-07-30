@@ -4,6 +4,7 @@ import static com.example.danmuapiapp.xposed.DanmuXposedHttp.httpGet;
 import static com.example.danmuapiapp.xposed.DanmuXposedHttp.urlEncode;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.extractEpisodeNumber;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.extractSourceFromTitle;
+import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.extractYear;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.joinNonBlank;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeDisplayTitle;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeSearchTitle;
@@ -125,8 +126,12 @@ final class DanmuXposedBridgeClient {
             if (sourceRaw.isEmpty()) sourceRaw = readString(item, "source", "sourceName", "provider", "api", "from");
             String source = normalizeSourceKey(sourceRaw);
             String type = readString(item, "typeDescription", "type");
+            String year = extractYear(
+                readString(item, "year", "publishYear", "releaseYear", "startDate", "airDate", "date"),
+                name);
             int episodeCount = Math.max(0, readInt(item, "episodeCount", "totalEpisodes", "count"));
-            result.add(new AnimeRef(coreBase, animeId, bangumiId, name, episodeCount, source, type));
+            result.add(new AnimeRef(
+                coreBase, animeId, bangumiId, name, year, episodeCount, source, type));
         }
         return result;
     }

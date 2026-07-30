@@ -61,12 +61,7 @@ final class DanmuXposedEpisodeRepository {
                 AnimeRef anime = search.animes.get(i);
                 String handle = UUID.randomUUID().toString();
                 animeRefs.put(handle, anime);
-                String countLabel = anime.episodeCount > 0 ? "共" + anime.episodeCount + "集" : "";
-                String sourceLabel = displaySourceName(anime.source);
-                String titleLabel = normalizeDisplayTitle(anime.title);
-                if (titleLabel.isEmpty()) titleLabel = anime.title;
-                String label = joinNonBlank(titleLabel, countLabel, sourceLabel, anime.type);
-                if (label.isEmpty()) label = "剧名 " + (result.candidates.size() + 1);
+                String label = buildAnimeCandidateLabel(anime, result.candidates.size() + 1);
                 result.candidates.add(new CandidateHandle(MODE_ANIME, handle, label, anime.source));
             }
             result.filters.addAll(buildSourceFilters(result.candidates));
@@ -75,6 +70,16 @@ final class DanmuXposedEpisodeRepository {
             result.message = "弹幕 API 核心搜索失败：" + formatError(throwable);
         }
         return result;
+    }
+
+    static String buildAnimeCandidateLabel(AnimeRef anime, int fallbackNumber) {
+        if (anime == null) return "剧名 " + Math.max(1, fallbackNumber);
+        String countLabel = anime.episodeCount > 0 ? "共" + anime.episodeCount + "集" : "";
+        String sourceLabel = displaySourceName(anime.source);
+        String titleLabel = normalizeDisplayTitle(anime.title);
+        if (titleLabel.isEmpty()) titleLabel = anime.title;
+        String label = joinNonBlank(titleLabel, anime.year, countLabel, sourceLabel, anime.type);
+        return label.isEmpty() ? "剧名 " + Math.max(1, fallbackNumber) : label;
     }
 
     BridgeResult loadAnimeDetail(String animeHandle, String episodeHint) {

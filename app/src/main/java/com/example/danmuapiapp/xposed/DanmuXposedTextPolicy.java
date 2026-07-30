@@ -93,6 +93,16 @@ final class DanmuXposedTextPolicy {
         return collapsed;
     }
 
+    static String extractYear(String... candidates) {
+        if (candidates == null) return "";
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.trim().isEmpty()) continue;
+            Matcher matcher = PATTERN_YEAR.matcher(candidate);
+            if (matcher.find()) return matcher.group();
+        }
+        return "";
+    }
+
     static String extractSourceFromTitle(String title) {
         if (title == null || title.trim().isEmpty()) return "";
         Matcher matcher = PATTERN_SOURCE_FROM_TITLE.matcher(title.trim());

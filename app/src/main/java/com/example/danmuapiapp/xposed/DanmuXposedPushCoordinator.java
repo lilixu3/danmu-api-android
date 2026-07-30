@@ -669,7 +669,7 @@ final class DanmuXposedPushCoordinator {
     }
 
     ShellMedia readShellMedia(int preferredPort) {
-        return shellMediaReader.read(preferredPort);
+        return shellMediaReader.read(currentActivity(), preferredPort);
     }
 
     private String formatError(Throwable throwable) {
