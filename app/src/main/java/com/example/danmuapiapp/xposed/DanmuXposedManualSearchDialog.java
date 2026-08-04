@@ -22,6 +22,12 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The dialog behind the injected "APP弹幕" button: search a title, pick a source, pick an
@@ -55,6 +61,10 @@ final class DanmuXposedManualSearchDialog {
         int gridRowHeightDp = CELL_HEIGHT_DP + DanmuTheme.SPACE_1 * 2;
         long searchRequestId = 0L;
         long detailRequestId = 0L;
+        long mediaRequestId = 0L;
+        Future<?> searchTask;
+        Future<?> detailTask;
+        Future<?> mediaTask;
         boolean showTitles;
         boolean searching = false;
         boolean active = true;
@@ -130,7 +140,7 @@ final class DanmuXposedManualSearchDialog {
 
         BridgeResult queryBridgeAnimeSearch(Activity activity, String title);
 
-        BridgeResult loadAnimeDetailDirect(String animeHandle, String episodeHint);
+        BridgeResult loadAnimeDetailDirect(CandidateHandle animeHandle, String episodeHint);
 
         void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, PushFeedback feedback);
 
@@ -148,16 +158,29 @@ final class DanmuXposedManualSearchDialog {
 
         void showSettingsDialog(Activity activity, DanmuTheme theme, int shellPort, Runnable onChanged);
 
-        EpisodeCandidate episodeCandidate(String handle);
+        EpisodeCandidate episodeCandidate(CandidateHandle handle);
 
         void logError(String message, Throwable throwable);
     }
 
     private final Host host;
+    private final ThreadPoolExecutor requestExecutor;
     private DialogSessionSnapshot cachedSession;
+    private static final AtomicInteger REQUEST_THREAD_ID = new AtomicInteger();
 
     DanmuXposedManualSearchDialog(Host host) {
         this.host = host;
+        this.requestExecutor = new ThreadPoolExecutor(
+            2, 2, 30L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(8),
+            runnable -> {
+                Thread thread = new Thread(
+                    runnable, "DanmuDialogWorker-" + REQUEST_THREAD_ID.incrementAndGet());
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy());
+        this.requestExecutor.allowCoreThreadTimeOut(true);
     }
 
     void show(Activity activity) {
@@ -401,6 +424,10 @@ final class DanmuXposedManualSearchDialog {
             numberModeButton.setOnClickListener(modeToggle);
             titleModeButton.setOnClickListener(modeToggle);
             episodeBackButton.setOnClickListener(v -> {
+                state.detailRequestId++;
+                cancelTask(state.detailTask);
+                state.detailTask = null;
+                searchButton.setEnabled(true);
                 state.stage = STAGE_DRAMA;
                 state.renderContent.run();
                 state.applyStageStatus.run();
@@ -483,7 +510,15 @@ final class DanmuXposedManualSearchDialog {
 
             AlertDialog dialog = DanmuDialog.create(activity, root);
             closeButton.setOnClickListener(v -> dialog.dismiss());
-            dialog.setOnDismissListener(d -> state.active = false);
+            dialog.setOnDismissListener(d -> {
+                state.active = false;
+                state.searchRequestId++;
+                state.detailRequestId++;
+                state.mediaRequestId++;
+                cancelTask(state.searchTask);
+                cancelTask(state.detailTask);
+                cancelTask(state.mediaTask);
+            });
             historyButton.setOnClickListener(v -> {
                 host.showPushHistoryDialog(activity, t);
                 updateNotifyDot.run();
@@ -498,6 +533,11 @@ final class DanmuXposedManualSearchDialog {
                 if (keyword.isEmpty()) {
                     Toast.makeText(activity, "先输入剧名", Toast.LENGTH_SHORT).show();
                     return;
+                }
+                if (state.mediaTask != null) {
+                    state.mediaRequestId++;
+                    cancelTask(state.mediaTask);
+                    state.mediaTask = null;
                 }
                 cachedSession = null;
                 state.mode = MODE_ANIME;
@@ -519,34 +559,45 @@ final class DanmuXposedManualSearchDialog {
                 state.searching = true;
                 state.searchMessage = "搜索中…";
                 state.detailRequestId++;
+                cancelTask(state.searchTask);
+                cancelTask(state.detailTask);
                 statusText.setText("搜索中…");
                 searchButton.setEnabled(false);
                 state.renderDramaList.run();
                 state.renderContent.run();
                 long requestId = ++state.searchRequestId;
-                new Thread(() -> {
-                    BridgeResult result = host.queryBridgeAnimeSearch(activity, keyword);
-                    activity.runOnUiThread(() -> {
-                        if (!state.active || requestId != state.searchRequestId) return;
-                        state.searching = false;
-                        searchButton.setEnabled(true);
-                        state.searchMessage = result.message;
-                        if (state.stage != STAGE_EPISODE) statusText.setText(result.message);
-                        animeLabels.clear();
-                        animeHandles.clear();
-                        sourceFilters.clear();
-                        if (result.ok) {
-                            animeHandles.addAll(result.candidates);
-                            sourceFilters.addAll(result.filters);
-                            for (CandidateHandle candidate : result.candidates) {
-                                animeLabels.add(candidate.label);
+                try {
+                    state.searchTask = requestExecutor.submit(() -> {
+                        BridgeResult result = host.queryBridgeAnimeSearch(activity, keyword);
+                        activity.runOnUiThread(() -> {
+                            if (!state.active || requestId != state.searchRequestId) return;
+                            state.searchTask = null;
+                            state.searching = false;
+                            searchButton.setEnabled(true);
+                            state.searchMessage = result.message;
+                            if (state.stage != STAGE_EPISODE) statusText.setText(result.message);
+                            animeLabels.clear();
+                            animeHandles.clear();
+                            sourceFilters.clear();
+                            if (result.ok) {
+                                animeHandles.addAll(result.candidates);
+                                sourceFilters.addAll(result.filters);
+                                for (CandidateHandle candidate : result.candidates) {
+                                    animeLabels.add(candidate.label);
+                                }
                             }
-                        }
-                        state.renderDramaList.run();
-                        state.renderContent.run();
-                        persistSession.run();
+                            state.renderDramaList.run();
+                            state.renderContent.run();
+                            persistSession.run();
+                        });
                     });
-                }, "DanmuSearchAnime").start();
+                } catch (RejectedExecutionException rejected) {
+                    state.searching = false;
+                    searchButton.setEnabled(true);
+                    state.searchMessage = "请求过多，请稍后重试";
+                    statusText.setText(state.searchMessage);
+                    state.renderDramaList.run();
+                }
             };
 
             searchButton.setOnClickListener(v -> searchAction.run());
@@ -575,37 +626,43 @@ final class DanmuXposedManualSearchDialog {
                 state.renderContent.run();
                 updateNotifyDot.run();
                 feedback.onPushInfo(host.formatLastPushInfo(activity));
-                new Thread(() -> {
-                    ShellMedia media = host.readShellMedia(state.shellPort);
-                    activity.runOnUiThread(() -> {
-                        if (!state.active) return;
-                        updateNotifyDot.run();
-                        feedback.onPushInfo(host.formatLastPushInfo(activity));
-                        if (media != null) {
-                            state.shellPort = media.port;
-                            state.currentEpisode = media.displayEpisode();
-                            String normalized = normalizeDisplayTitle(media.title);
-                            String mediaTitle = normalized.isEmpty() ? media.title.trim() : normalized;
-                            if (!mediaTitle.isEmpty() && restoreCachedSession(
-                                mediaTitle, state, animeLabels, animeHandles, sourceFilters, compactHandles)) {
-                                DialogSessionSnapshot restored = cachedSession;
-                                keywordInput.setText(restored == null ? mediaTitle : restored.keyword);
-                                keywordInput.setSelection(keywordInput.getText().length());
-                                renderEpisodeGrid.run();
-                                state.renderDramaList.run();
-                                state.renderContent.run();
-                                state.applyStageStatus.run();
-                                scrollEpisodeGridToIndex(activity, episodeScroll, state.selectedEpisodeIndex,
-                                    state.gridColumns, state.gridRowHeightDp);
-                            } else if (!mediaTitle.isEmpty()) {
-                                state.currentMediaTitle = mediaTitle;
-                                keywordInput.setText(mediaTitle);
-                                keywordInput.setSelection(keywordInput.getText().length());
-                                searchAction.run();
+                long mediaRequestId = ++state.mediaRequestId;
+                try {
+                    state.mediaTask = requestExecutor.submit(() -> {
+                        ShellMedia media = host.readShellMedia(state.shellPort);
+                        activity.runOnUiThread(() -> {
+                            if (!state.active || mediaRequestId != state.mediaRequestId) return;
+                            state.mediaTask = null;
+                            updateNotifyDot.run();
+                            feedback.onPushInfo(host.formatLastPushInfo(activity));
+                            if (media != null) {
+                                state.shellPort = media.port;
+                                state.currentEpisode = media.displayEpisode();
+                                String normalized = normalizeDisplayTitle(media.title);
+                                String mediaTitle = normalized.isEmpty() ? media.title.trim() : normalized;
+                                if (!mediaTitle.isEmpty() && restoreCachedSession(
+                                    mediaTitle, state, animeLabels, animeHandles, sourceFilters, compactHandles)) {
+                                    DialogSessionSnapshot restored = cachedSession;
+                                    keywordInput.setText(restored == null ? mediaTitle : restored.keyword);
+                                    keywordInput.setSelection(keywordInput.getText().length());
+                                    renderEpisodeGrid.run();
+                                    state.renderDramaList.run();
+                                    state.renderContent.run();
+                                    state.applyStageStatus.run();
+                                    scrollEpisodeGridToIndex(activity, episodeScroll, state.selectedEpisodeIndex,
+                                        state.gridColumns, state.gridRowHeightDp);
+                                } else if (!mediaTitle.isEmpty()) {
+                                    state.currentMediaTitle = mediaTitle;
+                                    keywordInput.setText(mediaTitle);
+                                    keywordInput.setSelection(keywordInput.getText().length());
+                                    searchAction.run();
+                                }
                             }
-                        }
+                        });
                     });
-                }, "DanmuReadMedia").start();
+                } catch (RejectedExecutionException ignored) {
+                    state.mediaTask = null;
+                }
             });
 
             DanmuDialog.showCentered(dialog, activity,
@@ -725,40 +782,49 @@ final class DanmuXposedManualSearchDialog {
         persistSession.run();
         statusText.setText("正在加载剧集：" + anime.label);
         searchButton.setEnabled(false);
+        cancelTask(state.detailTask);
         long requestId = ++state.detailRequestId;
-        new Thread(() -> {
-            BridgeResult result = host.loadAnimeDetailDirect(anime.handle, state.currentEpisode);
-            activity.runOnUiThread(() -> {
-                if (!state.active || requestId != state.detailRequestId) return;
-                searchButton.setEnabled(true);
-                statusText.setText(result.message);
-                if (result.ok && !result.candidates.isEmpty()) {
-                    state.episodeMessage = result.message;
-                    state.mode = MODE_EPISODE;
-                    compactHandles.clear();
-                    compactHandles.addAll(result.candidates);
-                    int targetIndex = findEpisodeIndex(
-                        result.candidates, state.currentEpisode, result.selectedIndex);
-                    state.selectedEpisodeIndex = targetIndex;
-                    feedback.onPushInfo(host.formatLastPushInfo(activity));
-                    renderEpisodeGrid.run();
-                    state.stage = STAGE_EPISODE;
-                    state.renderContent.run();
-                    scrollEpisodeGridToIndex(activity, episodeScroll, targetIndex,
-                        state.gridColumns, state.gridRowHeightDp);
-                    focusEpisodeCell(episodeItemViews, targetIndex);
-                    persistSession.run();
-                } else {
-                    state.mode = MODE_ANIME;
-                    state.selectedEpisodeIndex = 0;
-                    state.episodeMessage = "";
-                    compactHandles.clear();
-                    renderEpisodeGrid.run();
-                    state.renderContent.run();
-                    persistSession.run();
-                }
+        String episodeHint = state.currentEpisode;
+        try {
+            state.detailTask = requestExecutor.submit(() -> {
+                BridgeResult result = host.loadAnimeDetailDirect(anime, episodeHint);
+                activity.runOnUiThread(() -> {
+                    if (!state.active || requestId != state.detailRequestId) return;
+                    state.detailTask = null;
+                    searchButton.setEnabled(true);
+                    statusText.setText(result.message);
+                    if (result.ok && !result.candidates.isEmpty()) {
+                        state.episodeMessage = result.message;
+                        state.mode = MODE_EPISODE;
+                        compactHandles.clear();
+                        compactHandles.addAll(result.candidates);
+                        int targetIndex = findEpisodeIndex(
+                            result.candidates, state.currentEpisode, result.selectedIndex);
+                        state.selectedEpisodeIndex = targetIndex;
+                        feedback.onPushInfo(host.formatLastPushInfo(activity));
+                        renderEpisodeGrid.run();
+                        state.stage = STAGE_EPISODE;
+                        state.renderContent.run();
+                        scrollEpisodeGridToIndex(activity, episodeScroll, targetIndex,
+                            state.gridColumns, state.gridRowHeightDp);
+                        focusEpisodeCell(episodeItemViews, targetIndex);
+                        persistSession.run();
+                    } else {
+                        state.mode = MODE_ANIME;
+                        state.selectedEpisodeIndex = 0;
+                        state.episodeMessage = "";
+                        compactHandles.clear();
+                        renderEpisodeGrid.run();
+                        state.renderContent.run();
+                        persistSession.run();
+                    }
+                });
             });
-        }, "DanmuAnimeDetail").start();
+        } catch (RejectedExecutionException rejected) {
+            state.detailTask = null;
+            searchButton.setEnabled(true);
+            statusText.setText("请求过多，请稍后重试");
+        }
     }
 
     private void renderEpisodeGrid(
@@ -901,6 +967,11 @@ final class DanmuXposedManualSearchDialog {
         return new String[]{value.substring(0, sep), value.substring(sep + 3)};
     }
 
+    private void cancelTask(Future<?> task) {
+        if (task != null && !task.isDone()) task.cancel(true);
+        requestExecutor.purge();
+    }
+
     private String episodeCellLabel(CandidateHandle candidate, int index, boolean showTitles) {
         if (showTitles) return buildEpisodeTitleLabel(candidate, index);
         return shortEpisodeLabel(candidate, index);
@@ -909,7 +980,7 @@ final class DanmuXposedManualSearchDialog {
     private String buildEpisodeTitleLabel(CandidateHandle candidate, int index) {
         int number = candidate == null ? 0 : extractEpisodeNumber(candidate.label);
         String head = number > 0 ? "第" + number + "集" : "第" + (index + 1) + "集";
-        EpisodeCandidate episode = candidate == null ? null : host.episodeCandidate(candidate.handle);
+        EpisodeCandidate episode = candidate == null ? null : host.episodeCandidate(candidate);
         String title = episode == null ? "" : episode.name.trim();
         if (!title.isEmpty() && !title.equals(String.valueOf(number)) && !title.equals(head)) {
             return head + " · " + title;

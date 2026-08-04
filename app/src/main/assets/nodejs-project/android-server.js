@@ -1942,6 +1942,270 @@ function _applyDanmuXmlOverrides(xml, { offsetSec = 0, fontSize = null } = {}) {
   });
 }
 
+const _PREPARED_DANMAKU_TTL_MS = 2 * 60 * 1000;
+const _PREPARED_DANMAKU_MAX_ENTRIES = 8;
+const _PREPARED_DANMAKU_MAX_ENTRY_BYTES = 16 * 1024 * 1024;
+const _PREPARED_DANMAKU_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const _preparedDanmakuEntries = new Map();
+const _preparedDanmakuBySource = new Map();
+const _preparedDanmakuInflight = new Map();
+let _preparedDanmakuBytes = 0;
+let _preparedDanmakuSeq = 1;
+
+function _countDanmakuXml(xml) {
+  const text = String(xml || '');
+  let count = 0;
+  let index = 0;
+  while ((index = text.indexOf('<d', index)) >= 0) {
+    const next = text.charAt(index + 2);
+    if (next === '>' || /\s/.test(next)) count++;
+    index += 2;
+  }
+  return count;
+}
+
+function _looksLikeDanmakuXml(contentType, text) {
+  const type = String(contentType || '').toLowerCase();
+  const value = String(text || '').trimStart();
+  if (!value.startsWith('<')) return false;
+  return type.includes('xml') || value.startsWith('<?xml') ||
+    value.startsWith('<i>') || value.startsWith('<i ') ||
+    value.startsWith('<d>') || value.startsWith('<d ');
+}
+
+function _preparedDanmakuError(message, statusCode = 500) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function _deletePreparedDanmaku(id) {
+  const entry = _preparedDanmakuEntries.get(id);
+  if (!entry) return;
+  _preparedDanmakuEntries.delete(id);
+  if (_preparedDanmakuBySource.get(entry.sourceUrl) === id) {
+    _preparedDanmakuBySource.delete(entry.sourceUrl);
+  }
+  _preparedDanmakuBytes = Math.max(0, _preparedDanmakuBytes - entry.body.length);
+}
+
+function _cleanupPreparedDanmaku(now = Date.now()) {
+  for (const [id, entry] of _preparedDanmakuEntries.entries()) {
+    if (entry.expiresAtMs <= now) _deletePreparedDanmaku(id);
+  }
+  while (
+    _preparedDanmakuEntries.size > _PREPARED_DANMAKU_MAX_ENTRIES ||
+    _preparedDanmakuBytes > _PREPARED_DANMAKU_MAX_TOTAL_BYTES
+  ) {
+    const oldest = _preparedDanmakuEntries.keys().next().value;
+    if (!oldest) break;
+    _deletePreparedDanmaku(oldest);
+  }
+}
+
+function _getPreparedDanmakuBySource(sourceUrl) {
+  _cleanupPreparedDanmaku();
+  const id = _preparedDanmakuBySource.get(sourceUrl);
+  const entry = id ? _preparedDanmakuEntries.get(id) : null;
+  if (!entry) return null;
+  _preparedDanmakuEntries.delete(id);
+  _preparedDanmakuEntries.set(id, entry);
+  return entry;
+}
+
+function _getPreparedDanmakuById(id) {
+  _cleanupPreparedDanmaku();
+  const entry = _preparedDanmakuEntries.get(id);
+  if (!entry) return null;
+  _preparedDanmakuEntries.delete(id);
+  _preparedDanmakuEntries.set(id, entry);
+  return entry;
+}
+
+function _normalizePreparedDanmakuTarget(rawUrl) {
+  let target;
+  try {
+    target = new URL(String(rawUrl || '').trim());
+  } catch {
+    throw _preparedDanmakuError('缺少或无法解析弹幕 URL', 400);
+  }
+  if (target.protocol !== 'http:') {
+    throw _preparedDanmakuError('预取仅支持本机 HTTP 弹幕 URL', 400);
+  }
+  if (target.username || target.password) {
+    throw _preparedDanmakuError('弹幕 URL 不允许包含用户信息', 400);
+  }
+  const hostname = String(target.hostname || '').toLowerCase();
+  const isLoopbackHost = hostname === 'localhost' || hostname === '::1' ||
+    hostname === '[::1]' || hostname.startsWith('127.');
+  const targetPort = Number(target.port || 80);
+  if (!isLoopbackHost || targetPort !== PORT) {
+    throw _preparedDanmakuError('预取只允许访问当前核心服务', 400);
+  }
+  const pathname = _stripTokenPrefix(target.pathname || '/');
+  if (pathname !== '/api/v2/comment' && !pathname.startsWith('/api/v2/comment/')) {
+    throw _preparedDanmakuError('预取只允许弹幕评论接口', 400);
+  }
+  target.hash = '';
+  return target;
+}
+
+function _readDanmakuOverrides(urlObj) {
+  const offsetMsRaw = urlObj.searchParams.get('offsetMs') || urlObj.searchParams.get('offset_ms');
+  const offsetRaw = urlObj.searchParams.get('offset') || urlObj.searchParams.get('danmu_offset');
+  const fontRaw = urlObj.searchParams.get('fontSize') || urlObj.searchParams.get('font_size') ||
+    urlObj.searchParams.get('fontsize');
+  let offsetSec = 0;
+  if (offsetMsRaw && String(offsetMsRaw).trim() !== '') {
+    const ms = Number.parseFloat(String(offsetMsRaw));
+    if (Number.isFinite(ms)) offsetSec = ms / 1000.0;
+  } else if (offsetRaw && String(offsetRaw).trim() !== '') {
+    const seconds = Number.parseFloat(String(offsetRaw));
+    if (Number.isFinite(seconds)) offsetSec = seconds;
+  }
+  let fontSize = null;
+  if (fontRaw && String(fontRaw).trim() !== '') {
+    const parsed = Number.parseInt(String(fontRaw), 10);
+    if (Number.isFinite(parsed) && parsed > 0) fontSize = parsed;
+  }
+  return { offsetSec, fontSize };
+}
+
+async function _loadPreparedDanmaku(target, requestHeaders, clientIp) {
+  const { offsetSec, fontSize } = _readDanmakuOverrides(target);
+  const cleanUrl = new URL(target.toString());
+  for (const key of ['offset', 'danmu_offset', 'offsetMs', 'offset_ms', 'fontSize', 'font_size', 'fontsize']) {
+    cleanUrl.searchParams.delete(key);
+  }
+
+  const headers = { ...requestHeaders, host: cleanUrl.host };
+  delete headers['content-length'];
+  delete headers['content-encoding'];
+  const coreResponse = await handleRequest(new Request(cleanUrl.toString(), {
+    method: 'GET',
+    headers,
+  }), process.env, 'node', clientIp);
+  const contentType = String(coreResponse.headers.get('content-type') || '');
+  const rawText = await coreResponse.text();
+  if (coreResponse.status < 200 || coreResponse.status > 299) {
+    const summary = rawText.trim().replace(/\s+/g, ' ').slice(0, 160);
+    throw _preparedDanmakuError(`核心弹幕接口返回 HTTP ${coreResponse.status}${summary ? `: ${summary}` : ''}`, 502);
+  }
+
+  const outText = _applyDanmuXmlOverrides(rawText, { offsetSec, fontSize });
+  if (!_looksLikeDanmakuXml(contentType, outText)) {
+    throw _preparedDanmakuError('核心弹幕接口未返回有效 XML', 502);
+  }
+  const body = Buffer.from(outText, 'utf-8');
+  if (body.length > _PREPARED_DANMAKU_MAX_ENTRY_BYTES) {
+    throw _preparedDanmakuError('弹幕 XML 超出预取缓存上限', 413);
+  }
+  return {
+    sourceUrl: target.toString(),
+    body,
+    count: _countDanmakuXml(outText),
+    contentType: contentType.toLowerCase().includes('xml')
+      ? contentType
+      : 'application/xml; charset=utf-8',
+  };
+}
+
+function _cachePreparedDanmaku(payload) {
+  const oldId = _preparedDanmakuBySource.get(payload.sourceUrl);
+  if (oldId) _deletePreparedDanmaku(oldId);
+  const id = `${Date.now().toString(36)}-${(_preparedDanmakuSeq++).toString(36)}`;
+  const entry = {
+    ...payload,
+    id,
+    expiresAtMs: Date.now() + _PREPARED_DANMAKU_TTL_MS,
+  };
+  _preparedDanmakuEntries.set(id, entry);
+  _preparedDanmakuBySource.set(entry.sourceUrl, id);
+  _preparedDanmakuBytes += entry.body.length;
+  _cleanupPreparedDanmaku();
+  return entry;
+}
+
+async function _prepareDanmaku(rawUrl, requestHeaders, clientIp) {
+  const target = _normalizePreparedDanmakuTarget(rawUrl);
+  const sourceUrl = target.toString();
+  const cached = _getPreparedDanmakuBySource(sourceUrl);
+  if (cached) return { entry: cached, cached: true };
+
+  let pending = _preparedDanmakuInflight.get(sourceUrl);
+  if (!pending) {
+    pending = _loadPreparedDanmaku(target, requestHeaders, clientIp)
+      .then(_cachePreparedDanmaku);
+    _preparedDanmakuInflight.set(sourceUrl, pending);
+  }
+  try {
+    return { entry: await pending, cached: false };
+  } finally {
+    if (_preparedDanmakuInflight.get(sourceUrl) === pending) {
+      _preparedDanmakuInflight.delete(sourceUrl);
+    }
+  }
+}
+
+async function _handleDanmakuPrepare(req, res, fullUrl, clientIp, headers) {
+  if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
+    _sendJson(res, 403, { success: false, errorMessage: 'Forbidden' });
+    return;
+  }
+  if (String(req.method || 'GET').toUpperCase() !== 'GET') {
+    _sendJson(res, 405, { success: false, errorMessage: 'Method Not Allowed' });
+    return;
+  }
+  try {
+    const result = await _prepareDanmaku(fullUrl.searchParams.get('url'), headers, clientIp);
+    const entry = result.entry;
+    _sendJson(res, 200, {
+      success: true,
+      url: `http://127.0.0.1:${PORT}/__danmaku/prepared/${entry.id}.xml`,
+      count: entry.count,
+      size: entry.body.length,
+      expiresAt: entry.expiresAtMs,
+      cached: result.cached,
+    });
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || 500);
+    _sendJson(res, statusCode, {
+      success: false,
+      errorMessage: error?.message || '弹幕预取失败',
+    });
+  }
+}
+
+function _handlePreparedDanmaku(req, res, strippedPathname, fullUrl, clientIp) {
+  if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
+    _sendJson(res, 403, { success: false, errorMessage: 'Forbidden' });
+    return;
+  }
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    _sendJson(res, 405, { success: false, errorMessage: 'Method Not Allowed' });
+    return;
+  }
+  const prefix = '/__danmaku/prepared/';
+  const fileName = strippedPathname.substring(prefix.length);
+  const id = fileName.endsWith('.xml') ? fileName.slice(0, -4) : '';
+  if (!/^[a-z0-9-]+$/.test(id)) {
+    _sendJson(res, 404, { success: false, errorMessage: 'Prepared danmaku not found' });
+    return;
+  }
+  const entry = _getPreparedDanmakuById(id);
+  if (!entry) {
+    _sendJson(res, 404, { success: false, errorMessage: 'Prepared danmaku expired' });
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader('content-type', entry.contentType);
+  res.setHeader('content-length', String(entry.body.length));
+  res.setHeader('cache-control', 'no-store');
+  res.setHeader('x-danmaku-count', String(entry.count));
+  res.end(method === 'HEAD' ? undefined : entry.body);
+}
+
 function createMainServer() {
   const server = http.createServer(async (req, res) => {
     try {
@@ -2072,6 +2336,15 @@ function createMainServer() {
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
         const buf = await readRequestBody(req);
         body = buf.length ? buf : undefined;
+      }
+
+      if (strippedPathname === '/__danmaku/prepare') {
+        await _handleDanmakuPrepare(req, res, fullUrl, clientIp, headers);
+        return;
+      }
+      if (strippedPathname.startsWith('/__danmaku/prepared/')) {
+        _handlePreparedDanmaku(req, res, strippedPathname, fullUrl, clientIp);
+        return;
       }
 
       // ------------------------------------------------------------

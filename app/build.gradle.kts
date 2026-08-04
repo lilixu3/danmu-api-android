@@ -668,6 +668,11 @@ tasks.register<Exec>("testNodeRuntimeParsing") {
     commandLine("node", "node-tests/parse-dotenv-regression.js")
 }
 
+val testDanmakuPrepareCacheTask = tasks.register<Exec>("testDanmakuPrepareCache") {
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/danmaku-prepare-cache-regression.js")
+}
+
 tasks.register<Exec>("testBundledBrotliRuntime") {
     dependsOn("verifyBundledNodeModules")
     workingDir = rootProject.projectDir
@@ -1110,6 +1115,7 @@ tasks.named("preBuild").configure {
     dependsOn(testBundledBrotliRuntimeTask)
     dependsOn(testBundledNodeLockClosureTask)
     dependsOn(testBundledCoreRuntimeDependenciesTask)
+    dependsOn(testDanmakuPrepareCacheTask)
 }
 
 tasks.matching {

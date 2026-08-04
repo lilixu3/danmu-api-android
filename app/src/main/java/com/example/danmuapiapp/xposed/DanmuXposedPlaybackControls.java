@@ -39,7 +39,7 @@ final class DanmuXposedPlaybackControls {
     private static final String[] SHELL_CONTROL_ANCHOR_IDS = {
         "danmaku", "ending", "episodes", "opening", "video", "audio", "text",
         "danmu", "play_time_end", "play_time_start", "choose_series", "play_refresh",
-        "play_scale", "play_speed"
+        "play_scale", "play_speed", "play_player", "icon_danmaku_auto_search"
     };
     private static final String[] CONTAINER_ANCHOR_IDS = {
         "bottom", "bottom_container", "container_playing_setting"
@@ -49,9 +49,9 @@ final class DanmuXposedPlaybackControls {
     }
 
     static boolean looksLikePlaybackPage(Activity activity, ViewGroup decor, Anchor anchor) {
-        if (anchor == null || anchor.parent == null) return false;
         String className = activity.getClass().getName();
         if (isKnownPlaybackActivityName(className)) return true;
+        if (anchor == null || anchor.parent == null) return false;
         if (!looksLikeShellControlRow(anchor.parent)) return false;
         if (decor.getWidth() > decor.getHeight() && decor.getWidth() > dp(activity, 560)) return true;
         int orientation = activity.getResources().getConfiguration().orientation;
@@ -60,6 +60,10 @@ final class DanmuXposedPlaybackControls {
         return (flags & WindowManager.LayoutParams.FLAG_FULLSCREEN) != 0 ||
             activity.getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
             activity.getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+    }
+
+    static boolean isKnownPlaybackActivity(Activity activity) {
+        return activity != null && isKnownPlaybackActivityName(activity.getClass().getName());
     }
 
     static View createButton(Activity activity, View anchorView) {

@@ -1,10 +1,10 @@
 package com.example.danmuapiapp.xposed;
 
 import static com.example.danmuapiapp.xposed.DanmuXposedHttp.buildShellPushUrl;
-import static com.example.danmuapiapp.xposed.DanmuXposedHttp.countDanmaku;
 import static com.example.danmuapiapp.xposed.DanmuXposedHttp.httpGet;
+import static com.example.danmuapiapp.xposed.DanmuXposedHttp.isSuccessfulShellPushResponse;
+import static com.example.danmuapiapp.xposed.DanmuXposedHttp.prepareDanmaku;
 import static com.example.danmuapiapp.xposed.DanmuXposedHttp.urlEncode;
-import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.extractEpisodeNumber;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.joinNonBlank;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeDisplayTitle;
 import static com.example.danmuapiapp.xposed.DanmuXposedTextPolicy.normalizeSearchTitle;
@@ -49,6 +49,7 @@ final class DanmuXposedPushCoordinator {
     private final Host host;
     private final DanmuXposedEpisodeRepository episodeRepository;
     private final DanmuXposedShellMediaReader shellMediaReader = new DanmuXposedShellMediaReader();
+    private final PlaybackReadinessGate readinessGate = new PlaybackReadinessGate();
 
     private volatile boolean autoLoopStarted = false;
     private volatile boolean playbackActivityVisible = false;
@@ -63,6 +64,10 @@ final class DanmuXposedPushCoordinator {
     private volatile WeakReference<Activity> autoLoopActivity = null;
     private volatile PendingAutoPush pendingAutoPush = null;
     private final Object autoPlanLock = new Object();
+    private final Object autoMatchWorkLock = new Object();
+    private volatile String activeAutoMatchSignature = "";
+    private volatile long activeAutoMatchGeneration = 0L;
+    private volatile long activeAutoMatchObservedAtMs = 0L;
     private final Object pushGuardLock = new Object();
     private volatile String lastPushInfo = "";
     private volatile String lastPushUrl = "";
@@ -73,7 +78,8 @@ final class DanmuXposedPushCoordinator {
     private final LinkedList<String> pushHistory = new LinkedList<>();
     private static final int MAX_PUSH_HISTORY = 6;
     private static final String STATUS_NOT_READY = "not_ready";
-    private static final long PUSH_IN_FLIGHT_TTL_MS = 20_000L;
+    private static final String STATUS_SUPERSEDED = "superseded";
+    private static final long PUSH_IN_FLIGHT_TTL_MS = 45_000L;
     private static final long PUSH_RECENT_TTL_MS = 8_000L;
     private static final long AUTO_POLL_FAST_MS = 850L;
     private static final long AUTO_POLL_STABLE_MS = 4_000L;
@@ -82,6 +88,7 @@ final class DanmuXposedPushCoordinator {
     private static final long AUTO_POLL_ERROR_MS = 2_600L;
     private static final long AUTO_POLL_FAST_WINDOW_MS = 15_000L;
     private static final long AUTO_PENDING_FAST_WINDOW_MS = 20_000L;
+    private static final long AUTO_PENDING_TTL_MS = 120_000L;
     private static final long AUTO_FAILURE_COOLDOWN_MS = 15_000L;
 
     DanmuXposedPushCoordinator(Host host, DanmuXposedEpisodeRepository episodeRepository) {
@@ -114,9 +121,13 @@ final class DanmuXposedPushCoordinator {
     }
 
     void pushCandidate(Activity activity, CandidateHandle candidate, int shellPort, PushFeedback feedback) {
+        if (candidate == null || candidate.episodeCandidate == null) {
+            feedback.onStatus("剧集候选已过期，请重新搜索");
+            return;
+        }
         feedback.onStatus("正在推送：" + candidate.label);
         new Thread(() -> {
-            BridgeRow row = pushEpisodeCandidate(activity.getApplicationContext(), candidate.handle, shellPort);
+            BridgeRow row = pushEpisodeCandidate(activity.getApplicationContext(), candidate, shellPort);
             activity.runOnUiThread(() -> {
                 feedback.onStatus(row.message);
                 feedback.onPushInfo(formatLastPushInfo(activity));
@@ -127,7 +138,7 @@ final class DanmuXposedPushCoordinator {
         }, "DanmuDirectPush").start();
     }
 
-    BridgeRow pushEpisodeCandidate(Context context, String handle, int shellPort) {
+    BridgeRow pushEpisodeCandidate(Context context, CandidateHandle handle, int shellPort) {
         EpisodeCandidate candidate = episodeRepository.loadEpisodeCandidate(handle);
         if (candidate == null) return new BridgeRow("error", "剧集候选已过期，请重新搜索", "");
         return pushResolvedCandidate(context, candidate, shellPort, "已推送");
@@ -137,20 +148,35 @@ final class DanmuXposedPushCoordinator {
         PushGuard guard = null;
         try {
             InjectionSettings settings = host.readInjectionSettings(context, shellPort);
-            String danmakuUrl = applyDanmakuParams(candidate.url, settings);
+            String sourceDanmakuUrl = applyDanmakuParams(candidate.url, settings);
             int effectivePort = shellPort > 0 && shellPort <= 65535 ? shellPort : settings.shellPort;
-            String pushUrl = buildShellPushUrl(effectivePort, danmakuUrl);
-            guard = beginPushGuard(effectivePort, danmakuUrl);
+            effectivePort = DanmuXposedHostShell.resolve(context, effectivePort).port;
+            guard = beginPushGuard(effectivePort, sourceDanmakuUrl);
             if (!guard.allowed) {
                 String status = "recent".equals(guard.reason) ? "skip_recent" : "skip_inflight";
                 return new BridgeRow(status, "已跳过重复推送：" + candidate.displayLabel(), "");
             }
-            httpGet(pushUrl, 1200, 5000);
+
+            PreparedDanmaku prepared;
+            try {
+                prepared = prepareDanmaku(settings.corePort, sourceDanmakuUrl);
+            } catch (Throwable prepareError) {
+                throw new IllegalStateException(
+                    "弹幕预取失败，已取消宿主推送：" + formatError(prepareError), prepareError);
+            }
+            String pushDanmakuUrl = prepared.url;
+
+            String pushUrl = buildShellPushUrl(effectivePort, pushDanmakuUrl);
+            String pushResponse = httpGet(pushUrl, 1200, 5000);
+            if (!isSuccessfulShellPushResponse(pushResponse)) {
+                throw new IllegalStateException("宿主刷新未返回 ok：" + summarizeResponse(pushResponse));
+            }
             finishPushGuard(guard, true);
             String label = buildPushLabel(candidate);
-            String message = buildPushPendingMessage(prefix, label);
-            scheduleDanmakuCountUpdate(context, candidate, danmakuUrl);
-            return new BridgeRow("ok", message, danmakuUrl);
+            String message = buildPushResultMessage(prefix, label, prepared.count);
+            recordLastPush(context, message, pushDanmakuUrl);
+            notifyAutoPush(message);
+            return new BridgeRow("ok", message, pushDanmakuUrl);
         } catch (Throwable throwable) {
             if (guard != null && guard.allowed) finishPushGuard(guard, false);
             return new BridgeRow("error", "推送失败：" + formatError(throwable), "");
@@ -180,32 +206,51 @@ final class DanmuXposedPushCoordinator {
         }
         try {
             String matchSignature = media.matchSignature();
-            PendingAutoPush plan = getPendingAutoPush(matchSignature);
+            MediaIdentity target = MediaIdentity.from(media);
+            AutoMatchToken token = observeAutoMediaSelection(media);
+            PendingAutoPush plan = getPendingAutoPush(token);
             if (plan == null) {
-                int targetEpisodeNumber = extractEpisodeNumber(media.displayEpisode());
-                String searchTitle = normalizeSearchTitle(media.title);
-                if (searchTitle.isEmpty()) searchTitle = media.title;
-                DirectSearch search = episodeRepository.searchAnimeDirect(context, searchTitle);
-                if (search.animes.isEmpty()) {
-                    clearPendingAutoPush(matchSignature);
-                    return new BridgeRow("error", "自动推送未找到剧名：" + searchTitle, "");
+                synchronized (autoMatchWorkLock) {
+                    plan = getPendingAutoPush(token);
+                    if (plan == null) {
+                        if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
+                        long matchStartedAtMs = System.currentTimeMillis();
+                        String searchTitle = normalizeSearchTitle(media.title);
+                        if (searchTitle.isEmpty()) searchTitle = media.title;
+                        DirectSearch search = episodeRepository.searchAnimeDirect(context, searchTitle);
+                        if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
+                        if (search.animes.isEmpty()) {
+                            clearPendingAutoPush(token);
+                            return new BridgeRow("error", "自动推送未找到剧名：" + searchTitle, "");
+                        }
+                        EpisodeCandidate selected = episodeRepository.selectAutoEpisodeInSearchOrder(search.animes, target);
+                        if (!isAutoMatchCurrent(token) || !isCurrentActivitySelection(token, media.port)) {
+                            return supersededAutoPushRow();
+                        }
+                        if (selected == null) {
+                            clearPendingAutoPush(token);
+                            return new BridgeRow("error", "自动推送未找到可确认的同名同季剧集：" + media.title + " " + media.displayEpisode(), "");
+                        }
+                        long matchedAtMs = System.currentTimeMillis();
+                        plan = new PendingAutoPush(
+                            matchSignature, token.generation, selected, media.port,
+                            token.observedAtMs, matchedAtMs);
+                        if (!setPendingAutoPush(plan, token)) return supersededAutoPushRow();
+                        host.log(Log.INFO, "auto pre-match completed in " +
+                            Math.max(0L, matchedAtMs - matchStartedAtMs) + "ms; selection age=" +
+                            Math.max(0L, matchedAtMs - token.observedAtMs) + "ms");
+                    }
                 }
-                EpisodeCandidate selected = episodeRepository.selectAutoEpisodeInSearchOrder(search.animes, targetEpisodeNumber);
-                if (selected == null) {
-                    clearPendingAutoPush(matchSignature);
-                    return new BridgeRow("error", "自动推送未匹配到剧集：" + media.title + " " + media.displayEpisode(), "");
-                }
-                plan = new PendingAutoPush(matchSignature, selected, media.port, System.currentTimeMillis());
-                setPendingAutoPush(plan);
             }
-            if (!media.isReadyForDanmaku()) {
+            if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
+            if (!readinessGate.isReady(media)) {
                 String stateLabel = media.playbackStateLabel();
                 String message = "已预匹配：" + plan.candidate.displayLabel() + "，等待播放态推送" + (stateLabel.isEmpty() ? "" : " · " + stateLabel);
                 return new BridgeRow(STATUS_NOT_READY, message, plan.candidate.url);
             }
             BridgeRow pushed = pushResolvedCandidate(context, plan.candidate, media.port > 0 ? media.port : plan.shellPort, "自动推送成功");
             if ("ok".equals(pushed.status) || "skip_recent".equals(pushed.status)) {
-                clearPendingAutoPush(matchSignature);
+                clearPendingAutoPush(token);
             }
             return pushed;
         } catch (Throwable throwable) {
@@ -234,13 +279,13 @@ final class DanmuXposedPushCoordinator {
                     InjectionSettings settings = host.readInjectionSettings(appContext, 9978);
                     if (!settings.injectionEnabled) {
                         lastAutoSignature = "";
-                        clearPendingAutoPush("");
+                        invalidateAutoMediaSelection();
                         sleepAutoLoopQuietly(AUTO_POLL_DISABLED_MS);
                         continue;
                     }
                     if (!settings.autoPushEnabled) {
                         lastAutoSignature = "";
-                        clearPendingAutoPush("");
+                        invalidateAutoMediaSelection();
                         sleepAutoLoopQuietly(AUTO_POLL_DISABLED_MS);
                         continue;
                     }
@@ -263,18 +308,22 @@ final class DanmuXposedPushCoordinator {
                         boolean recentSkipped = "skip_recent".equals(row.status);
                         boolean inFlightSkipped = "skip_inflight".equals(row.status);
                         boolean notReady = STATUS_NOT_READY.equals(row.status);
+                        boolean superseded = STATUS_SUPERSEDED.equals(row.status);
                         if (pushed || recentSkipped) {
                             lastAutoSignature = signature;
                             lastAutoFailureSignature = "";
                             lastAutoFailureUntilMs = 0L;
                             autoLoopFastUntilMs = 0L;
-                        } else if (!notReady && !inFlightSkipped) {
+                        } else if (!notReady && !inFlightSkipped && !superseded) {
                             rememberAutoFailure(signature);
                         }
-                        host.log((pushed || recentSkipped || inFlightSkipped || notReady) ? Log.INFO : Log.WARN, row.message);
-                        delayMs = (!notReady && !inFlightSkipped && !pushed && !recentSkipped)
+                        host.log((pushed || recentSkipped || inFlightSkipped || notReady || superseded) ? Log.INFO : Log.WARN, row.message);
+                        delayMs = (!notReady && !inFlightSkipped && !pushed && !recentSkipped && !superseded)
                             ? AUTO_POLL_ERROR_MS
-                            : selectAutoPollDelay(notReady && hasFreshPendingAutoPush(signature), pushed || recentSkipped, inFlightSkipped);
+                            : selectAutoPollDelay(
+                                superseded || (notReady && hasFreshPendingAutoPush(media.matchSignature())),
+                                pushed || recentSkipped,
+                                inFlightSkipped);
                     } else {
                         delayMs = selectAutoPollDelay(false, false, false);
                     }
@@ -318,7 +367,7 @@ final class DanmuXposedPushCoordinator {
         if (identity == foregroundActivityIdentity) foregroundActivityIdentity = 0;
         if (identity == lastPlaybackActivityIdentity) {
             playbackActivityVisible = false;
-            clearPendingAutoPush("");
+            invalidateAutoMediaSelection();
             wakeAutoLoop();
             host.log(Log.INFO, "playback activity paused; keep successful auto signature");
         }
@@ -402,11 +451,85 @@ final class DanmuXposedPushCoordinator {
         lastAutoFailureUntilMs = System.currentTimeMillis() + AUTO_FAILURE_COOLDOWN_MS;
     }
 
+    private AutoMatchToken observeAutoMediaSelection(ShellMedia media) {
+        String signature = media == null ? "" : media.matchSignature();
+        long now = System.currentTimeMillis();
+        boolean changed = false;
+        AutoMatchToken token;
+        synchronized (this) {
+            if (!signature.equals(activeAutoMatchSignature)) {
+                activeAutoMatchSignature = signature;
+                activeAutoMatchGeneration++;
+                activeAutoMatchObservedAtMs = now;
+                changed = true;
+            }
+            token = new AutoMatchToken(
+                activeAutoMatchSignature, activeAutoMatchGeneration, activeAutoMatchObservedAtMs);
+        }
+        if (changed) {
+            clearPendingAutoPush("");
+            readinessGate.reset();
+            requestFastAutoPoll("media selection changed");
+            host.log(Log.INFO, "auto media selection observed; generation=" + token.generation);
+        }
+        return token;
+    }
+
+    private boolean isAutoMatchCurrent(AutoMatchToken token) {
+        if (token == null) return false;
+        synchronized (this) {
+            return token.generation == activeAutoMatchGeneration &&
+                token.matchSignature.equals(activeAutoMatchSignature);
+        }
+    }
+
+    private boolean isCurrentActivitySelection(AutoMatchToken token, int preferredPort) {
+        if (!isAutoMatchCurrent(token)) return false;
+        Activity activity = currentActivity();
+        if (activity == null) return isAutoMatchCurrent(token);
+        if (activity.isFinishing() || activity.isDestroyed()) return false;
+        ShellMedia latest = shellMediaReader.read(activity, preferredPort);
+        if (latest == null || latest.title.isEmpty()) return false;
+        if (!token.matchSignature.equals(latest.matchSignature())) {
+            observeAutoMediaSelection(latest);
+            return false;
+        }
+        return isAutoMatchCurrent(token);
+    }
+
+    private BridgeRow supersededAutoPushRow() {
+        return new BridgeRow(STATUS_SUPERSEDED, "播放选集已变化，已丢弃旧匹配结果", "");
+    }
+
+    private void invalidateAutoMediaSelection() {
+        synchronized (this) {
+            if (!activeAutoMatchSignature.isEmpty()) {
+                activeAutoMatchSignature = "";
+                activeAutoMatchGeneration++;
+                activeAutoMatchObservedAtMs = 0L;
+            }
+        }
+        clearPendingAutoPush("");
+        readinessGate.reset();
+    }
+
     private boolean hasFreshPendingAutoPush(String matchSignature) {
         String signature = matchSignature == null ? "" : matchSignature;
+        AutoMatchToken token;
+        synchronized (this) {
+            token = new AutoMatchToken(
+                activeAutoMatchSignature, activeAutoMatchGeneration, activeAutoMatchObservedAtMs);
+        }
+        if (!signature.equals(token.matchSignature)) return false;
+        long now = System.currentTimeMillis();
         synchronized (autoPlanLock) {
             PendingAutoPush plan = pendingAutoPush;
-            return plan != null && signature.equals(plan.matchSignature) && System.currentTimeMillis() - plan.createdAtMs <= AUTO_PENDING_FAST_WINDOW_MS;
+            if (plan == null) return false;
+            if (!plan.isUsable(signature, token.generation, now, AUTO_PENDING_TTL_MS)) {
+                pendingAutoPush = null;
+                return false;
+            }
+            return now - plan.createdAtMs <= AUTO_PENDING_FAST_WINDOW_MS;
         }
     }
 
@@ -416,8 +539,12 @@ final class DanmuXposedPushCoordinator {
             lastAutoFailureSignature = "";
             lastAutoFailureUntilMs = 0L;
             playbackSessionSerial++;
+            activeAutoMatchSignature = "";
+            activeAutoMatchGeneration++;
+            activeAutoMatchObservedAtMs = 0L;
         }
         clearPendingAutoPush("");
+        readinessGate.reset();
         cleanupPushGuards(System.currentTimeMillis());
         host.log(Log.INFO, "auto push signature reset: " + reason);
     }
@@ -490,30 +617,12 @@ final class DanmuXposedPushCoordinator {
         return sb.toString();
     }
 
-    private String buildPushPendingMessage(String prefix, String label) {
+    private String buildPushResultMessage(String prefix, String label, int count) {
         String cleanPrefix = prefix == null ? "" : prefix.trim();
         String cleanLabel = label == null ? "" : label.trim();
-        if (cleanPrefix.isEmpty()) {
-            return cleanLabel.isEmpty() ? "统计弹幕数中…" : cleanLabel + "，统计弹幕数中…";
-        }
-        return cleanLabel.isEmpty() ? cleanPrefix + "：统计弹幕数中…" : cleanPrefix + "：" + cleanLabel + "，统计弹幕数中…";
-    }
-
-    private String buildPushCountMessage(String label, int count) {
-        String cleanLabel = label == null ? "" : label.trim();
-        String countText = count >= 0 ? count + "条弹幕" : "弹幕数未知";
-        if (cleanLabel.isEmpty()) return "已匹配（" + countText + "）";
-        return "已匹配" + cleanLabel + "（" + countText + "）";
-    }
-
-    private void scheduleDanmakuCountUpdate(Context context, EpisodeCandidate candidate, String danmakuUrl) {
-        new Thread(() -> {
-            int count = countDanmaku(danmakuUrl);
-            String label = buildPushLabel(candidate);
-            String message = buildPushCountMessage(label, count);
-            recordLastPush(context, message, danmakuUrl);
-            notifyAutoPush(message);
-        }, "DanmuCountAfterPush").start();
+        String base = cleanPrefix.isEmpty() ? "已推送" : cleanPrefix;
+        if (!cleanLabel.isEmpty()) base += "：" + cleanLabel;
+        return count >= 0 ? base + "（" + count + "条弹幕）" : base;
     }
 
     private void recordLastPush(Context context, String message, String url) {
@@ -581,24 +690,55 @@ final class DanmuXposedPushCoordinator {
         }
     }
 
-    private PendingAutoPush getPendingAutoPush(String matchSignature) {
-        String signature = matchSignature == null ? "" : matchSignature;
+    private void clearPendingAutoPush(AutoMatchToken token) {
+        if (token == null) return;
         synchronized (autoPlanLock) {
             PendingAutoPush plan = pendingAutoPush;
-            if (plan == null || !signature.equals(plan.matchSignature)) return null;
+            if (plan != null && token.generation == plan.generation &&
+                token.matchSignature.equals(plan.matchSignature)) {
+                pendingAutoPush = null;
+            }
+        }
+    }
+
+    private PendingAutoPush getPendingAutoPush(AutoMatchToken token) {
+        if (token == null || !isAutoMatchCurrent(token)) return null;
+        long now = System.currentTimeMillis();
+        synchronized (autoPlanLock) {
+            PendingAutoPush plan = pendingAutoPush;
+            if (plan == null) return null;
+            if (!plan.isUsable(token.matchSignature, token.generation, now, AUTO_PENDING_TTL_MS)) {
+                pendingAutoPush = null;
+                return null;
+            }
             return plan;
         }
     }
 
-    private void setPendingAutoPush(PendingAutoPush plan) {
+    private boolean setPendingAutoPush(PendingAutoPush plan, AutoMatchToken token) {
+        if (plan == null || !isAutoMatchCurrent(token)) return false;
         synchronized (autoPlanLock) {
+            if (!isAutoMatchCurrent(token)) return false;
             pendingAutoPush = plan;
+            return true;
         }
     }
 
     private boolean hasPendingAutoPush() {
+        AutoMatchToken token;
+        synchronized (this) {
+            token = new AutoMatchToken(
+                activeAutoMatchSignature, activeAutoMatchGeneration, activeAutoMatchObservedAtMs);
+        }
+        long now = System.currentTimeMillis();
         synchronized (autoPlanLock) {
-            return pendingAutoPush != null;
+            PendingAutoPush plan = pendingAutoPush;
+            if (plan == null) return false;
+            if (!plan.isUsable(token.matchSignature, token.generation, now, AUTO_PENDING_TTL_MS)) {
+                pendingAutoPush = null;
+                return false;
+            }
+            return true;
         }
     }
 
@@ -679,6 +819,12 @@ final class DanmuXposedPushCoordinator {
         return throwable.getClass().getSimpleName() + " " + message;
     }
 
+    private String summarizeResponse(String response) {
+        String value = response == null ? "空响应" : response.trim().replaceAll("\\s+", " ");
+        if (value.isEmpty()) return "空响应";
+        return value.length() <= 120 ? value : value.substring(0, 120) + "…";
+    }
+
     private LinearLayout.LayoutParams matchWrapWithBottom(Activity activity, int bottomDp) { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); lp.setMargins(0, 0, 0, dp(activity, bottomDp)); return lp; }
 
     private int dp(Activity activity, int value) {
@@ -697,6 +843,18 @@ final class DanmuXposedPushCoordinator {
             this.globalKey = globalKey;
             this.sessionKey = sessionKey;
             this.reason = reason;
+        }
+    }
+
+    private static final class AutoMatchToken {
+        final String matchSignature;
+        final long generation;
+        final long observedAtMs;
+
+        AutoMatchToken(String matchSignature, long generation, long observedAtMs) {
+            this.matchSignature = matchSignature == null ? "" : matchSignature;
+            this.generation = generation;
+            this.observedAtMs = observedAtMs;
         }
     }
 }
