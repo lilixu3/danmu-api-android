@@ -114,6 +114,12 @@ class DanmuDownloadViewModel @Inject constructor(
     var previewDialogState by mutableStateOf(DanmuPreviewDialogState())
         private set
 
+    var isSyncingRecords by mutableStateOf(false)
+        private set
+
+    var isDeletingRecords by mutableStateOf(false)
+        private set
+
     var activeTaskId by mutableStateOf<Long?>(null)
         private set
 
@@ -150,6 +156,9 @@ class DanmuDownloadViewModel @Inject constructor(
                 selectedFormat = config.format()
                 fileNameTemplate = config.fileNameTemplate
             }
+        }
+        if (settings.value.saveTreeUri.isNotBlank()) {
+            syncExistingFiles(showMessageWhenUnchanged = false)
         }
     }
 
@@ -210,9 +219,77 @@ class DanmuDownloadViewModel @Inject constructor(
         previewDialogState = DanmuPreviewDialogState()
     }
 
-    fun clearRecords() {
-        downloadRepository.clearRecords()
-        operationMessage = "下载记录已清空"
+    fun deleteRecords(recordIds: Set<Long>, deleteLocalFiles: Boolean) {
+        if (recordIds.isEmpty() || isDeletingRecords) return
+        if (isDownloading) {
+            operationMessage = "下载进行中，请暂停后再删除记录"
+            return
+        }
+        if (isSyncingRecords) {
+            operationMessage = "正在扫描目录，请稍后再删除"
+            return
+        }
+        viewModelScope.launch {
+            isDeletingRecords = true
+            errorMessage = null
+            downloadRepository.deleteRecords(recordIds, deleteLocalFiles).fold(
+                onSuccess = { summary ->
+                    refreshCurrentEpisodeStates()
+                    operationMessage = when {
+                        summary.removedRecords <= 0 -> "所选记录已不存在"
+                        !deleteLocalFiles -> "已清理 ${summary.removedRecords} 条 App 下载记录，本地文件已保留"
+                        else -> buildString {
+                            append("已清理 ${summary.removedRecords} 条记录")
+                            append("，删除 ${summary.deletedFiles} 个本地文件")
+                            if (summary.missingFiles > 0) {
+                                append("，${summary.missingFiles} 个文件已不存在")
+                            }
+                            if (summary.retainedSharedFiles > 0) {
+                                append("，保留 ${summary.retainedSharedFiles} 个仍被其他记录引用的文件")
+                            }
+                            if (summary.failedFiles > 0) {
+                                append("，${summary.failedFiles} 个文件删除失败")
+                            }
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    errorMessage = "删除下载记录失败：${throwable.message ?: "未知错误"}"
+                }
+            )
+            isDeletingRecords = false
+        }
+    }
+
+    fun syncExistingFiles() {
+        syncExistingFiles(showMessageWhenUnchanged = true)
+    }
+
+    private fun syncExistingFiles(showMessageWhenUnchanged: Boolean) {
+        if (isSyncingRecords || isDeletingRecords || settings.value.saveTreeUri.isBlank()) return
+        viewModelScope.launch {
+            isSyncingRecords = true
+            val result = downloadRepository.syncExistingFiles()
+            result.fold(
+                onSuccess = { summary ->
+                    if (summary.importedRecords > 0) {
+                        refreshCurrentEpisodeStates()
+                    }
+                    if (summary.importedRecords > 0 || showMessageWhenUnchanged) {
+                        operationMessage = buildString {
+                            append("已扫描 ${summary.scannedFiles} 个文件，新增 ${summary.importedRecords} 条记录")
+                            if (summary.truncated) append("（已达到扫描上限）")
+                        }
+                    }
+                },
+                onFailure = { throwable ->
+                    if (showMessageWhenUnchanged) {
+                        errorMessage = "目录扫描失败：${throwable.message ?: "未知错误"}"
+                    }
+                }
+            )
+            isSyncingRecords = false
+        }
     }
 
     fun queueSummary(): DownloadQueueSummary {
@@ -562,7 +639,8 @@ class DanmuDownloadViewModel @Inject constructor(
                 source = episode.source,
                 format = selectedFormat,
                 fileNameTemplate = fileNameTemplate,
-                conflictPolicy = settings.value.policy()
+                conflictPolicy = settings.value.policy(),
+                animeId = anime.animeId
             )
         }
         val added = downloadRepository.enqueueTasks(inputs)
@@ -703,7 +781,8 @@ class DanmuDownloadViewModel @Inject constructor(
                             animeTitle = anime.title,
                             episodes = episodes,
                             queueTasksSnapshot = queueTasks.value,
-                            recordsSnapshot = records.value
+                            recordsSnapshot = records.value,
+                            animeId = anime.animeId
                         )
                     }
                     episodeCandidates = episodes
@@ -763,7 +842,8 @@ class DanmuDownloadViewModel @Inject constructor(
                 source = episode.source,
                 format = selectedFormat,
                 fileNameTemplate = fileNameTemplate,
-                conflictPolicy = settings.value.policy()
+                conflictPolicy = settings.value.policy(),
+                animeId = anime.animeId
             )
         }
         val added = downloadRepository.enqueueTasks(inputs)
@@ -1502,9 +1582,33 @@ class DanmuDownloadViewModel @Inject constructor(
         val next = (old ?: EpisodeDownloadUiState()).copy(
             state = state,
             progress = progress,
-            detail = detail
+            detail = detail,
+            downloadedBefore = old?.downloadedBefore == true || state == EpisodeDownloadState.Success,
+            downloadedRecordCount = if (state == EpisodeDownloadState.Success) {
+                maxOf(old?.downloadedRecordCount ?: 0, 1)
+            } else {
+                old?.downloadedRecordCount ?: 0
+            },
+            lastDownloadedAt = if (state == EpisodeDownloadState.Success) {
+                System.currentTimeMillis()
+            } else {
+                old?.lastDownloadedAt
+            }
         )
         episodeStates = episodeStates + (episodeId to next)
+    }
+
+    private fun refreshCurrentEpisodeStates() {
+        val anime = currentAnime ?: return
+        val episodes = episodeCandidates
+        if (episodes.isEmpty()) return
+        episodeStates = buildInitialEpisodeStates(
+            animeTitle = anime.title,
+            episodes = episodes,
+            queueTasksSnapshot = queueTasks.value,
+            recordsSnapshot = records.value,
+            animeId = anime.animeId
+        )
     }
 
     fun episodeUiState(episode: DownloadEpisodeCandidate): EpisodeDownloadUiState {
@@ -1513,44 +1617,6 @@ class DanmuDownloadViewModel @Inject constructor(
 
     private fun stateOfEpisode(episode: DownloadEpisodeCandidate): EpisodeDownloadState {
         return episodeStates[episode.episodeId]?.state ?: EpisodeDownloadState.Idle
-    }
-
-    private fun latestQueueTaskForEpisode(episode: DownloadEpisodeCandidate): DanmuDownloadTask? {
-        val animeKey = normalizeAnimeTitleForMatch(currentAnime?.title.orEmpty())
-        val sourceKey = canonicalSourceKey(episode.source)
-        val episodeTitleKey = normalizeEpisodeTitleForMatch(episode.title)
-        return queueTasks.value
-            .asSequence()
-            .filter { task ->
-                val taskAnimeKey = normalizeAnimeTitleForMatch(task.animeTitle)
-                val animeMatches = animeKey.isBlank() || taskAnimeKey == animeKey
-                val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(task.source) == sourceKey
-                val numberMatches = task.episodeNo == episode.episodeNumber
-                val idMatches = task.episodeId == episode.episodeId
-                val titleMatches = episodeTitleKey.isNotBlank() &&
-                    normalizeEpisodeTitleForMatch(task.episodeTitle) == episodeTitleKey
-                animeMatches && sourceMatches && (numberMatches || idMatches || titleMatches)
-            }
-            .maxByOrNull { it.updatedAt }
-    }
-
-    private fun latestRecordForEpisode(episode: DownloadEpisodeCandidate): com.example.danmuapiapp.domain.model.DanmuDownloadRecord? {
-        val animeKey = normalizeAnimeTitleForMatch(currentAnime?.title.orEmpty())
-        val sourceKey = canonicalSourceKey(episode.source)
-        val episodeTitleKey = normalizeEpisodeTitleForMatch(episode.title)
-        return records.value
-            .asSequence()
-            .filter { record ->
-                val recordAnimeKey = normalizeAnimeTitleForMatch(record.animeTitle)
-                val animeMatches = animeKey.isBlank() || recordAnimeKey == animeKey
-                val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(record.source) == sourceKey
-                val numberMatches = record.episodeNo == episode.episodeNumber
-                val idMatches = record.episodeId == episode.episodeId
-                val titleMatches = episodeTitleKey.isNotBlank() &&
-                    normalizeEpisodeTitleForMatch(record.episodeTitle) == episodeTitleKey
-                animeMatches && sourceMatches && (numberMatches || idMatches || titleMatches)
-            }
-            .maxByOrNull { it.createdAt }
     }
 
     private fun requestGet(url: String): Result<Pair<Int, String>> {
@@ -1620,7 +1686,8 @@ class DanmuDownloadViewModel @Inject constructor(
                     source = matchedEpisode.source.ifBlank { task.source },
                     format = DanmuDownloadFormat.fromValue(task.format),
                     fileNameTemplate = task.fileNameTemplate,
-                    conflictPolicy = DownloadConflictPolicy.fromKey(task.conflictPolicy)
+                    conflictPolicy = DownloadConflictPolicy.fromKey(task.conflictPolicy),
+                    animeId = candidate.animeId
                 )
             }
             error("未找到匹配剧集：第${task.episodeNo}集（${task.source.ifBlank { "unknown" }}）")

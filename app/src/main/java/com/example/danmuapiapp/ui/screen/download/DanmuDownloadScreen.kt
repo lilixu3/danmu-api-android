@@ -123,6 +123,7 @@ fun DanmuDownloadScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val queueSummary = viewModel.queueSummary()
+    val recordAnimeCount = remember(records) { buildDownloadRecordAnimeGroups(records).size }
 
     LaunchedEffect(viewModel.operationMessage) {
         val msg = viewModel.operationMessage
@@ -283,7 +284,7 @@ fun DanmuDownloadScreen(
                                             containerColor = MaterialTheme.colorScheme.tertiary,
                                             contentColor = MaterialTheme.colorScheme.onTertiary
                                         ) {
-                                            Text("${records.size}")
+                                            Text("$recordAnimeCount")
                                         }
                                     }
                                 }
@@ -299,7 +300,11 @@ fun DanmuDownloadScreen(
                         2 -> RecordsPage(
                             records = records,
                             previewState = viewModel.previewDialogState,
-                            onClear = viewModel::clearRecords,
+                            isSyncing = viewModel.isSyncingRecords,
+                            isDeleting = viewModel.isDeletingRecords,
+                            canMutateRecords = !viewModel.isDownloading,
+                            onDeleteRecords = viewModel::deleteRecords,
+                            onSync = viewModel::syncExistingFiles,
                             onPreviewRecord = viewModel::openRecordPreview,
                             onDismissPreview = viewModel::dismissRecordPreview
                         )

@@ -163,13 +163,16 @@ class ApiTestViewModel @Inject constructor(
             val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
 
             result.fold(
-                onSuccess = { (code, body) ->
+                onSuccess = { response ->
+                    val code = response.code
+                    val body = response.body
                     debugResponse = withContext(Dispatchers.Default) {
                         buildDebugResponse(
                             endpoint = endpoint,
                             responseCode = code,
                             responseBody = body,
-                            responseDurationMs = elapsed
+                            responseDurationMs = elapsed,
+                            bodySizeBytes = response.bodySizeBytes
                         )
                     }
                     recordSuccess(
@@ -756,11 +759,18 @@ class ApiTestViewModel @Inject constructor(
         val body: String?
     )
 
+    private data class ApiRawResponse(
+        val code: Int,
+        val body: String,
+        val bodySizeBytes: Int
+    )
+
     private fun buildDebugResponse(
         endpoint: ApiEndpointConfig,
         responseCode: Int,
         responseBody: String,
-        responseDurationMs: Long
+        responseDurationMs: Long,
+        bodySizeBytes: Int
     ): ApiDebugResponse {
         val fullText = prettyPrintJson(responseBody)
         val preview = if (shouldCollapseDebugResponse(endpoint)) {
@@ -775,7 +785,7 @@ class ApiTestViewModel @Inject constructor(
             previewText = preview.text,
             fullText = fullText,
             previewTruncated = preview.isTruncated,
-            bodySizeBytes = responseBody.toByteArray(Charsets.UTF_8).size,
+            bodySizeBytes = bodySizeBytes,
             danmuInsight = null
         )
     }
@@ -915,7 +925,7 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
-    private suspend fun executeGet(url: String): Result<Pair<Int, String>> {
+    private suspend fun executeGet(url: String): Result<ApiRawResponse> {
         val request = Request.Builder().url(url).get().build()
         return executeRequest(request)
     }
@@ -923,7 +933,7 @@ class ApiTestViewModel @Inject constructor(
     private suspend fun executeJsonPost(
         url: String,
         jsonBody: String
-    ): Result<Pair<Int, String>> {
+    ): Result<ApiRawResponse> {
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val request = Request.Builder()
             .url(url)
@@ -932,12 +942,38 @@ class ApiTestViewModel @Inject constructor(
         return executeRequest(request)
     }
 
-    private suspend fun executeRequest(request: Request): Result<Pair<Int, String>> {
+    private suspend fun executeRequest(request: Request): Result<ApiRawResponse> {
         return withContext(Dispatchers.IO) {
             runCatching {
                 httpClient.newCall(request).execute().use { response ->
-                    response.code to response.body.string()
+                    val mediaType = response.body.contentType()
+                    val bytes = response.body.bytes()
+                    val isBinary = mediaType?.type == "application" && mediaType.subtype == "octet-stream"
+                    val body = if (isBinary) {
+                        formatBinaryResponse(bytes)
+                    } else {
+                        bytes.toString(mediaType?.charset(Charsets.UTF_8) ?: Charsets.UTF_8)
+                    }
+                    ApiRawResponse(
+                        code = response.code,
+                        body = body,
+                        bodySizeBytes = bytes.size
+                    )
                 }
+            }
+        }
+    }
+
+    private fun formatBinaryResponse(bytes: ByteArray): String {
+        val preview = bytes
+            .take(256)
+            .joinToString(" ") { byte -> "%02X".format(byte.toInt() and 0xFF) }
+        return buildString {
+            append("二进制响应：${bytes.size} 字节")
+            if (preview.isNotBlank()) {
+                append("\nHEX（前 ${minOf(bytes.size, 256)} 字节）：\n")
+                append(preview)
+                if (bytes.size > 256) append("\n…")
             }
         }
     }

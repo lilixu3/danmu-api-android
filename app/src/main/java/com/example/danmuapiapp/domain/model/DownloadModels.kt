@@ -5,29 +5,111 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+enum class DanmuPayloadKind {
+    Json,
+    Xml,
+    Binary
+}
+
 enum class DanmuDownloadFormat(
     val value: String,
     val label: String,
     val extension: String,
-    val mimeType: String
+    val mimeType: String,
+    val payloadKind: DanmuPayloadKind
 ) {
     Json(
         value = "json",
         label = "JSON",
         extension = "json",
-        mimeType = "application/json"
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
     ),
     Xml(
         value = "xml",
         label = "XML",
         extension = "xml",
-        mimeType = "application/xml"
+        mimeType = "application/xml",
+        payloadKind = DanmuPayloadKind.Xml
+    ),
+    ArtplayerJson(
+        value = "artplayer.json",
+        label = "ArtPlayer JSON",
+        extension = "artplayer.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
+    ),
+    BahaJson(
+        value = "baha.json",
+        label = "Baha JSON",
+        extension = "baha.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
+    ),
+    BiliXml(
+        value = "bili.xml",
+        label = "哔哩哔哩 XML",
+        extension = "bili.xml",
+        mimeType = "application/xml",
+        payloadKind = DanmuPayloadKind.Xml
+    ),
+    DanuniJson(
+        value = "danuni.json",
+        label = "DanUni JSON",
+        extension = "danuni.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
+    ),
+    DanuniBinPb(
+        value = "danuni.binpb",
+        label = "DanUni Protobuf",
+        extension = "danuni.binpb",
+        mimeType = "application/octet-stream",
+        payloadKind = DanmuPayloadKind.Binary
+    ),
+    DdplayJson(
+        value = "ddplay.json",
+        label = "弹弹play JSON",
+        extension = "ddplay.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
+    ),
+    DplayerJson(
+        value = "dplayer.json",
+        label = "DPlayer JSON",
+        extension = "dplayer.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
+    ),
+    VodJson(
+        value = "vod.json",
+        label = "VOD JSON",
+        extension = "vod.json",
+        mimeType = "application/json",
+        payloadKind = DanmuPayloadKind.Json
     );
 
+    val supportsPreview: Boolean
+        get() = payloadKind != DanmuPayloadKind.Binary
+
     companion object {
-        fun fromValue(raw: String?): DanmuDownloadFormat {
+        fun fromValueOrNull(raw: String?): DanmuDownloadFormat? {
             val value = raw?.trim()?.lowercase().orEmpty()
-            return entries.firstOrNull { it.value == value } ?: Xml
+            return entries.firstOrNull { it.value == value }
+        }
+
+        fun fromValue(raw: String?): DanmuDownloadFormat {
+            return fromValueOrNull(raw) ?: Xml
+        }
+
+        fun fromFileName(fileName: String?): DanmuDownloadFormat? {
+            val normalized = fileName?.trim()?.lowercase().orEmpty()
+            if (normalized.isBlank()) return null
+            return entries
+                .sortedByDescending { it.extension.length }
+                .firstOrNull { format ->
+                    normalized == format.extension || normalized.endsWith(".${format.extension}")
+                }
         }
     }
 }
@@ -278,13 +360,18 @@ data class DanmuDownloadRecord(
     val bytes: Long = 0L,
     val danmuCount: Int? = null,
     val httpCode: Int? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val animeId: Long = 0L
 ) {
     fun statusEnum(): DownloadRecordStatus {
         return DownloadRecordStatus.entries.firstOrNull { it.key == status } ?: DownloadRecordStatus.Failed
     }
 
-    fun formatEnum(): DanmuDownloadFormat = DanmuDownloadFormat.fromValue(format)
+    fun formatOrNull(): DanmuDownloadFormat? = DanmuDownloadFormat.fromValueOrNull(format)
+
+    fun formatEnum(): DanmuDownloadFormat = formatOrNull() ?: DanmuDownloadFormat.Xml
+
+    fun formatLabel(): String = formatOrNull()?.label ?: format.ifBlank { "未知格式" }
 }
 
 @Serializable
@@ -303,7 +390,8 @@ data class DanmuDownloadTask(
     val conflictPolicy: String = DownloadConflictPolicy.Rename.key,
     val status: String = DownloadQueueStatus.Pending.key,
     val attempts: Int = 0,
-    val lastDetail: String = ""
+    val lastDetail: String = "",
+    val animeId: Long = 0L
 ) {
     fun statusEnum(): DownloadQueueStatus = DownloadQueueStatus.fromKey(status)
 
@@ -317,7 +405,8 @@ data class DanmuDownloadTask(
             source = source,
             format = DanmuDownloadFormat.fromValue(format),
             fileNameTemplate = fileNameTemplate,
-            conflictPolicy = DownloadConflictPolicy.fromKey(conflictPolicy)
+            conflictPolicy = DownloadConflictPolicy.fromKey(conflictPolicy),
+            animeId = animeId
         )
     }
 }
@@ -331,7 +420,8 @@ data class DanmuDownloadInput(
     val source: String,
     val format: DanmuDownloadFormat,
     val fileNameTemplate: String,
-    val conflictPolicy: DownloadConflictPolicy
+    val conflictPolicy: DownloadConflictPolicy,
+    val animeId: Long = 0L
 )
 
 data class DanmuDownloadResult(
@@ -344,6 +434,22 @@ data class DanmuDownloadResult(
     val danmuCount: Int? = null,
     val httpCode: Int? = null,
     val errorMessage: String? = null
+)
+
+data class DownloadDirectorySyncResult(
+    val scannedFiles: Int,
+    val importedRecords: Int,
+    val skippedFiles: Int,
+    val truncated: Boolean
+)
+
+data class DownloadRecordDeleteResult(
+    val removedRecords: Int,
+    val requestedFiles: Int,
+    val deletedFiles: Int,
+    val missingFiles: Int,
+    val failedFiles: Int,
+    val retainedSharedFiles: Int
 )
 
 data class DanmuPreviewItem(
@@ -396,7 +502,8 @@ fun DanmuDownloadInput.toQueueTask(taskId: Long): DanmuDownloadTask {
         conflictPolicy = conflictPolicy.key,
         status = DownloadQueueStatus.Pending.key,
         attempts = 0,
-        lastDetail = "等待下载"
+        lastDetail = "等待下载",
+        animeId = animeId
     )
 }
 

@@ -170,7 +170,11 @@ interface DanmuDownloadRepository {
         record: DanmuDownloadRecord,
         previewLimit: Int = 50000
     ): Result<DanmuFilePreview>
-    fun clearRecords()
+    suspend fun syncExistingFiles(): Result<DownloadDirectorySyncResult>
+    suspend fun deleteRecords(
+        recordIds: Set<Long>,
+        deleteLocalFiles: Boolean
+    ): Result<DownloadRecordDeleteResult>
 }
 
 interface AdminSessionRepository {
