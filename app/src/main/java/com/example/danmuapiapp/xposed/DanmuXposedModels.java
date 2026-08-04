@@ -51,23 +51,30 @@ final class ShellMedia {
     final String episodeText;
     final int episodeNumber;
     final String url;
+    final String vodFlag;
     final int state;
     final long position;
     final long duration;
 
     ShellMedia(int port, String title, String episodeText, int episodeNumber, String url, int state, long position, long duration) {
+        this(port, title, episodeText, episodeNumber, url, "", state, position, duration);
+    }
+
+    ShellMedia(int port, String title, String episodeText, int episodeNumber, String url, String vodFlag,
+               int state, long position, long duration) {
         this.port = port;
         this.title = title == null ? "" : title;
         this.episodeText = episodeText == null ? "" : episodeText;
         this.episodeNumber = episodeNumber;
         this.url = url == null ? "" : url;
+        this.vodFlag = vodFlag == null ? "" : vodFlag;
         this.state = state;
         this.position = position;
         this.duration = duration;
     }
 
     ShellMedia withPort(int newPort) {
-        return new ShellMedia(newPort, title, episodeText, episodeNumber, url, state, position, duration);
+        return new ShellMedia(newPort, title, episodeText, episodeNumber, url, vodFlag, state, position, duration);
     }
 
     String displayEpisode() {
@@ -76,16 +83,24 @@ final class ShellMedia {
     }
 
     String matchSignature() {
-        return title.trim() + "|" + displayEpisode().trim() + "|" + episodeNumber;
+        return MediaIdentity.from(this).key();
     }
 
     String signature() {
-        return matchSignature();
+        return playbackIdentity();
     }
 
-    boolean isReadyForDanmaku() {
-        if (state == 3) return true;
-        return state < 0 && position > 0L;
+    String playbackIdentity() {
+        return matchSignature() + "|" + url.trim() + "|" + vodFlag.trim();
+    }
+
+    String playbackStateBucket() {
+        if (state == 3) return "playing";
+        if (state == 2) return "preparing";
+        if (state == 1) return "paused";
+        if (state == 6) return "buffering";
+        if (state == 0) return "stopped";
+        return state < 0 ? "unknown" : "state:" + state;
     }
 
     String playbackStateLabel() {
@@ -102,17 +117,121 @@ final class ShellMedia {
     }
 }
 
+final class MediaIdentity {
+    final String rawTitle;
+    final String baseTitle;
+    final String year;
+    final int season;
+    final int episodeNumber;
+    final String varietyEpisode;
+    final String episodeIdentity;
+
+    private MediaIdentity(String rawTitle, String baseTitle, String year, int season,
+                          int episodeNumber, String varietyEpisode, String episodeIdentity) {
+        this.rawTitle = rawTitle == null ? "" : rawTitle.trim();
+        this.baseTitle = baseTitle == null ? "" : baseTitle.trim();
+        this.year = year == null ? "" : year.trim();
+        this.season = season;
+        this.episodeNumber = episodeNumber;
+        this.varietyEpisode = varietyEpisode == null ? "" : varietyEpisode.trim();
+        this.episodeIdentity = episodeIdentity == null ? "" : episodeIdentity.trim();
+    }
+
+    static MediaIdentity from(ShellMedia media) {
+        if (media == null) return from("", "", -1);
+        int episode = media.episodeNumber > 0
+            ? media.episodeNumber : DanmuXposedTextPolicy.extractEpisodeNumber(media.displayEpisode());
+        return from(media.title, media.displayEpisode(), episode);
+    }
+
+    static MediaIdentity from(String title, String episodeText, int episodeNumber) {
+        String rawTitle = title == null ? "" : title.trim();
+        String rawEpisode = episodeText == null ? "" : episodeText.trim();
+        String year = DanmuXposedTextPolicy.extractTitleMetadataYear(rawTitle);
+        int season = DanmuXposedTextPolicy.extractSeasonNumber(rawTitle);
+        if (season <= 0) season = DanmuXposedTextPolicy.extractSeasonNumber(rawEpisode);
+        String variety = DanmuXposedTextPolicy.normalizeVarietyEpisode(rawEpisode);
+        String episodeIdentity = !variety.isEmpty()
+            ? variety
+            : episodeNumber > 0
+                ? "episode:" + episodeNumber
+                : DanmuXposedTextPolicy.normalizeEpisodeIdentity(rawEpisode);
+        return new MediaIdentity(
+            rawTitle,
+            DanmuXposedTextPolicy.normalizeTitleForMatch(rawTitle),
+            year,
+            season,
+            episodeNumber,
+            variety,
+            episodeIdentity);
+    }
+
+    int comparableSeason() {
+        return season > 0 ? season : 1;
+    }
+
+    String key() {
+        return baseTitle + "|year:" + year + "|season:" + comparableSeason() + "|" + episodeIdentity;
+    }
+}
+
+final class PlaybackReadinessGate {
+    private String playbackIdentity = "";
+    private long lastPosition = -1L;
+
+    synchronized boolean isReady(ShellMedia media) {
+        if (media == null) {
+            reset();
+            return false;
+        }
+        String identity = media.playbackIdentity();
+        if (!identity.equals(playbackIdentity)) {
+            playbackIdentity = identity;
+            lastPosition = -1L;
+        }
+        if (media.state == 3) {
+            lastPosition = media.position;
+            return true;
+        }
+        if (media.state >= 0) {
+            lastPosition = media.position;
+            return false;
+        }
+        boolean advancingWithoutState = lastPosition >= 0L && media.position > lastPosition;
+        lastPosition = media.position;
+        return advancingWithoutState;
+    }
+
+    synchronized void reset() {
+        playbackIdentity = "";
+        lastPosition = -1L;
+    }
+
+}
+
 final class PendingAutoPush {
     final String matchSignature;
+    final long generation;
     final EpisodeCandidate candidate;
     final int shellPort;
+    final long selectionObservedAtMs;
     final long createdAtMs;
 
-    PendingAutoPush(String matchSignature, EpisodeCandidate candidate, int shellPort, long createdAtMs) {
+    PendingAutoPush(String matchSignature, long generation, EpisodeCandidate candidate, int shellPort,
+                    long selectionObservedAtMs, long createdAtMs) {
         this.matchSignature = matchSignature == null ? "" : matchSignature;
+        this.generation = generation;
         this.candidate = candidate;
         this.shellPort = shellPort;
+        this.selectionObservedAtMs = selectionObservedAtMs;
         this.createdAtMs = createdAtMs;
+    }
+
+    boolean isUsable(String expectedSignature, long expectedGeneration, long nowMs, long ttlMs) {
+        String signature = expectedSignature == null ? "" : expectedSignature;
+        long ageMs = nowMs - createdAtMs;
+        return candidate != null && signature.equals(matchSignature) && generation == expectedGeneration &&
+            ageMs >= 0L && ageMs <= ttlMs;
     }
 }
 
@@ -121,16 +240,25 @@ final class CandidateHandle {
     final String handle;
     final String label;
     final String source;
+    final AnimeRef anime;
+    final EpisodeCandidate episodeCandidate;
 
     CandidateHandle(int type, String handle, String label) {
         this(type, handle, label, "");
     }
 
     CandidateHandle(int type, String handle, String label, String source) {
+        this(type, handle, label, source, null, null);
+    }
+
+    CandidateHandle(int type, String handle, String label, String source,
+                    AnimeRef anime, EpisodeCandidate episodeCandidate) {
         this.type = type;
         this.handle = handle;
         this.label = label;
         this.source = source == null ? "" : source;
+        this.anime = anime;
+        this.episodeCandidate = episodeCandidate;
     }
 }
 
@@ -200,6 +328,20 @@ final class EpisodeCandidate {
 
     String displayLabel() {
         return joinNonBlank(name, episode, source);
+    }
+}
+
+final class PreparedDanmaku {
+    final String url;
+    final int count;
+    final long size;
+    final long expiresAtMs;
+
+    PreparedDanmaku(String url, int count, long size, long expiresAtMs) {
+        this.url = url == null ? "" : url;
+        this.count = count;
+        this.size = Math.max(0L, size);
+        this.expiresAtMs = Math.max(0L, expiresAtMs);
     }
 }
 

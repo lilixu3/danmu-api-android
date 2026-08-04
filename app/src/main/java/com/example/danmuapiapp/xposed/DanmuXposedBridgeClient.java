@@ -136,7 +136,7 @@ final class DanmuXposedBridgeClient {
         return result;
     }
 
-    private List<EpisodeCandidate> parseBangumiCandidates(String coreBase, String raw, AnimeRef anime, int targetEpisodeNumber) throws Exception {
+    List<EpisodeCandidate> parseBangumiCandidates(String coreBase, String raw, AnimeRef anime, int targetEpisodeNumber) throws Exception {
         String trimmed = raw == null ? "" : raw.trim();
         if (trimmed.isEmpty()) return new ArrayList<>();
         JSONObject root = new JSONObject(trimmed);
@@ -157,14 +157,8 @@ final class DanmuXposedBridgeClient {
             if (ep == null) continue;
             String directUrl = readString(ep, "url", "path", "danmaku", "danmu");
             String episodeId = readString(ep, "episodeId", "id", "commentId", "episode_id");
-            String url;
-            if (directUrl.startsWith("http://") || directUrl.startsWith("https://")) {
-                url = directUrl;
-            } else if (!episodeId.isEmpty()) {
-                url = coreBase + "/api/v2/comment/" + urlEncode(episodeId) + "?format=xml";
-            } else {
-                continue;
-            }
+            String url = resolveEpisodeDanmakuUrl(coreBase, episodeId, directUrl);
+            if (url.isEmpty()) continue;
             String episodeNumber = readString(ep, "episodeNumber", "episodeNo", "episodeIndex", "number", "sort");
             String episodeTitle = readString(ep, "episodeTitle", "title", "name", "episode", "episodeName", "remark", "remarks");
             int parsedEpisodeNumber = extractEpisodeNumber(episodeNumber);
@@ -173,6 +167,26 @@ final class DanmuXposedBridgeClient {
             result.add(new EpisodeCandidate(animeTitle, episodeLabel, parsedEpisodeNumber, source, url));
         }
         return result;
+    }
+
+    static String resolveEpisodeDanmakuUrl(String coreBase, String episodeId, String directUrl) throws Exception {
+        String base = coreBase == null ? "" : coreBase.trim();
+        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        if (base.isEmpty()) return "";
+
+        String id = episodeId == null ? "" : episodeId.trim();
+        if (!id.isEmpty()) {
+            return base + "/api/v2/comment/" + urlEncode(id) + "?format=xml";
+        }
+
+        String direct = directUrl == null ? "" : directUrl.trim();
+        if (!direct.startsWith("http://") && !direct.startsWith("https://")) return "";
+        String coreCommentBase = base + "/api/v2/comment";
+        if (direct.equals(coreCommentBase) || direct.startsWith(coreCommentBase + "/") ||
+            direct.startsWith(coreCommentBase + "?")) {
+            return direct;
+        }
+        return coreCommentBase + "?url=" + urlEncode(direct) + "&format=xml";
     }
 
     private String buildEpisodeLabel(String episodeNumber, String episodeTitle, int targetEpisodeNumber) {

@@ -113,7 +113,7 @@ public class DanmuXposedModule extends XposedModule {
         }
 
         @Override
-        public BridgeResult loadAnimeDetailDirect(String animeHandle, String episodeHint) {
+        public BridgeResult loadAnimeDetailDirect(CandidateHandle animeHandle, String episodeHint) {
             return DanmuXposedModule.this.loadAnimeDetailDirect(animeHandle, episodeHint);
         }
 
@@ -159,7 +159,7 @@ public class DanmuXposedModule extends XposedModule {
         }
 
         @Override
-        public EpisodeCandidate episodeCandidate(String handle) {
+        public EpisodeCandidate episodeCandidate(CandidateHandle handle) {
             return DanmuXposedModule.this.episodeCandidate(handle);
         }
 
@@ -329,6 +329,9 @@ public class DanmuXposedModule extends XposedModule {
     private void scheduleInject(Activity activity) {
         try {
             if (activity == null) return;
+            if (isKnownPlaybackActivity(activity)) {
+                pushCoordinator.startAutoPushLoopOnce(activity);
+            }
             installInjectionWatch(activity);
             Window window = activity.getWindow();
             if (window == null) return;
@@ -438,9 +441,9 @@ public class DanmuXposedModule extends XposedModule {
             if (!looksLikePlaybackPage(activity, decor, anchor)) {
                 return;
             }
+            pushCoordinator.startAutoPushLoopOnce(activity);
 
             if (anchor == null || anchor.parent == null) {
-                pushCoordinator.startAutoPushLoopOnce(activity);
                 log(Log.WARN, TAG, "playback page found but no control-bar anchor yet");
                 return;
             }
@@ -489,7 +492,7 @@ public class DanmuXposedModule extends XposedModule {
         manualSearchDialog.show(activity);
     }
 
-    private EpisodeCandidate episodeCandidate(String handle) {
+    private EpisodeCandidate episodeCandidate(CandidateHandle handle) {
         return episodeRepository.loadEpisodeCandidate(handle);
     }
 
@@ -497,7 +500,7 @@ public class DanmuXposedModule extends XposedModule {
         return episodeRepository.queryAnimeSearch(activity, title);
     }
 
-    private BridgeResult loadAnimeDetailDirect(String animeHandle, String episodeHint) {
+    private BridgeResult loadAnimeDetailDirect(CandidateHandle animeHandle, String episodeHint) {
         return episodeRepository.loadAnimeDetail(animeHandle, episodeHint);
     }
 

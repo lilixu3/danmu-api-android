@@ -13,10 +13,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 final class DanmuXposedEpisodeRepository {
     static final int MODE_ANIME = 1;
@@ -26,8 +24,6 @@ final class DanmuXposedEpisodeRepository {
     static final int MAX_AUTO_DETAIL_REQUESTS = 8;
 
     private final DanmuXposedBridgeClient bridgeClient;
-    private final Map<String, AnimeRef> animeRefs = new ConcurrentHashMap<>();
-    private final Map<String, EpisodeCandidate> episodeCandidates = new ConcurrentHashMap<>();
 
     DanmuXposedEpisodeRepository(DanmuXposedBridgeClient.SettingsReader settingsReader) {
         this.bridgeClient = new DanmuXposedBridgeClient(settingsReader);
@@ -56,13 +52,12 @@ final class DanmuXposedEpisodeRepository {
             result.message = search.animes.isEmpty()
                 ? "未搜到，可换关键词"
                 : "搜索到 " + search.animes.size() + " 个结果，点剧名展开";
-            animeRefs.clear();
             for (int i = 0; i < Math.min(search.animes.size(), MAX_RETURN_ANIMES); i++) {
                 AnimeRef anime = search.animes.get(i);
                 String handle = UUID.randomUUID().toString();
-                animeRefs.put(handle, anime);
                 String label = buildAnimeCandidateLabel(anime, result.candidates.size() + 1);
-                result.candidates.add(new CandidateHandle(MODE_ANIME, handle, label, anime.source));
+                result.candidates.add(new CandidateHandle(
+                    MODE_ANIME, handle, label, anime.source, anime, null));
             }
             result.filters.addAll(buildSourceFilters(result.candidates));
         } catch (Throwable throwable) {
@@ -82,9 +77,9 @@ final class DanmuXposedEpisodeRepository {
         return label.isEmpty() ? "剧名 " + Math.max(1, fallbackNumber) : label;
     }
 
-    BridgeResult loadAnimeDetail(String animeHandle, String episodeHint) {
+    BridgeResult loadAnimeDetail(CandidateHandle animeHandle, String episodeHint) {
         BridgeResult result = new BridgeResult();
-        AnimeRef anime = animeRefs.get(animeHandle == null ? "" : animeHandle.trim());
+        AnimeRef anime = animeHandle == null ? null : animeHandle.anime;
         if (anime == null) {
             result.ok = false;
             result.message = "剧名候选已过期，请重新搜索";
@@ -93,23 +88,20 @@ final class DanmuXposedEpisodeRepository {
         try {
             int targetEpisodeNumber = extractEpisodeNumber(episodeHint);
             List<EpisodeCandidate> episodes = rankCandidates(
-                dedupeCandidates(loadEpisodesForAnime(anime, targetEpisodeNumber)),
-                targetEpisodeNumber
-            );
+                dedupeCandidates(loadEpisodesForAnime(anime, targetEpisodeNumber)));
             result.ok = true;
             int selectedIndex = findEpisodeIndex(episodes, targetEpisodeNumber);
             result.selectedIndex = selectedIndex;
             result.message = episodes.isEmpty()
                 ? "《" + anime.title + "》暂无可推送剧集"
                 : "已展开《" + anime.title + "》，默认选中当前播放" + selectedEpisodeText(episodes, selectedIndex, targetEpisodeNumber) + "，上下滑动查看更多";
-            episodeCandidates.clear();
             for (int i = 0; i < Math.min(episodes.size(), MAX_RETURN_EPISODES); i++) {
                 EpisodeCandidate episode = episodes.get(i);
                 String handle = UUID.randomUUID().toString();
-                episodeCandidates.put(handle, episode);
                 String label = joinNonBlank(episode.episode, episode.name, episode.source);
                 if (label.isEmpty()) label = "剧集 " + (result.candidates.size() + 1);
-                result.candidates.add(new CandidateHandle(MODE_EPISODE, handle, label));
+                result.candidates.add(new CandidateHandle(
+                    MODE_EPISODE, handle, label, "", null, episode));
             }
         } catch (Throwable throwable) {
             result.ok = false;
@@ -118,26 +110,89 @@ final class DanmuXposedEpisodeRepository {
         return result;
     }
 
-    EpisodeCandidate loadEpisodeCandidate(String handle) {
-        return episodeCandidates.get(handle == null ? "" : handle.trim());
+    EpisodeCandidate loadEpisodeCandidate(CandidateHandle handle) {
+        return handle == null ? null : handle.episodeCandidate;
     }
 
-    EpisodeCandidate selectAutoEpisodeInSearchOrder(List<AnimeRef> animes, int targetEpisodeNumber) throws Exception {
-        EpisodeCandidate firstFallback = null;
-        int limit = Math.min(animes == null ? 0 : animes.size(), MAX_AUTO_DETAIL_REQUESTS);
-        for (int i = 0; i < limit; i++) {
+    EpisodeCandidate selectAutoEpisodeInSearchOrder(List<AnimeRef> animes, MediaIdentity target) throws Exception {
+        if (target == null || target.baseTitle.isEmpty()) return null;
+        for (AnimeRef anime : matchingAutoDetailCandidates(animes, target)) {
             List<EpisodeCandidate> episodes = rankCandidates(
-                dedupeCandidates(loadEpisodesForAnime(animes.get(i), targetEpisodeNumber)),
-                targetEpisodeNumber
-            );
+                dedupeCandidates(loadEpisodesForAnime(anime, target.episodeNumber)));
             if (episodes.isEmpty()) continue;
-            EpisodeCandidate selected = selectBestEpisode(episodes, targetEpisodeNumber);
-            if (firstFallback == null) firstFallback = selected;
-            if (targetEpisodeNumber <= 0 || scoreEpisode(selected, targetEpisodeNumber) >= 3) {
-                return selected;
-            }
+            EpisodeCandidate selected = selectStrictEpisode(episodes, target, isMovie(anime));
+            if (selected != null) return selected;
         }
-        return firstFallback;
+        return null;
+    }
+
+    static List<AnimeRef> matchingAutoDetailCandidates(List<AnimeRef> animes, MediaIdentity target) {
+        ArrayList<AnimeRef> matches = new ArrayList<>();
+        if (animes == null || target == null) return matches;
+        for (AnimeRef anime : animes) {
+            if (!animeMatches(target, anime)) continue;
+            matches.add(anime);
+            if (matches.size() >= MAX_AUTO_DETAIL_REQUESTS) break;
+        }
+        return matches;
+    }
+
+    static boolean animeMatches(MediaIdentity target, AnimeRef candidate) {
+        if (target == null || candidate == null || target.baseTitle.isEmpty()) return false;
+        if (!DanmuXposedTextPolicy.titlesMatch(target.rawTitle, candidate.title)) return false;
+        if (!target.year.isEmpty()) {
+            String candidateYear = DanmuXposedTextPolicy.extractYear(candidate.year, candidate.title);
+            if (!target.year.equals(candidateYear)) return false;
+        }
+        int candidateSeason = DanmuXposedTextPolicy.extractSeasonNumber(candidate.title);
+        int comparableCandidateSeason = candidateSeason > 0 ? candidateSeason : 1;
+        return target.comparableSeason() == comparableCandidateSeason;
+    }
+
+    static EpisodeCandidate selectStrictEpisode(
+        List<EpisodeCandidate> candidates, MediaIdentity target, boolean allowFirstEpisode
+    ) {
+        if (candidates == null || candidates.isEmpty() || target == null) return null;
+        ArrayList<EpisodeCandidate> eligible = new ArrayList<>();
+        for (EpisodeCandidate candidate : candidates) {
+            if (candidate == null) continue;
+            if (DanmuXposedTextPolicy.isTrailerText(candidate.episode) ||
+                DanmuXposedTextPolicy.isTrailerText(candidate.name)) continue;
+            eligible.add(candidate);
+        }
+        if (eligible.isEmpty()) return null;
+
+        if (!target.varietyEpisode.isEmpty()) {
+            for (EpisodeCandidate candidate : eligible) {
+                String identity = DanmuXposedTextPolicy.normalizeVarietyEpisode(candidate.episode);
+                if (target.varietyEpisode.equals(identity)) return candidate;
+            }
+            return null;
+        }
+        if (target.episodeNumber > 0) {
+            for (EpisodeCandidate candidate : eligible) {
+                int parsed = candidate.episodeNumber > 0
+                    ? candidate.episodeNumber
+                    : extractEpisodeNumber(candidate.episode);
+                if (parsed == target.episodeNumber) return candidate;
+            }
+            return null;
+        }
+        if (!target.episodeIdentity.isEmpty()) {
+            for (EpisodeCandidate candidate : eligible) {
+                String identity = DanmuXposedTextPolicy.normalizeEpisodeIdentity(candidate.episode);
+                if (target.episodeIdentity.equals(identity)) return candidate;
+            }
+            return null;
+        }
+        if (allowFirstEpisode || eligible.size() == 1) return eligible.get(0);
+        return null;
+    }
+
+    private static boolean isMovie(AnimeRef anime) {
+        if (anime == null) return false;
+        String type = (anime.type + " " + anime.title).toLowerCase(Locale.ROOT);
+        return type.contains("电影") || type.contains("movie") || type.contains("剧场版");
     }
 
     private List<SourceFilter> buildSourceFilters(List<CandidateHandle> candidates) {
@@ -166,7 +221,7 @@ final class DanmuXposedEpisodeRepository {
         return out;
     }
 
-    private List<EpisodeCandidate> rankCandidates(List<EpisodeCandidate> candidates, int targetEpisodeNumber) {
+    private List<EpisodeCandidate> rankCandidates(List<EpisodeCandidate> candidates) {
         candidates.sort((a, b) -> {
             int an = episodeSortNumber(a);
             int bn = episodeSortNumber(b);
@@ -190,21 +245,6 @@ final class DanmuXposedEpisodeRepository {
             if (score >= 3) return i;
         }
         return bestIndex;
-    }
-
-    private EpisodeCandidate selectBestEpisode(List<EpisodeCandidate> candidates, int targetEpisodeNumber) {
-        if (candidates == null || candidates.isEmpty()) return null;
-        if (targetEpisodeNumber <= 0) return candidates.get(0);
-        EpisodeCandidate best = null;
-        int bestScore = -1;
-        for (EpisodeCandidate candidate : candidates) {
-            int score = scoreEpisode(candidate, targetEpisodeNumber);
-            if (score > bestScore || (score == bestScore && episodeSortNumber(candidate) < episodeSortNumber(best))) {
-                best = candidate;
-                bestScore = score;
-            }
-        }
-        return best == null ? candidates.get(0) : best;
     }
 
     private int episodeSortNumber(EpisodeCandidate candidate) {

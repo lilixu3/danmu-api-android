@@ -89,7 +89,11 @@ class InjectedPlaybackDialogPolicyTest {
         assertTrue(source.contains("private static final class SearchDialogState"))
         assertTrue(source.contains("private static final class DialogSessionSnapshot"))
         assertTrue(source.contains("restoreCachedSession("))
-        assertTrue(source.contains("dialog.setOnDismissListener(d -> state.active = false)"))
+        assertTrue(source.contains("dialog.setOnDismissListener(d -> {"))
+        assertTrue(source.contains("cancelTask(state.searchTask)"))
+        assertTrue(source.contains("cancelTask(state.detailTask)"))
+        assertTrue(source.contains("cancelTask(state.mediaTask)"))
+        assertTrue(source.contains("new LinkedBlockingQueue<>(8)"))
         assertTrue(source.contains("requestId != state.searchRequestId"))
         assertTrue(source.contains("requestId != state.detailRequestId"))
         assertFalse(source.contains("final int[] selectedEpisodeIndex"))
@@ -184,6 +188,84 @@ class InjectedPlaybackDialogPolicyTest {
         assertFalse(source.contains("skip floating injection"))
         assertFalse(source.contains("final boolean fromResource"))
         assertFalse(source.contains("private ShellMedia readShellMedia()"))
+    }
+
+    @Test
+    fun `NewBox应进入默认作用域并使用宿主真实端口`() {
+        val scope = readSource("app/src/main/resources/META-INF/xposed/scope.list")
+        val coordinator = readPushCoordinatorSource()
+        val mediaReader = readShellMediaReaderSource()
+
+        assertTrue(scope.lineSequence().any { it.trim() == "com.newbox.mobile" })
+        assertTrue(scope.lineSequence().any { it.trim() == "com.truthvision.homecare.nb.bn" })
+        assertTrue(scope.lineSequence().any { it.trim() == "com.fongmi.android.tw" })
+        assertTrue(coordinator.contains("DanmuXposedHostShell.resolve(context, effectivePort).port"))
+        assertTrue(mediaReader.contains("DanmuXposedHostShell.resolve(activity, preferredPort)"))
+        assertTrue(mediaReader.contains("target.authoritative"))
+        assertTrue(readSource("app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedHostShell.java")
+            .contains("com.github.catvod.Proxy"))
+    }
+
+    @Test
+    fun `播放媒体读取与旧选集校验应使用可靠宿主状态`() {
+        val mediaReader = readShellMediaReaderSource()
+        val coordinator = readPushCoordinatorSource()
+        val selectionCheck = coordinator.substringAfter("private boolean isCurrentActivitySelection")
+            .substringBefore("private BridgeRow supersededAutoPushRow")
+
+        assertTrue(mediaReader.contains("findViewByName(activity, \"player\")"))
+        assertTrue(mediaReader.contains("mapShellEndpointPlaybackState(state)"))
+        assertTrue(selectionCheck.contains("shellMediaReader.read(activity, preferredPort)"))
+        assertTrue(selectionCheck.contains("latest == null || latest.title.isEmpty()) return false"))
+        assertFalse(selectionCheck.contains("readActivityMedia"))
+    }
+
+    @Test
+    fun `推送应先预取同一份弹幕且不再异步二次统计`() {
+        val coordinator = readPushCoordinatorSource()
+        val server = readSource("app/src/main/assets/nodejs-project/android-server.js")
+
+        assertTrue(coordinator.contains("prepareDanmaku(settings.corePort, sourceDanmakuUrl)"))
+        assertTrue(coordinator.contains("buildShellPushUrl(effectivePort, pushDanmakuUrl)"))
+        assertTrue(coordinator.contains("buildPushResultMessage(prefix, label, prepared.count)"))
+        assertTrue(coordinator.contains("弹幕预取失败，已取消宿主推送"))
+        assertFalse(coordinator.contains("fallback to original URL"))
+        assertFalse(coordinator.contains("prepared == null ? -1"))
+        assertFalse(coordinator.contains("DanmuCountAfterPush"))
+        assertFalse(coordinator.contains("弹幕数未知"))
+        assertTrue(server.contains("/__danmaku/prepare"))
+        assertTrue(server.contains("/__danmaku/prepared/"))
+    }
+
+    @Test
+    fun `自动轮询不应依赖控制栏按钮注入成功`() {
+        val source = readXposedSource()
+        val controls = readPlaybackControlsSource()
+        val scheduleMethod = source.substringAfter("private void scheduleInject")
+            .substringBefore("private void installInjectionWatch")
+        val pageMethod = controls.substringAfter("static boolean looksLikePlaybackPage")
+            .substringBefore("static boolean isKnownPlaybackActivity")
+
+        assertTrue(scheduleMethod.contains("isKnownPlaybackActivity(activity)"))
+        assertTrue(scheduleMethod.contains("pushCoordinator.startAutoPushLoopOnce(activity)"))
+        assertTrue(pageMethod.indexOf("isKnownPlaybackActivityName(className)") <
+            pageMethod.indexOf("anchor == null || anchor.parent == null"))
+    }
+
+    @Test
+    fun `搜索候选应携带不可变负载而不是依赖可清空的全局表`() {
+        val repository = readSource(
+            "app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedEpisodeRepository.java"
+        )
+        val models = readSource(
+            "app/src/main/java/com/example/danmuapiapp/xposed/DanmuXposedModels.java"
+        )
+
+        assertTrue(models.contains("final AnimeRef anime"))
+        assertTrue(models.contains("final EpisodeCandidate episodeCandidate"))
+        assertFalse(repository.contains("animeRefs.clear()"))
+        assertFalse(repository.contains("episodeCandidates.clear()"))
+        assertFalse(repository.contains("ConcurrentHashMap"))
     }
 
     private fun readXposedSource(): String {
