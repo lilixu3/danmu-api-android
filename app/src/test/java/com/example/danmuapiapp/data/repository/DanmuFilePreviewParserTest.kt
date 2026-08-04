@@ -86,4 +86,76 @@ class DanmuFilePreviewParserTest {
         assertEquals("一秒半", preview.items.single().text)
         assertEquals(1.5, preview.items.single().timeSeconds ?: -1.0, 0.001)
     }
+
+    @Test
+    fun `artplayer preview maps fixed modes`() {
+        val json = """
+            {"danmuku":[
+              {"text":"顶部","time":2.5,"mode":1,"color":"#FFFFFF"},
+              {"text":"底部","time":3.0,"mode":2,"color":"#FFFFFF"}
+            ]}
+        """.trimIndent()
+
+        val preview = DanmuFilePreviewParser.parse(
+            input = json.byteInputStream(),
+            format = DanmuDownloadFormat.ArtplayerJson,
+            fileName = "demo.artplayer.json",
+            relativePath = "demo.artplayer.json",
+            bytes = json.toByteArray().size.toLong(),
+            previewLimit = 10
+        )
+
+        assertEquals(2, preview.count)
+        assertEquals("5", preview.items[0].mode)
+        assertEquals("4", preview.items[1].mode)
+    }
+
+    @Test
+    fun `baha preview reads nested danmu and converts tenths to seconds`() {
+        val json = """
+            {"data":{"danmu":[
+              {"text":"测试","time":25,"position":0,"color":"#FFFFFF"}
+            ],"totalCount":1}}
+        """.trimIndent()
+
+        val preview = DanmuFilePreviewParser.parse(
+            input = json.byteInputStream(),
+            format = DanmuDownloadFormat.BahaJson,
+            fileName = "demo.baha.json",
+            relativePath = "demo.baha.json",
+            bytes = json.toByteArray().size.toLong(),
+            previewLimit = 10
+        )
+
+        assertEquals(1, preview.count)
+        assertEquals(2.5, preview.items.single().timeSeconds ?: -1.0, 0.001)
+        assertEquals("测试", preview.items.single().text)
+    }
+
+    @Test
+    fun `dplayer and vod tuple previews expose text and modes`() {
+        val dplayer = """{"code":0,"data":[[1.5,1,16777215,"sender","顶部"]]}"""
+        val dplayerPreview = DanmuFilePreviewParser.parse(
+            input = dplayer.byteInputStream(),
+            format = DanmuDownloadFormat.DplayerJson,
+            fileName = "demo.dplayer.json",
+            relativePath = "demo.dplayer.json",
+            bytes = dplayer.toByteArray().size.toLong(),
+            previewLimit = 10
+        )
+        assertEquals("顶部", dplayerPreview.items.single().text)
+        assertEquals("5", dplayerPreview.items.single().mode)
+
+        val vod = """{"danum":1,"danmuku":[[3,"bottom","#FFFFFF","","底部"]]}"""
+        val vodPreview = DanmuFilePreviewParser.parse(
+            input = vod.byteInputStream(),
+            format = DanmuDownloadFormat.VodJson,
+            fileName = "demo.vod.json",
+            relativePath = "demo.vod.json",
+            bytes = vod.toByteArray().size.toLong(),
+            previewLimit = 10
+        )
+        assertEquals("底部", vodPreview.items.single().text)
+        assertEquals("4", vodPreview.items.single().mode)
+    }
 }

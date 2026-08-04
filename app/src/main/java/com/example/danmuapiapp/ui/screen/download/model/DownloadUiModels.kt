@@ -1,7 +1,9 @@
 package com.example.danmuapiapp.ui.screen.download
 
 import com.example.danmuapiapp.domain.model.DanmuFilePreview
+import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
+import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 
 data class DownloadAnimeCandidate(
     val animeId: Long,
@@ -39,7 +41,39 @@ enum class EpisodeDownloadState {
 data class EpisodeDownloadUiState(
     val state: EpisodeDownloadState = EpisodeDownloadState.Idle,
     val progress: Float = 0f,
-    val detail: String = ""
+    val detail: String = "",
+    val downloadedBefore: Boolean = false,
+    val downloadedRecordCount: Int = 0,
+    val lastDownloadedAt: Long? = null
+)
+
+data class AnimeDownloadHistorySummary(
+    val downloadedEpisodeCount: Int = 0,
+    val successfulRecordCount: Int = 0,
+    val latestDownloadedAt: Long? = null
+)
+
+data class DownloadRecordAnimeGroup(
+    val key: String,
+    val title: String,
+    val records: List<DanmuDownloadRecord>,
+    val episodes: List<DownloadRecordEpisodeGroup>,
+    val latestAt: Long,
+    val failedCount: Int,
+    val skippedCount: Int,
+    val totalBytes: Long
+)
+
+data class DownloadRecordEpisodeGroup(
+    val key: String,
+    val episodeNo: Int,
+    val title: String,
+    val records: List<DanmuDownloadRecord>,
+    val representative: DanmuDownloadRecord,
+    val previewRecord: DanmuDownloadRecord?,
+    val status: DownloadRecordStatus,
+    val successfulFileCount: Int,
+    val latestAt: Long
 )
 
 data class EpisodeStateSummary(
