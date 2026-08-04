@@ -31,9 +31,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Close
@@ -111,6 +113,7 @@ internal fun SearchDownloadPage(
     viewModel: DanmuDownloadViewModel,
     settings: com.example.danmuapiapp.domain.model.DanmuDownloadSettings
 ) {
+    val downloadRecords by viewModel.records.collectAsStateWithLifecycle()
     val inDetail = viewModel.currentAnime != null
     val visibleEpisodes = viewModel.visibleEpisodes()
     val episodeSummary = if (inDetail) {
@@ -220,6 +223,7 @@ internal fun SearchDownloadPage(
                 items(viewModel.animeCandidates, key = { it.animeId }) { anime ->
                     AnimeEntryRow(
                         anime = anime,
+                        history = buildAnimeDownloadHistorySummary(anime, downloadRecords),
                         loading = viewModel.isLoadingEpisodes,
                         onClick = { viewModel.openAnimeDetail(anime) }
                     )
@@ -630,6 +634,7 @@ internal fun AnimeInfoHeader(
 @Composable
 internal fun AnimeEntryRow(
     anime: DownloadAnimeCandidate,
+    history: AnimeDownloadHistorySummary,
     loading: Boolean,
     onClick: () -> Unit
 ) {
@@ -669,6 +674,24 @@ internal fun AnimeEntryRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (history.downloadedEpisodeCount > 0) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.DownloadDone,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = Color(0xFF2E7D32)
+                        )
+                        Text(
+                            text = "已下载 ${history.downloadedEpisodeCount} 集",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF2E7D32)
+                        )
+                    }
+                }
             }
             if (loading) {
                 CircularProgressIndicator(
@@ -680,14 +703,14 @@ internal fun AnimeEntryRow(
             } else {
                 Surface(
                     modifier = Modifier.padding(top = 2.dp),
-                    shape = RoundedCornerShape(999.dp),
+                    shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 ) {
-                    Text(
-                        "进入",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                    Icon(
+                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "查看剧集",
+                        modifier = Modifier.padding(7.dp).size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -703,7 +726,7 @@ internal fun EpisodeRow(
     enabled: Boolean,
     onSelect: () -> Unit
 ) {
-    val (statusText, statusColor) = when (state.state) {
+    val (operationStatusText, operationStatusColor) = when (state.state) {
         EpisodeDownloadState.Idle -> "待选" to MaterialTheme.colorScheme.onSurfaceVariant
         EpisodeDownloadState.Queued -> "排队" to MaterialTheme.colorScheme.primary
         EpisodeDownloadState.Running -> "下载中" to Color(0xFF1565C0)
@@ -711,6 +734,16 @@ internal fun EpisodeRow(
         EpisodeDownloadState.Failed -> "失败" to Color(0xFFC62828)
         EpisodeDownloadState.Skipped -> "跳过" to Color(0xFFF57C00)
         EpisodeDownloadState.Canceled -> "取消" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val statusText = if (state.downloadedBefore && state.state == EpisodeDownloadState.Success) {
+        "已下载"
+    } else {
+        operationStatusText
+    }
+    val statusColor = if (state.downloadedBefore && state.state == EpisodeDownloadState.Success) {
+        Color(0xFF2E7D32)
+    } else {
+        operationStatusColor
     }
 
     Surface(
@@ -760,16 +793,43 @@ internal fun EpisodeRow(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = statusColor.copy(alpha = 0.14f)
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        statusText,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = statusColor.copy(alpha = 0.14f)
+                    ) {
+                        Text(
+                            statusText,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor
+                        )
+                    }
+                    if (state.downloadedBefore && state.state != EpisodeDownloadState.Success) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.DownloadDone,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = Color(0xFF2E7D32)
+                            )
+                            Text(
+                                if (state.downloadedRecordCount > 1) {
+                                    "已下载 ${state.downloadedRecordCount} 次"
+                                } else {
+                                    "已下载"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+                    }
                 }
             }
             if (state.state == EpisodeDownloadState.Running) {

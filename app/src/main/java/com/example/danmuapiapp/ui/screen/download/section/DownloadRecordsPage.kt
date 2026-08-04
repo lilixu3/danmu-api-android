@@ -1,8 +1,5 @@
 package com.example.danmuapiapp.ui.screen.download
 
-import com.example.danmuapiapp.ui.component.AppDialog
-import com.example.danmuapiapp.ui.component.AppDialogStyle
-import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppModalPanel
 
 import androidx.compose.foundation.BorderStroke
@@ -32,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,7 +60,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DanmuFilePreview
 import com.example.danmuapiapp.domain.model.DanmuPreviewFilter
@@ -82,10 +79,12 @@ internal enum class RecordFilter(val label: String) {
 }
 
 @Composable
-internal fun RecordsPage(
+private fun LegacyRecordsPage(
     records: List<DanmuDownloadRecord>,
     previewState: DanmuPreviewDialogState,
+    isSyncing: Boolean,
     onClear: () -> Unit,
+    onSync: () -> Unit,
     onPreviewRecord: (DanmuDownloadRecord) -> Unit,
     onDismissPreview: () -> Unit
 ) {
@@ -117,17 +116,33 @@ internal fun RecordsPage(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("下载记录", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "最多展示最近 80 条；成功的 XML/JSON 可查看弹幕数和内容",
+                            "最多展示最近 80 条；文本格式可查看弹幕数和内容",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(
-                        onClick = onClear,
-                        enabled = records.isNotEmpty(),
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Rounded.ClearAll, "清空记录", Modifier.size(18.dp))
+                    Row {
+                        IconButton(
+                            onClick = onSync,
+                            enabled = !isSyncing,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            if (isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Rounded.Refresh, "扫描已有弹幕", Modifier.size(18.dp))
+                            }
+                        }
+                        IconButton(
+                            onClick = onClear,
+                            enabled = records.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Rounded.ClearAll, "清空记录", Modifier.size(18.dp))
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -211,7 +226,7 @@ internal fun RecordsPage(
 }
 
 @Composable
-internal fun RecordItem(
+private fun RecordItem(
     record: DanmuDownloadRecord,
     formatter: SimpleDateFormat,
     loadingPreview: Boolean,
@@ -256,7 +271,11 @@ internal fun RecordItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "${record.animeTitle} · E${record.episodeNo}",
+                        if (record.episodeNo > 0) {
+                            "${record.animeTitle} · E${record.episodeNo}"
+                        } else {
+                            record.animeTitle
+                        },
                         style = MaterialTheme.typography.labelLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -276,7 +295,7 @@ internal fun RecordItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${formatter.format(Date(record.createdAt))} · ${record.formatEnum().label} · ${record.source}",
+                    "${formatter.format(Date(record.createdAt))} · ${record.formatLabel()} · ${record.source}",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -296,10 +315,10 @@ internal fun RecordItem(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                val canPreview = record.statusEnum() == DownloadRecordStatus.Success &&
-                    record.fileUri.isNotBlank() &&
-                    (record.formatEnum() == DanmuDownloadFormat.Xml || record.formatEnum() == DanmuDownloadFormat.Json)
-                if (canPreview) {
+                val hasReadableFile = record.statusEnum() == DownloadRecordStatus.Success &&
+                    record.fileUri.isNotBlank()
+                val canPreview = hasReadableFile && record.formatOrNull()?.supportsPreview == true
+                if (hasReadableFile) {
                     Spacer(Modifier.height(4.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -307,28 +326,31 @@ internal fun RecordItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = record.danmuCount?.let { "弹幕 $it 条" } ?: "弹幕数待读取",
+                            text = record.danmuCount?.let { "弹幕 $it 条" }
+                                ?: if (canPreview) "弹幕数待读取" else "二进制格式不提供内容预览",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        OutlinedButton(
-                            onClick = onPreview,
-                            enabled = !loadingPreview,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            if (loadingPreview) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Rounded.Search, null, Modifier.size(16.dp))
+                        if (canPreview) {
+                            OutlinedButton(
+                                onClick = onPreview,
+                                enabled = !loadingPreview,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                if (loadingPreview) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(Icons.Rounded.Search, null, Modifier.size(16.dp))
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (loadingPreview) "读取中" else "查看")
                             }
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (loadingPreview) "读取中" else "查看")
                         }
                     }
                 }
@@ -338,7 +360,7 @@ internal fun RecordItem(
 }
 
 @Composable
-private fun DanmuPreviewDialog(
+internal fun DanmuPreviewDialog(
     state: DanmuPreviewDialogState,
     onDismiss: () -> Unit
 ) {

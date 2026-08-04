@@ -3,6 +3,7 @@ package com.example.danmuapiapp.data.repository
 import android.util.JsonReader
 import android.util.Log
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
+import com.example.danmuapiapp.domain.model.DanmuPayloadKind
 import com.example.danmuapiapp.domain.model.DanmuFilePreview
 import com.example.danmuapiapp.domain.model.DanmuPreviewItem
 import org.json.JSONArray
@@ -35,13 +36,17 @@ object DanmuFilePreviewParser {
         previewLimit: Int = 500
     ): DanmuFilePreview {
         val safeLimit = previewLimit.coerceIn(1, 100_000)
-        return when (format) {
-            DanmuDownloadFormat.Xml -> parseXml(input, fileName, relativePath, bytes, safeLimit)
-            DanmuDownloadFormat.Json -> parseJson(input, fileName, relativePath, bytes, safeLimit)
+        return when (format.payloadKind) {
+            DanmuPayloadKind.Xml -> parseXml(input, fileName, relativePath, bytes, safeLimit)
+                .copy(format = format)
+            DanmuPayloadKind.Json -> parseJson(input, fileName, relativePath, bytes, safeLimit, format)
+                .copy(format = format)
+            DanmuPayloadKind.Binary -> error("${format.label} 是二进制格式，不支持内容预览")
         }
     }
 
     fun count(payload: ByteArray, format: DanmuDownloadFormat): Int? {
+        if (!format.supportsPreview) return null
         if (payload.isEmpty()) return 0
         return runCatching {
             payload.inputStream().use { input ->
@@ -158,13 +163,14 @@ object DanmuFilePreviewParser {
         fileName: String,
         relativePath: String,
         bytes: Long,
-        previewLimit: Int
+        previewLimit: Int,
+        format: DanmuDownloadFormat
     ): DanmuFilePreview {
         // 小文件走快速路径，大文件走流式路径
         if (bytes in 1..MAX_JSON_SAFE_BYTES) {
-            return parseJsonSmall(input, fileName, relativePath, bytes, previewLimit)
+            return parseJsonSmall(input, fileName, relativePath, bytes, previewLimit, format)
         }
-        return parseJsonStreaming(input, fileName, relativePath, bytes, previewLimit)
+        return parseJsonStreaming(input, fileName, relativePath, bytes, previewLimit, format)
     }
 
     /** 小文件：全量读入后 JSONObject 解析（兼容性好，性能高）。 */
@@ -173,7 +179,8 @@ object DanmuFilePreviewParser {
         fileName: String,
         relativePath: String,
         bytes: Long,
-        previewLimit: Int
+        previewLimit: Int,
+        format: DanmuDownloadFormat
     ): DanmuFilePreview {
         val raw = input.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF").trim()
         if (raw.isBlank()) {
@@ -181,17 +188,14 @@ object DanmuFilePreviewParser {
         }
         val root = JSONTokener(raw).nextValue()
         val comments = extractCommentsArray(root)
-        val explicitCount = (root as? JSONObject)
-            ?.takeIf { it.has("count") }
-            ?.optInt("count", -1)
-            ?.takeIf { it >= 0 }
+        val explicitCount = extractExplicitCount(root, format)
         val count = explicitCount ?: comments.length()
         val items = mutableListOf<DanmuPreviewItem>()
         val itemCount = comments.length()
         val limit = minOf(previewLimit, itemCount)
         for (i in 0 until limit) {
             val item = comments.opt(i) ?: continue
-            items += jsonPreviewItem(index = i + 1, item = item)
+            items += jsonPreviewItem(index = i + 1, item = item, format = format)
         }
         return DanmuFilePreview(
             format = DanmuDownloadFormat.Json,
@@ -211,23 +215,19 @@ object DanmuFilePreviewParser {
         fileName: String,
         relativePath: String,
         bytes: Long,
-        previewLimit: Int
+        previewLimit: Int,
+        format: DanmuDownloadFormat
     ): DanmuFilePreview {
         val reader = JsonReader(InputStreamReader(input, Charsets.UTF_8))
         reader.isLenient = true
 
         return try {
             reader.use { r ->
-                val token = r.peek()
-                when (token) {
-                    android.util.JsonToken.BEGIN_ARRAY -> {
-                        streamJsonArray(r, fileName, relativePath, bytes, previewLimit)
-                    }
-
-                    android.util.JsonToken.BEGIN_OBJECT -> {
-                        streamJsonObject(r, fileName, relativePath, bytes, previewLimit)
-                    }
-
+                when (r.peek()) {
+                    android.util.JsonToken.BEGIN_ARRAY ->
+                        streamJsonArray(r, fileName, relativePath, bytes, previewLimit, format)
+                    android.util.JsonToken.BEGIN_OBJECT ->
+                        streamJsonObject(r, fileName, relativePath, bytes, previewLimit, format)
                     else -> emptyJsonResult(fileName, relativePath, bytes, previewLimit)
                 }
             }
@@ -252,28 +252,19 @@ object DanmuFilePreviewParser {
         fileName: String,
         relativePath: String,
         bytes: Long,
-        previewLimit: Int
+        previewLimit: Int,
+        format: DanmuDownloadFormat
     ): DanmuFilePreview {
-        val items = mutableListOf<DanmuPreviewItem>()
-        var count = 0
-        reader.beginArray()
-        while (reader.hasNext()) {
-            val item = streamJsonItem(reader, count + 1)
-            count++
-            if (items.size < previewLimit) {
-                items += item
-            }
-        }
-        reader.endArray()
+        val streamed = readJsonArray(reader, previewLimit, format)
         return DanmuFilePreview(
             format = DanmuDownloadFormat.Json,
             fileName = fileName,
             relativePath = relativePath,
             bytes = bytes,
-            count = maxOf(count, items.size),
+            count = streamed.count,
             previewLimit = previewLimit,
-            truncated = count > items.size,
-            items = items
+            truncated = streamed.count > streamed.items.size,
+            items = streamed.items
         )
     }
 
@@ -282,103 +273,120 @@ object DanmuFilePreviewParser {
         fileName: String,
         relativePath: String,
         bytes: Long,
-        previewLimit: Int
+        previewLimit: Int,
+        format: DanmuDownloadFormat
     ): DanmuFilePreview {
         var explicitCount: Int? = null
-        var commentsArray: JsonReader? = null
+        var streamed: StreamedJsonItems? = null
 
         reader.beginObject()
         while (reader.hasNext()) {
             val name = reader.nextName()
             when {
-                name == "count" -> {
-                    try {
-                        explicitCount = reader.nextInt()
-                    } catch (_: Exception) {
+                isCountKey(name) -> readIntOrNull(reader)?.let { value ->
+                    if (value >= 0) explicitCount = value
+                }
+                isCommentsKey(name) && reader.peek() == android.util.JsonToken.BEGIN_ARRAY -> {
+                    if (streamed == null) {
+                        streamed = readJsonArray(reader, previewLimit, format)
+                    } else {
                         reader.skipValue()
                     }
                 }
-
-                isCommentsKey(name) && commentsArray == null && reader.peek() == android.util.JsonToken.BEGIN_ARRAY -> {
-                    // 找到 comments 数组，延迟处理（先读完 count）
-                    commentsArray = reader
-                    // 不在此处 beginArray，先跳过其他字段
-                    reader.skipValue()
-                }
-
-                name == "data" && reader.peek() == android.util.JsonToken.BEGIN_OBJECT -> {
-                    // 处理 {"data": {"comments": [...]}} 嵌套
-                    val nested = streamJsonDataObject(reader, previewLimit)
-                    if (nested.items.isNotEmpty() || nested.count > 0) {
-                        return DanmuFilePreview(
-                            format = DanmuDownloadFormat.Json,
-                            fileName = fileName,
-                            relativePath = relativePath,
-                            bytes = bytes,
-                            count = nested.count,
-                            previewLimit = previewLimit,
-                            truncated = nested.count > nested.items.size,
-                            items = nested.items
-                        )
+                name == "data" -> when (reader.peek()) {
+                    android.util.JsonToken.BEGIN_ARRAY -> {
+                        if (streamed == null) {
+                            streamed = readJsonArray(reader, previewLimit, format)
+                        } else {
+                            reader.skipValue()
+                        }
                     }
-                    // 没找到 comments，继续
+                    android.util.JsonToken.BEGIN_OBJECT -> {
+                        val nested = streamJsonDataObject(reader, previewLimit, format)
+                        if (streamed == null) streamed = nested.first
+                        if (explicitCount == null) explicitCount = nested.second
+                    }
+                    else -> reader.skipValue()
                 }
-
                 else -> reader.skipValue()
             }
         }
         reader.endObject()
 
-        // 如果有缓存的 comments 数组引用，流式读取
-        if (commentsArray != null) {
-            return streamJsonArray(commentsArray, fileName, relativePath, bytes, previewLimit)
-                .copy(count = explicitCount ?: 0)
-        }
-
-        return emptyJsonResult(fileName, relativePath, bytes, previewLimit)
-    }
-
-    /** 处理 {\"data\": {\"comments\": [...]}} 嵌套。 */
-    private fun streamJsonDataObject(
-        reader: JsonReader,
-        previewLimit: Int
-    ): DanmuFilePreview {
-        val items = mutableListOf<DanmuPreviewItem>()
-        var count = 0
-        reader.beginObject()
-        while (reader.hasNext()) {
-            val name = reader.nextName()
-            if (isCommentsKey(name) && reader.peek() == android.util.JsonToken.BEGIN_ARRAY) {
-                reader.beginArray()
-                while (reader.hasNext()) {
-                    val item = streamJsonItem(reader, count + 1)
-                    count++
-                    if (items.size < previewLimit) {
-                        items += item
-                    }
-                }
-                reader.endArray()
-            } else {
-                reader.skipValue()
-            }
-        }
-        reader.endObject()
+        val result = streamed ?: StreamedJsonItems(emptyList(), 0)
+        val count = explicitCount ?: result.count
         return DanmuFilePreview(
             format = DanmuDownloadFormat.Json,
-            fileName = "",
-            relativePath = "",
-            bytes = 0,
-            count = maxOf(count, items.size),
+            fileName = fileName,
+            relativePath = relativePath,
+            bytes = bytes,
+            count = count,
             previewLimit = previewLimit,
-            truncated = count > items.size,
-            items = items
+            truncated = count > result.items.size || result.count > result.items.size,
+            items = result.items
         )
     }
 
-    private fun streamJsonItem(reader: JsonReader, index: Int): DanmuPreviewItem {
-        if (reader.peek() == android.util.JsonToken.STRING) {
-            return DanmuPreviewItem(index = index, text = reader.nextString())
+    private fun streamJsonDataObject(
+        reader: JsonReader,
+        previewLimit: Int,
+        format: DanmuDownloadFormat
+    ): Pair<StreamedJsonItems?, Int?> {
+        var streamed: StreamedJsonItems? = null
+        var explicitCount: Int? = null
+        reader.beginObject()
+        while (reader.hasNext()) {
+            val name = reader.nextName()
+            when {
+                isCountKey(name) -> readIntOrNull(reader)?.let { value ->
+                    if (value >= 0) explicitCount = value
+                }
+                isCommentsKey(name) && reader.peek() == android.util.JsonToken.BEGIN_ARRAY -> {
+                    if (streamed == null) {
+                        streamed = readJsonArray(reader, previewLimit, format)
+                    } else {
+                        reader.skipValue()
+                    }
+                }
+                else -> reader.skipValue()
+            }
         }
+        reader.endObject()
+        return streamed to explicitCount
+    }
+
+    private fun readJsonArray(
+        reader: JsonReader,
+        previewLimit: Int,
+        format: DanmuDownloadFormat
+    ): StreamedJsonItems {
+        val items = mutableListOf<DanmuPreviewItem>()
+        var count = 0
+        reader.beginArray()
+        while (reader.hasNext()) {
+            count++
+            val item = streamJsonItem(reader, count, format)
+            if (items.size < previewLimit) items += item
+        }
+        reader.endArray()
+        return StreamedJsonItems(items = items, count = count)
+    }
+
+    private fun streamJsonItem(
+        reader: JsonReader,
+        index: Int,
+        format: DanmuDownloadFormat
+    ): DanmuPreviewItem {
+        when (reader.peek()) {
+            android.util.JsonToken.STRING -> return DanmuPreviewItem(index = index, text = reader.nextString())
+            android.util.JsonToken.BEGIN_ARRAY -> return streamJsonTuple(reader, index, format)
+            android.util.JsonToken.BEGIN_OBJECT -> Unit
+            else -> {
+                val value = reader.nextStringOrSkip()
+                return DanmuPreviewItem(index = index, text = value)
+            }
+        }
+
         var p = ""
         var text = ""
         var timeSeconds: Double? = null
@@ -388,25 +396,25 @@ object DanmuFilePreviewParser {
 
         reader.beginObject()
         while (reader.hasNext()) {
-            when (val name = reader.nextName()) {
+            when (reader.nextName()) {
                 "p" -> p = reader.nextStringOrSkip()
                 "m", "content", "text", "message" -> {
-                    val v = reader.nextStringOrSkip()
-                    if (v.isNotBlank() && text.isEmpty()) text = v
+                    val value = reader.nextStringOrSkip()
+                    if (value.isNotBlank() && text.isEmpty()) text = value
                 }
                 "timepoint" -> timeSeconds = reader.nextDoubleOrSkip()?.takeIf(Double::isFinite)
-                "time" -> timeSeconds = reader.nextDoubleOrSkip()?.takeIf(Double::isFinite)
+                "time" -> timeSeconds = normalizeTime(reader.nextDoubleOrSkip(), format)
                 "progress" -> timeSeconds = reader.nextDoubleOrSkip()
                     ?.takeIf(Double::isFinite)
                     ?.div(1000.0)
-                "mode", "ct" -> {
-                    val v = reader.nextStringOrSkip()
-                    if (v.isNotBlank() && mode.isEmpty()) mode = v
+                "mode", "ct", "position" -> {
+                    val value = reader.nextStringOrSkip()
+                    if (value.isNotBlank() && mode.isEmpty()) mode = value
                 }
                 "color" -> color = reader.nextStringOrSkip().trim()
                 "source", "platform", "type" -> {
-                    val v = reader.nextStringOrSkip()
-                    if (v.isNotBlank() && source.isEmpty()) source = v
+                    val value = reader.nextStringOrSkip()
+                    if (value.isNotBlank() && source.isEmpty()) source = value
                 }
                 else -> reader.skipValue()
             }
@@ -419,13 +427,45 @@ object DanmuFilePreviewParser {
             DanmuPreviewItem(
                 index = index,
                 timeSeconds = timeSeconds,
-                mode = mode,
+                mode = normalizeMode(mode, format),
                 color = color,
                 source = source,
                 text = text
             )
         }
     }
+
+    private fun streamJsonTuple(
+        reader: JsonReader,
+        index: Int,
+        format: DanmuDownloadFormat
+    ): DanmuPreviewItem {
+        val values = mutableListOf<String>()
+        reader.beginArray()
+        while (reader.hasNext()) {
+            val value = when (reader.peek()) {
+                android.util.JsonToken.STRING,
+                android.util.JsonToken.NUMBER -> reader.nextString()
+                android.util.JsonToken.BOOLEAN -> reader.nextBoolean().toString()
+                android.util.JsonToken.NULL -> {
+                    reader.nextNull()
+                    ""
+                }
+                else -> {
+                    reader.skipValue()
+                    ""
+                }
+            }
+            values += value
+        }
+        reader.endArray()
+        return tuplePreviewItem(index, values, format)
+    }
+
+    private data class StreamedJsonItems(
+        val items: List<DanmuPreviewItem>,
+        val count: Int
+    )
 
     // ─── helpers ──────────────────────────────────────────
 
@@ -434,20 +474,47 @@ object DanmuFilePreviewParser {
             name == "danmuku" || name == "d" || name == "danmu"
     }
 
+    private fun isCountKey(name: String): Boolean {
+        return name == "count" || name == "totalCount" || name == "danum"
+    }
+
+    private fun readIntOrNull(reader: JsonReader): Int? {
+        return when (reader.peek()) {
+            android.util.JsonToken.NUMBER,
+            android.util.JsonToken.STRING -> reader.nextString().toIntOrNull()
+            else -> {
+                reader.skipValue()
+                null
+            }
+        }
+    }
+
     private fun JsonReader.nextStringOrSkip(): String {
-        return try {
-            nextString()
-        } catch (_: Exception) {
-            ""
+        return when (peek()) {
+            android.util.JsonToken.STRING,
+            android.util.JsonToken.NUMBER -> runCatching { nextString() }.getOrDefault("")
+            android.util.JsonToken.BOOLEAN -> nextBoolean().toString()
+            android.util.JsonToken.NULL -> {
+                nextNull()
+                ""
+            }
+            else -> {
+                skipValue()
+                ""
+            }
         }
     }
 
     private fun JsonReader.nextDoubleOrSkip(): Double? {
-        return try {
-            val v = nextDouble()
-            if (v.isFinite()) v else null
-        } catch (_: Exception) {
-            null
+        return when (peek()) {
+            android.util.JsonToken.NUMBER,
+            android.util.JsonToken.STRING -> runCatching { nextString().toDouble() }
+                .getOrNull()
+                ?.takeIf(Double::isFinite)
+            else -> {
+                skipValue()
+                null
+            }
         }
     }
 
@@ -492,13 +559,36 @@ object DanmuFilePreviewParser {
                     // data 可能是 {\"comments\": [...]} 嵌套
                     ?: root.optJSONObject("data")?.optJSONArray("comments")
                     ?: root.optJSONObject("data")?.optJSONArray("danmus")
+                    ?: root.optJSONObject("data")?.optJSONArray("danmaku")
+                    ?: root.optJSONObject("data")?.optJSONArray("danmuku")
+                    ?: root.optJSONObject("data")?.optJSONArray("danmu")
                     ?: JSONArray()
             }
             else -> JSONArray()
         }
     }
 
-    private fun jsonPreviewItem(index: Int, item: Any): DanmuPreviewItem {
+    private fun extractExplicitCount(root: Any?, format: DanmuDownloadFormat): Int? {
+        val obj = root as? JSONObject ?: return null
+        val raw = when (format) {
+            DanmuDownloadFormat.BahaJson -> obj.optJSONObject("data")?.optInt("totalCount", -1)
+            DanmuDownloadFormat.VodJson -> obj.optInt("danum", -1)
+            DanmuDownloadFormat.Json,
+            DanmuDownloadFormat.DdplayJson -> obj.optInt("count", -1)
+            else -> null
+        }
+        return raw?.takeIf { it >= 0 }
+    }
+
+    private fun jsonPreviewItem(
+        index: Int,
+        item: Any,
+        format: DanmuDownloadFormat
+    ): DanmuPreviewItem {
+        if (item is JSONArray) {
+            val values = (0 until item.length()).map { position -> item.optString(position) }
+            return tuplePreviewItem(index, values, format)
+        }
         if (item !is JSONObject) {
             return DanmuPreviewItem(index = index, text = item.toString())
         }
@@ -514,7 +604,10 @@ object DanmuFilePreviewParser {
         }
         val timeSeconds = when {
             item.has("timepoint") -> item.optDouble("timepoint", Double.NaN).takeIf(Double::isFinite)
-            item.has("time") -> item.optDouble("time", Double.NaN).takeIf(Double::isFinite)
+            item.has("time") -> normalizeTime(
+                item.optDouble("time", Double.NaN).takeIf(Double::isFinite),
+                format
+            )
             item.has("progress") -> item.optDouble("progress", Double.NaN)
                 .takeIf(Double::isFinite)
                 ?.div(1000.0)
@@ -523,7 +616,14 @@ object DanmuFilePreviewParser {
         return DanmuPreviewItem(
             index = index,
             timeSeconds = timeSeconds,
-            mode = firstNonBlank(item.optString("mode"), item.optString("ct")),
+            mode = normalizeMode(
+                firstNonBlank(
+                    item.optString("mode"),
+                    item.optString("ct"),
+                    item.optString("position")
+                ),
+                format
+            ),
             color = item.optString("color").trim(),
             source = firstNonBlank(
                 item.optString("source"),
@@ -532,6 +632,53 @@ object DanmuFilePreviewParser {
             ),
             text = text
         )
+    }
+
+    private fun tuplePreviewItem(
+        index: Int,
+        values: List<String>,
+        format: DanmuDownloadFormat
+    ): DanmuPreviewItem {
+        if (format != DanmuDownloadFormat.DplayerJson && format != DanmuDownloadFormat.VodJson) {
+            return DanmuPreviewItem(index = index, text = values.joinToString(","))
+        }
+        return DanmuPreviewItem(
+            index = index,
+            timeSeconds = values.getOrNull(0)?.toDoubleOrNull(),
+            mode = normalizeMode(values.getOrNull(1).orEmpty(), format),
+            color = values.getOrNull(2).orEmpty(),
+            source = if (format == DanmuDownloadFormat.DplayerJson) values.getOrNull(3).orEmpty() else "",
+            text = values.getOrNull(4).orEmpty()
+        )
+    }
+
+    private fun normalizeTime(value: Double?, format: DanmuDownloadFormat): Double? {
+        if (value == null || !value.isFinite()) return null
+        return if (format == DanmuDownloadFormat.BahaJson) value / 10.0 else value
+    }
+
+    private fun normalizeMode(raw: String, format: DanmuDownloadFormat): String {
+        val value = raw.trim().lowercase()
+        return when (format) {
+            DanmuDownloadFormat.ArtplayerJson,
+            DanmuDownloadFormat.BahaJson,
+            DanmuDownloadFormat.DplayerJson -> when (value) {
+                "1" -> "5"
+                "2" -> "4"
+                else -> value
+            }
+            DanmuDownloadFormat.DanuniJson -> when (value) {
+                "1", "bottom" -> "4"
+                "2", "top" -> "5"
+                else -> value
+            }
+            DanmuDownloadFormat.VodJson -> when (value) {
+                "top" -> "5"
+                "bottom" -> "4"
+                else -> "1"
+            }
+            else -> value
+        }
     }
 
     private fun buildPreviewItem(index: Int, p: String, text: String): DanmuPreviewItem {

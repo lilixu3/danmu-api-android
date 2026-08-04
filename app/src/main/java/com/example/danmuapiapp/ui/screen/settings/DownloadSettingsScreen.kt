@@ -28,9 +28,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -177,6 +179,23 @@ fun DownloadSettingsScreen(
                         Icon(Icons.Rounded.FolderOpen, null, Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("选择下载目录")
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::syncExistingFiles,
+                        enabled = settings.saveTreeUri.isNotBlank() && !viewModel.isSyncingDirectory,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        if (viewModel.isSyncingDirectory) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (viewModel.isSyncingDirectory) "正在扫描已有弹幕" else "扫描已有弹幕")
                     }
                     OutlinedButton(
                         onClick = viewModel::clearSaveTree,

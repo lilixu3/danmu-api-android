@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
+
 enum class ApiParamInputType {
     Text,
     Select
@@ -27,6 +29,9 @@ data class ApiEndpointConfig(
 )
 
 object ApiTestCatalog {
+
+    private val commentFormatOptions = DanmuDownloadFormat.entries.map { it.value }
+    private const val commentFormatHelper = "可选：核心支持的弹幕输出格式"
 
     val endpoints: List<ApiEndpointConfig> = listOf(
         ApiEndpointConfig(
@@ -101,8 +106,8 @@ object ApiTestCatalog {
                     name = "format",
                     label = "格式",
                     inputType = ApiParamInputType.Select,
-                    options = listOf("json", "xml"),
-                    helper = "可选：json 或 xml"
+                    options = commentFormatOptions,
+                    helper = commentFormatHelper
                 ),
                 ApiParamConfig(
                     name = "duration",
@@ -136,8 +141,8 @@ object ApiTestCatalog {
                     name = "format",
                     label = "格式",
                     inputType = ApiParamInputType.Select,
-                    options = listOf("json", "xml"),
-                    helper = "可选：json 或 xml"
+                    options = commentFormatOptions,
+                    helper = commentFormatHelper
                 ),
                 ApiParamConfig(
                     name = "duration",
@@ -165,8 +170,8 @@ object ApiTestCatalog {
                     name = "format",
                     label = "格式",
                     inputType = ApiParamInputType.Select,
-                    options = listOf("json", "xml"),
-                    helper = "可选：json 或 xml"
+                    options = commentFormatOptions,
+                    helper = commentFormatHelper
                 )
             ),
             hasRawBody = true,

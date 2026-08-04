@@ -92,20 +92,38 @@ internal fun buildInitialEpisodeStates(
     animeTitle: String,
     episodes: List<DownloadEpisodeCandidate>,
     queueTasksSnapshot: List<DanmuDownloadTask>,
-    recordsSnapshot: List<com.example.danmuapiapp.domain.model.DanmuDownloadRecord>
+    recordsSnapshot: List<com.example.danmuapiapp.domain.model.DanmuDownloadRecord>,
+    animeId: Long = 0L
 ): Map<Long, EpisodeDownloadUiState> {
     if (episodes.isEmpty()) return emptyMap()
     val animeKey = normalizeAnimeTitleForMatch(animeTitle)
     val filteredQueue = queueTasksSnapshot.filter { task ->
-        animeKey.isBlank() || normalizeAnimeTitleForMatch(task.animeTitle) == animeKey
+        animeKey.isBlank() || animeIdentityMatches(task.animeTitle, task.animeId, animeTitle, animeId)
     }
     val filteredRecords = recordsSnapshot.filter { record ->
-        animeKey.isBlank() || normalizeAnimeTitleForMatch(record.animeTitle) == animeKey
+        animeKey.isBlank() || animeIdentityMatches(record.animeTitle, record.animeId, animeTitle, animeId)
     }
     val stateMap = LinkedHashMap<Long, EpisodeDownloadUiState>(episodes.size)
     episodes.forEach { episode ->
         val sourceKey = canonicalSourceKey(episode.source)
         val titleKey = normalizeEpisodeTitleForMatch(episode.title)
+        val matchingRecords = filteredRecords
+            .asSequence()
+            .filter { record ->
+                val sourceMatches = historySourceMatches(episode.source, record.source)
+                val numberMatches = record.episodeNo > 0 && record.episodeNo == episode.episodeNumber
+                val idMatches = record.episodeId > 0L && record.episodeId == episode.episodeId
+                val titleMatches = titleKey.isNotBlank() &&
+                    normalizeEpisodeTitleForMatch(record.episodeTitle) == titleKey
+                sourceMatches && (numberMatches || idMatches || titleMatches)
+            }
+            .sortedByDescending { it.createdAt }
+            .toList()
+        val successfulRecords = matchingRecords.filter {
+            it.statusEnum() == DownloadRecordStatus.Success
+        }
+        val downloadedBefore = successfulRecords.isNotEmpty()
+        val lastDownloadedAt = successfulRecords.maxOfOrNull { it.createdAt }
         val queueTask = filteredQueue
             .asSequence()
             .filter { task ->
@@ -138,21 +156,14 @@ internal fun buildInitialEpisodeStates(
             stateMap[episode.episodeId] = EpisodeDownloadUiState(
                 state = mappedState,
                 progress = progress,
-                detail = queueTask.lastDetail
+                detail = queueTask.lastDetail,
+                downloadedBefore = downloadedBefore,
+                downloadedRecordCount = successfulRecords.size,
+                lastDownloadedAt = lastDownloadedAt
             )
             return@forEach
         }
-        val record = filteredRecords
-            .asSequence()
-            .filter { record ->
-                val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(record.source) == sourceKey
-                val numberMatches = record.episodeNo == episode.episodeNumber
-                val idMatches = record.episodeId == episode.episodeId
-                val titleMatches = titleKey.isNotBlank() &&
-                    normalizeEpisodeTitleForMatch(record.episodeTitle) == titleKey
-                sourceMatches && (numberMatches || idMatches || titleMatches)
-            }
-            .maxByOrNull { it.createdAt }
+        val record = matchingRecords.firstOrNull()
         if (record != null) {
             val mappedState = when (record.statusEnum()) {
                 DownloadRecordStatus.Success -> EpisodeDownloadState.Success
@@ -162,7 +173,10 @@ internal fun buildInitialEpisodeStates(
             stateMap[episode.episodeId] = EpisodeDownloadUiState(
                 state = mappedState,
                 progress = 1f,
-                detail = record.relativePath.ifBlank { record.errorMessage ?: "" }
+                detail = record.relativePath.ifBlank { record.errorMessage ?: "" },
+                downloadedBefore = downloadedBefore,
+                downloadedRecordCount = successfulRecords.size,
+                lastDownloadedAt = lastDownloadedAt
             )
         }
     }
