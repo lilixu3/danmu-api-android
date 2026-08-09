@@ -17,8 +17,7 @@ class ManualUrlDanmuSelectionFactoryTest {
                 year = "2024",
                 episodeLabel = "第12集",
                 platformLabel = "腾讯视频"
-            ),
-            metadataTrace = emptyList()
+            )
         )
 
         assertTrue(selection.anime.animeId < 0L)
@@ -33,14 +32,14 @@ class ManualUrlDanmuSelectionFactoryTest {
         assertEquals(12, selection.episode.episodeNumber)
         assertEquals("凡人修仙传 第12集", selection.episode.title)
         assertEquals("腾讯视频", selection.episode.source)
+        assertEquals("https://v.qq.com/x/cover/example/episode.html", selection.episode.sourceUrl)
     }
 
     @Test
     fun `manual url candidate falls back safely when metadata is unavailable`() {
         val selection = buildManualUrlDanmuSelection(
             inputUrl = "https://example.com/video?id=1",
-            metadata = null,
-            metadataTrace = emptyList()
+            metadata = null
         )
 
         assertEquals("https://example.com/video?id=1", selection.anime.title)

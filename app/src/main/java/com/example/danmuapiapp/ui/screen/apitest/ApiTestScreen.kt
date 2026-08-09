@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import android.app.Activity
 import android.content.ClipData
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,7 +28,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -73,10 +78,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.net.toUri
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.LogTagClassifier
+import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -88,7 +95,9 @@ import com.example.danmuapiapp.ui.screen.download.buildAnimeSearchResultPresenta
 import com.example.danmuapiapp.ui.screen.console.LogExportFormatter
 import com.example.danmuapiapp.ui.screen.console.buildLogExportText
 import com.example.danmuapiapp.ui.screen.console.shareLogsAsTextFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,6 +112,7 @@ fun ApiTestScreen(
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val clipboard = LocalClipboard.current
     val context = LocalContext.current
+    val screenScope = rememberCoroutineScope()
 
     var primaryTab by rememberSaveable { mutableIntStateOf(0) }
     var danmuTab by rememberSaveable { mutableIntStateOf(0) }
@@ -111,6 +121,7 @@ fun ApiTestScreen(
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var showLogDialog by rememberSaveable { mutableStateOf(false) }
     var initialLogScope by rememberSaveable { mutableIntStateOf(0) }
+    var pendingDanmuExport by remember { mutableStateOf<DanmuExportPayload?>(null) }
     var pendingLogExportText by remember { mutableStateOf("") }
     val saveLogLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
@@ -124,6 +135,32 @@ fun ApiTestScreen(
                 Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
             }.onFailure { throwable ->
                 Toast.makeText(context, throwable.message ?: "导出日志失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val saveDanmuLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val payload = pendingDanmuExport
+        val uri = result.data?.data
+        if (payload == null || result.resultCode != Activity.RESULT_OK || uri == null) {
+            pendingDanmuExport = null
+        } else {
+            screenScope.launch {
+                val writeResult = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                            output.write(payload.bytes)
+                            output.flush()
+                        } ?: error("无法打开导出文件")
+                    }
+                }
+                writeResult.onSuccess {
+                    viewModel.onExportSaved(payload.fileName)
+                }.onFailure { throwable ->
+                    viewModel.onExportSaveFailed(throwable.message ?: "导出文件写入失败")
+                }
+                pendingDanmuExport = null
             }
         }
     }
@@ -157,15 +194,44 @@ fun ApiTestScreen(
         }
     }
 
+    LaunchedEffect(primaryTab, danmuTab, baseUrl) {
+        if (primaryTab == 0 && danmuTab == 2) {
+            viewModel.loadFavorites(baseUrl)
+        }
+    }
+
+    LaunchedEffect(viewModel.preparedExport?.id) {
+        val payload = viewModel.preparedExport ?: return@LaunchedEffect
+        viewModel.consumePreparedExport(payload.id)
+        pendingDanmuExport = payload
+        saveDanmuLauncher.launch(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = payload.format.mimeType
+                putExtra(Intent.EXTRA_TITLE, payload.fileName)
+            }
+        )
+    }
+
+    LaunchedEffect(viewModel.uiNotice?.id) {
+        val notice = viewModel.uiNotice ?: return@LaunchedEffect
+        Toast.makeText(
+            context,
+            notice.message,
+            if (notice.isError) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+        ).show()
+        viewModel.consumeUiNotice(notice.id)
+    }
+
     val canStepBack = when {
-        primaryTab == 1 && danmuTab == 0 && viewModel.autoMatchResult != null -> true
-        primaryTab == 1 && danmuTab == 1 && (viewModel.manualResult != null || viewModel.manualCurrentAnime != null) -> true
+        primaryTab == 0 && danmuTab == 0 && viewModel.autoMatchResult != null -> true
+        primaryTab == 0 && danmuTab == 1 && (viewModel.manualResult != null || viewModel.manualCurrentAnime != null) -> true
         else -> false
     }
     val backAction = {
         when {
-            primaryTab == 1 && danmuTab == 0 && viewModel.autoMatchResult != null -> viewModel.clearAutoResult()
-            primaryTab == 1 && danmuTab == 1 && (viewModel.manualResult != null || viewModel.manualCurrentAnime != null) -> viewModel.backManualStep()
+            primaryTab == 0 && danmuTab == 0 && viewModel.autoMatchResult != null -> viewModel.clearAutoResult()
+            primaryTab == 0 && danmuTab == 1 && (viewModel.manualResult != null || viewModel.manualCurrentAnime != null) -> viewModel.backManualStep()
             else -> onBack()
         }
     }
@@ -233,14 +299,14 @@ fun ApiTestScreen(
                 Tab(
                     selected = primaryTab == 0,
                     onClick = { primaryTab = 0 },
-                    text = { Text("接口调试") },
-                    icon = { Icon(Icons.Rounded.Tune, null) }
+                    text = { Text("弹幕测试") },
+                    icon = { Icon(Icons.Rounded.Movie, null) }
                 )
                 Tab(
                     selected = primaryTab == 1,
                     onClick = { primaryTab = 1 },
-                    text = { Text("弹幕测试") },
-                    icon = { Icon(Icons.Rounded.Movie, null) }
+                    text = { Text("接口调试") },
+                    icon = { Icon(Icons.Rounded.Tune, null) }
                 )
             }
         }
@@ -254,7 +320,7 @@ fun ApiTestScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             AnimatedContent(targetState = primaryTab, label = "primaryTab") { tab ->
-                if (tab == 0) {
+                if (tab == 1) {
                     ApiDebugPane(
                         endpoint = endpoint,
                         endpoints = viewModel.endpoints,
@@ -317,10 +383,33 @@ fun ApiTestScreen(
                         isLoadingManualDanmu = viewModel.isLoadingManualDanmu,
                         loadingEpisodeId = viewModel.loadingEpisodeId,
                         manualResult = viewModel.manualResult,
+                        favoriteSupportState = viewModel.favoriteSupportState,
+                        favoriteItems = viewModel.favoriteItems,
+                        scheduledFavoriteRefreshSupported = viewModel.scheduledFavoriteRefreshSupported,
+                        favoriteLoadError = viewModel.favoriteLoadError,
+                        favoriteOperation = viewModel.favoriteOperation,
+                        favoriteOperationKeyword = viewModel.favoriteOperationKeyword,
+                        successfulManualSearchKeyword = viewModel.successfulManualSearchKeyword,
+                        isExportingDanmu = viewModel.isExportingDanmu || pendingDanmuExport != null,
                         onOpenAnime = { anime -> viewModel.openManualAnimeDetail(baseUrl, anime) },
                         onPickEpisode = { anime, episode -> viewModel.loadManualDanmu(baseUrl, anime, episode) },
                         onBackManual = viewModel::backManualStep,
-                        onOpenLogs = { openLogs(0) }
+                        onOpenLogs = { openLogs(0) },
+                        onReloadFavorites = { viewModel.loadFavorites(baseUrl) },
+                        onToggleFavorite = { viewModel.toggleManualFavorite(baseUrl, manualQuery) },
+                        onOpenFavorite = { item ->
+                            manualQuery = item.keyword
+                            danmuTab = 1
+                            viewModel.searchAnime(baseUrl, item.keyword)
+                        },
+                        onRefreshFavorite = { item -> viewModel.refreshFavorite(baseUrl, item) },
+                        onRemoveFavorite = { item -> viewModel.removeFavorite(baseUrl, item) },
+                        onScheduleFavorite = { item, draft ->
+                            viewModel.updateFavoriteSchedule(baseUrl, item, draft)
+                        },
+                        onExportDanmu = { insight, format ->
+                            viewModel.prepareDanmuExport(baseUrl, insight, format)
+                        }
                     )
                 }
             }
@@ -381,6 +470,7 @@ fun ApiTestScreen(
             }
         )
     }
+
 }
 
 @Composable
@@ -967,10 +1057,25 @@ private fun DanmuTestPane(
     isLoadingManualDanmu: Boolean,
     loadingEpisodeId: Long?,
     manualResult: DanmuInsight?,
+    favoriteSupportState: FavoriteSupportState,
+    favoriteItems: List<ApiTestFavoriteItem>,
+    scheduledFavoriteRefreshSupported: Boolean,
+    favoriteLoadError: String?,
+    favoriteOperation: FavoriteOperation?,
+    favoriteOperationKeyword: String?,
+    successfulManualSearchKeyword: String,
+    isExportingDanmu: Boolean,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
     onBackManual: () -> Unit,
-    onOpenLogs: () -> Unit
+    onOpenLogs: () -> Unit,
+    onReloadFavorites: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOpenFavorite: (ApiTestFavoriteItem) -> Unit,
+    onRefreshFavorite: (ApiTestFavoriteItem) -> Unit,
+    onRemoveFavorite: (ApiTestFavoriteItem) -> Unit,
+    onScheduleFavorite: (ApiTestFavoriteItem, FavoriteScheduleDraft?) -> Unit,
+    onExportDanmu: (DanmuInsight, DanmuDownloadFormat) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DanmuModeSwitcher(
@@ -979,17 +1084,18 @@ private fun DanmuTestPane(
         )
 
         AnimatedContent(targetState = danmuTab, label = "danmuTab") { tab ->
-            if (tab == 0) {
-                DanmuAutoPane(
+            when (tab) {
+                0 -> DanmuAutoPane(
                     fileName = autoFileName,
                     onFileNameChange = onAutoFileNameChange,
                     isLoading = isAutoMatching,
                     result = autoMatchResult,
                     onAutoMatch = onAutoMatch,
-                    onClearResult = onClearAuto
+                    onClearResult = onClearAuto,
+                    isExportingDanmu = isExportingDanmu,
+                    onExportDanmu = onExportDanmu
                 )
-            } else {
-                DanmuManualPane(
+                1 -> DanmuManualPane(
                     query = manualQuery,
                     onQueryChange = onManualQueryChange,
                     onSearch = onManualSearch,
@@ -1003,10 +1109,32 @@ private fun DanmuTestPane(
                     isLoadingManualDanmu = isLoadingManualDanmu,
                     loadingEpisodeId = loadingEpisodeId,
                     result = manualResult,
+                    favoriteSupportState = favoriteSupportState,
+                    favoriteItems = favoriteItems,
+                    favoriteOperation = favoriteOperation,
+                    favoriteOperationKeyword = favoriteOperationKeyword,
+                    successfulManualSearchKeyword = successfulManualSearchKeyword,
+                    isExportingDanmu = isExportingDanmu,
                     onOpenAnime = onOpenAnime,
                     onPickEpisode = onPickEpisode,
                     onBack = onBackManual,
-                    onOpenLogs = onOpenLogs
+                    onOpenLogs = onOpenLogs,
+                    onReloadFavorites = onReloadFavorites,
+                    onToggleFavorite = onToggleFavorite,
+                    onExportDanmu = onExportDanmu
+                )
+                else -> ApiTestFavoritePane(
+                    supportState = favoriteSupportState,
+                    favorites = favoriteItems,
+                    scheduledRefreshSupported = scheduledFavoriteRefreshSupported,
+                    loadError = favoriteLoadError,
+                    operation = favoriteOperation,
+                    operationKeyword = favoriteOperationKeyword,
+                    onReload = onReloadFavorites,
+                    onOpen = onOpenFavorite,
+                    onRefresh = onRefreshFavorite,
+                    onRemove = onRemoveFavorite,
+                    onSchedule = onScheduleFavorite
                 )
             }
         }
@@ -1043,6 +1171,13 @@ private fun DanmuModeSwitcher(
                 label = "手动匹配",
                 icon = Icons.Rounded.Search,
                 onClick = { onTabChange(1) }
+            )
+            DanmuModeTab(
+                modifier = Modifier.weight(1f),
+                selected = selectedTab == 2,
+                label = "收藏",
+                icon = Icons.Rounded.Bookmark,
+                onClick = { onTabChange(2) }
             )
         }
     }
@@ -1108,7 +1243,9 @@ private fun DanmuAutoPane(
     isLoading: Boolean,
     result: DanmuInsight?,
     onAutoMatch: () -> Unit,
-    onClearResult: () -> Unit
+    onClearResult: () -> Unit,
+    isExportingDanmu: Boolean,
+    onExportDanmu: (DanmuInsight, DanmuDownloadFormat) -> Unit
 ) {
     val isUrlInput = ApiTestInputResolver.extractHttpUrl(fileName) != null
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1176,7 +1313,13 @@ private fun DanmuAutoPane(
             )
         }
         if (result != null) {
-            DanmuInsightPanel(insight = result)
+            DanmuInsightPanel(
+                insight = result,
+                backLabel = "重新匹配",
+                onBack = onClearResult,
+                isExportingDanmu = isExportingDanmu,
+                onExportDanmu = onExportDanmu
+            )
         }
     }
 }
@@ -1196,10 +1339,19 @@ private fun DanmuManualPane(
     isLoadingManualDanmu: Boolean,
     loadingEpisodeId: Long?,
     result: DanmuInsight?,
+    favoriteSupportState: FavoriteSupportState,
+    favoriteItems: List<ApiTestFavoriteItem>,
+    favoriteOperation: FavoriteOperation?,
+    favoriteOperationKeyword: String?,
+    successfulManualSearchKeyword: String,
+    isExportingDanmu: Boolean,
     onOpenAnime: (DownloadAnimeCandidate) -> Unit,
     onPickEpisode: (DownloadAnimeCandidate, DownloadEpisodeCandidate) -> Unit,
     onBack: () -> Unit,
-    onOpenLogs: () -> Unit
+    onOpenLogs: () -> Unit,
+    onReloadFavorites: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onExportDanmu: (DanmuInsight, DanmuDownloadFormat) -> Unit
 ) {
     when {
         result != null -> {
@@ -1207,7 +1359,9 @@ private fun DanmuManualPane(
                 DanmuInsightPanel(
                     insight = result,
                     backLabel = if (result.pathLabel.contains("URL")) "返回搜索" else "返回剧集",
-                    onBack = onBack
+                    onBack = onBack,
+                    isExportingDanmu = isExportingDanmu,
+                    onExportDanmu = onExportDanmu
                 )
             }
         }
@@ -1426,9 +1580,59 @@ private fun DanmuManualPane(
                             subtitle = if (isUrlSearch) "读取页面标题/海报/年份，点击结果后直接加载弹幕详情" else "搜索结果会直接出现在下方"
                         )
                     }
-                    animeCandidates.isNotEmpty() -> WorkbenchCard(
-                        title = if (animeCandidates.any { it.directUrl.isNotBlank() }) "URL 解析结果" else "搜索结果"
-                    ) {
+                    animeCandidates.isNotEmpty() -> {
+                        val hasDirectUrlResult = animeCandidates.any { it.directUrl.isNotBlank() }
+                        val stableKeyword = successfulManualSearchKeyword.takeIf {
+                            it.isNotBlank() && it == query.trim() && !hasDirectUrlResult
+                        }
+                        val favorite = stableKeyword?.let { findFavoriteForKeyword(favoriteItems, it) }
+                        val favoriteBusy = favoriteOperation != null && (
+                            favoriteOperationKeyword == stableKeyword ||
+                                favoriteOperationKeyword == favorite?.keyword
+                            )
+                        WorkbenchCard(
+                            title = if (hasDirectUrlResult) "URL 解析结果" else "搜索结果",
+                            action = if (stableKeyword != null && favoriteSupportState != FavoriteSupportState.Unsupported) {
+                                {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            if (
+                                                favoriteSupportState == FavoriteSupportState.Failed ||
+                                                favoriteSupportState == FavoriteSupportState.Unknown
+                                            ) {
+                                                onReloadFavorites()
+                                            } else {
+                                                onToggleFavorite()
+                                            }
+                                        },
+                                        enabled = !favoriteBusy && favoriteSupportState != FavoriteSupportState.Loading,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        if (favoriteBusy || favoriteSupportState == FavoriteSupportState.Loading) {
+                                            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(
+                                                if (favorite != null) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                                null,
+                                                Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(Modifier.width(5.dp))
+                                        Text(
+                                            when {
+                                                favoriteSupportState == FavoriteSupportState.Failed -> "重试"
+                                                favorite != null -> "已收藏"
+                                                else -> "收藏"
+                                            },
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            } else {
+                                null
+                            }
+                        ) {
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1443,6 +1647,7 @@ private fun DanmuManualPane(
                                     onClick = { onOpenAnime(anime) }
                                 )
                             }
+                        }
                         }
                     }
                     manualHasSearched -> InfoHintCard(
@@ -1623,16 +1828,26 @@ private fun EpisodeCandidateRow(
 private fun DanmuInsightPanel(
     insight: DanmuInsight,
     backLabel: String? = null,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    isExportingDanmu: Boolean,
+    onExportDanmu: (DanmuInsight, DanmuDownloadFormat) -> Unit
 ) {
     val peakMoment = remember(insight.highMoments) {
         insight.highMoments.maxByOrNull { it.count }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DanmuMetricsGrid(insight = insight, backLabel = backLabel, onBack = onBack)
-        if (insight.requestTrace.isNotEmpty()) {
-            DanmuRequestTraceCard(insight.requestTrace)
+        DanmuMetricsGrid(
+            insight = insight,
+            backLabel = backLabel,
+            onBack = onBack
+        )
+        if (insight.exportTarget != null) {
+            ApiTestExportCard(
+                insight = insight,
+                exporting = isExportingDanmu,
+                onExport = onExportDanmu
+            )
         }
         if (peakMoment != null) {
             DanmuPeakMomentCard(moment = peakMoment)
@@ -1764,66 +1979,13 @@ private fun DanmuMetaBar(
 }
 
 @Composable
-private fun DanmuRequestTraceCard(traces: List<DanmuRequestTrace>) {
-    WorkbenchCard(title = "真实调用") {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            traces.forEachIndexed { index, trace ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = apiTestSubPanelColor(),
-                    border = BorderStroke(1.dp, apiTestOutlineColor(alpha = 0.64f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            StatusBadge(
-                                text = "${index + 1}. ${trace.label}",
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            StatusBadge(
-                                text = trace.method.uppercase(Locale.getDefault()),
-                                color = if (trace.method.equals("POST", true)) {
-                                    MaterialTheme.colorScheme.tertiary
-                                } else {
-                                    MaterialTheme.colorScheme.secondary
-                                }
-                            )
-                        }
-                        if (trace.inputValue.isNotBlank()) {
-                            Text(
-                                text = "${trace.inputLabel.ifBlank { "输入" }}：${trace.inputValue}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            text = trace.url,
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun DanmuMetricsGrid(
     insight: DanmuInsight,
     backLabel: String? = null,
     onBack: (() -> Unit)? = null
 ) {
+    val clipboard = LocalClipboard.current
+    val context = LocalContext.current
     val matchLine = remember(insight.animeTitle, insight.episodeTitle) {
         buildPlayerMatchLine(insight)
     }
@@ -1887,6 +2049,67 @@ private fun DanmuMetricsGrid(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(backLabel, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            if (insight.sourceUrl.isNotBlank()) {
+                HorizontalDivider(color = apiTestOutlineColor(alpha = 0.7f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "来源地址",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                        )
+                        Text(
+                            text = insight.sourceUrl,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            clipboard.nativeClipboard.setPrimaryClip(
+                                ClipData.newPlainText("弹幕来源地址", insight.sourceUrl)
+                            )
+                            Toast.makeText(context, "来源地址已复制", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "复制来源地址",
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    val canOpenSource = insight.sourceUrl.startsWith("http://", ignoreCase = true) ||
+                        insight.sourceUrl.startsWith("https://", ignoreCase = true)
+                    IconButton(
+                        enabled = canOpenSource,
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, insight.sourceUrl.toUri())
+                                )
+                            }.onFailure {
+                                Toast.makeText(context, "无法打开来源地址", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = "打开来源地址",
+                            modifier = Modifier.size(19.dp)
+                        )
                     }
                 }
             }
@@ -2585,7 +2808,7 @@ private fun CompactContextBar(
 }
 
 @Composable
-private fun WorkbenchCard(
+internal fun WorkbenchCard(
     title: String,
     subtitle: String? = null,
     action: @Composable (() -> Unit)? = null,
@@ -2656,7 +2879,7 @@ private fun MonoPreview(text: String) {
 }
 
 @Composable
-private fun InfoHintCard(
+internal fun InfoHintCard(
     title: String,
     subtitle: String,
     action: (@Composable RowScope.() -> Unit)? = null
@@ -2698,7 +2921,7 @@ private fun InfoHintCard(
 }
 
 @Composable
-private fun LoadingHintCard(
+internal fun LoadingHintCard(
     title: String,
     subtitle: String
 ) {
@@ -2764,7 +2987,7 @@ private fun statusColor(code: Int): Color {
 }
 
 @Composable
-private fun apiTestPanelColor(): Color {
+internal fun apiTestPanelColor(): Color {
     val c = MaterialTheme.colorScheme
     return if (c.background.luminance() < 0.5f) {
         lerp(c.surfaceContainerHigh, c.surfaceContainerHighest, 0.32f)
@@ -2774,7 +2997,7 @@ private fun apiTestPanelColor(): Color {
 }
 
 @Composable
-private fun apiTestSubPanelColor(): Color {
+internal fun apiTestSubPanelColor(): Color {
     val c = MaterialTheme.colorScheme
     return if (c.background.luminance() < 0.5f) {
         lerp(c.surfaceContainer, c.surfaceContainerHigh, 0.42f)
@@ -2804,7 +3027,7 @@ private fun apiTestCommentRowColor(): Color {
 }
 
 @Composable
-private fun apiTestOutlineColor(alpha: Float = 1f): Color {
+internal fun apiTestOutlineColor(alpha: Float = 1f): Color {
     val c = MaterialTheme.colorScheme
     return if (c.background.luminance() < 0.5f) {
         c.outlineVariant.copy(alpha = 0.42f * alpha)

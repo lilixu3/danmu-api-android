@@ -34,19 +34,13 @@ data class DanmuHighMoment(
     val count: Int
 )
 
-data class DanmuRequestTrace(
-    val label: String,
-    val method: String,
-    val url: String,
-    val inputLabel: String = "",
-    val inputValue: String = ""
-)
-
 data class DanmuInsight(
     val commentId: Long?,
+    val exportTarget: DanmuExportTarget?,
     val animeTitle: String,
     val episodeTitle: String,
     val source: String,
+    val sourceUrl: String = "",
     val pathLabel: String,
     val matchedAtMillis: Long,
     val totalCount: Int,
@@ -58,7 +52,6 @@ data class DanmuInsight(
     val heatBuckets: List<DanmuHeatBucket>,
     val highMoments: List<DanmuHighMoment>,
     val comments: List<DanmuCommentItem>,
-    val requestTrace: List<DanmuRequestTrace> = emptyList(),
     val posterUrl: String = "",
     val year: String = "",
     val resolvedEpisodeLabel: String = ""

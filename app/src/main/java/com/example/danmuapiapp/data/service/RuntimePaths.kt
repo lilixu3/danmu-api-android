@@ -392,16 +392,20 @@ object RuntimePaths {
         private val configApplied: Boolean,
         private val targetCore: File?,
         private val coreBackup: File?,
-        private val coreApplied: Boolean
+        private val coreApplied: Boolean,
+        private val targetFavorites: File?,
+        private val favoritesBackup: File?,
+        private val favoritesApplied: Boolean
     ) {
         fun commit() {
-            listOfNotNull(configBackup, coreBackup).forEach { backup ->
+            listOfNotNull(configBackup, coreBackup, favoritesBackup).forEach { backup ->
                 runCatching { backup.deleteRecursively() }
             }
         }
 
         fun rollback() {
             val errors = mutableListOf<Throwable>()
+            rollbackTarget(targetFavorites, favoritesBackup, favoritesApplied, "收藏", errors)
             rollbackTarget(targetCore, coreBackup, coreApplied, "核心", errors)
             rollbackTarget(targetConfig, configBackup, configApplied, "配置", errors)
             if (errors.isNotEmpty()) {
@@ -441,7 +445,11 @@ object RuntimePaths {
     ): WorkDirMigrationReceipt {
         val oldRoot = File(oldBase, "nodejs-project")
         if (!oldRoot.exists()) {
-            return WorkDirMigrationReceipt(null, null, false, null, null, false)
+            return WorkDirMigrationReceipt(
+                null, null, false,
+                null, null, false,
+                null, null, false
+            )
         }
         if (!oldRoot.isDirectory) {
             throw IllegalStateException("原工作目录不是有效目录：${oldRoot.absolutePath}")
@@ -461,21 +469,27 @@ object RuntimePaths {
         val stagedCore = File(newRoot, ".$coreName-migration-$token")
         val configBackup = File(newRoot, ".config-backup-$token")
         val coreBackup = File(newRoot, ".$coreName-backup-$token")
+        val sourceFavorites = File(oldRoot, ".cache/${FavoriteCacheStore.FILE_NAME}")
+        val targetFavorites = File(newRoot, ".cache/${FavoriteCacheStore.FILE_NAME}")
+        val stagedFavorites = File(newRoot, ".favorites-migration-$token")
+        val favoritesBackup = File(newRoot, ".favorites-backup-$token")
 
         fun cleanStaging() {
-            listOf(stagedConfig, stagedCore).forEach { artifact ->
+            listOf(stagedConfig, stagedCore, stagedFavorites).forEach { artifact ->
                 runCatching { artifact.deleteRecursively() }
             }
         }
 
         cleanStaging()
-        listOf(configBackup, coreBackup).forEach { artifact ->
+        listOf(configBackup, coreBackup, favoritesBackup).forEach { artifact ->
             runCatching { artifact.deleteRecursively() }
         }
         var replaceConfig = false
         var replaceCore = false
+        var replaceFavorites = false
         var configApplied = false
         var coreApplied = false
+        var favoritesApplied = false
         try {
             if (targetConfig.isDirectory) {
                 copyDirectoryStrict(targetConfig, stagedConfig)
@@ -502,6 +516,23 @@ object RuntimePaths {
                 replaceCore = true
             }
 
+            if (sourceFavorites.isFile) {
+                val targetRaw = if (targetFavorites.isFile) {
+                    targetFavorites.readText(Charsets.UTF_8)
+                } else {
+                    "{}"
+                }
+                val merged = FavoriteCacheStore.mergeDocuments(
+                    preferredRaw = sourceFavorites.readText(Charsets.UTF_8),
+                    secondaryRaw = targetRaw
+                )
+                stagedFavorites.writeText(
+                    FavoriteCacheStore.snapshotOf(merged).content,
+                    Charsets.UTF_8
+                )
+                replaceFavorites = true
+            }
+
             if (replaceConfig) {
                 if (targetConfig.exists() && !targetConfig.renameTo(configBackup)) {
                     throw IllegalStateException("无法备份目标配置")
@@ -522,16 +553,45 @@ object RuntimePaths {
                 }
                 coreApplied = true
             }
+            if (replaceFavorites) {
+                val favoritesDir = targetFavorites.parentFile
+                    ?: throw IllegalStateException("目标收藏目录无效")
+                if (!favoritesDir.exists() && !favoritesDir.mkdirs()) {
+                    throw IllegalStateException("无法创建目标收藏目录")
+                }
+                if (targetFavorites.exists() && !targetFavorites.renameTo(favoritesBackup)) {
+                    throw IllegalStateException("无法备份目标收藏")
+                }
+                if (!stagedFavorites.renameTo(targetFavorites)) {
+                    favoritesBackup.renameTo(targetFavorites)
+                    throw IllegalStateException("无法应用迁移收藏")
+                }
+                favoritesApplied = true
+            }
             return WorkDirMigrationReceipt(
                 targetConfig = targetConfig.takeIf { replaceConfig },
                 configBackup = configBackup.takeIf { it.exists() },
                 configApplied = configApplied,
                 targetCore = targetCore.takeIf { replaceCore },
                 coreBackup = coreBackup.takeIf { it.exists() },
-                coreApplied = coreApplied
+                coreApplied = coreApplied,
+                targetFavorites = targetFavorites.takeIf { replaceFavorites },
+                favoritesBackup = favoritesBackup.takeIf { it.exists() },
+                favoritesApplied = favoritesApplied
             )
         } catch (error: Exception) {
             val rollbackErrors = mutableListOf<String>()
+            if (favoritesBackup.exists()) {
+                if (targetFavorites.exists() && !targetFavorites.deleteRecursively()) {
+                    rollbackErrors += "无法移除未完成的目标收藏"
+                } else if (!favoritesBackup.renameTo(targetFavorites)) {
+                    rollbackErrors += "无法恢复收藏备份：${favoritesBackup.absolutePath}"
+                }
+            } else if (favoritesApplied) {
+                if (targetFavorites.exists() && !targetFavorites.deleteRecursively()) {
+                    rollbackErrors += "无法撤销新收藏"
+                }
+            }
             if (configBackup.exists()) {
                 if (targetConfig.exists() && !targetConfig.deleteRecursively()) {
                     rollbackErrors += "无法移除未完成的目标配置"

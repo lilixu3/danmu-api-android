@@ -2,6 +2,7 @@ const { parentPort, workerData } = require('worker_threads');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const util = require('util');
+const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
 
 if (!parentPort) {
   throw new Error('worker missing parentPort');
@@ -66,6 +67,7 @@ applyEnvSnapshot(initialEnv);
 
 let handleRequest = null;
 let coreGlobals = null;
+let favoriteSchedulerStop = () => {};
 
 const QUIET_CORE_LOG_PATH_RE = /(^|\/)api\/(?:logs|reqrecords|cache\/animes)(?=(["'\s?#]|$))/i;
 
@@ -211,6 +213,21 @@ async function loadWorker() {
   }
 }
 
+async function initializeFavoriteScheduler() {
+  try {
+    const result = await startFavoriteSchedulerHost({
+      projectDir,
+      variantDir,
+      env: process.env,
+      port: process.env.DANMU_API_PORT,
+      log: (message, detail) => _sendLog('info', [message, detail].filter(Boolean)),
+    });
+    favoriteSchedulerStop = result?.stop || (() => {});
+  } catch (error) {
+    _sendLog('warn', ['[favorite] scheduler initialization skipped:', error?.message || error]);
+  }
+}
+
 async function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
 
@@ -279,7 +296,11 @@ async function handleMessage(msg) {
 async function main() {
   await loadWorker();
   parentPort.postMessage({ type: 'ready' });
+  void initializeFavoriteScheduler();
   parentPort.on('message', handleMessage);
+  parentPort.on('close', () => {
+    try { favoriteSchedulerStop(); } catch {}
+  });
 }
 
 main().catch((error) => {

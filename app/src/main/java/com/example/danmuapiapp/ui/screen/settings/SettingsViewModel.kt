@@ -17,6 +17,7 @@ import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.DanmuQuickSettingsTileService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
+import com.example.danmuapiapp.data.service.FavoriteCacheStore
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
@@ -755,6 +756,39 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    fun buildFavoriteExportFileName(): String {
+        val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        return "danmu_api_favorites_$ts.json"
+    }
+
+    suspend fun exportFavoriteContent(): Result<FavoriteCacheStore.Snapshot> {
+        return withContext(Dispatchers.IO) { FavoriteCacheStore.readCurrent(context) }
+    }
+
+    fun importFavoriteContent(content: String) {
+        viewModelScope.launch {
+            val wasRunning = runtimeState.value.status == ServiceStatus.Running
+            val result = withContext(Dispatchers.IO) {
+                FavoriteCacheStore.writeCurrent(context, content)
+            }
+            result.fold(
+                onSuccess = { snapshot ->
+                    if (wasRunning) runtimeRepo.restartService()
+                    operationMessage = if (wasRunning) {
+                        "已导入 ${snapshot.count} 项收藏，服务正在重启"
+                    } else {
+                        "已导入 ${snapshot.count} 项收藏，下次启动服务时生效"
+                    }
+                    runtimeRepo.addLog(LogLevel.Info, "已导入 ${snapshot.count} 项收藏数据")
+                },
+                onFailure = { error ->
+                    operationMessage = "收藏导入失败：${error.message ?: "文件格式无效"}"
+                    runtimeRepo.addLog(LogLevel.Error, "收藏导入失败：${error.message ?: "文件格式无效"}")
+                }
+            )
+        }
+    }
+
     fun openWebDavConfigDialog() {
         val config = webDavService.loadConfig()
         webDavUrlInput = config.url
@@ -814,17 +848,30 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
             isWebDavOperating = true
-            webDavOperatingText = "正在上传 .env 到 WebDAV..."
+            webDavOperatingText = "正在上传配置与收藏到 WebDAV..."
             envConfigRepo.reload()
             val content = envConfigRepo.rawContent.value
-            webDavService.backupEnv(content).fold(
-                onSuccess = {
-                    operationMessage = "WebDAV 备份成功：$it"
-                },
-                onFailure = {
-                    operationMessage = "WebDAV 备份失败：${it.message}"
+            val favoriteSnapshot = withContext(Dispatchers.IO) {
+                FavoriteCacheStore.readCurrent(context)
+            }
+            if (favoriteSnapshot.isFailure) {
+                operationMessage = "WebDAV 备份失败：${favoriteSnapshot.exceptionOrNull()?.message}"
+            } else {
+                val envResult = webDavService.backupEnv(content)
+                if (envResult.isFailure) {
+                    operationMessage = "WebDAV 备份失败：${envResult.exceptionOrNull()?.message}"
+                } else {
+                    val favorites = favoriteSnapshot.getOrThrow()
+                    webDavService.backupFavorites(favorites.content).fold(
+                        onSuccess = {
+                            operationMessage = "WebDAV 备份成功：配置及 ${favorites.count} 项收藏"
+                        },
+                        onFailure = {
+                            operationMessage = "配置已上传，但收藏备份失败：${it.message}"
+                        }
+                    )
                 }
-            )
+            }
             isWebDavOperating = false
             webDavOperatingText = ""
         }
@@ -840,25 +887,63 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
             isWebDavOperating = true
-            webDavOperatingText = "正在从 WebDAV 下载 .env..."
-            webDavService.restoreEnv().fold(
-                onSuccess = { content ->
-                    envConfigRepo.saveRawContent(content).fold(
-                        onSuccess = {
-                            applyRuntimeFromEnv(content)
-                            operationMessage = "WebDAV 恢复成功，已覆盖当前 .env，建议重启服务"
-                            runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置，建议重启服务")
-                        },
-                        onFailure = {
-                            operationMessage = "WebDAV 恢复失败：${it.message ?: "写入 .env 失败"}"
-                            runtimeRepo.addLog(LogLevel.Error, "WebDAV 恢复写入 .env 失败：${it.message ?: "写入失败"}")
-                        }
-                    )
-                },
-                onFailure = {
-                    operationMessage = "WebDAV 恢复失败：${it.message}"
+            webDavOperatingText = "正在从 WebDAV 下载配置与收藏..."
+            val envResult = webDavService.restoreEnv()
+            val favoriteResult = if (envResult.isSuccess) {
+                webDavService.restoreFavorites()
+            } else {
+                Result.success(null)
+            }
+            when {
+                envResult.isFailure -> {
+                    operationMessage = "WebDAV 恢复失败：${envResult.exceptionOrNull()?.message}"
                 }
-            )
+                favoriteResult.isFailure -> {
+                    operationMessage = "WebDAV 恢复失败：${favoriteResult.exceptionOrNull()?.message}"
+                }
+                else -> {
+                    val envContent = envResult.getOrThrow()
+                    val favoriteContent = favoriteResult.getOrNull()
+                    val validatedFavorites = favoriteContent?.let { raw ->
+                        runCatching { FavoriteCacheStore.snapshotOf(raw) }
+                    }
+                    if (validatedFavorites?.isFailure == true) {
+                        operationMessage = "WebDAV 收藏备份无效：${validatedFavorites.exceptionOrNull()?.message}"
+                    } else {
+                        envConfigRepo.saveRawContent(envContent).fold(
+                            onSuccess = {
+                                val favoriteWrite = validatedFavorites?.getOrNull()?.let { snapshot ->
+                                    withContext(Dispatchers.IO) {
+                                        FavoriteCacheStore.writeCurrent(context, snapshot.content)
+                                    }
+                                } ?: Result.success(null)
+                                favoriteWrite.fold(
+                                    onSuccess = { snapshot ->
+                                        applyRuntimeFromEnv(envContent)
+                                        val wasRunning = runtimeState.value.status == ServiceStatus.Running
+                                        if (wasRunning) runtimeRepo.restartService()
+                                        val favoriteSummary = snapshot?.let { "，恢复 ${it.count} 项收藏" }
+                                            ?: "，云端无收藏备份，已保留本地收藏"
+                                        operationMessage = if (wasRunning) {
+                                            "WebDAV 恢复成功$favoriteSummary，服务正在重启"
+                                        } else {
+                                            "WebDAV 恢复成功$favoriteSummary"
+                                        }
+                                        runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置与收藏")
+                                    },
+                                    onFailure = {
+                                        operationMessage = "配置已恢复，但收藏写入失败：${it.message}"
+                                    }
+                                )
+                            },
+                            onFailure = {
+                                operationMessage = "WebDAV 恢复失败：${it.message ?: "写入 .env 失败"}"
+                                runtimeRepo.addLog(LogLevel.Error, "WebDAV 恢复写入 .env 失败：${it.message ?: "写入失败"}")
+                            }
+                        )
+                    }
+                }
+            }
             isWebDavOperating = false
             webDavOperatingText = ""
         }
