@@ -213,6 +213,8 @@ object EnvVarConfigLoader {
                 if (cleanedParsed.isNotEmpty()) cleanedParsed else sanitizeOptions(allowedPlatforms)
             }
 
+            "AUTO_MATCH_MAPPING_TABLE" -> sanitizeOptions(allowedPlatforms)
+
             "DANMU_OFFSET" -> {
                 val parsedWithoutAll = cleanedParsed.filterNot { it.equals("all", ignoreCase = true) }
                 val sourceOptions = if (parsedWithoutAll.isNotEmpty()) {

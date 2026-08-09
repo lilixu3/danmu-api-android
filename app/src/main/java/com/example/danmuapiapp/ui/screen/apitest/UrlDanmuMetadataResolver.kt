@@ -14,11 +14,6 @@ import java.time.ZoneId
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-internal data class UrlDanmuMetadataResult(
-    val metadata: UrlDanmuMetadata?,
-    val trace: List<DanmuRequestTrace> = emptyList()
-)
-
 internal class UrlDanmuMetadataResolver(
     httpClient: OkHttpClient
 ) {
@@ -26,77 +21,67 @@ internal class UrlDanmuMetadataResolver(
         .callTimeout(6, TimeUnit.SECONDS)
         .build()
 
-    suspend fun resolve(inputUrl: String): UrlDanmuMetadataResult {
+    suspend fun resolve(inputUrl: String): UrlDanmuMetadata? {
         if (!inputUrl.startsWith("http", ignoreCase = true)) {
-            return UrlDanmuMetadataResult(metadata = null)
+            return null
         }
         return withContext(Dispatchers.IO) {
             when (UrlDanmuMetadataPlatform.detect(inputUrl)) {
                 UrlDanmuMetadataPlatform.Tencent -> resolveByHtml(
                     inputUrl = inputUrl,
-                    label = "腾讯元数据",
                     platformLabel = "腾讯视频",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Iqiyi -> withHtmlFallback(
                     primary = resolveIqiyi(inputUrl),
                     inputUrl = inputUrl,
-                    label = "爱奇艺页面元数据",
                     platformLabel = "爱奇艺",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Youku -> withHtmlFallback(
                     primary = resolveYouku(inputUrl),
                     inputUrl = inputUrl,
-                    label = "优酷页面元数据",
                     platformLabel = "优酷",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Mango -> withHtmlFallback(
                     primary = resolveMango(inputUrl),
                     inputUrl = inputUrl,
-                    label = "芒果页面元数据",
                     platformLabel = "芒果TV",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Bilibili -> withHtmlFallback(
                     primary = resolveBilibili(inputUrl),
                     inputUrl = inputUrl,
-                    label = "B站页面元数据",
                     platformLabel = "哔哩哔哩",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Migu -> withHtmlFallback(
                     primary = resolveMigu(inputUrl),
                     inputUrl = inputUrl,
-                    label = "咪咕页面元数据",
                     platformLabel = "咪咕视频",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Sohu -> withHtmlFallback(
                     primary = resolveSohu(inputUrl),
                     inputUrl = inputUrl,
-                    label = "搜狐页面元数据",
                     platformLabel = "搜狐视频",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Leshi -> withHtmlFallback(
                     primary = resolveLeshi(inputUrl),
                     inputUrl = inputUrl,
-                    label = "乐视页面元数据",
                     platformLabel = "乐视视频",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Xigua -> withHtmlFallback(
                     primary = resolveXigua(inputUrl),
                     inputUrl = inputUrl,
-                    label = "西瓜页面元数据",
                     platformLabel = "西瓜视频",
                     userAgent = DESKTOP_UA
                 )
                 UrlDanmuMetadataPlatform.Unknown -> resolveByHtml(
                     inputUrl = inputUrl,
-                    label = "页面元数据",
                     platformLabel = "URL",
                     userAgent = MOBILE_UA
                 )
@@ -104,7 +89,7 @@ internal class UrlDanmuMetadataResolver(
         }
     }
 
-    private fun resolveIqiyi(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveIqiyi(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""/v_([A-Za-z0-9]+)\.html""")
             .find(inputUrl)
             ?.groupValues
@@ -131,13 +116,12 @@ internal class UrlDanmuMetadataResolver(
         )
         params["sign"] = UrlDanmuMetadataPlatformParsers.iqiyiSign(params)
         val apiUrl = buildUrl("https://www.iqiyi.com/prelw/tvg/v2/lw/base_info", params)
-        val trace = trace("爱奇艺详情", "GET", apiUrl, inputUrl)
-        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.iqiyi.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-        val metadata = UrlDanmuMetadataPlatformParsers.parseIqiyiBaseInfoJson(inputUrl, body)
-        return UrlDanmuMetadataResult(metadata = metadata, trace = listOf(trace))
+        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.iqiyi.com/")
+            ?: return null
+        return UrlDanmuMetadataPlatformParsers.parseIqiyiBaseInfoJson(inputUrl, body)
     }
 
-    private fun resolveYouku(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveYouku(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""id_([^./?#]+)""")
             .find(inputUrl)
             ?.groupValues
@@ -152,8 +136,7 @@ internal class UrlDanmuMetadataResolver(
                 "ext" to "show"
             )
         )
-        val traces = mutableListOf(trace("优酷视频详情", "GET", videoApi, inputUrl))
-        val videoJson = fetchText(videoApi, userAgent = DESKTOP_UA) ?: return UrlDanmuMetadataResult(null, traces)
+        val videoJson = fetchText(videoApi, userAgent = DESKTOP_UA) ?: return null
         val showId = runCatching {
             JSONObject(videoJson).optJSONObject("show")?.optString("id").orEmpty().trim()
         }.getOrDefault("")
@@ -167,18 +150,14 @@ internal class UrlDanmuMetadataResolver(
                     "ext" to "show"
                 )
             )
-            traces += trace("优酷剧集详情", "GET", showApi, showId)
             fetchText(showApi, userAgent = DESKTOP_UA)
         } else {
             null
         }
-        return UrlDanmuMetadataResult(
-            metadata = UrlDanmuMetadataPlatformParsers.parseYoukuJson(inputUrl, videoJson, showJson),
-            trace = traces
-        )
+        return UrlDanmuMetadataPlatformParsers.parseYoukuJson(inputUrl, videoJson, showJson)
     }
 
-    private fun resolveMango(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveMango(inputUrl: String): UrlDanmuMetadata? {
         val match = Regex("""/b/(\d+)/(\d+)\.html""").find(inputUrl) ?: return null
         val cid = match.groupValues[1]
         val vid = match.groupValues[2]
@@ -186,141 +165,106 @@ internal class UrlDanmuMetadataResolver(
             "https://pcweb.api.mgtv.com/video/info",
             linkedMapOf("cid" to cid, "vid" to vid)
         )
-        val trace = trace("芒果视频详情", "GET", apiUrl, inputUrl)
-        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.mgtv.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-        return UrlDanmuMetadataResult(
-            metadata = UrlDanmuMetadataPlatformParsers.parseMangoVideoInfoJson(inputUrl, body),
-            trace = listOf(trace)
-        )
+        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.mgtv.com/")
+            ?: return null
+        return UrlDanmuMetadataPlatformParsers.parseMangoVideoInfoJson(inputUrl, body)
     }
 
-    private fun resolveBilibili(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveBilibili(inputUrl: String): UrlDanmuMetadata? {
         val epId = Regex("""/bangumi/play/ep(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: Regex("""[?&]ep_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
         if (!epId.isNullOrBlank()) {
             val apiUrl = buildUrl("https://api.bilibili.com/pgc/view/web/season", linkedMapOf("ep_id" to epId))
-            val trace = trace("B站番剧详情", "GET", apiUrl, inputUrl)
-            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-            return UrlDanmuMetadataResult(
-                metadata = UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(inputUrl, body, epId),
-                trace = listOf(trace)
-            )
+            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
+                ?: return null
+            return UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(inputUrl, body, epId)
         }
 
         val seasonId = Regex("""/bangumi/play/ss(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: Regex("""[?&]season_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
         if (!seasonId.isNullOrBlank()) {
             val apiUrl = buildUrl("https://api.bilibili.com/pgc/view/web/season", linkedMapOf("season_id" to seasonId))
-            val trace = trace("B站番剧详情", "GET", apiUrl, inputUrl)
-            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-            return UrlDanmuMetadataResult(
-                metadata = UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(inputUrl, body, null),
-                trace = listOf(trace)
-            )
+            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
+                ?: return null
+            return UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(inputUrl, body, null)
         }
 
         val bvid = Regex("""/(BV[0-9A-Za-z]+)""").find(inputUrl)?.groupValues?.getOrNull(1)
         if (!bvid.isNullOrBlank()) {
             val apiUrl = buildUrl("https://api.bilibili.com/x/web-interface/view", linkedMapOf("bvid" to bvid))
-            val trace = trace("B站视频详情", "GET", apiUrl, inputUrl)
-            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-            return UrlDanmuMetadataResult(
-                metadata = UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(inputUrl, body),
-                trace = listOf(trace)
-            )
+            val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
+                ?: return null
+            return UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(inputUrl, body)
         }
         return null
     }
 
-    private fun resolveMigu(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveMigu(inputUrl: String): UrlDanmuMetadata? {
         val cid = queryParam(inputUrl, "cid")
             ?: Regex("""cid=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: return null
         val apiUrl = "https://v3-sc.miguvideo.com/program/v4/cont/content-info/$cid/1"
-        val trace = trace("咪咕内容详情", "GET", apiUrl, inputUrl)
-        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.miguvideo.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-        return UrlDanmuMetadataResult(
-            metadata = UrlDanmuMetadataPlatformParsers.parseMiguContentInfoJson(inputUrl, body),
-            trace = listOf(trace)
-        )
+        val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.miguvideo.com/")
+            ?: return null
+        return UrlDanmuMetadataPlatformParsers.parseMiguContentInfoJson(inputUrl, body)
     }
 
-    private fun resolveSohu(inputUrl: String): UrlDanmuMetadataResult? {
-        val traces = mutableListOf<DanmuRequestTrace>()
-        traces += trace("搜狐页面元数据", "GET", inputUrl, inputUrl)
-        val html = fetchText(inputUrl, userAgent = DESKTOP_UA, referer = "https://tv.sohu.com/") ?: return UrlDanmuMetadataResult(null, traces)
+    private fun resolveSohu(inputUrl: String): UrlDanmuMetadata? {
+        val html = fetchText(inputUrl, userAgent = DESKTOP_UA, referer = "https://tv.sohu.com/")
+            ?: return null
         val pageMetadata = parseUrlDanmuMetadata(inputUrl, html)
         val playlistId = UrlDanmuMetadataPlatformParsers.extractSohuPlaylistId(html)
         if (playlistId.isNullOrBlank()) {
-            return UrlDanmuMetadataResult(pageMetadata?.copy(platformLabel = "搜狐视频"), traces)
+            return pageMetadata?.copy(platformLabel = "搜狐视频")
         }
         val apiUrl = buildUrl("https://pl.hd.sohu.com/videolist", linkedMapOf("playlistid" to playlistId))
-        traces += trace("搜狐专辑详情", "GET", apiUrl, playlistId)
         val json = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = inputUrl)
         val apiMetadata = json?.let { UrlDanmuMetadataPlatformParsers.parseSohuVideoListJson(inputUrl, it) }
-        return UrlDanmuMetadataResult(
-            metadata = mergeMetadata(primary = apiMetadata, fallback = pageMetadata, platformLabel = "搜狐视频"),
-            trace = traces
-        )
+        return mergeMetadata(primary = apiMetadata, fallback = pageMetadata, platformLabel = "搜狐视频")
     }
 
-    private fun resolveLeshi(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveLeshi(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""/vplay/(\d+)\.html""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: return null
         val pageUrl = "https://www.le.com/ptv/vplay/$videoId.html"
-        val trace = trace("乐视页面元数据", "GET", pageUrl, inputUrl)
-        val html = fetchText(pageUrl, userAgent = DESKTOP_UA, referer = "https://www.le.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
+        val html = fetchText(pageUrl, userAgent = DESKTOP_UA, referer = "https://www.le.com/")
+            ?: return null
         val pageMetadata = parseUrlDanmuMetadata(inputUrl, html)
         val leMetadata = UrlDanmuMetadataPlatformParsers.parseLeshiHtml(inputUrl, html)
-        return UrlDanmuMetadataResult(
-            metadata = mergeMetadata(primary = leMetadata, fallback = pageMetadata, platformLabel = "乐视视频"),
-            trace = listOf(trace)
-        )
+        return mergeMetadata(primary = leMetadata, fallback = pageMetadata, platformLabel = "乐视视频")
     }
 
-    private fun resolveXigua(inputUrl: String): UrlDanmuMetadataResult? {
+    private fun resolveXigua(inputUrl: String): UrlDanmuMetadata? {
         if (inputUrl.contains("douyin.com", ignoreCase = true)) return null
         val gid = Regex("""/video/(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: Regex("""/(\d{10,})(?:[/?#]|$)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: return null
         val pageUrl = "https://m.ixigua.com/video/$gid"
-        val trace = trace("西瓜页面元数据", "GET", pageUrl, inputUrl)
-        val html = fetchText(pageUrl, userAgent = MOBILE_UA, referer = "https://m.ixigua.com/") ?: return UrlDanmuMetadataResult(null, listOf(trace))
-        return UrlDanmuMetadataResult(
-            metadata = parseUrlDanmuMetadata(inputUrl, html)?.copy(platformLabel = "西瓜视频"),
-            trace = listOf(trace)
-        )
+        val html = fetchText(pageUrl, userAgent = MOBILE_UA, referer = "https://m.ixigua.com/")
+            ?: return null
+        return parseUrlDanmuMetadata(inputUrl, html)?.copy(platformLabel = "西瓜视频")
     }
 
     private fun resolveByHtml(
         inputUrl: String,
-        label: String,
         platformLabel: String,
         userAgent: String
-    ): UrlDanmuMetadataResult {
-        val trace = trace(label, "GET", inputUrl, inputUrl)
+    ): UrlDanmuMetadata? {
         val html = fetchText(inputUrl, userAgent = userAgent)
-        val metadata = html?.let { parseUrlDanmuMetadata(inputUrl, it)?.copy(platformLabel = platformLabel) }
-        return UrlDanmuMetadataResult(metadata = metadata, trace = listOf(trace))
+        return html?.let { parseUrlDanmuMetadata(inputUrl, it)?.copy(platformLabel = platformLabel) }
     }
 
     private fun withHtmlFallback(
-        primary: UrlDanmuMetadataResult?,
+        primary: UrlDanmuMetadata?,
         inputUrl: String,
-        label: String,
         platformLabel: String,
         userAgent: String
-    ): UrlDanmuMetadataResult {
-        if (primary?.metadata != null) return primary
-        val fallback = resolveByHtml(
+    ): UrlDanmuMetadata? {
+        if (primary != null) return primary
+        return resolveByHtml(
             inputUrl = inputUrl,
-            label = label,
             platformLabel = platformLabel,
             userAgent = userAgent
-        )
-        return UrlDanmuMetadataResult(
-            metadata = fallback.metadata,
-            trace = primary?.trace.orEmpty() + fallback.trace
         )
     }
 
@@ -366,16 +310,6 @@ internal class UrlDanmuMetadataResolver(
                     if (key == name && value.isNotBlank()) value else null
                 }
         }.getOrNull()
-    }
-
-    private fun trace(label: String, method: String, url: String, inputValue: String): DanmuRequestTrace {
-        return DanmuRequestTrace(
-            label = label,
-            method = method,
-            url = url,
-            inputLabel = "URL",
-            inputValue = inputValue
-        )
     }
 
     private fun mergeMetadata(

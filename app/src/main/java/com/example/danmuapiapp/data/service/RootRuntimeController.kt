@@ -167,19 +167,23 @@ object RootRuntimeController {
             fi
             rm -rf "${'$'}NEW/.cache" || exit 9
             mkdir -p "${'$'}NEW/.cache" || exit 10
-            [ -f "${'$'}NEW/main.js" ] || exit 11
+            if [ -f "${'$'}SRC/.cache/${FavoriteCacheStore.FILE_NAME}" ]; then
+              cp -f "${'$'}SRC/.cache/${FavoriteCacheStore.FILE_NAME}" "${'$'}NEW/.cache/${FavoriteCacheStore.FILE_NAME}" 2>/dev/null || \
+                cat "${'$'}SRC/.cache/${FavoriteCacheStore.FILE_NAME}" > "${'$'}NEW/.cache/${FavoriteCacheStore.FILE_NAME}" || exit 11
+            fi
+            [ -f "${'$'}NEW/main.js" ] || exit 12
 
-            (cd "${'$'}SRC" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 12
-            (cd "${'$'}NEW" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 13
-            cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 14
-            rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
+            (cd "${'$'}SRC" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}SRC_LIST" || exit 13
+            (cd "${'$'}NEW" && find . -path './.cache' -prune -o -type f -exec cksum {} + | LC_ALL=C sort) > "${'$'}DST_LIST" || exit 14
+            cmp -s "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 15
+            rm -f "${'$'}SRC_LIST" "${'$'}DST_LIST" || exit 16
 
             if [ -e "${'$'}DST" ]; then
-              mv "${'$'}DST" "${'$'}BACKUP" || exit 16
+              mv "${'$'}DST" "${'$'}BACKUP" || exit 17
               HAD_DST=1
             fi
             SWAPPED=1
-            mv "${'$'}NEW" "${'$'}DST" || exit 17
+            mv "${'$'}NEW" "${'$'}DST" || exit 18
             SWAPPED=0
             rm -rf "${'$'}BACKUP" 2>/dev/null || true
             trap - EXIT HUP INT TERM

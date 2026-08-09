@@ -63,13 +63,14 @@ internal fun parseMatchSelection(raw: String): MatchSelection? {
 internal fun parseDanmuInsight(
     raw: String,
     commentId: Long?,
+    exportTarget: DanmuExportTarget? = commentId?.let(DanmuExportTarget::Episode),
     animeTitle: String,
     episodeTitle: String,
     source: String,
+    sourceUrl: String = "",
     pathLabel: String,
     matchedAtMillis: Long,
     requestDurationMs: Long?,
-    requestTrace: List<DanmuRequestTrace> = emptyList(),
     posterUrl: String = "",
     year: String = "",
     resolvedEpisodeLabel: String = ""
@@ -82,9 +83,11 @@ internal fun parseDanmuInsight(
     val preview = buildTextPreview(raw, DANMU_PREVIEW_LIMIT)
     return DanmuInsight(
         commentId = commentId,
+        exportTarget = exportTarget,
         animeTitle = animeTitle,
         episodeTitle = episodeTitle,
         source = source,
+        sourceUrl = sourceUrl,
         pathLabel = pathLabel,
         matchedAtMillis = matchedAtMillis,
         totalCount = comments.size,
@@ -96,7 +99,6 @@ internal fun parseDanmuInsight(
         heatBuckets = heatBuckets,
         highMoments = highMoments,
         comments = comments,
-        requestTrace = requestTrace,
         posterUrl = posterUrl,
         year = year,
         resolvedEpisodeLabel = resolvedEpisodeLabel

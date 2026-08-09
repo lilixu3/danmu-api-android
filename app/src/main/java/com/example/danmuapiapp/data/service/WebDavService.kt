@@ -75,7 +75,16 @@ class WebDavService @Inject constructor(
             config.password.isNotBlank()
     }
 
-    suspend fun backupEnv(content: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun backupEnv(content: String): Result<String> = backupFile(".env", content)
+
+    suspend fun backupFavorites(content: String): Result<String> = backupFile("favorites.json", content)
+
+    suspend fun restoreEnv(): Result<String> = restoreFile(".env", missingAllowed = false)
+        .mapCatching { it ?: throw IOException("云端不存在 .env") }
+
+    suspend fun restoreFavorites(): Result<String?> = restoreFile("favorites.json", missingAllowed = true)
+
+    private suspend fun backupFile(fileName: String, content: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val config = loadConfig()
             if (!isConfigured(config)) {
@@ -97,7 +106,7 @@ class WebDavService @Inject constructor(
                     continue
                 }
 
-                val fileUrl = "$baseUrl/${encodePath(folder)}/.env"
+                val fileUrl = "$baseUrl/${encodePath(folder)}/${encodeSegment(fileName)}"
                 val uploadResult = executeRequest(
                     method = "PUT",
                     url = fileUrl,
@@ -105,7 +114,7 @@ class WebDavService @Inject constructor(
                     content = content
                 )
                 if (uploadResult.code in 200..299 || uploadResult.code == 204) {
-                    return@withContext Result.success(displayPath(folder))
+                    return@withContext Result.success("${displayPath(folder)}/$fileName")
                 }
 
                 val detail = uploadResult.body.take(120).ifBlank { "无响应详情" }
@@ -118,7 +127,10 @@ class WebDavService @Inject constructor(
         }
     }
 
-    suspend fun restoreEnv(): Result<String> = withContext(Dispatchers.IO) {
+    private suspend fun restoreFile(
+        fileName: String,
+        missingAllowed: Boolean
+    ): Result<String?> = withContext(Dispatchers.IO) {
         try {
             val config = loadConfig()
             if (!isConfigured(config)) {
@@ -133,8 +145,9 @@ class WebDavService @Inject constructor(
             val authHeader = authHeader(config.username, config.password)
 
             var lastErrorMessage = "未知错误"
+            var missingOnEveryCandidate = true
             for (baseUrl in baseUrls) {
-                val fileUrl = "$baseUrl/${encodePath(folder)}/.env"
+                val fileUrl = "$baseUrl/${encodePath(folder)}/${encodeSegment(fileName)}"
                 val downloadResult = executeRequest(
                     method = "GET",
                     url = fileUrl,
@@ -143,11 +156,15 @@ class WebDavService @Inject constructor(
                 if (downloadResult.code in 200..299) {
                     return@withContext Result.success(downloadResult.body)
                 }
+                if (downloadResult.code != 404) missingOnEveryCandidate = false
 
                 val detail = downloadResult.body.take(120).ifBlank { "无响应详情" }
                 lastErrorMessage = "下载失败（HTTP ${downloadResult.code}）：${friendlyMessage(detail, downloadResult.error)}"
             }
 
+            if (missingAllowed && missingOnEveryCandidate) {
+                return@withContext Result.success(null)
+            }
             Result.failure(IOException(lastErrorMessage))
         } catch (e: Exception) {
             Result.failure(e)

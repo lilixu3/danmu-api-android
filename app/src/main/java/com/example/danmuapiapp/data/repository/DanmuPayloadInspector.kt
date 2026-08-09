@@ -130,6 +130,9 @@ internal object DanmuPayloadInspector {
         payload: ByteArray,
         contentType: String?
     ): DanmuPayloadInspection {
+        if (payload.isEmpty()) {
+            return invalid(DanmuDownloadFormat.DanuniBinPb, "返回内容为空")
+        }
         val normalizedType = contentType
             ?.substringBefore(';')
             ?.trim()

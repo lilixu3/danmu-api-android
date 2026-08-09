@@ -14,14 +14,12 @@ internal data class UrlDanmuMetadata(
 
 internal data class ManualUrlDanmuSelection(
     val anime: DownloadAnimeCandidate,
-    val episode: DownloadEpisodeCandidate,
-    val metadataTrace: List<DanmuRequestTrace>
+    val episode: DownloadEpisodeCandidate
 )
 
 internal fun buildManualUrlDanmuSelection(
     inputUrl: String,
-    metadata: UrlDanmuMetadata?,
-    metadataTrace: List<DanmuRequestTrace>
+    metadata: UrlDanmuMetadata?
 ): ManualUrlDanmuSelection {
     val source = metadata?.platformLabel?.ifBlank { null } ?: "URL"
     val title = metadata?.title?.ifBlank { null } ?: inputUrl
@@ -54,14 +52,14 @@ internal fun buildManualUrlDanmuSelection(
         title = episodeTitle,
         source = source,
         directUrl = inputUrl,
+        sourceUrl = inputUrl,
         posterUrl = metadata?.posterUrl.orEmpty(),
         year = metadata?.year.orEmpty(),
         resolvedEpisodeLabel = episodeLabel
     )
     return ManualUrlDanmuSelection(
         anime = anime,
-        episode = episode,
-        metadataTrace = metadataTrace
+        episode = episode
     )
 }
 
@@ -82,6 +80,7 @@ internal fun buildManualUrlEpisodeCandidate(anime: DownloadAnimeCandidate): Down
         title = title,
         source = anime.sourceLabel.ifBlank { "URL" },
         directUrl = directUrl,
+        sourceUrl = directUrl,
         posterUrl = anime.imageUrl,
         year = anime.year,
         resolvedEpisodeLabel = anime.episodeLabel
