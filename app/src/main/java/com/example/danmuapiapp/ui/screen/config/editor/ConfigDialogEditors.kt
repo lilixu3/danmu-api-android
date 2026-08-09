@@ -93,6 +93,13 @@ internal fun EnvVarEditDialog(
     }
 
     val normalizedKey = remember(def.key) { def.key.trim().uppercase(Locale.getDefault()) }
+    val autoMatchValidation = remember(normalizedKey, value, def.options) {
+        if (normalizedKey == KEY_AUTO_MATCH_MAPPING_TABLE) {
+            validateAutoMatchMappingTable(value, def.options)
+        } else {
+            AutoMatchMappingValidation(valid = true)
+        }
+    }
 
     AppDialog(
         onDismissRequest = onDismiss,
@@ -153,6 +160,16 @@ internal fun EnvVarEditDialog(
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it }
+                        )
+                        true
+                    }
+
+                    KEY_AUTO_MATCH_MAPPING_TABLE -> {
+                        AutoMatchMappingTableEditor(
+                            rememberKey = def.key,
+                            value = value,
+                            onValueChange = { value = it },
+                            platformOptions = def.options
                         )
                         true
                     }
@@ -318,7 +335,10 @@ internal fun EnvVarEditDialog(
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("取消") }
-                FilledTonalButton(onClick = { onSave(value) }) { Text("保存") }
+                FilledTonalButton(
+                    onClick = { onSave(value) },
+                    enabled = autoMatchValidation.valid
+                ) { Text("保存") }
             }
         }
     )

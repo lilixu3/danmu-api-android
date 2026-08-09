@@ -5,6 +5,7 @@ const net = require('net');
 const path = require('path');
 const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
+const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -27,6 +28,8 @@ let _WorkerCtor = null;
 let _mainServer = null;
 let _proxyServer = null;
 let _shutdownPromise = null;
+let _directFavoriteSchedulerStop = () => {};
+let _directFavoriteSchedulerGeneration = 0;
 
 let _coreWatchers = [];
 let _coreWatchDirs = new Set();
@@ -353,6 +356,7 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
     }
     _coreReloadPending = false;
     _clearCoreWatchers();
+    _stopDirectFavoriteScheduler();
 
     const workerState = _activeWorkerState;
     const mainServer = _mainServer;
@@ -406,6 +410,37 @@ function _syncEnvToWorker() {
   if (!_activeWorkerState) return;
   const snapshot = _getEnvSnapshot();
   _postToWorker(_activeWorkerState, { type: 'setEnv', env: snapshot });
+}
+
+function _stopDirectFavoriteScheduler() {
+  _directFavoriteSchedulerGeneration += 1;
+  try { _directFavoriteSchedulerStop(); } catch {}
+  _directFavoriteSchedulerStop = () => {};
+}
+
+function _scheduleDirectFavoriteScheduler(variantKey, info) {
+  _stopDirectFavoriteScheduler();
+  const generation = _directFavoriteSchedulerGeneration;
+  void startFavoriteSchedulerHost({
+    projectDir: __dirname,
+    variantDir: info.dir,
+    env: process.env,
+    port: PORT,
+    log,
+  }).then((result) => {
+    if (generation !== _directFavoriteSchedulerGeneration) {
+      try { result?.stop?.(); } catch {}
+      return;
+    }
+    _directFavoriteSchedulerStop = result?.stop || (() => {});
+    if (result?.supported) {
+      log('[danmu_api]', `Favorite scheduler attached to direct core (${variantKey})`);
+    }
+  }).catch((error) => {
+    if (generation === _directFavoriteSchedulerGeneration) {
+      log('[danmu_api]', 'Favorite scheduler initialization skipped:', error?.message || error);
+    }
+  });
 }
 
 function _sendWorkerRequest(state, payload, timeoutMs = 30000) {
@@ -558,6 +593,11 @@ async function _loadHandleRequestForVariant(options = {}) {
     const loaded = await tryLoad(v);
     handleRequest = loaded.handler;
     _directCoreGlobals = loaded.coreGlobals || null;
+    if (loaded.viaWorker) {
+      _stopDirectFavoriteScheduler();
+    } else {
+      _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
+    }
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -571,6 +611,11 @@ async function _loadHandleRequestForVariant(options = {}) {
         const loaded = await tryLoad('stable');
         handleRequest = loaded.handler;
         _directCoreGlobals = loaded.coreGlobals || null;
+        if (loaded.viaWorker) {
+          _stopDirectFavoriteScheduler();
+        } else {
+          _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
+        }
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;

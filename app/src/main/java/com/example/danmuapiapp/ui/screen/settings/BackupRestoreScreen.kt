@@ -41,7 +41,10 @@ fun BackupRestoreScreen(
     val scope = rememberCoroutineScope()
     var pendingExportContent by remember { mutableStateOf<String?>(null) }
     var pendingImportContent by remember { mutableStateOf<String?>(null) }
+    var pendingFavoriteExportContent by remember { mutableStateOf<String?>(null) }
+    var pendingFavoriteImportContent by remember { mutableStateOf<String?>(null) }
     var showImportConfirmDialog by remember { mutableStateOf(false) }
+    var showFavoriteImportConfirmDialog by remember { mutableStateOf(false) }
     var showWebDavRestoreConfirmDialog by remember { mutableStateOf(false) }
     var isDecodingTvSync by remember { mutableStateOf(false) }
 
@@ -75,6 +78,39 @@ fun BackupRestoreScreen(
             showImportConfirmDialog = true
         }.onFailure {
             viewModel.postMessage("导入失败：${it.message}")
+        }
+    }
+
+    val favoriteExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingFavoriteExportContent
+        pendingFavoriteExportContent = null
+        if (uri == null || content == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(content.toByteArray(Charsets.UTF_8))
+            } ?: error("无法写入目标文件")
+        }.onSuccess {
+            viewModel.postMessage("收藏数据导出成功")
+        }.onFailure {
+            viewModel.postMessage("收藏数据导出失败：${it.message}")
+        }
+    }
+
+    val favoriteImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
+            }.orEmpty()
+        }.onSuccess { content ->
+            pendingFavoriteImportContent = content
+            showFavoriteImportConfirmDialog = true
+        }.onFailure {
+            viewModel.postMessage("收藏数据导入失败：${it.message}")
         }
     }
 
@@ -121,7 +157,7 @@ fun BackupRestoreScreen(
         ) {
             SettingsPageHeader(
                 title = "备份与恢复",
-                subtitle = ".env 导入导出、TV 扫码同步与 WebDAV 云端同步",
+                subtitle = "配置、收藏与定时计划的本地及云端备份",
                 onBack = onBack
             )
 
@@ -170,6 +206,55 @@ fun BackupRestoreScreen(
                             Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("导入 .env")
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "收藏与定时计划",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                scope.launch {
+                                    viewModel.exportFavoriteContent().fold(
+                                        onSuccess = { snapshot ->
+                                            pendingFavoriteExportContent = snapshot.content
+                                            favoriteExportLauncher.launch(viewModel.buildFavoriteExportFileName())
+                                        },
+                                        onFailure = {
+                                            viewModel.postMessage("收藏数据导出失败：${it.message}")
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = appTonalButtonColors()
+                        ) {
+                            Icon(Icons.Rounded.Bookmark, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("导出收藏")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                favoriteImportLauncher.launch(
+                                    arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("导入收藏")
                         }
                     }
                 }
@@ -303,6 +388,34 @@ fun BackupRestoreScreen(
         )
     }
 
+    if (showFavoriteImportConfirmDialog) {
+        AppDialog(
+            onDismissRequest = { showFavoriteImportConfirmDialog = false },
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
+            title = { Text("确认导入收藏") },
+            text = { Text("导入将覆盖当前模式的收藏与定时计划，是否继续？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val content = pendingFavoriteImportContent
+                    showFavoriteImportConfirmDialog = false
+                    pendingFavoriteImportContent = null
+                    if (content != null) {
+                        viewModel.importFavoriteContent(content)
+                    } else {
+                        viewModel.postMessage("收藏导入失败：文件内容为空")
+                    }
+                }) { Text("确认导入") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFavoriteImportConfirmDialog = false
+                    pendingFavoriteImportContent = null
+                }) { Text("取消") }
+            }
+        )
+    }
+
     // ── WebDAV restore confirm dialog ──
     if (showWebDavRestoreConfirmDialog) {
         AppDialog(
@@ -310,7 +423,7 @@ fun BackupRestoreScreen(
             style = AppDialogStyle.Confirm,
             tone = AppDialogTone.Warning,
             title = { Text("确认云端恢复") },
-            text = { Text("将从 WebDAV 下载并覆盖当前 .env，是否继续？") },
+            text = { Text("将从 WebDAV 恢复配置、收藏与定时计划，是否继续？") },
             confirmButton = {
                 TextButton(onClick = {
                     showWebDavRestoreConfirmDialog = false

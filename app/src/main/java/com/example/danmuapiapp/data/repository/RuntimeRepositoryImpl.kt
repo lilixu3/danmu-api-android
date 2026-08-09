@@ -18,6 +18,7 @@ import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
+import com.example.danmuapiapp.data.service.FavoriteCacheStore
 import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
@@ -510,6 +511,19 @@ class RuntimeRepositoryImpl @Inject constructor(
                 stopServiceLocked()
                 waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
             }
+
+            val favoriteSync = FavoriteCacheStore.synchronizeModes(
+                context = context,
+                preferredMode = current.runMode,
+                otherMode = mode
+            )
+            if (favoriteSync.isFailure) {
+                val detail = favoriteSync.exceptionOrNull()?.message ?: "未知错误"
+                addLog(LogLevel.Error, "运行模式切换失败：收藏数据同步失败：$detail")
+                if (shouldResume) startServiceLocked()
+                return@launchSerializedUserOperation
+            }
+            addLog(LogLevel.Info, "已同步 ${favoriteSync.getOrThrow().count} 项收藏到 ${mode.label} 模式")
 
             clearRuntimeStartedAt()
             RuntimeModePrefs.put(context, mode)

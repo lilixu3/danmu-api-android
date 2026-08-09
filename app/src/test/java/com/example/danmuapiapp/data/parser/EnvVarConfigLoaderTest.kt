@@ -40,4 +40,24 @@ class EnvVarConfigLoaderTest {
             definition.options
         )
     }
+
+    @Test
+    fun `自动匹配映射表应获得核心平台选项`() {
+        val source = """
+            export class Envs {
+              static ALLOWED_PLATFORMS = ['qiyi', 'qq', 'youku'];
+            }
+            const envVarConfig = {
+              'AUTO_MATCH_MAPPING_TABLE': {
+                category: 'match',
+                type: 'map',
+                description: '自动匹配映射表'
+              }
+            };
+        """.trimIndent()
+
+        val definition = EnvVarConfigLoader.parseCatalogContent(source).single()
+
+        assertEquals(listOf("qiyi", "qq", "youku"), definition.options)
+    }
 }

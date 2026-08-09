@@ -10,6 +10,17 @@ import org.junit.Test
 class DanmuPayloadInspectorTest {
 
     @Test
+    fun `empty protobuf payload is rejected`() {
+        val result = DanmuPayloadInspector.inspect(
+            payload = byteArrayOf(),
+            format = DanmuDownloadFormat.DanuniBinPb,
+            contentType = "application/octet-stream"
+        )
+
+        assertFalse(result.valid)
+    }
+
+    @Test
     fun `all text output formats validate and expose counts`() {
         val samples = listOf(
             Triple(

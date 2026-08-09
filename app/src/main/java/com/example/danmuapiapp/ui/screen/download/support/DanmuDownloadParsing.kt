@@ -71,7 +71,8 @@ internal fun parseEpisodeCandidates(raw: String, fallbackSource: String = ""): L
             episodeId = episodeId,
             episodeNumber = number,
             title = title,
-            source = source
+            source = source,
+            sourceUrl = readString(item, "url", "sourceUrl")
         )
     }
     val dedupByEpisode = LinkedHashMap<String, DownloadEpisodeCandidate>(out.size)

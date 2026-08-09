@@ -63,6 +63,9 @@ class RuntimePathsMigrationTest {
                 parentFile?.mkdirs()
                 writeText("old cache")
             }
+            oldProject.resolve(".cache/favoritesCache").writeText(
+                """{"迁移收藏":{"timestamp":100,"results":[]}}"""
+            )
             createCore(oldProject, "stable", "stable-source")
             createCore(oldProject, "dev", "dev-source")
             createCore(oldProject, "custom", "custom-source")
@@ -103,6 +106,7 @@ class RuntimePathsMigrationTest {
             assertFalse(newProject.resolve("danmu_api_custom").exists())
             assertFalse(newProject.resolve("logs/old.log").exists())
             assertFalse(newProject.resolve(".cache/old-cache.json").exists())
+            assertTrue(newProject.resolve(".cache/favoritesCache").readText().contains("迁移收藏"))
             assertTrue(oldProject.resolve("danmu_api_stable/worker.js").exists())
             assertTrue(oldProject.resolve("logs/old.log").exists())
             assertTrue(oldProject.resolve(".cache/old-cache.json").exists())
@@ -150,6 +154,14 @@ class RuntimePathsMigrationTest {
             }
             newProject.resolve("danmu_api_dev").apply { mkdirs() }
                 .resolve("legacy.txt").writeText("keep-target")
+            oldProject.resolve(".cache/favoritesCache").apply {
+                parentFile?.mkdirs()
+                writeText("""{"来源收藏":{"timestamp":100}}""")
+            }
+            newProject.resolve(".cache/favoritesCache").apply {
+                parentFile?.mkdirs()
+                writeText("""{"目标收藏":{"timestamp":200}}""")
+            }
 
             val result = runCatching {
                 RuntimePaths.performWorkDirMigrationTransaction(
@@ -165,6 +177,8 @@ class RuntimePathsMigrationTest {
             assertFalse(newProject.resolve("config/source-only.json").exists())
             assertEquals("keep-target", newProject.resolve("danmu_api_dev/legacy.txt").readText())
             assertFalse(newProject.resolve("danmu_api_dev/worker.js").exists())
+            assertTrue(newProject.resolve(".cache/favoritesCache").readText().contains("目标收藏"))
+            assertFalse(newProject.resolve(".cache/favoritesCache").readText().contains("来源收藏"))
             assertTrue(oldProject.resolve("danmu_api_dev/worker.js").isFile)
             assertTrue(
                 newProject.listFiles().orEmpty().none {
@@ -215,6 +229,9 @@ class RuntimePathsMigrationTest {
                 parentFile?.mkdirs()
                 writeText("source cache")
             }
+            oldProject.resolve(".cache/favoritesCache").writeText(
+                """{"共同收藏":{"timestamp":300,"source":"source"},"来源收藏":{"timestamp":100}}"""
+            )
             createCore(oldProject, "custom", "source-core")
 
             val newProject = File(newBase, "nodejs-project")
@@ -230,6 +247,9 @@ class RuntimePathsMigrationTest {
                 parentFile?.mkdirs()
                 writeText("target cache")
             }
+            newProject.resolve(".cache/favoritesCache").writeText(
+                """{"共同收藏":{"timestamp":200,"source":"target"},"目标收藏":{"timestamp":100}}"""
+            )
             createCore(newProject, "custom", "target-core")
 
             RuntimePaths.migrateSelectedCoreAndConfig(oldBase, newBase, "custom")
@@ -241,6 +261,9 @@ class RuntimePathsMigrationTest {
             assertEquals("target log", newProject.resolve("logs/target.log").readText())
             assertFalse(newProject.resolve(".cache/source-cache.json").exists())
             assertEquals("target cache", newProject.resolve(".cache/target-cache.json").readText())
+            val favorites = org.json.JSONObject(newProject.resolve(".cache/favoritesCache").readText())
+            assertEquals(3, favorites.length())
+            assertEquals("source", favorites.getJSONObject("共同收藏").getString("source"))
         } finally {
             oldBase.deleteRecursively()
             newBase.deleteRecursively()

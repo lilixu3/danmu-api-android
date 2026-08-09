@@ -23,6 +23,7 @@ data class DownloadEpisodeCandidate(
     val title: String,
     val source: String,
     val directUrl: String = "",
+    val sourceUrl: String = "",
     val posterUrl: String = "",
     val year: String = "",
     val resolvedEpisodeLabel: String = ""
