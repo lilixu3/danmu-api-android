@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.domain.model.CacheClearItem
+import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +24,10 @@ class CacheViewModel @Inject constructor(
     val entries = cacheRepository.cacheEntries
     val adminSessionState = adminSessionRepository.sessionState
     val isLoading = cacheRepository.isLoading
+    val clearCapability = cacheRepository.clearCapability
+
+    var selectedItems by mutableStateOf(CacheClearItem.entries.toSet())
+        private set
 
     var isClearing by mutableStateOf(false)
         private set
@@ -36,6 +42,11 @@ class CacheViewModel @Inject constructor(
 
     init {
         refresh()
+        viewModelScope.launch {
+            clearCapability.collect { capability ->
+                if (!capability.supportsSelective) selectAll()
+            }
+        }
     }
 
     fun refresh() {
@@ -44,7 +55,24 @@ class CacheViewModel @Inject constructor(
         }
     }
 
+    fun toggleClearItem(item: CacheClearItem) {
+        if (clearCapability.value.support != CacheClearSupport.Selective) return
+        selectedItems = if (item in selectedItems) selectedItems - item else selectedItems + item
+    }
+
+    fun selectAll() {
+        selectedItems = CacheClearItem.entries.toSet()
+    }
+
+    fun selectNone() {
+        if (clearCapability.value.support == CacheClearSupport.Selective) selectedItems = emptySet()
+    }
+
     fun requestClear() {
+        if (selectedItems.isEmpty()) {
+            message = "请至少选择一项要清理的缓存"
+            return
+        }
         val adminState = adminSessionState.value
         if (!adminState.isAdminMode) {
             adminRequiredMessage = if (adminState.hasAdminTokenConfigured) {
@@ -67,12 +95,16 @@ class CacheViewModel @Inject constructor(
         adminRequiredMessage = ""
     }
 
-    fun clearAll() {
+    fun clearSelected() {
         showClearConfirmDialog = false
         isClearing = true
         viewModelScope.launch(Dispatchers.IO) {
-            cacheRepository.clearAll().fold(
-                onSuccess = { message = "缓存已全部清理" },
+            val requested = selectedItems
+            cacheRepository.clear(requested).fold(
+                onSuccess = { result ->
+                    val count = result.clearedItems.size
+                    message = if (result.usedSelectiveProtocol) "已清理 $count 项缓存" else "缓存已全部清理"
+                },
                 onFailure = { message = "清理失败：${it.message}" }
             )
             isClearing = false

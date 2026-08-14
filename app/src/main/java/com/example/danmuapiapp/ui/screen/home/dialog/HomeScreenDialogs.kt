@@ -124,7 +124,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
-import com.example.danmuapiapp.domain.model.CacheEntry
+import com.example.danmuapiapp.domain.model.CacheClearCapability
+import com.example.danmuapiapp.domain.model.CacheClearItem
 import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
@@ -135,13 +136,12 @@ import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
-import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import com.example.danmuapiapp.ui.component.CacheClearCapabilityNotice
+import com.example.danmuapiapp.ui.component.CacheClearSelectionList
+import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
 import java.net.URI
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.max
 
 @Composable
@@ -220,15 +220,17 @@ internal fun DialogActionButton(
 @Composable
 internal fun CacheQuickDialog(
     cacheStats: CacheStats,
-    cacheEntries: List<CacheEntry>,
+    capability: CacheClearCapability,
+    selectedItems: Set<CacheClearItem>,
     isLoading: Boolean,
     isClearing: Boolean,
-    onRefresh: () -> Unit,
-    onQuickClear: () -> Unit,
+    onToggleItem: (CacheClearItem) -> Unit,
+    onSelectAll: () -> Unit,
+    onSelectNone: () -> Unit,
+    onClear: () -> Unit,
     onOpenCacheManagement: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val subtitle = if (cacheStats.isAvailable) {
         "${cacheStats.reqRecordsCount} 条记录 · 今日 ${cacheStats.todayReqNum} 次请求"
     } else {
@@ -238,7 +240,7 @@ internal fun CacheQuickDialog(
     HomePanelDialog(
         onDismissRequest = onDismiss,
         icon = Icons.Rounded.Storage,
-        title = "缓存概览",
+        title = "选择清理范围",
         subtitle = subtitle,
         content = {
             Column(
@@ -262,51 +264,28 @@ internal fun CacheQuickDialog(
                         )
                         CacheStatBadge(
                             modifier = Modifier.weight(1f),
-                            label = "番剧缓存",
+                            label = "缓存番剧",
                             value = "${cacheStats.animeCacheCount}"
                         )
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CacheStatBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "被合并源",
-                            value = "${cacheStats.mergedSourceCount}"
-                        )
-                        CacheStatBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "剧集映射",
-                            value = "${cacheStats.episodeLinkCount}"
-                        )
-                        CacheStatBadge(
-                            modifier = Modifier.weight(1f),
-                            label = "上次清理",
-                            value = cacheStats.lastClearedAt?.let {
-                                dateFormat.format(Date(it))
-                            } ?: "从未"
-                        )
-                    }
-
-                    if (cacheEntries.isNotEmpty()) {
-                        Text(
-                            text = "最近请求",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            cacheEntries.take(4).forEach { entry ->
-                                CacheEntryPreviewRow(entry = entry)
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = "暂无请求记录",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    CacheClearCapabilityNotice(capability)
+                    CacheClearSelectionToolbar(
+                        selectedCount = selectedItems.size,
+                        selectionEnabled = capability.supportsSelective && !isClearing,
+                        onSelectAll = onSelectAll,
+                        onSelectNone = onSelectNone
+                    )
+                    CacheClearSelectionList(
+                        selectedItems = selectedItems,
+                        selectionEnabled = capability.supportsSelective && !isClearing,
+                        onToggle = onToggleItem,
+                        compact = true
+                    )
+                    Text(
+                        "收藏数据会保留；清理后部分数据需要重新获取。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 } else {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -336,34 +315,20 @@ internal fun CacheQuickDialog(
         },
         actions = {
             DialogActionButton(
-                text = "关闭",
-                icon = Icons.Rounded.Close,
-                onClick = onDismiss
-            )
-            if (isLoading) {
-                DialogActionButton(
-                    text = "刷新中",
-                    icon = Icons.Rounded.Refresh,
-                    onClick = {},
-                    enabled = false
-                )
-            } else {
-                DialogActionButton(
-                    text = "刷新",
-                    icon = Icons.Rounded.Refresh,
-                    onClick = onRefresh
-                )
-            }
-            DialogActionButton(
-                text = if (isClearing) "清理中…" else "快速清理",
-                icon = Icons.Rounded.DeleteSweep,
-                onClick = onQuickClear,
-                enabled = cacheStats.isAvailable && !isClearing && !isLoading
-            )
-            DialogActionButton(
-                text = "缓存管理",
+                text = "完整管理",
                 icon = Icons.AutoMirrored.Rounded.OpenInNew,
-                onClick = onOpenCacheManagement,
+                onClick = onOpenCacheManagement
+            )
+            DialogActionButton(
+                text = when {
+                    isClearing -> "清理中"
+                    capability.supportsSelective -> "清理 ${selectedItems.size} 项"
+                    else -> "全部清理"
+                },
+                icon = Icons.Rounded.DeleteSweep,
+                onClick = onClear,
+                enabled = cacheStats.isAvailable && selectedItems.isNotEmpty() && !isLoading,
+                loading = isClearing,
                 primary = true
             )
         }
@@ -403,101 +368,6 @@ internal fun CacheStatBadge(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
-        }
-    }
-}
-
-@Composable
-internal fun CacheEntryPreviewRow(entry: CacheEntry) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-    val methodColor = when (entry.type.uppercase()) {
-        "GET" -> MaterialTheme.colorScheme.primary
-        "POST" -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val statusCode = entry.statusCode ?: entry.hitCount.takeIf { it in 100..599 }
-    val statusColor = when {
-        statusCode != null && statusCode in 200..299 -> MaterialTheme.colorScheme.primary
-        statusCode != null && statusCode >= 400 -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val inputLine = when {
-        entry.requestUrl.isNotBlank() -> "URL：${entry.requestUrl}"
-        entry.fileName.isNotBlank() -> "文件名：${entry.fileName}"
-        entry.keyword.isNotBlank() -> "关键词：${entry.keyword}"
-        else -> ""
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (entry.type.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = methodColor.copy(alpha = 0.12f)
-                    ) {
-                        Text(
-                            entry.type.uppercase(),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = methodColor,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                Text(
-                    entry.key.ifBlank { "未知接口" },
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (statusCode != null) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = statusColor.copy(alpha = 0.12f)
-                    ) {
-                        Text(
-                            "$statusCode",
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusColor
-                        )
-                    }
-                }
-                Text(
-                    dateFormat.format(Date(entry.createdAt)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-            }
-            if (inputLine.isNotBlank()) {
-                Text(
-                    inputLine,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
         }
     }
 }

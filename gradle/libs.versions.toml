@@ -18,6 +18,7 @@ splashscreen = "1.2.0"
 datastore = "1.2.0"
 zxing = "3.5.4"
 material3Adaptive = "1.2.0"
+markdownRenderer = "0.41.0"
 desugarJdkLibs = "2.1.5"
 documentfile = "1.1.0"
 material = "1.13.0"
@@ -65,6 +66,10 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 # Image
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+markdown-renderer = { group = "com.mikepenz", name = "multiplatform-markdown-renderer", version.ref = "markdownRenderer" }
+markdown-renderer-m3 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
+markdown-renderer-coil2 = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-coil2", version.ref = "markdownRenderer" }
+markdown-renderer-code = { group = "com.mikepenz", name = "multiplatform-markdown-renderer-code", version.ref = "markdownRenderer" }
 
 # QR Code
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }

@@ -26,4 +26,11 @@
     <!-- Never restore one installation's runtime ownership marker into another. -->
     <exclude domain="sharedpref" path="runtime_identity.xml" />
 
+    <!-- GitHub credentials are device-local and must never enter Android Backup. -->
+    <exclude domain="sharedpref" path="github_auth_prefs.xml" />
+    <exclude domain="sharedpref" path="runtime.xml" />
+    <exclude domain="sharedpref" path="webdav_config.xml" />
+    <exclude domain="sharedpref" path="admin_session.xml" />
+    <exclude domain="sharedpref" path="core_candidate_recovery.xml" />
+
 </full-backup-content>

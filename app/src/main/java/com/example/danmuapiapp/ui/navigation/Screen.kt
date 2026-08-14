@@ -27,6 +27,13 @@ object ToolRoute {
     const val Config = "tool_config"
     const val DeviceAccess = "tool_device_access"
     const val CacheManagement = "tool_cache_management"
+    const val Diagnostics = "tool_diagnostics"
+}
+
+object CoreRoute {
+    const val PullRequestLab = "core_pr_lab/{variant}"
+
+    fun pullRequestLab(variantKey: String): String = "core_pr_lab/$variantKey"
 }
 
 object SettingsRoute {

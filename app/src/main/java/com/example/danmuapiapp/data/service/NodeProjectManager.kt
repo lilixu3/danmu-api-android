@@ -8,6 +8,7 @@ import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.safeGetInt
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.RunMode
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -285,6 +286,17 @@ object NodeProjectManager {
         val updates = linkedMapOf<String, String>()
         updates["DANMU_API_VARIANT"] = variantValue
         updates["DANMU_API_PORT"] = portValue.toString()
+        val listenModeFromPrefs = RuntimeListenMode.fromKey(
+            if (prefs.contains(RuntimeListenMode.PREFERENCE_KEY)) {
+                prefs.safeGetString(RuntimeListenMode.PREFERENCE_KEY)
+            } else {
+                null
+            }
+        )
+        val listenHostValue = listenModeFromPrefs?.bindHost
+            ?: existingEnv[RuntimeListenMode.ENV_KEY]?.trim()?.takeIf { it.isNotEmpty() }
+            ?: RuntimeListenMode.Ipv4Only.bindHost
+        updates[RuntimeListenMode.ENV_KEY] = listenHostValue
         val removeKeys = linkedSetOf<String>()
         val rawTokenFromPrefs = prefs.safeGetString("token")
         val tokenFromPrefs = RuntimeTokenNormalizer.normalizeInput(rawTokenFromPrefs)

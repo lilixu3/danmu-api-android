@@ -29,7 +29,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun RequestRecordsScreen(
     onBack: () -> Unit,
@@ -39,6 +39,10 @@ fun RequestRecordsScreen(
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboard.current
     var filterSuccess by remember { mutableStateOf<Boolean?>(null) }
+    var query by remember { mutableStateOf("") }
+    var methodFilter by remember { mutableStateOf<String?>(null) }
+    var methodMenuExpanded by remember { mutableStateOf(false) }
+    var timeRange by remember { mutableStateOf(RequestTimeRange.All) }
     var expandedId by remember { mutableStateOf<Long?>(null) }
 
     val today = ZonedDateTime.now()
@@ -53,11 +57,19 @@ fun RequestRecordsScreen(
         viewModel.refresh()
     }
 
-    val filteredRecords = when (filterSuccess) {
-        true -> records.filter { it.success }
-        false -> records.filter { !it.success }
-        null -> records
+    val availableMethods = remember(records) { records.map { it.method.uppercase() }.distinct().sorted() }
+    val filteredRecords = remember(records, query, filterSuccess, methodFilter, timeRange) {
+        RequestRecordInsights.filter(
+            records,
+            RequestRecordFilter(
+                query = query,
+                success = filterSuccess,
+                method = methodFilter,
+                timeRange = timeRange
+            )
+        )
     }
+    val insights = remember(filteredRecords) { RequestRecordInsights.summarize(filteredRecords) }
 
     Column(
         modifier = Modifier
@@ -148,12 +160,32 @@ fun RequestRecordsScreen(
             }
         }
 
-        // Filter chips
-        Row(
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            singleLine = true,
+            label = { Text("搜索请求") },
+            placeholder = { Text("接口、IP、状态码或错误") },
+            leadingIcon = { Icon(Icons.Rounded.Search, null) },
+            trailingIcon = if (query.isNotBlank()) {
+                {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Rounded.Close, "清空搜索")
+                    }
+                }
+            } else null,
+            shape = RoundedCornerShape(10.dp)
+        )
+
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             FilterChip(
                 selected = filterSuccess == null,
@@ -185,6 +217,55 @@ fun RequestRecordsScreen(
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
+            ExposedDropdownMenuBox(
+                expanded = methodMenuExpanded,
+                onExpandedChange = { methodMenuExpanded = it }
+            ) {
+                FilterChip(
+                    selected = methodFilter != null,
+                    onClick = { methodMenuExpanded = true },
+                    label = { Text(methodFilter ?: "方法") },
+                    trailingIcon = { Icon(Icons.Rounded.ArrowDropDown, null, Modifier.size(16.dp)) },
+                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(
+                    expanded = methodMenuExpanded,
+                    onDismissRequest = { methodMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("全部方法") },
+                        onClick = {
+                            methodFilter = null
+                            methodMenuExpanded = false
+                        }
+                    )
+                    availableMethods.forEach { method ->
+                        DropdownMenuItem(
+                            text = { Text(method) },
+                            onClick = {
+                                methodFilter = method
+                                methodMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            FilterChip(
+                selected = timeRange == RequestTimeRange.LastHour,
+                onClick = {
+                    timeRange = if (timeRange == RequestTimeRange.LastHour) RequestTimeRange.All
+                    else RequestTimeRange.LastHour
+                },
+                label = { Text("近 1 小时") }
+            )
+            FilterChip(
+                selected = timeRange == RequestTimeRange.Today,
+                onClick = {
+                    timeRange = if (timeRange == RequestTimeRange.Today) RequestTimeRange.All
+                    else RequestTimeRange.Today
+                },
+                label = { Text("今天") }
+            )
         }
 
         // Stats card
@@ -204,10 +285,47 @@ fun RequestRecordsScreen(
                     .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                StatItem(label = "今日", value = todayCount.toString())
-                StatItem(label = "成功", value = successCount.toString(), valueColor = if (isSystemInDarkTheme()) Color(0xFF4ADE80) else Color(0xFF4CAF50))
-                StatItem(label = "失败", value = errorCount.toString(), valueColor = if (errorCount > 0) (if (isSystemInDarkTheme()) Color(0xFFF87171) else Color(0xFFE53935)) else MaterialTheme.colorScheme.onSurface)
-                StatItem(label = "总计", value = records.size.toString())
+                StatItem(label = "匹配", value = insights.total.toString())
+                StatItem(
+                    label = "失败率",
+                    value = "${insights.failureRatePercent}%",
+                    valueColor = if (insights.failureRatePercent > 0) {
+                        if (isSystemInDarkTheme()) Color(0xFFF87171) else Color(0xFFE53935)
+                    } else MaterialTheme.colorScheme.onSurface
+                )
+                StatItem(label = "P95", value = "${insights.p95DurationMs}ms")
+                StatItem(label = "客户端", value = insights.uniqueClients.toString())
+            }
+        }
+
+        if (insights.topFailureEndpoint != null || insights.slowCount > 0) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Rounded.Troubleshoot, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                    Text(
+                        buildString {
+                            insights.topFailureEndpoint?.let {
+                                append("失败最多：$it (${insights.topFailureCount})")
+                            }
+                            if (insights.slowCount > 0) {
+                                if (isNotEmpty()) append(" · ")
+                                append("慢请求 ${insights.slowCount} 条")
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
             }
         }
 
@@ -229,7 +347,9 @@ fun RequestRecordsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        if (filterSuccess != null) "没有匹配的记录" else "暂无请求记录",
+                        if (query.isNotBlank() || filterSuccess != null || methodFilter != null ||
+                            timeRange != RequestTimeRange.All
+                        ) "没有匹配的记录" else "暂无请求记录",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )

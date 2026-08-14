@@ -1,12 +1,14 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
+import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
@@ -41,8 +43,25 @@ class SettingsRepositoryImpl @Inject constructor(
     private val uiScalePrefs = context.getSharedPreferences(AppAppearancePrefs.PREFS_UI_SCALE_LEGACY, Context.MODE_PRIVATE)
     private val githubProxyPrefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
     private val githubAuthPrefs = context.getSharedPreferences("github_auth_prefs", Context.MODE_PRIVATE)
-    private val githubTokenStore = SecureStringStore(githubAuthPrefs, "danmuapi_github_auth_v1")
+    private val githubTokenStore = SecureStringStore(
+        githubAuthPrefs,
+        "danmuapi_github_auth_v1",
+        allowPlaintextFallback = false
+    )
     private val legacyVariantPrefs = context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
+    private val workDirPrefs = context.getSharedPreferences(RuntimePaths.PREFS_WORK_DIR, Context.MODE_PRIVATE)
+    private val workDirCustomCorePreferences = WorkDirCustomCorePreferences(settingsPrefs)
+    private val customCoreConfigLock = Any()
+    private var activeWorkDirIdentity = RuntimePaths.normalWorkDirIdentity(context)
+
+    init {
+        val legacyConfig = resolveLegacyCustomCoreConfig()
+        workDirCustomCorePreferences.migrateLegacyConfigIfNeeded(
+            workDirIdentity = activeWorkDirIdentity,
+            legacyConfig = legacyConfig,
+            hasLegacyConfig = legacyConfig.hasAnyValue()
+        )
+    }
 
     private val _githubProxy = MutableStateFlow(
         githubProxyPrefs.safeGetString("selected_proxy", "original").ifBlank { "original" }
@@ -117,21 +136,32 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _logMaxCount = MutableStateFlow(settingsPrefs.getInt("log_max_count", 500))
     override val logMaxCount: StateFlow<Int> = _logMaxCount.asStateFlow()
 
-    private val prefChangeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         if (prefs !== settingsPrefs) return@OnSharedPreferenceChangeListener
-        when (key) {
-            "custom_repo",
-            "custom_repo_branch" -> applyCustomCoreSourceState(resolveStoredCustomCoreSource())
-            displayNameKeyForVariant(ApiVariant.Stable),
-            displayNameKeyForVariant(ApiVariant.Dev),
-            displayNameKeyForVariant(ApiVariant.Custom) -> {
+        when {
+            workDirCustomCorePreferences.isKeyForWorkDir(key, activeWorkDirIdentity) -> {
+                synchronized(customCoreConfigLock) {
+                    refreshActiveWorkDirCustomCoreStateLocked()
+                }
+            }
+            key == displayNameKeyForVariant(ApiVariant.Stable) ||
+                key == displayNameKeyForVariant(ApiVariant.Dev) -> {
                 applyCoreDisplayNamesState(resolveCoreDisplayNames())
+            }
+        }
+    }
+
+    private val workDirPrefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        if (prefs === workDirPrefs && RuntimePaths.isWorkDirSelectionPreference(key)) {
+            synchronized(customCoreConfigLock) {
+                refreshActiveWorkDirCustomCoreStateLocked(mirrorLegacyValues = true)
             }
         }
     }
 
     init {
         settingsPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
+        workDirPrefs.registerOnSharedPreferenceChangeListener(workDirPrefChangeListener)
         // 统一禁用文件日志，日志只走 /api/logs。
         if (settingsPrefs.safeGetBoolean("file_log_enabled", false)) {
             settingsPrefs.edit { putBoolean("file_log_enabled", false) }
@@ -139,6 +169,9 @@ class SettingsRepositoryImpl @Inject constructor(
         // 公告服务改为内置固定地址，忽略历史用户配置。
         if (settingsPrefs.contains("announcement_base_url")) {
             settingsPrefs.edit { remove("announcement_base_url") }
+        }
+        synchronized(customCoreConfigLock) {
+            mirrorLegacyCustomCoreConfig(resolveStoredCustomCoreConfigLocked())
         }
         AppAppearancePrefs.applyNightMode(_nightMode.value)
     }
@@ -154,7 +187,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun setGithubToken(token: String) {
         val normalized = token.trim()
-        githubTokenStore.put("github_token", normalized)
+        check(githubTokenStore.put("github_token", normalized)) {
+            "无法使用 Android Keystore 安全保存 GitHub Token"
+        }
         _githubToken.value = normalized
     }
 
@@ -208,12 +243,26 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override fun setVariantDisplayName(variant: ApiVariant, name: String) {
         val normalized = name.trim()
+        if (variant == ApiVariant.Custom) {
+            synchronized(customCoreConfigLock) {
+                synchronizeActiveWorkDirLocked()
+                val workDirIdentity = activeWorkDirIdentity
+                val current = resolveStoredCustomCoreConfigLocked(workDirIdentity)
+                workDirCustomCorePreferences.write(
+                    workDirIdentity,
+                    current.copy(displayName = normalized)
+                )
+                settingsPrefs.edit { putString(displayNameKeyForVariant(ApiVariant.Custom), normalized) }
+                applyCoreDisplayNamesState(_coreDisplayNames.value.copy(custom = normalized))
+            }
+            return
+        }
         settingsPrefs.edit { putString(displayNameKeyForVariant(variant), normalized) }
         applyCoreDisplayNamesState(
             when (variant) {
                 ApiVariant.Stable -> _coreDisplayNames.value.copy(stable = normalized)
                 ApiVariant.Dev -> _coreDisplayNames.value.copy(dev = normalized)
-                ApiVariant.Custom -> _coreDisplayNames.value.copy(custom = normalized)
+                ApiVariant.Custom -> error("Custom display name is handled above")
             }
         )
     }
@@ -221,8 +270,17 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun saveCustomCoreSource(
         repoInput: String,
         branchInput: String
-    ): ResolvedCustomCoreSource {
+    ): ResolvedCustomCoreSource = synchronized(customCoreConfigLock) {
+        synchronizeActiveWorkDirLocked()
+        val workDirIdentity = activeWorkDirIdentity
         val resolved = resolveCustomCoreSource(repoInput, branchInput)
+        workDirCustomCorePreferences.write(
+            workDirIdentity,
+            resolveStoredCustomCoreConfigLocked(workDirIdentity).copy(
+                repo = resolved.repo,
+                branch = resolved.branch
+            )
+        )
         settingsPrefs.edit {
             putString("custom_repo", resolved.repo)
             if (resolved.repo.isBlank()) {
@@ -233,15 +291,25 @@ class SettingsRepositoryImpl @Inject constructor(
         }
         saveLegacyCustomRepo(resolved.repo)
         applyCustomCoreSourceState(resolved)
-        return resolved
+        resolved
     }
 
     override fun saveCustomCoreConfig(
         displayName: String,
         repoInput: String,
         branchInput: String
-    ): ResolvedCustomCoreConfig {
+    ): ResolvedCustomCoreConfig = synchronized(customCoreConfigLock) {
+        synchronizeActiveWorkDirLocked()
+        val workDirIdentity = activeWorkDirIdentity
         val resolvedConfig = resolveCustomCoreConfig(displayName, repoInput, branchInput)
+        workDirCustomCorePreferences.write(
+            workDirIdentity,
+            StoredCustomCoreConfig(
+                displayName = resolvedConfig.displayName,
+                repo = resolvedConfig.repo,
+                branch = resolvedConfig.branch
+            )
+        )
         settingsPrefs.edit {
             putString(displayNameKeyForVariant(ApiVariant.Custom), resolvedConfig.displayName)
             putString("custom_repo", resolvedConfig.repo)
@@ -256,19 +324,25 @@ class SettingsRepositoryImpl @Inject constructor(
         applyCustomCoreSourceState(
             resolveCustomCoreSource(resolvedConfig.repo, resolvedConfig.branch)
         )
-        return resolvedConfig
+        resolvedConfig
     }
 
     override fun setCustomRepo(repo: String) {
-        val resolved = resolveRepoOnlyCustomCoreSource(
-            repoInput = repo,
-            currentBranch = _customRepoBranch.value
-        )
-        saveCustomCoreSource(repoInput = resolved.repo, branchInput = resolved.branch)
+        synchronized(customCoreConfigLock) {
+            synchronizeActiveWorkDirLocked()
+            val resolved = resolveRepoOnlyCustomCoreSource(
+                repoInput = repo,
+                currentBranch = _customRepoBranch.value
+            )
+            saveCustomCoreSource(repoInput = resolved.repo, branchInput = resolved.branch)
+        }
     }
 
     override fun setCustomRepoBranch(branch: String) {
-        saveCustomCoreSource(repoInput = _customRepo.value, branchInput = branch)
+        synchronized(customCoreConfigLock) {
+            synchronizeActiveWorkDirLocked()
+            saveCustomCoreSource(repoInput = _customRepo.value, branchInput = branch)
+        }
     }
 
     override fun setCustomRepoDisplayName(name: String) {
@@ -312,23 +386,36 @@ class SettingsRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun reloadFromStorage() {
+        _githubProxy.value = githubProxyPrefs.safeGetString("selected_proxy", "original").ifBlank { "original" }
+        _autoStart.value = NormalAutoStartPrefs.isBootAutoStartEnabled(context)
+        _keepAlive.value = NodeKeepAlivePrefs.isKeepAliveEnabled(context)
+        _keepAliveHeartbeatEnabled.value = NodeKeepAlivePrefs.isHeartbeatEnabled(context)
+        _keepAliveHeartbeatMode.value = NodeKeepAlivePrefs.getHeartbeatMode(context)
+        _keepAliveHeartbeatIntervalMinutes.value = NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context)
+        _normalModeStabilityMode.value = NormalModeStabilityPrefs.get(context)
+        _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
+        _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)
+        _hideFromRecents.value = AppAppearancePrefs.readHideFromRecents(uiPrefs)
+        _tokenVisible.value = settingsPrefs.safeGetBoolean("token_visible", false)
+        _logEnabled.value = settingsPrefs.safeGetBoolean("log_enabled", true)
+        _logPreviewEnabled.value = settingsPrefs.safeGetBoolean("log_preview_enabled", true)
+        _logMaxCount.value = settingsPrefs.getInt("log_max_count", 500).coerceIn(100, 2000)
+        synchronized(customCoreConfigLock) {
+            refreshActiveWorkDirCustomCoreStateLocked(mirrorLegacyValues = true)
+        }
+        AppAppearancePrefs.applyNightMode(_nightMode.value)
+    }
+
     private fun resolveCoreDisplayNames(): CoreVariantDisplayNames {
         return CoreVariantDisplayNames(
             stable = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Stable)).trim(),
             dev = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Dev)).trim(),
-            custom = resolveCustomRepoDisplayName()
+            custom = resolveStoredCustomCoreConfigLocked(activeWorkDirIdentity).displayName.trim()
         )
     }
 
-    private fun resolveCustomRepoDisplayName(): String {
-        return settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Custom)).trim()
-    }
-
-    private fun resolveStoredCustomBranch(): String {
-        return settingsPrefs.safeGetString("custom_repo_branch")
-    }
-
-    private fun resolveCustomRepo(): String {
+    private fun resolveLegacyCustomRepo(): String {
         val direct = normalizeGithubRepo(settingsPrefs.safeGetString("custom_repo"))
         if (direct.isNotBlank()) return direct
         val owner = legacyVariantPrefs.safeGetString("custom_owner").trim()
@@ -336,11 +423,61 @@ class SettingsRepositoryImpl @Inject constructor(
         return normalizeGithubRepo(if (owner.isNotBlank() && repo.isNotBlank()) "$owner/$repo" else repo)
     }
 
-    private fun resolveStoredCustomCoreSource(): ResolvedCustomCoreSource {
-        return resolveCustomCoreSource(
-            repoInput = resolveCustomRepo(),
-            branchInput = resolveStoredCustomBranch()
+    private fun resolveLegacyCustomCoreConfig(): StoredCustomCoreConfig {
+        return StoredCustomCoreConfig(
+            displayName = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Custom)).trim(),
+            repo = resolveLegacyCustomRepo(),
+            branch = settingsPrefs.safeGetString("custom_repo_branch").trim()
         )
+    }
+
+    private fun resolveStoredCustomCoreConfigLocked(
+        workDirIdentity: String = activeWorkDirIdentity
+    ): StoredCustomCoreConfig {
+        return workDirCustomCorePreferences.read(workDirIdentity)
+    }
+
+    private fun resolveStoredCustomCoreSource(): ResolvedCustomCoreSource {
+        val config = resolveStoredCustomCoreConfigLocked()
+        return resolveCustomCoreSource(
+            repoInput = config.repo,
+            branchInput = config.branch
+        )
+    }
+
+    private fun synchronizeActiveWorkDirLocked() {
+        val currentIdentity = RuntimePaths.normalWorkDirIdentity(context)
+        if (currentIdentity != activeWorkDirIdentity) {
+            activeWorkDirIdentity = currentIdentity
+            refreshActiveWorkDirCustomCoreStateLocked()
+        }
+    }
+
+    private fun refreshActiveWorkDirCustomCoreStateLocked(mirrorLegacyValues: Boolean = false) {
+        activeWorkDirIdentity = RuntimePaths.normalWorkDirIdentity(context)
+        val config = resolveStoredCustomCoreConfigLocked()
+        applyCoreDisplayNamesState(
+            resolveCoreDisplayNames().copy(custom = config.displayName.trim())
+        )
+        applyCustomCoreSourceState(
+            resolveCustomCoreSource(config.repo, config.branch)
+        )
+        if (mirrorLegacyValues) {
+            mirrorLegacyCustomCoreConfig(config)
+        }
+    }
+
+    private fun mirrorLegacyCustomCoreConfig(config: StoredCustomCoreConfig) {
+        settingsPrefs.edit {
+            putString(displayNameKeyForVariant(ApiVariant.Custom), config.displayName)
+            putString("custom_repo", config.repo)
+            if (config.repo.isBlank()) {
+                remove("custom_repo_branch")
+            } else {
+                putString("custom_repo_branch", config.branch)
+            }
+        }
+        saveLegacyCustomRepo(config.repo)
     }
 
     private fun applyCoreDisplayNamesState(names: CoreVariantDisplayNames) {
@@ -380,5 +517,9 @@ class SettingsRepositoryImpl @Inject constructor(
             ApiVariant.Dev -> "dev_repo_display_name"
             ApiVariant.Custom -> "custom_repo_display_name"
         }
+    }
+
+    private fun StoredCustomCoreConfig.hasAnyValue(): Boolean {
+        return displayName.isNotBlank() || repo.isNotBlank() || branch.isNotBlank()
     }
 }

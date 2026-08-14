@@ -91,6 +91,7 @@ class HomeViewModel @Inject constructor(
     val proxyOptions = githubProxyService.proxyOptions()
     val cacheStats = cacheRepo.cacheStats
     val cacheEntries = cacheRepo.cacheEntries
+    val cacheClearCapability = cacheRepo.clearCapability
     val isCacheLoading = cacheRepo.isLoading
     val adminSessionState = adminSessionRepository.sessionState
     val unreadAnnouncements = appForegroundAnnouncementChecker.unreadAnnouncements
@@ -110,6 +111,8 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     var showNoCoreDialog by mutableStateOf(false)
+        private set
+    var unavailableVariant by mutableStateOf<ApiVariant?>(null)
         private set
     var showVariantPicker by mutableStateOf(false)
         private set
@@ -240,6 +243,8 @@ class HomeViewModel @Inject constructor(
 
     var isClearingCache by mutableStateOf(false)
         private set
+    var selectedCacheClearItems by mutableStateOf(CacheClearItem.entries.toSet())
+        private set
 
     init {
         loadIgnoredUpdateVersions()
@@ -249,6 +254,17 @@ class HomeViewModel @Inject constructor(
         observeRuntimeDrivenCoreRefresh()
         observeRuntimeDrivenRequestRecordRefresh()
         observeRuntimeDrivenCacheRefresh()
+        observeCacheClearCapability()
+    }
+
+    private fun observeCacheClearCapability() {
+        viewModelScope.launch {
+            cacheClearCapability.collect { capability ->
+                if (!capability.supportsSelective) {
+                    selectedCacheClearItems = CacheClearItem.entries.toSet()
+                }
+            }
+        }
     }
 
     private fun observeRuntimeDrivenCoreRefresh() {
@@ -436,7 +452,33 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun quickClearCache() {
+    fun prepareCacheClearSelection() {
+        selectedCacheClearItems = CacheClearItem.entries.toSet()
+        refreshCache()
+    }
+
+    fun toggleCacheClearItem(item: CacheClearItem) {
+        if (!cacheClearCapability.value.supportsSelective) return
+        selectedCacheClearItems = if (item in selectedCacheClearItems) {
+            selectedCacheClearItems - item
+        } else {
+            selectedCacheClearItems + item
+        }
+    }
+
+    fun selectAllCacheClearItems() {
+        selectedCacheClearItems = CacheClearItem.entries.toSet()
+    }
+
+    fun clearCacheClearSelection() {
+        if (cacheClearCapability.value.supportsSelective) selectedCacheClearItems = emptySet()
+    }
+
+    fun clearSelectedCache() {
+        if (selectedCacheClearItems.isEmpty()) {
+            appUpdateMessage = "请至少选择一项要清理的缓存"
+            return
+        }
         val adminState = adminSessionState.value
         if (!adminState.isAdminMode) {
             cacheAdminRequiredMessage = if (adminState.hasAdminTokenConfigured) {
@@ -450,8 +492,15 @@ class HomeViewModel @Inject constructor(
         if (isClearingCache) return
         isClearingCache = true
         viewModelScope.launch(Dispatchers.IO) {
-            cacheRepo.clearAll().fold(
-                onSuccess = { appUpdateMessage = "缓存已清理" },
+            val requestedItems = selectedCacheClearItems
+            cacheRepo.clear(requestedItems).fold(
+                onSuccess = { result ->
+                    appUpdateMessage = if (result.usedSelectiveProtocol) {
+                        "已清理 ${result.clearedItems.size} 项缓存"
+                    } else {
+                        "缓存已全部清理"
+                    }
+                },
                 onFailure = { appUpdateMessage = "清理失败：${it.message}" }
             )
             isClearingCache = false
@@ -489,6 +538,20 @@ class HomeViewModel @Inject constructor(
 
     fun dismissNoCoreDialog() {
         showNoCoreDialog = false
+    }
+
+    fun dismissUnavailableVariantDialog() {
+        unavailableVariant = null
+    }
+
+    fun installUnavailableVariant() {
+        val variant = unavailableVariant ?: return
+        unavailableVariant = null
+        installAndStart(variant)
+    }
+
+    fun consumeUnavailableVariantForSettings() {
+        unavailableVariant = null
     }
 
     fun openCoreDownloadDialog() {
@@ -664,14 +727,90 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun completeInstallAndStart(variant: ApiVariant) {
+        val previousVariant = runtimeState.value.variant
+        val wasRunning = runtimeState.value.status == ServiceStatus.Running
+        val expectsSameVariantRecovery = coreRepo.candidateState.value?.let { candidate ->
+            candidate.variant == variant && candidate.hasRecoveryPoint
+        } == true
         runtimeRepo.updateVariant(variant)
         runtimeRepo.addLog(LogLevel.Info, "${variantLabel(variant)} 安装成功，已切换为当前核心")
-        val status = runtimeState.value.status
-        if (status == ServiceStatus.Running) {
+        if (wasRunning) {
             runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用新核心...")
             runtimeRepo.restartService()
         } else {
             runtimeRepo.startService()
+        }
+        monitorInstalledCoreStart(variant, previousVariant, wasRunning, expectsSameVariantRecovery)
+    }
+
+    private fun monitorInstalledCoreStart(
+        installedVariant: ApiVariant,
+        previousVariant: ApiVariant,
+        wasRunning: Boolean,
+        expectsSameVariantRecovery: Boolean
+    ) {
+        viewModelScope.launch {
+            isSwitchingCore = true
+            try {
+                var sawProgress = false
+                val started = withTimeoutOrNull(45_000L) {
+                    runtimeState.first { state ->
+                        when (state.status) {
+                            ServiceStatus.Starting, ServiceStatus.Stopping -> {
+                                sawProgress = true
+                                false
+                            }
+                            ServiceStatus.Running -> state.variant == installedVariant &&
+                                (sawProgress || !wasRunning)
+                            ServiceStatus.Error -> sawProgress
+                            ServiceStatus.Stopped -> sawProgress
+                        }
+                    }
+                }?.status == ServiceStatus.Running
+                if (started) return@launch
+
+                val recoveredSameVariant = if (expectsSameVariantRecovery) {
+                    withTimeoutOrNull(40_000L) {
+                        runtimeState.first { state ->
+                            state.variant == installedVariant && state.status == ServiceStatus.Running
+                        }
+                    } != null
+                } else false
+                if (recoveredSameVariant) {
+                    appUpdateMessage = "新核心启动失败，已恢复该版本的上一个可用核心"
+                    return@launch
+                }
+
+                if (previousVariant == installedVariant) {
+                    appUpdateMessage = "安装完成，但核心启动失败，请查看运行日志"
+                    return@launch
+                }
+                val previousReady = withContext(Dispatchers.IO) {
+                    coreRepo.isCoreReady(previousVariant)
+                }
+                runtimeRepo.updateVariant(previousVariant)
+                if (!previousReady) {
+                    appUpdateMessage = "新核心启动失败，已恢复原核心选择；原核心需要重新安装"
+                    return@launch
+                }
+                runtimeRepo.addLog(
+                    LogLevel.Warn,
+                    "新安装核心启动失败，已切回 ${variantLabel(previousVariant)}"
+                )
+                runtimeRepo.restartService()
+                val fallbackRunning = withTimeoutOrNull(45_000L) {
+                    runtimeState.first { state ->
+                        state.variant == previousVariant && state.status == ServiceStatus.Running
+                    }
+                } != null
+                appUpdateMessage = if (fallbackRunning) {
+                    "新核心启动失败，已恢复并启动 ${variantLabel(previousVariant)}"
+                } else {
+                    "新核心启动失败，已恢复 ${variantLabel(previousVariant)} 选择，请检查运行日志"
+                }
+            } finally {
+                isSwitchingCore = false
+            }
         }
     }
 
@@ -980,7 +1119,7 @@ class HomeViewModel @Inject constructor(
 
                 val ready = withContext(Dispatchers.IO) {
                     coreRepo.isCoreReady(variant)
-                }
+                } && coreInfoList.value.find { it.variant == variant }?.sourceMismatch != true
                 if (!ready) {
                     val latestInfo = coreInfoList.value.find { it.variant == variant }
                     if (latestInfo?.sourceMismatch == true) {
@@ -988,17 +1127,15 @@ class HomeViewModel @Inject constructor(
                         appUpdateMessage = "${variantLabel(variant)} 当前来源与设置不一致，请先重新下载核心"
                         return@launch
                     }
-                    runtimeRepo.updateVariant(variant)
-                    runtimeRepo.addLog(LogLevel.Warn, "${variantLabel(variant)} 未安装，已切换选择，下载后可直接使用")
-                    if (current.status == ServiceStatus.Running) {
-                        runtimeRepo.addLog(LogLevel.Info, "服务仍在运行当前核心，下载后会自动重启应用新核心")
-                    }
-                    appUpdateMessage = "${variantLabel(variant)} 尚未安装，请先下载核心"
-                    showNoCoreDialog = true
+                    runtimeRepo.addLog(LogLevel.Warn, "${variantLabel(variant)} 未安装，已保留当前核心选择")
+                    unavailableVariant = variant
                     return@launch
                 }
 
                 runtimeRepo.addLog(LogLevel.Info, "切换核心到 ${variantLabel(variant)}")
+                val expectsSameVariantRecovery = coreRepo.candidateState.value?.let { candidate ->
+                    candidate.variant == variant && candidate.hasRecoveryPoint
+                } == true
                 runtimeRepo.updateVariant(variant)
 
                 if (wasRunning) {
@@ -1017,6 +1154,44 @@ class HomeViewModel @Inject constructor(
                             else -> "切换后服务状态异常，请查看日志"
                         }
                         runtimeRepo.addLog(LogLevel.Error, reason)
+                        val recoveredSameVariant = if (expectsSameVariantRecovery) {
+                            runtimeRepo.addLog(LogLevel.Warn, "正在等待候选核心自动恢复结果")
+                            withTimeoutOrNull(40_000L) {
+                                runtimeState.first { state ->
+                                    state.variant == variant && state.status == ServiceStatus.Running
+                                }
+                            } != null
+                        } else {
+                            false
+                        }
+                        if (recoveredSameVariant) {
+                            appUpdateMessage = "新版本启动失败，已恢复 ${variantLabel(variant)} 的上一个可用版本"
+                            return@launch
+                        }
+
+                        val previousReady = withContext(Dispatchers.IO) {
+                            coreRepo.isCoreReady(current.variant)
+                        }
+                        runtimeRepo.updateVariant(current.variant)
+                        if (previousReady) {
+                            runtimeRepo.addLog(
+                                LogLevel.Warn,
+                                "切换失败，已恢复选择 ${variantLabel(current.variant)}，正在重新启动"
+                            )
+                            runtimeRepo.restartService()
+                            val restored = withTimeoutOrNull(45_000L) {
+                                runtimeState.first { state ->
+                                    state.variant == current.variant && state.status == ServiceStatus.Running
+                                }
+                            } != null
+                            appUpdateMessage = if (restored) {
+                                "切换失败，已恢复并启动 ${variantLabel(current.variant)}"
+                            } else {
+                                "切换失败，已恢复 ${variantLabel(current.variant)} 选择，请检查运行日志"
+                            }
+                        } else {
+                            appUpdateMessage = "切换失败，已恢复原核心选择；原核心当前不可用，请先重新安装"
+                        }
                     }
                 }
             } catch (t: Throwable) {

@@ -16,7 +16,8 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class SecureStringStore(
     private val prefs: SharedPreferences,
-    private val keyAlias: String
+    private val keyAlias: String,
+    private val allowPlaintextFallback: Boolean = true
 ) {
 
     companion object {
@@ -30,26 +31,32 @@ class SecureStringStore(
     fun get(key: String, defaultValue: String = ""): String {
         val raw = prefs.safeGetString(key, defaultValue)
         if (!raw.startsWith(CIPHER_PREFIX)) {
-            migratePlainValue(key, raw)
-            return raw
+            if (raw.isBlank()) return raw
+            val migrated = migratePlainValue(key, raw)
+            if (migrated || allowPlaintextFallback) return raw
+            prefs.edit { remove(key) }
+            return defaultValue
         }
         val cipherText = raw.removePrefix(CIPHER_PREFIX)
         return decrypt(cipherText) ?: defaultValue
     }
 
-    fun put(key: String, value: String) {
+    fun put(key: String, value: String): Boolean {
         if (value.isBlank()) {
             prefs.edit { putString(key, "") }
-            return
+            return true
         }
         val encrypted = encrypt(value)
+        if (encrypted == null && !allowPlaintextFallback) return false
         prefs.edit { putString(key, encrypted ?: value) }
+        return true
     }
 
-    private fun migratePlainValue(key: String, value: String) {
-        if (value.isBlank()) return
-        val encrypted = encrypt(value) ?: return
+    private fun migratePlainValue(key: String, value: String): Boolean {
+        if (value.isBlank()) return true
+        val encrypted = encrypt(value) ?: return false
         prefs.edit { putString(key, encrypted) }
+        return true
     }
 
     private fun encrypt(value: String): String? {

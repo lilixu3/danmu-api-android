@@ -27,10 +27,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.CacheEntry
+import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
 import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
+import com.example.danmuapiapp.ui.component.CacheClearCapabilityNotice
+import com.example.danmuapiapp.ui.component.CacheClearSelectionList
+import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
+import com.example.danmuapiapp.ui.theme.appDangerButtonColors
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -44,6 +49,7 @@ fun CacheManagementScreen(
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
+    val clearCapability by viewModel.clearCapability.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -71,12 +77,10 @@ fun CacheManagementScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp)
-                .padding(top = 16.dp)
+                .padding(horizontal = 18.dp)
         ) {
-            // Header — same as RequestRecordsScreen
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -91,7 +95,7 @@ fun CacheManagementScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                     }
                     Column {
-                        Text("缓存管理", style = MaterialTheme.typography.headlineLarge)
+                        Text("缓存管理", style = MaterialTheme.typography.headlineMedium)
                         Text(
                             if (stats.isAvailable)
                                 "${stats.reqRecordsCount} 条记录 · 今日 ${stats.todayReqNum} 次请求"
@@ -102,90 +106,142 @@ fun CacheManagementScreen(
                         )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilledTonalIconButton(
-                        onClick = viewModel::refresh,
-                        enabled = !isLoading,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Rounded.Refresh, "刷新", Modifier.size(18.dp))
-                        }
-                    }
-                    FilledTonalIconButton(
-                        onClick = viewModel::requestClear,
-                        enabled = stats.isAvailable && !viewModel.isClearing && !isLoading,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        if (viewModel.isClearing) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Rounded.DeleteSweep, "清理缓存", Modifier.size(18.dp))
-                        }
+                FilledTonalIconButton(
+                    onClick = viewModel::refresh,
+                    enabled = !isLoading,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Rounded.Refresh, "刷新", Modifier.size(19.dp))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 22.dp)
+            ) {
+                if (!stats.isAvailable && !isLoading) {
+                    item(key = "offline") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Rounded.CloudOff, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "启动服务后可读取并清理核心缓存。",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
 
-            if (!stats.isAvailable && !isLoading) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Rounded.CloudOff,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                if (stats.isAvailable) {
+                    item(key = "stats") { CacheStatsRow(stats = stats) }
+                }
+
+                item(key = "clear-heading") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("清理范围", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "服务未运行，无法获取缓存信息。",
-                            style = MaterialTheme.typography.bodyMedium,
+                            "选择本次需要重置的核心缓存，收藏数据不会受影响",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            }
+                item(key = "capability") { CacheClearCapabilityNotice(clearCapability) }
+                item(key = "toolbar") {
+                    CacheClearSelectionToolbar(
+                        selectedCount = viewModel.selectedItems.size,
+                        selectionEnabled = clearCapability.supportsSelective && !viewModel.isClearing,
+                        onSelectAll = viewModel::selectAll,
+                        onSelectNone = viewModel::selectNone
+                    )
+                }
+                item(key = "selection") {
+                    CacheClearSelectionList(
+                        selectedItems = viewModel.selectedItems,
+                        selectionEnabled = clearCapability.supportsSelective && !viewModel.isClearing,
+                        onToggle = viewModel::toggleClearItem
+                    )
+                }
+                item(key = "clear-action") {
+                    Button(
+                        onClick = viewModel::requestClear,
+                        enabled = stats.isAvailable && viewModel.selectedItems.isNotEmpty() &&
+                            !viewModel.isClearing && !isLoading,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = appDangerButtonColors()
+                    ) {
+                        if (viewModel.isClearing) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(19.dp))
+                        }
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (clearCapability.support == CacheClearSupport.Selective) {
+                                "清理已选 ${viewModel.selectedItems.size} 项"
+                            } else {
+                                "兼容清理全部缓存"
+                            }
+                        )
+                    }
+                }
 
-            if (stats.isAvailable) {
-                CacheStatsRow(stats = stats)
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            if (entries.isNotEmpty()) {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
+                item(key = "records-heading") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("最近请求", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "显示 ${entries.size} 条",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (entries.isNotEmpty()) {
                     items(entries) { entry ->
                         CacheEntryCard(entry = entry)
                     }
-                }
-            } else if (stats.isAvailable && !isLoading) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-                        Text("当前无请求记录", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (stats.isAvailable && !isLoading) {
+                    item(key = "records-empty") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    "当前无请求记录",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -213,17 +269,18 @@ fun CacheManagementScreen(
             title = { Text("确认清理缓存") },
             text = {
                 Text(
-                    "将清除全部内存缓存（搜索缓存、弹幕缓存、请求记录等），此操作不可撤销。",
+                    if (clearCapability.support == CacheClearSupport.Selective) {
+                        "将清理已选择的 ${viewModel.selectedItems.size} 项缓存，未选择的数据会保留。"
+                    } else {
+                        "当前核心不支持按项清理，将清除全部八项核心缓存。"
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = viewModel::clearAll,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) { Text("清理") }
+                Button(onClick = viewModel::clearSelected, colors = appDangerButtonColors()) {
+                    Text("确认清理")
+                }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissClearConfirm) { Text("取消") }

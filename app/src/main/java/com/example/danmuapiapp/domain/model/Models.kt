@@ -41,10 +41,12 @@ data class RuntimeState(
     val token: String = "",
     val variant: ApiVariant = ApiVariant.Stable,
     val runMode: RunMode = RunMode.Normal,
+    val listenMode: RuntimeListenMode = RuntimeListenMode.Ipv4Only,
     val pid: Int? = null,
     val uptimeSeconds: Long = 0,
     val localUrl: String = "",
     val lanUrl: String = "",
+    val lanIpv6Url: String = "",
     val errorMessage: String? = null,
     val statusMessage: String? = null
 )
@@ -58,10 +60,11 @@ data class CoreInfo(
     val hasVersionUpdate: Boolean = false,
     val sourceMismatch: Boolean = false,
     val sourceStatus: CoreSourceStatus = CoreSourceStatus.NotApplicable,
-    val desiredSource: String? = null
+    val desiredSource: String? = null,
+    val pullRequestNumbers: List<Int> = emptyList()
 ) {
     val isReady: Boolean
-        get() = isInstalled
+        get() = isInstalled && !sourceMismatch
 
     val needsAttention: Boolean
         get() = sourceMismatch ||
@@ -105,7 +108,64 @@ data class GithubRelease(
     val name: String,
     val body: String,
     val publishedAt: String,
-    val zipballUrl: String
+    val zipballUrl: String,
+    val commitSha: String = "",
+    val version: String = ""
+)
+
+data class CoreRevision(
+    val commitSha: String,
+    val title: String,
+    val message: String,
+    val author: String,
+    val committedAt: String,
+    val version: String,
+    val archiveUrl: String
+) {
+    val shortSha: String
+        get() = commitSha.take(7)
+
+    val displayVersion: String
+        get() = version.trim().ifBlank { "版本读取失败" }
+}
+
+data class CoreRevisionPage(
+    val revisions: List<CoreRevision>,
+    val page: Int,
+    val hasNextPage: Boolean
+)
+
+enum class CoreDiffLineType {
+    Context,
+    Added,
+    Removed,
+    Header
+}
+
+data class CoreDiffLine(
+    val type: CoreDiffLineType,
+    val content: String,
+    val oldLineNumber: Int? = null,
+    val newLineNumber: Int? = null
+)
+
+data class CoreRevisionFileChange(
+    val path: String,
+    val previousPath: String? = null,
+    val status: String,
+    val additions: Int,
+    val deletions: Int,
+    val changes: Int,
+    val lines: List<CoreDiffLine> = emptyList(),
+    val patchUnavailableReason: String? = null
+)
+
+data class CoreRevisionDetails(
+    val revision: CoreRevision,
+    val files: List<CoreRevisionFileChange>,
+    val additions: Int,
+    val deletions: Int,
+    val changedFiles: Int
 )
 
 data class GithubProxyOption(

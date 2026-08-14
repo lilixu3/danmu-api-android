@@ -43,7 +43,11 @@ class GithubProxyService @Inject constructor(
 
     private val prefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
     private val githubAuthPrefs = context.getSharedPreferences("github_auth_prefs", Context.MODE_PRIVATE)
-    private val githubTokenStore = SecureStringStore(githubAuthPrefs, "danmuapi_github_auth_v1")
+    private val githubTokenStore = SecureStringStore(
+        githubAuthPrefs,
+        "danmuapi_github_auth_v1",
+        allowPlaintextFallback = false
+    )
     private val allOptions = listOf(
         GithubProxyOption(PROXY_ID_ORIGINAL, "GitHub 官方（直连）", "", isOriginal = true),
         GithubProxyOption("gh_proxy_org", "GH-Proxy.org", "https://gh-proxy.org"),
@@ -74,6 +78,8 @@ class GithubProxyService @Inject constructor(
     fun hasUserSelectedProxy(): Boolean = _hasUserSelected.value
 
     fun isUsingProxy(): Boolean = hasUserSelectedProxy() && !currentSelectedOption().isOriginal
+
+    fun hasGithubToken(): Boolean = githubTokenStore.get("github_token").trim().isNotBlank()
 
     fun setSelectedProxy(proxyId: String) {
         persistSelection(proxyId, markSelected = true)
