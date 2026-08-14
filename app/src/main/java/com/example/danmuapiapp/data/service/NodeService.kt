@@ -27,14 +27,11 @@ import com.example.danmuapiapp.domain.model.ErrorHandler
 import kotlinx.coroutines.*
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.net.ConnectivityManager
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import java.net.HttpURLConnection
-import java.net.Inet4Address
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
 import java.net.Socket
 import java.net.URL
 import java.util.concurrent.atomic.AtomicLong
@@ -1021,49 +1018,8 @@ class NodeService : Service() {
     private fun resolveLanUrl(): String {
         val port = readPortFromEnvFile().takeIf { it in 1..65535 } ?: 9321
         val token = readTokenFromEnvFile()
-        val tokenPath = token.takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty()
-        val lanIp = resolveLanIp()
-        return "http://$lanIp:$port$tokenPath"
-    }
-
-    @Suppress("deprecation")
-    private fun resolveLanIp(): String {
-        val activeNetworkIp = runCatching {
-            val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
-                as? ConnectivityManager ?: return@runCatching null
-            val activeNetwork = cm.activeNetwork ?: return@runCatching null
-            val properties = cm.getLinkProperties(activeNetwork) ?: return@runCatching null
-            properties.linkAddresses
-                .asSequence()
-                .mapNotNull { it.address as? Inet4Address }
-                .mapNotNull { it.hostAddress }
-                .firstOrNull { it != "0.0.0.0" && !it.startsWith("169.254.") }
-        }.getOrNull()
-        if (!activeNetworkIp.isNullOrBlank()) return activeNetworkIp
-
-        try {
-            var fallbackIp: String? = null
-            NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { intf ->
-                if (!intf.isUp || intf.isLoopback) return@forEach
-                intf.inetAddresses?.toList()?.forEach { addr ->
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        val ip = addr.hostAddress ?: return@forEach
-                        if (ip == "0.0.0.0" || ip.startsWith("169.254.")) return@forEach
-                        val name = (intf.name ?: "").lowercase()
-                        if (name.startsWith("wlan") || name.startsWith("eth") ||
-                            name.startsWith("en") || name.startsWith("rmnet")
-                        ) {
-                            return ip
-                        }
-                        if (fallbackIp == null) fallbackIp = ip
-                    }
-                }
-            }
-            if (!fallbackIp.isNullOrBlank()) return fallbackIp
-        } catch (e: Exception) {
-            AppDiagnosticLogger.w(applicationContext, TAG, "resolveLanIp 回退枚举失败: ${e.message}", e)
-        }
-        return "0.0.0.0"
+        val lanIp = RuntimeNetworkAddressResolver.resolve(applicationContext).ipv4
+        return RuntimeNetworkAddressResolver.buildHttpUrl(lanIp, port, token)
     }
 
     private fun readTokenFromEnvFile(): String {

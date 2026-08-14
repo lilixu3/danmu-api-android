@@ -41,7 +41,8 @@ class GithubRemoteService @Inject constructor(
 
     data class TextResponsePayload(
         val finalUrl: String,
-        val body: String
+        val body: String,
+        val linkHeader: String? = null
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -52,7 +53,15 @@ class GithubRemoteService @Inject constructor(
         .build()
 
     fun apiUrlCandidates(path: String): List<String> {
-        return withProxyCandidates("https://api.github.com/$path")
+        val original = "https://api.github.com/$path"
+        val candidates = withProxyCandidates(original)
+        // Authenticated metadata must use the official API first so the token is
+        // actually applied and the displayed account quota matches these calls.
+        return if (githubProxyService.hasGithubToken()) {
+            listOf(original).plus(candidates).distinct()
+        } else {
+            candidates
+        }
     }
 
     fun rawUrlCandidates(repo: String, filePath: String): List<String> {
@@ -67,7 +76,11 @@ class GithubRemoteService @Inject constructor(
         return requestMapped(urls, headers) { body -> body.takeIf { it.isNotBlank() } }
     }
 
-    fun requestTextResponse(urls: List<String>, headers: Map<String, String>): TextResponsePayload? {
+    fun requestTextResponse(
+        urls: List<String>,
+        headers: Map<String, String>,
+        bodyValidator: (String) -> Boolean = { true }
+    ): TextResponsePayload? {
         for (url in urls) {
             repeat(2) { attempt ->
                 try {
@@ -78,10 +91,11 @@ class GithubRemoteService @Inject constructor(
                     metadataHttpClient.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) return@use
                         val body = response.body.string()
-                        if (body.isBlank()) return@use
+                        if (body.isBlank() || !bodyValidator(body)) return@use
                         return TextResponsePayload(
                             finalUrl = response.request.url.toString(),
-                            body = body
+                            body = body,
+                            linkHeader = response.header("Link")
                         )
                     }
                 } catch (_: Exception) {

@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +26,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
+import com.example.danmuapiapp.data.service.AppBackupPreview
+import com.example.danmuapiapp.data.service.AppBackupSection
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,6 +46,13 @@ fun BackupRestoreScreen(
     var pendingImportContent by remember { mutableStateOf<String?>(null) }
     var pendingFavoriteExportContent by remember { mutableStateOf<String?>(null) }
     var pendingFavoriteImportContent by remember { mutableStateOf<String?>(null) }
+    var pendingFullExportContent by remember { mutableStateOf<String?>(null) }
+    var pendingFullImportContent by remember { mutableStateOf<String?>(null) }
+    var fullBackupPreview by remember { mutableStateOf<AppBackupPreview?>(null) }
+    var selectedBackupSections by remember { mutableStateOf(AppBackupSection.entries.toSet()) }
+    var selectedRestoreSections by remember { mutableStateOf(emptySet<AppBackupSection>()) }
+    var showFullBackupExportDialog by remember { mutableStateOf(false) }
+    var showFullBackupRestoreDialog by remember { mutableStateOf(false) }
     var showImportConfirmDialog by remember { mutableStateOf(false) }
     var showFavoriteImportConfirmDialog by remember { mutableStateOf(false) }
     var showWebDavRestoreConfirmDialog by remember { mutableStateOf(false) }
@@ -114,6 +124,45 @@ fun BackupRestoreScreen(
         }
     }
 
+    val fullBackupExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val content = pendingFullExportContent
+        pendingFullExportContent = null
+        if (uri == null || content == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(content.toByteArray(Charsets.UTF_8))
+            } ?: error("无法写入目标文件")
+        }.onSuccess {
+            viewModel.postMessage("完整备份已导出")
+        }.onFailure {
+            viewModel.postMessage("导出失败：${it.message}")
+        }
+    }
+
+    val fullBackupImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: error("无法读取文件")
+        }.onSuccess { content ->
+            viewModel.inspectFullBackup(content).fold(
+                onSuccess = { preview ->
+                    pendingFullImportContent = content
+                    fullBackupPreview = preview
+                    selectedRestoreSections = preview.sections
+                    showFullBackupRestoreDialog = true
+                },
+                onFailure = { viewModel.postMessage("完整备份无效：${it.message}") }
+            )
+        }.onFailure {
+            viewModel.postMessage("读取备份失败：${it.message}")
+        }
+    }
+
     val tvSyncLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
@@ -157,7 +206,7 @@ fun BackupRestoreScreen(
         ) {
             SettingsPageHeader(
                 title = "备份与恢复",
-                subtitle = "配置、收藏与定时计划的本地及云端备份",
+                subtitle = "服务配置、App 设置与核心来源的分类备份",
                 onBack = onBack
             )
 
@@ -179,6 +228,60 @@ fun BackupRestoreScreen(
             // ── Local backup ──
             SettingsGroup(title = "本地备份") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        "完整备份",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                selectedBackupSections = AppBackupSection.entries.toSet()
+                                showFullBackupExportDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !viewModel.isFullBackupOperating,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = appTonalButtonColors()
+                        ) {
+                            Icon(Icons.Rounded.Inventory2, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("整包导出")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                fullBackupImportLauncher.launch(
+                                    arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !viewModel.isFullBackupOperating,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("整包恢复")
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Token、密码和会话凭据不会写入整包。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "兼容旧备份",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -359,6 +462,53 @@ fun BackupRestoreScreen(
         }
     }
 
+    if (showFullBackupExportDialog) {
+        BackupSectionSelectionDialog(
+            title = "选择备份内容",
+            available = AppBackupSection.entries.toSet(),
+            selected = selectedBackupSections,
+            confirmLabel = "导出",
+            onSelectionChange = { selectedBackupSections = it },
+            onDismiss = { showFullBackupExportDialog = false },
+            onConfirm = {
+                val sections = selectedBackupSections
+                showFullBackupExportDialog = false
+                scope.launch {
+                    viewModel.createFullBackup(sections).fold(
+                        onSuccess = { content ->
+                            pendingFullExportContent = content
+                            fullBackupExportLauncher.launch(viewModel.buildFullBackupFileName())
+                        },
+                        onFailure = { viewModel.postMessage("完整备份失败：${it.message}") }
+                    )
+                }
+            }
+        )
+    }
+
+    if (showFullBackupRestoreDialog) {
+        BackupSectionSelectionDialog(
+            title = "选择恢复内容",
+            available = fullBackupPreview?.sections.orEmpty(),
+            selected = selectedRestoreSections,
+            confirmLabel = "恢复所选",
+            onSelectionChange = { selectedRestoreSections = it },
+            onDismiss = {
+                showFullBackupRestoreDialog = false
+                pendingFullImportContent = null
+                fullBackupPreview = null
+            },
+            onConfirm = {
+                val content = pendingFullImportContent
+                val sections = selectedRestoreSections
+                showFullBackupRestoreDialog = false
+                pendingFullImportContent = null
+                fullBackupPreview = null
+                if (content != null) viewModel.restoreFullBackup(content, sections)
+            }
+        )
+    }
+
     // ── Import confirm dialog ──
     if (showImportConfirmDialog) {
         AppDialog(
@@ -423,7 +573,7 @@ fun BackupRestoreScreen(
             style = AppDialogStyle.Confirm,
             tone = AppDialogTone.Warning,
             title = { Text("确认云端恢复") },
-            text = { Text("将从 WebDAV 恢复配置、收藏与定时计划，是否继续？") },
+            text = { Text("优先恢复 WebDAV 完整备份；若云端只有旧格式，则兼容恢复 .env 与收藏。") },
             confirmButton = {
                 TextButton(onClick = {
                     showWebDavRestoreConfirmDialog = false
@@ -451,6 +601,75 @@ fun BackupRestoreScreen(
             onDismiss = viewModel::dismissWebDavConfigDialog
         )
     }
+}
+
+@Composable
+private fun BackupSectionSelectionDialog(
+    title: String,
+    available: Set<AppBackupSection>,
+    selected: Set<AppBackupSection>,
+    confirmLabel: String,
+    onSelectionChange: (Set<AppBackupSection>) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AppDialog(
+        onDismissRequest = onDismiss,
+        style = AppDialogStyle.Selection,
+        tone = AppDialogTone.Brand,
+        title = { Text(title) },
+        text = {
+            AppBackupSection.entries.filter { it in available }.forEach { section ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onSelectionChange(
+                                if (section in selected) selected - section else selected + section
+                            )
+                        }
+                        .padding(vertical = 7.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = section in selected,
+                        onCheckedChange = { checked ->
+                            onSelectionChange(if (checked) selected + section else selected - section)
+                        }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(section.backupLabel(), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            section.backupDescription(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = selected.isNotEmpty()) { Text(confirmLabel) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+private fun AppBackupSection.backupLabel(): String = when (this) {
+    AppBackupSection.Environment -> "服务配置"
+    AppBackupSection.Favorites -> "收藏与定时计划"
+    AppBackupSection.AppSettings -> "App 设置"
+    AppBackupSection.CoreSources -> "核心仓库与版本清单"
+    AppBackupSection.AccessRules -> "设备访问规则"
+}
+
+private fun AppBackupSection.backupDescription(): String = when (this) {
+    AppBackupSection.Environment -> ".env 非敏感项，保留本机现有凭据"
+    AppBackupSection.Favorites -> "当前模式的收藏、刷新计划与状态"
+    AppBackupSection.AppSettings -> "界面、运行、保活和下载偏好"
+    AppBackupSection.CoreSources -> "各工作目录仓库设置，不包含核心文件"
+    AppBackupSection.AccessRules -> "访问模式与黑名单"
 }
 
 @Composable

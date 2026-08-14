@@ -7,8 +7,17 @@ import com.example.danmuapiapp.data.util.RuntimeApiAccess
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
+import com.example.danmuapiapp.data.service.RootShell
+import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
+import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CacheClearCapability
+import com.example.danmuapiapp.domain.model.CacheClearItem
+import com.example.danmuapiapp.domain.model.CacheClearResult
+import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -21,6 +30,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -50,6 +60,9 @@ class CacheRepositoryImpl @Inject constructor(
     private val _cacheEntries = MutableStateFlow<List<CacheEntry>>(emptyList())
     override val cacheEntries: StateFlow<List<CacheEntry>> = _cacheEntries.asStateFlow()
 
+    private val _clearCapability = MutableStateFlow(CacheClearCapability())
+    override val clearCapability: StateFlow<CacheClearCapability> = _clearCapability.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -57,6 +70,7 @@ class CacheRepositoryImpl @Inject constructor(
         _isLoading.value = true
         try {
             val runtime = resolveRuntimeApiAccess()
+            _clearCapability.value = CacheClearCapability(detectClearSupport())
             val previousStats = _cacheStats.value
             val result = fetchReqRecordStats(runtime)
             val animeSummary = fetchAnimeCacheSummary(runtime)
@@ -78,7 +92,7 @@ class CacheRepositoryImpl @Inject constructor(
                     )
                 }
             } ?: previousStats.copy(
-                isAvailable = animeSummary.available || previousStats.isAvailable,
+                isAvailable = animeSummary.available,
                 animeCacheCount = if (animeSummary.available) animeSummary.animeCacheCount else previousStats.animeCacheCount,
                 mergedSourceCount = if (animeSummary.available) animeSummary.mergedSourceCount else previousStats.mergedSourceCount,
                 episodeLinkCount = if (animeSummary.available) animeSummary.episodeLinkCount else previousStats.episodeLinkCount
@@ -91,8 +105,9 @@ class CacheRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun clearAll(): Result<Unit> {
+    override suspend fun clear(items: Set<CacheClearItem>): Result<CacheClearResult> {
         return runCatching {
+            require(items.isNotEmpty()) { "请至少选择一项缓存" }
             val runtime = resolveRuntimeApiAccess()
             val adminState = adminSessionRepository.sessionState.value
             val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim('/')
@@ -108,11 +123,19 @@ class CacheRepositoryImpl @Inject constructor(
                 }
             }
 
+            val support = detectClearSupport()
+            _clearCapability.value = CacheClearCapability(support)
+            val allItems = CacheClearItem.entries.toSet()
+            if (support != CacheClearSupport.Selective && items != allItems) {
+                throw IllegalStateException("当前核心不支持按项清理，请全选后使用兼容清理")
+            }
+            val useSelective = support == CacheClearSupport.Selective
+            val requestBody = if (useSelective) CacheClearProtocol.requestBody(items) else ""
             val url = "http://127.0.0.1:${runtime.port}/$adminToken/api/cache/clear"
             val request = Request.Builder()
                 .url(url)
                 .applyRuntimeApiAuth(runtime)
-                .post("".toRequestBody("application/json".toMediaType()))
+                .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
             val result = httpClient.newCall(request).execute().use { response ->
@@ -123,25 +146,123 @@ class CacheRepositoryImpl @Inject constructor(
             val body = result.second
             if (code in 200..299) {
                 val clearedAt = System.currentTimeMillis()
-                _cacheStats.value = CacheStats(
-                    reqRecordsCount = 0,
-                    todayReqNum = 0,
-                    lastClearedAt = clearedAt,
-                    isAvailable = true,
-                    recentEntries = emptyList(),
-                    animeCacheCount = 0,
-                    mergedSourceCount = 0,
-                    episodeLinkCount = 0
-                )
-                _cacheEntries.value = emptyList()
+                val clearedKeys = CacheClearProtocol.parseClearedItems(body)
+                val effectiveItems = if (useSelective) {
+                    items.filterTo(linkedSetOf()) { item ->
+                        clearedKeys == null || item.wireKey in clearedKeys
+                    }
+                } else {
+                    allItems
+                }
+                applyOptimisticClear(effectiveItems, clearedAt)
                 refresh()
                 _cacheStats.value = _cacheStats.value.copy(lastClearedAt = clearedAt)
-                return@runCatching Unit
+                return@runCatching CacheClearResult(
+                    clearedItems = effectiveItems,
+                    usedSelectiveProtocol = useSelective
+                )
             }
 
             throw Exception(extractErrorMessage(body, code))
         }
     }
+
+    private fun applyOptimisticClear(items: Set<CacheClearItem>, clearedAt: Long) {
+        val previous = _cacheStats.value
+        val clearRequests = CacheClearItem.RequestHistory in items
+        val clearAnimeSummary = CacheClearItem.Animes in items ||
+            CacheClearItem.BangumiData in items ||
+            CacheClearItem.EpisodeIds in items ||
+            CacheClearItem.EpisodeNum in items ||
+            CacheClearItem.LastSelectMap in items
+        _cacheStats.value = previous.copy(
+            reqRecordsCount = if (clearRequests) 0 else previous.reqRecordsCount,
+            todayReqNum = if (clearRequests) 0 else previous.todayReqNum,
+            lastClearedAt = clearedAt,
+            recentEntries = if (clearRequests) emptyList() else previous.recentEntries,
+            animeCacheCount = if (clearAnimeSummary) 0 else previous.animeCacheCount,
+            mergedSourceCount = if (clearAnimeSummary) 0 else previous.mergedSourceCount,
+            episodeLinkCount = if (clearAnimeSummary) 0 else previous.episodeLinkCount
+        )
+        if (clearRequests) _cacheEntries.value = emptyList()
+    }
+
+    private fun detectClearSupport(): CacheClearSupport {
+        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
+            .orEmpty()
+            .ifBlank { ApiVariant.Stable.key }
+        val mode = RuntimePaths.currentRunMode(context)
+        val coreDir = File(RuntimePaths.projectDir(context, mode), "danmu_api_$variantKey")
+        val sources = if (mode == RunMode.Root) {
+            readRootClearProtocolSources(coreDir.absolutePath)
+        } else {
+            readNormalClearProtocolSources(coreDir)
+        }
+        return CacheClearProtocol.detectSupport(sources.systemApi, sources.worker)
+    }
+
+    private data class CacheClearProtocolSources(
+        val systemApi: String?,
+        val worker: String?
+    )
+
+    private fun readNormalClearProtocolSources(coreDir: File): CacheClearProtocolSources {
+        return CacheClearProtocolSources(
+            systemApi = readNormalSource(systemApiCandidates(coreDir)),
+            worker = readNormalSource(workerCandidates(coreDir))
+        )
+    }
+
+    private fun readNormalSource(candidates: List<File>): String? {
+        return candidates.firstNotNullOfOrNull { file ->
+            runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()
+        }
+    }
+
+    private fun readRootClearProtocolSources(coreDirPath: String): CacheClearProtocolSources {
+        return CacheClearProtocolSources(
+            systemApi = readRootSource(rootSystemApiCandidates(coreDirPath)),
+            worker = readRootSource(rootWorkerCandidates(coreDirPath))
+        )
+    }
+
+    private fun readRootSource(candidates: List<String>): String? {
+        val args = candidates.joinToString(" ") { shellQuote(it) }
+        val script = """
+            for FILE in $args; do
+              [ -f "${'$'}FILE" ] || continue
+              cat "${'$'}FILE" 2>/dev/null
+              exit ${'$'}?
+            done
+            exit 2
+        """.trimIndent()
+        val result = RootShell.exec(script, timeoutMs = 3500L)
+        return result.stdout.takeIf { result.ok && it.isNotBlank() }
+    }
+
+    private fun systemApiCandidates(coreDir: File): List<File> = listOf(
+        File(coreDir, "apis/system-api.js"),
+        File(coreDir, "danmu_api/apis/system-api.js"),
+        File(coreDir, "danmu-api/apis/system-api.js")
+    )
+
+    private fun workerCandidates(coreDir: File): List<File> = listOf(
+        File(coreDir, "worker.js"),
+        File(coreDir, "danmu_api/worker.js"),
+        File(coreDir, "danmu-api/worker.js")
+    )
+
+    private fun rootSystemApiCandidates(coreDirPath: String): List<String> = listOf(
+        "$coreDirPath/apis/system-api.js",
+        "$coreDirPath/danmu_api/apis/system-api.js",
+        "$coreDirPath/danmu-api/apis/system-api.js"
+    )
+
+    private fun rootWorkerCandidates(coreDirPath: String): List<String> = listOf(
+        "$coreDirPath/worker.js",
+        "$coreDirPath/danmu_api/worker.js",
+        "$coreDirPath/danmu-api/worker.js"
+    )
 
     private fun resolveRuntimeApiAccess(): RuntimeApiAccess {
         return RuntimeApiAccessResolver.resolve(context, runtimePrefs, DEFAULT_PORT)

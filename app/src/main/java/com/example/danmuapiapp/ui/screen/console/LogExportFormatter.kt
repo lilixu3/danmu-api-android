@@ -3,14 +3,13 @@ package com.example.danmuapiapp.ui.screen.console
 import com.example.danmuapiapp.domain.model.AppLogSource
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.data.util.SensitiveDataRedactor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
 internal object LogExportFormatter {
-    private const val REDACTION = "****"
-
     fun defaultFileName(
         nowMs: Long = System.currentTimeMillis(),
         timeZone: TimeZone = TimeZone.getDefault()
@@ -87,20 +86,7 @@ internal object LogExportFormatter {
     }
 
     fun redactSensitiveText(text: String): String {
-        var out = text
-        val patterns = listOf(
-            Regex("(?i)(api[_-]?key\\s*=\\s*)[^&\\s]+"),
-            Regex("(?i)(token\\s*=\\s*)[^&\\s]+"),
-            Regex("(?i)(ADMIN_TOKEN\\s*=\\s*)[^&\\s]+"),
-            Regex("(?i)(Authorization\\s*:\\s*Bearer\\s+)[^\\s]+"),
-            Regex("(?i)(Cookie\\s*:\\s*)[^\\n]*?(?=\\s+[A-Z_]+\\s*=|$)")
-        )
-        patterns.forEach { pattern ->
-            out = pattern.replace(out) { match ->
-                match.groupValues[1] + REDACTION
-            }
-        }
-        return out
+        return SensitiveDataRedactor.redact(text)
     }
 
     private fun levelLabel(level: LogLevel): String {

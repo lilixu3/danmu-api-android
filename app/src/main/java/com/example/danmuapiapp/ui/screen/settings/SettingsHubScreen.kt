@@ -93,9 +93,9 @@ fun SettingsHubScreen(
         "应用私有目录，由系统统一管理"
     }
     val serviceSummary = if (state.token.isBlank()) {
-        "当前监听 ${state.port} 端口，尚未启用访问 Token"
+        "${state.listenMode.label} · ${state.port} 端口 · 尚未启用访问 Token"
     } else {
-        "当前监听 ${state.port} 端口，已启用访问 Token"
+        "${state.listenMode.label} · ${state.port} 端口 · 已启用访问 Token"
     }
     val quickTileSummary = when {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.N -> "当前系统版本不支持控制中心快捷按钮"

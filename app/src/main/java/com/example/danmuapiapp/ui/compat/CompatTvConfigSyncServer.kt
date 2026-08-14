@@ -5,9 +5,11 @@ import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.TvConfigSyncPayload
 import com.example.danmuapiapp.data.service.TvConfigSyncResponse
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.LogLevel
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
@@ -226,10 +228,13 @@ class CompatTvConfigSyncServer(
         }
         val port = payload.runtime.port.takeIf { it in 1..65535 } ?: runtimeSnapshot.port
         val token = RuntimeTokenNormalizer.normalizeInput(payload.runtime.token)
+        val syncedEnv = DotEnvCodec.parse(payload.envContent)
+        val listenMode = RuntimeListenMode.fromBindHost(
+            syncedEnv[RuntimeListenMode.ENV_KEY]
+        ) ?: RuntimeListenMode.Ipv4Only
 
         settingsRepository.setGithubProxy(payload.settings.githubProxy)
         githubProxyService.setSelectedProxy(payload.settings.githubProxy)
-        settingsRepository.setGithubToken(payload.settings.githubToken)
         if (payload.version >= 2) {
             settingsRepository.setVariantDisplayName(ApiVariant.Stable, payload.settings.stableRepoDisplayName)
             settingsRepository.setVariantDisplayName(ApiVariant.Dev, payload.settings.devRepoDisplayName)
@@ -246,6 +251,7 @@ class CompatTvConfigSyncServer(
         val resolvedVariant = resolveVariantAfterSync(requestedVariant, runtimeSnapshot.variant)
         val portChanged = port != runtimeSnapshot.port
         val tokenChanged = token.trim() != runtimeSnapshot.token.trim()
+        val listenModeChanged = listenMode != runtimeSnapshot.listenMode
         val variantChanged = resolvedVariant != runtimeSnapshot.variant
         if (variantChanged) {
             runtimeRepository.updateVariant(resolvedVariant)
@@ -256,12 +262,13 @@ class CompatTvConfigSyncServer(
         val currentStatus = runtimeRepository.runtimeState.value.status
         val shouldRestart = currentStatus == ServiceStatus.Running || currentStatus == ServiceStatus.Starting
         var restartNote = ""
-        if (portChanged || tokenChanged) {
+        if (portChanged || tokenChanged || listenModeChanged) {
             cancelPendingRestart()
             runtimeRepository.applyServiceConfig(
                 port = port,
                 token = token,
-                restartIfRunning = shouldRestart
+                restartIfRunning = shouldRestart,
+                listenMode = listenMode
             )
             if (shouldRestart) {
                 restartNote = "服务正在重启"

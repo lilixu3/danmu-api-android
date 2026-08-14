@@ -23,13 +23,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.72"
+    ?: "1.0.5.73"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 158
+    ?: 159
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -312,6 +312,10 @@ dependencies {
     // Network
     implementation(libs.okhttp)
 
+    // PR 实验室使用成熟的纯 Java Git 实现执行本地三方合并。
+    implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.5.202508271544-r")
+    implementation("org.slf4j:slf4j-nop:1.7.36")
+
     // LSPosed / libxposed API 102 目标：minApiVersion 仍为 101，运行时通过能力检测兼容 101+。
     // service 用于模块 App 侧按官方 XposedServiceHelper 获取真实 API/作用域/RemotePreferences。
     compileOnly("io.github.libxposed:api:102.0.0")
@@ -319,6 +323,12 @@ dependencies {
 
     // Image loading
     implementation(libs.coil.compose)
+
+    // Compose 原生 GFM：PR 说明、公告与更新日志共用同一渲染器。
+    implementation(libs.markdown.renderer)
+    implementation(libs.markdown.renderer.m3)
+    implementation(libs.markdown.renderer.coil2)
+    implementation(libs.markdown.renderer.code)
 
     // 提供 XML 主题 Theme.Material3.DayNight.NoActionBar
     implementation(libs.material)
