@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 
 import android.app.Activity
 import android.content.Context
@@ -27,6 +28,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
@@ -702,6 +704,8 @@ internal fun ServiceRuntimeInfoDialog(
     pid: Int?,
     localUrl: String,
     lanUrl: String,
+    lanIpv6Url: String,
+    listenMode: RuntimeListenMode,
     token: String,
     maskedToken: String,
     tokenVisible: Boolean,
@@ -709,6 +713,7 @@ internal fun ServiceRuntimeInfoDialog(
 ) {
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
+    val displayLanIpv6 = maskRuntimeUrl(lanIpv6Url, token, maskedToken, tokenVisible)
 
     AppDialog(
         onDismissRequest = onDismiss,
@@ -746,11 +751,19 @@ internal fun ServiceRuntimeInfoDialog(
                 RuntimeInfoItem(label = "运行模式", value = runMode.label)
                 RuntimeInfoItem(label = "核心通道", value = variantLabel)
                 RuntimeInfoItem(label = "监听端口", value = "TCP $port")
+                RuntimeInfoItem(label = "监听网络", value = listenMode.label)
                 if (pid != null) {
                     RuntimeInfoItem(label = "进程 PID", value = pid.toString())
                 }
                 RuntimeInfoItem(label = "本机地址", value = displayLocal, mono = true)
-                RuntimeInfoItem(label = "局域网地址", value = displayLan, mono = true)
+                RuntimeInfoItem(label = "IPv4 地址", value = displayLan, mono = true)
+                if (listenMode == RuntimeListenMode.DualStack) {
+                    RuntimeInfoItem(
+                        label = "IPv6 地址",
+                        value = displayLanIpv6.ifBlank { "当前网络未分配可用地址" },
+                        mono = true
+                    )
+                }
             }
         },
         confirmButton = {
@@ -786,15 +799,18 @@ internal fun RuntimeInfoItem(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = if (value.isBlank()) "未生成" else value,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
-            )
+            SelectionContainer {
+                Text(
+                    text = if (value.isBlank()) "未生成" else value,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = if (value.contains('[')) 3 else 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -997,15 +1013,18 @@ internal fun ActionDeck(
 internal fun AccessGatewayPanel(
     localUrl: String,
     lanUrl: String,
+    lanIpv6Url: String,
     token: String,
     maskedToken: String,
     tokenVisible: Boolean,
     onToggleTokenVisible: () -> Unit,
     onCopyLocal: () -> Unit,
-    onCopyLan: () -> Unit
+    onCopyLan: () -> Unit,
+    onCopyLanIpv6: () -> Unit
 ) {
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
+    val displayLanIpv6 = maskRuntimeUrl(lanIpv6Url, token, maskedToken, tokenVisible)
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1044,12 +1063,21 @@ internal fun AccessGatewayPanel(
                 }
             }
             GatewayItem(
-                title = "局域网",
-                subtitle = "推荐在同一 Wi-Fi 下使用",
+                title = "局域网 IPv4",
+                subtitle = "兼容性最佳，推荐在同一 Wi-Fi 下使用",
                 value = displayLan,
                 onCopy = onCopyLan,
                 emphasize = true
             )
+            if (lanIpv6Url.isNotBlank()) {
+                GatewayItem(
+                    title = "局域网 IPv6",
+                    subtitle = "适用于已分配 IPv6 地址的双栈网络",
+                    value = displayLanIpv6,
+                    onCopy = onCopyLanIpv6,
+                    emphasize = false
+                )
+            }
             GatewayItem(
                 title = "本机",
                 subtitle = "仅当前设备可访问",
@@ -1117,16 +1145,19 @@ internal fun GatewayItem(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = if (emphasize) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = 1
-                )
+                SelectionContainer {
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = if (emphasize) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = if (value.contains('[')) 3 else 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             FilledTonalIconButton(
                 onClick = onCopy,

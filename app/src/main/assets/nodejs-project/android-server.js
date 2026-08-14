@@ -1055,6 +1055,20 @@ function _refreshListenConfigFromEnv() {
   PROXY_PORT = _safePort(process.env.DANMU_API_PROXY_PORT, 5321);
 }
 
+function _listenOptions(port) {
+  const options = { port, host: HOST };
+  if (net.isIP(HOST) === 6) {
+    // Android currently defaults to dual stack, but make IPv4 compatibility explicit.
+    options.ipv6Only = false;
+  }
+  return options;
+}
+
+function _listenUrl(port, pathSuffix = '') {
+  const displayHost = net.isIP(HOST) === 6 ? `[${HOST}]` : HOST;
+  return `http://${displayHost}:${port}${pathSuffix}`;
+}
+
 // Will be set after servers are created (used by the Android app to stop Node gracefully)
 let shutdownFn = null;
 
@@ -2656,8 +2670,8 @@ async function main() {
   _proxyServer = null;
 
   await new Promise((resolve, reject) => {
-    _mainServer.listen(PORT, HOST, () => {
-      log(`Main server listening on http://${HOST}:${PORT}`);
+    _mainServer.listen(_listenOptions(PORT), () => {
+      log(`Main server listening on ${_listenUrl(PORT)}`);
       resolve();
     });
     _mainServer.on('error', reject);
@@ -2667,8 +2681,8 @@ async function main() {
     _proxyServer = createProxyServer();
     try {
       await new Promise((resolve, reject) => {
-        _proxyServer.listen(PROXY_PORT, HOST, () => {
-          log(`Proxy server listening on http://${HOST}:${PROXY_PORT}/proxy?url=...`);
+        _proxyServer.listen(_listenOptions(PROXY_PORT), () => {
+          log(`Proxy server listening on ${_listenUrl(PROXY_PORT, '/proxy?url=...')}`);
           resolve();
         });
         _proxyServer.on('error', reject);

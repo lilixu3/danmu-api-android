@@ -10,8 +10,10 @@ import androidx.core.net.toUri
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.data.service.CoreVersionParser
+import com.example.danmuapiapp.data.service.GithubPullRequestService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.NodeProjectManager
+import com.example.danmuapiapp.data.service.PullRequestMergeService
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RootRuntimeController
 import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
@@ -25,7 +27,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -48,7 +52,9 @@ class CoreRepositoryImpl @Inject constructor(
     private val githubRemoteService: GithubRemoteService,
     private val githubProxyService: GithubProxyService,
     private val settingsRepository: SettingsRepository,
-    private val runtimeDependencyPackManager: RuntimeDependencyPackManager
+    private val runtimeDependencyPackManager: RuntimeDependencyPackManager,
+    private val githubPullRequestService: GithubPullRequestService,
+    private val pullRequestMergeService: PullRequestMergeService
 ) : CoreRepository {
 
     companion object {
@@ -60,6 +66,8 @@ class CoreRepositoryImpl @Inject constructor(
         private const val RUNTIME_PREFS = "runtime"
         private const val CORE_SOURCE_METADATA_FILE = ".danmuapiapp-core-source.json"
         private const val OPERATION_MARKER_FILE = ".danmuapiapp-operation"
+        private const val CANDIDATE_PREFS = "core_candidate_recovery"
+        private const val CANDIDATE_KEY = "pending_candidate"
         private const val MARKED_STAGING_RETENTION_MS = 60L * 60L * 1000L
         private const val LEGACY_STAGING_RETENTION_MS = 24L * 60L * 60L * 1000L
     }
@@ -81,7 +89,10 @@ class CoreRepositoryImpl @Inject constructor(
         val branch: String = "",
         val commitSha: String = "",
         val commitPublishedAt: String = "",
-        val versionLabel: String = ""
+        val versionLabel: String = "",
+        val pullRequestNumbers: List<Int> = emptyList(),
+        val pullRequestHeadShas: List<String> = emptyList(),
+        val localMergeSha: String = ""
     )
 
     private data class CoreRemoteSource(
@@ -105,6 +116,17 @@ class CoreRepositoryImpl @Inject constructor(
         val type: PendingCoreMutationType = PendingCoreMutationType.ReplaceCore
     )
 
+    @Serializable
+    private data class PersistedCoreCandidate(
+        val variantKey: String,
+        val runModeKey: String,
+        val actionLabel: String,
+        val installedAtMs: Long,
+        val targetDirPath: String,
+        val rootDirPath: String,
+        val backupDirPath: String = ""
+    )
+
     private data class BranchHeadInfo(
         val sha: String,
         val publishedAt: String,
@@ -119,6 +141,7 @@ class CoreRepositoryImpl @Inject constructor(
 
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
+    private val candidatePrefs = context.getSharedPreferences(CANDIDATE_PREFS, Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when {
@@ -153,6 +176,8 @@ class CoreRepositoryImpl @Inject constructor(
     private val nextOperationId = AtomicLong(0L)
     private val _operationState = MutableStateFlow(CoreOperationState())
     override val operationState: StateFlow<CoreOperationState> = _operationState.asStateFlow()
+    private val _candidateState = MutableStateFlow(loadPersistedCandidate()?.toPublicState())
+    override val candidateState: StateFlow<CoreCandidateState?> = _candidateState.asStateFlow()
     @Volatile
     private var pendingCoreMutation: PendingCoreMutation? = null
     private val repoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -180,6 +205,113 @@ class CoreRepositoryImpl @Inject constructor(
         repoScope.launch {
             cleanupStaleCoreArtifacts()
             restoreRecordedDependencyRepair()
+        }
+    }
+
+    private fun loadPersistedCandidate(): PersistedCoreCandidate? {
+        val raw = candidatePrefs.getString(CANDIDATE_KEY, null)?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        return runCatching { json.decodeFromString<PersistedCoreCandidate>(raw) }
+            .getOrNull()
+            ?.takeIf(::isCandidatePathValid)
+    }
+
+    private fun PersistedCoreCandidate.toPublicState(): CoreCandidateState? {
+        val variant = ApiVariant.entries.firstOrNull { it.key == variantKey } ?: return null
+        val mode = RunMode.fromKey(runModeKey) ?: return null
+        return CoreCandidateState(
+            variant = variant,
+            runMode = mode,
+            actionLabel = actionLabel,
+            installedAtMs = installedAtMs,
+            hasRecoveryPoint = backupDirPath.isNotBlank() && File(backupDirPath).isDirectory
+        )
+    }
+
+    private fun isCandidatePathValid(candidate: PersistedCoreCandidate): Boolean {
+        val variant = ApiVariant.entries.firstOrNull { it.key == candidate.variantKey } ?: return false
+        val mode = RunMode.fromKey(candidate.runModeKey) ?: return false
+        val expected = getCoreLocation(variant, mode)
+        val target = runCatching { File(candidate.targetDirPath).canonicalFile }.getOrNull() ?: return false
+        val expectedTarget = runCatching { expected.normalDir.canonicalFile }.getOrNull() ?: return false
+        if (target != expectedTarget || candidate.rootDirPath != expected.rootDirPath) return false
+        if (candidate.backupDirPath.isBlank()) return true
+        val backup = runCatching { File(candidate.backupDirPath).canonicalFile }.getOrNull() ?: return false
+        return backup.parentFile == expectedTarget.parentFile &&
+            backup.name.startsWith("${expectedTarget.name}.backup-")
+    }
+
+    private fun saveCandidate(candidate: PersistedCoreCandidate) {
+        val previous = loadPersistedCandidate()
+        if (previous?.backupDirPath?.isNotBlank() == true &&
+            previous.backupDirPath != candidate.backupDirPath
+        ) {
+            runCatching { File(previous.backupDirPath).deleteRecursively() }
+        }
+        if (!candidatePrefs.edit().putString(CANDIDATE_KEY, json.encodeToString(candidate)).commit()) {
+            throw IOException("无法保存核心启动观察记录")
+        }
+        _candidateState.value = candidate.toPublicState()
+    }
+
+    private fun clearCandidate(candidate: PersistedCoreCandidate, deleteBackup: Boolean) {
+        if (deleteBackup && candidate.backupDirPath.isNotBlank()) {
+            runCatching { File(candidate.backupDirPath).deleteRecursively() }
+        }
+        candidatePrefs.edit().remove(CANDIDATE_KEY).commit()
+        _candidateState.value = null
+    }
+
+    override suspend fun confirmCandidateCore(
+        variant: ApiVariant,
+        runMode: RunMode
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            mutationMutex.withLock {
+                val candidate = loadPersistedCandidate() ?: return@withLock false
+                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key) {
+                    return@withLock false
+                }
+                clearCandidate(candidate, deleteBackup = true)
+                true
+            }
+        }
+    }
+
+    override suspend fun restoreCandidateCore(
+        variant: ApiVariant,
+        runMode: RunMode
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            mutationMutex.withLock {
+                val candidate = loadPersistedCandidate() ?: return@withLock false
+                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key) {
+                    return@withLock false
+                }
+                if (candidate.backupDirPath.isBlank()) {
+                    clearCandidate(candidate, deleteBackup = false)
+                    return@withLock false
+                }
+                val targetDir = File(candidate.targetDirPath)
+                val backupDir = File(candidate.backupDirPath)
+                if (!backupDir.isDirectory) {
+                    clearCandidate(candidate, deleteBackup = false)
+                    return@withLock false
+                }
+                if (targetDir.exists() && !targetDir.deleteRecursively()) {
+                    throw IOException("无法移除启动失败的候选核心")
+                }
+                moveDirectory(backupDir, targetDir)
+                if (!NodeProjectManager.hasValidCore(targetDir)) {
+                    throw IOException("恢复点中的核心文件不完整")
+                }
+                if (runMode != RunMode.Normal) {
+                    syncCoreDirToRoot(targetDir, candidate.rootDirPath)
+                }
+                clearCandidate(candidate, deleteBackup = false)
+                refreshCoreInfo()
+                true
+            }
         }
     }
 
@@ -280,7 +412,7 @@ class CoreRepositoryImpl @Inject constructor(
 
     override fun isCoreReady(variant: ApiVariant): Boolean {
         val cached = _coreInfoList.value.find { it.variant == variant }
-        if (cached?.isReady == true) return true
+        if (cached?.isInstalled == true) return cached.isReady
 
         val isMainThread = Looper.myLooper() == Looper.getMainLooper()
         val mode = currentRunMode()
@@ -352,7 +484,8 @@ class CoreRepositoryImpl @Inject constructor(
                 isInstalled = installed,
                 sourceMismatch = sourceMismatch,
                 sourceStatus = sourceStatus,
-                desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch }
+                desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch },
+                pullRequestNumbers = localMetadata?.pullRequestNumbers.orEmpty()
             ),
             localMetadata = localMetadata
         )
@@ -544,7 +677,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
 
         val shortSha = head.sha.take(7)
-        val branchTag = versionLabel.ifBlank { shortSha.ifBlank { resolvedBranch } }
+        val branchTag = versionLabel.ifBlank { resolvedBranch }
         val branchName = buildString {
             append(resolvedBranch)
             if (shortSha.isNotBlank()) {
@@ -565,7 +698,7 @@ class CoreRepositoryImpl @Inject constructor(
                 branch = resolvedBranch,
                 commitSha = head.sha,
                 commitPublishedAt = head.publishedAt,
-                versionLabel = versionLabel.ifBlank { branchTag }
+                versionLabel = versionLabel
             )
         )
     }
@@ -676,6 +809,9 @@ class CoreRepositoryImpl @Inject constructor(
                 val mode = currentRunMode()
                 val location = getCoreLocation(variant, mode)
                 mutationMutex.withLock {
+                    loadPersistedCandidate()
+                        ?.takeIf { it.variantKey == variant.key && it.runModeKey == mode.key }
+                        ?.let { clearCandidate(it, deleteBackup = true) }
                     if (mode != RunMode.Normal) {
                         deleteRootCoreDir(location.rootDirPath)
                     }
@@ -698,10 +834,6 @@ class CoreRepositoryImpl @Inject constructor(
                     ?.removePrefix("v")
                     ?.trim()
                     .orEmpty()
-                    .ifBlank {
-                        remoteSource.release.tagName.removePrefix("v").trim()
-                            .ifBlank { remoteSource.release.name.removePrefix("v").trim() }
-                    }
                 val localVersion = info.version?.removePrefix("v")?.trim().orEmpty()
                 val localMetadata = readLocalCoreSourceMetadata(variant, currentRunMode())
                 val remoteSha = remoteSource.metadata?.commitSha?.trim().orEmpty()
@@ -782,6 +914,35 @@ class CoreRepositoryImpl @Inject constructor(
             }
         }
 
+    override suspend fun rollbackCore(
+        variant: ApiVariant,
+        revision: CoreRevision
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runOwnedCoreOperation(variant, "回退") { operationId ->
+            val versionHint = revision.version.trim().ifBlank { null }
+            val release = GithubRelease(
+                tagName = "",
+                name = revision.title,
+                body = revision.message,
+                publishedAt = revision.committedAt,
+                zipballUrl = revision.archiveUrl,
+                commitSha = revision.commitSha,
+                version = revision.version
+            )
+            downloadAndExtract(
+                operationId = operationId,
+                variant = variant,
+                zipUrl = revision.archiveUrl,
+                versionHint = versionHint,
+                actionLabel = "回退",
+                sourceMetadata = buildRollbackMetadata(variant, release, versionHint)
+            )
+            refreshCoreInfo()
+            refreshAllJob?.join()
+            checkAndMarkUpdate(variant)
+        }
+    }
+
     override suspend fun fetchReleaseHistory(variant: ApiVariant): List<GithubRelease> =
         withContext(Dispatchers.IO) {
             val repo = resolveRepo(variant)
@@ -797,6 +958,216 @@ class CoreRepositoryImpl @Inject constructor(
                 emptyList()
             }
         }
+
+    override suspend fun fetchRevisionHistory(
+        variant: ApiVariant,
+        page: Int,
+        pageSize: Int,
+        query: String
+    ): Result<CoreRevisionPage> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(page > 0) { "页码无效" }
+            require(pageSize in 1..100) { "每页数量无效" }
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置核心仓库")
+            val branches = resolveBranchCandidates(variant)
+            val normalizedQuery = query.trim()
+            val revisionPage = if (normalizedQuery.isBlank()) {
+                fetchRevisionCommits(
+                    repo = repo,
+                    branchCandidates = branches,
+                    includeDefaultBranchFallback = variant != ApiVariant.Custom,
+                    page = page,
+                    pageSize = pageSize
+                )
+            } else {
+                searchRevisionCommitsByAuthorOrKeyword(
+                    repo = repo,
+                    branchCandidates = branches,
+                    includeDefaultBranchFallback = variant != ApiVariant.Custom,
+                    query = normalizedQuery,
+                    page = page,
+                    pageSize = pageSize,
+                    keywordSearch = {
+                        if (variant == ApiVariant.Custom) {
+                            searchRevisionCommitsOnBranch(
+                                repo = repo,
+                                branchCandidates = branches,
+                                query = normalizedQuery,
+                                page = page,
+                                pageSize = pageSize
+                            )
+                        } else {
+                            searchRevisionCommits(
+                                repo = repo,
+                                query = normalizedQuery,
+                                page = page,
+                                pageSize = pageSize
+                            )
+                        }
+                    }
+                )
+            }
+            val versionLookupLimit = Semaphore(6)
+            val commits = revisionPage.revisions.map { revision ->
+                async {
+                    versionLookupLimit.withPermit {
+                        revision.copy(
+                            version = fetchRevisionVersion(repo, revision.commitSha).orEmpty()
+                        )
+                    }
+                }
+            }.awaitAll()
+            CoreRevisionPage(
+                revisions = commits,
+                page = page,
+                hasNextPage = revisionPage.hasNextPage
+            )
+        }
+    }
+
+    override suspend fun fetchRevisionDetails(
+        variant: ApiVariant,
+        revision: CoreRevision
+    ): Result<CoreRevisionDetails> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置核心仓库")
+            fetchRevisionDetailsFromGithub(repo, revision)
+                ?: throw IOException("无法获取该提交的文件变动")
+        }
+    }
+
+    override suspend fun fetchPullRequests(
+        variant: ApiVariant,
+        page: Int,
+        pageSize: Int,
+        filter: CorePullRequestFilter,
+        query: String
+    ): Result<CorePullRequestPage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+            val branch = resolvePullRequestBaseBranch(variant, repo)
+            val locallyMergedPullRequestNumbers = _coreInfoList.value
+                .firstOrNull { it.variant == variant && it.isReady }
+                ?.pullRequestNumbers
+                .orEmpty()
+            githubPullRequestService.list(
+                repository = repo,
+                baseBranch = branch,
+                page = page,
+                pageSize = pageSize,
+                filter = filter,
+                locallyMergedPullRequestNumbers = locallyMergedPullRequestNumbers,
+                query = query
+            )
+        }
+    }
+
+    override suspend fun fetchPullRequestDetails(
+        variant: ApiVariant,
+        pullRequestNumber: Int
+    ): Result<CorePullRequest> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+            githubPullRequestService.get(repo, pullRequestNumber)
+        }
+    }
+
+    override suspend fun fetchPullRequestFiles(
+        variant: ApiVariant,
+        pullRequestNumber: Int,
+        page: Int,
+        pageSize: Int
+    ): Result<CorePullRequestFilePage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+            githubPullRequestService.listFiles(
+                repository = repo,
+                pullRequestNumber = pullRequestNumber,
+                page = page,
+                pageSize = pageSize
+            )
+        }
+    }
+
+    override suspend fun preparePullRequestStack(
+        variant: ApiVariant,
+        pullRequestNumbers: List<Int>
+    ): Result<CoreDependencyRepairRequest> = withContext(Dispatchers.IO) {
+        val operationId = runCatching { beginCoreOperation(variant, "准备 PR 组合") }
+            .getOrElse { return@withContext Result.failure(it) }
+        var stagingDir: File? = null
+        try {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+            val branch = resolvePullRequestBaseBranch(variant, repo)
+            val mode = currentRunMode()
+            val location = getCoreLocation(variant, mode)
+            val staging = createCoreTempDir(location.normalDir, "staging")
+            stagingDir = staging
+            writeOperationMarker(staging, operationId)
+
+            val merged = pullRequestMergeService.buildInto(
+                repository = repo,
+                baseBranch = branch,
+                pullRequestNumbers = pullRequestNumbers,
+                destination = staging
+            ) { stage, progress ->
+                updateDownloadProgress(
+                    variant = variant,
+                    actionLabel = "合并 PR",
+                    stageText = stage,
+                    progress = progress,
+                    downloadedBytes = 0L,
+                    totalBytes = -1L
+                )
+            }
+            val pending = prepareStagedCore(
+                operationId = operationId,
+                variant = variant,
+                actionLabel = "应用 PR 组合",
+                stagingDir = staging,
+                targetDir = location.normalDir,
+                mode = mode,
+                rootDirPath = location.rootDirPath,
+                versionHint = merged.version,
+                sourceMetadata = CoreSourceMetadata(
+                    repo = merged.repository,
+                    branch = merged.baseBranch,
+                    commitSha = merged.baseCommitSha,
+                    commitPublishedAt = System.currentTimeMillis().toString(),
+                    versionLabel = merged.version.orEmpty(),
+                    pullRequestNumbers = merged.pullRequests.map { it.number },
+                    pullRequestHeadShas = merged.pullRequests.map { it.headSha },
+                    localMergeSha = merged.localMergeSha
+                )
+            )
+            setPendingCoreMutation(pending)
+            markOperationAwaitingRepair(operationId)
+            Result.success(pending.repair)
+        } catch (cancelled: CancellationException) {
+            clearPendingCoreMutation(operationId, deleteStaging = true)
+            stagingDir?.let { runCatching { it.deleteRecursively() } }
+            finishCoreOperation(operationId)
+            throw cancelled
+        } catch (error: Exception) {
+            clearPendingCoreMutation(operationId, deleteStaging = true)
+            stagingDir?.let { runCatching { it.deleteRecursively() } }
+            finishCoreOperation(operationId)
+            Result.failure(error)
+        } finally {
+            _downloadProgress.value = CoreDownloadProgress()
+        }
+    }
+
+    private fun resolvePullRequestBaseBranch(variant: ApiVariant, repository: String): String {
+        return resolveBranch(variant)?.takeIf { it.isNotBlank() }
+            ?: githubPullRequestService.resolveDefaultBranch(repository)
+    }
 
     override suspend fun repairPendingDependenciesOnline(operationId: Long): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -1162,6 +1533,314 @@ class CoreRepositoryImpl @Inject constructor(
         return fetchCommitHistoryFromAtom(repo, branchCandidates)
     }
 
+    private fun fetchRevisionCommits(
+        repo: String,
+        branchCandidates: List<String>,
+        includeDefaultBranchFallback: Boolean,
+        page: Int,
+        pageSize: Int,
+        author: String? = null
+    ): CoreRevisionPage {
+        val authorParameter = author?.let { "&author=${encodeUrlPart(it)}" }.orEmpty()
+        val urls = buildList {
+            branchCandidates.forEach { branch ->
+                addAll(
+                    apiUrlCandidates(
+                        "repos/$repo/commits?sha=${encodeUrlPart(branch)}" +
+                            "&per_page=$pageSize&page=$page$authorParameter"
+                    )
+                )
+            }
+            if (includeDefaultBranchFallback) {
+                addAll(
+                    apiUrlCandidates(
+                        "repos/$repo/commits?per_page=$pageSize&page=$page$authorParameter"
+                    )
+                )
+            }
+        }.distinct()
+
+        val payload = githubRemoteService.requestTextResponse(
+            urls = urls,
+            headers = githubApiHeaders(),
+            bodyValidator = { body ->
+                runCatching { json.parseToJsonElement(body) }.getOrNull() is JsonArray
+            }
+        ) ?: throw IOException("无法读取 GitHub 提交记录，请检查网络、API 额度或仓库分支")
+        val root = runCatching { json.parseToJsonElement(payload.body) }.getOrNull() as? JsonArray
+            ?: throw IOException("GitHub 提交记录响应格式无效")
+        val revisions = root.mapNotNull { element ->
+            parseCoreRevision(repo, element as? JsonObject ?: return@mapNotNull null)
+        }
+        return CoreRevisionPage(
+            revisions = revisions,
+            page = page,
+            hasNextPage = CoreRevisionSearch.hasNextHistoryPage(
+                linkHeader = payload.linkHeader,
+                receivedCount = revisions.size,
+                pageSize = pageSize
+            )
+        )
+    }
+
+    private fun searchRevisionCommitsByAuthorOrKeyword(
+        repo: String,
+        branchCandidates: List<String>,
+        includeDefaultBranchFallback: Boolean,
+        query: String,
+        page: Int,
+        pageSize: Int,
+        keywordSearch: () -> CoreRevisionPage
+    ): CoreRevisionPage {
+        val authorQuery = CoreRevisionSearch.authorQuery(query) ?: return keywordSearch()
+        val authorPage = fetchRevisionCommits(
+            repo = repo,
+            branchCandidates = branchCandidates,
+            includeDefaultBranchFallback = includeDefaultBranchFallback,
+            page = page,
+            pageSize = pageSize,
+            author = authorQuery.login
+        )
+        if (authorQuery.explicit || authorPage.revisions.isNotEmpty()) return authorPage
+
+        // A plain one-word query may be either a login or commit text. Only fall
+        // back to text search when this repository has no commits by that login.
+        if (page > 1) {
+            val firstAuthorPage = fetchRevisionCommits(
+                repo = repo,
+                branchCandidates = branchCandidates,
+                includeDefaultBranchFallback = includeDefaultBranchFallback,
+                page = 1,
+                pageSize = 1,
+                author = authorQuery.login
+            )
+            if (firstAuthorPage.revisions.isNotEmpty()) return authorPage
+        }
+        return keywordSearch()
+    }
+
+    private fun searchRevisionCommits(
+        repo: String,
+        query: String,
+        page: Int,
+        pageSize: Int
+    ): CoreRevisionPage {
+        val githubQuery = CoreRevisionSearch.query(repo, query)
+        val payload = githubRemoteService.requestTextResponse(
+            urls = apiUrlCandidates(
+                "search/commits?q=${encodeUrlPart(githubQuery)}&sort=committer-date&order=desc" +
+                    "&per_page=$pageSize&page=$page"
+            ),
+            headers = githubApiHeaders(),
+            bodyValidator = { body ->
+                val candidate = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
+                candidate?.get("items") is JsonArray
+            }
+        ) ?: throw IOException("GitHub 提交搜索失败，请检查网络、搜索额度或关键词")
+        val root = runCatching { json.parseToJsonElement(payload.body) }.getOrNull() as? JsonObject
+            ?: throw IOException("GitHub 提交搜索响应格式无效")
+        val items = root["items"] as? JsonArray ?: JsonArray(emptyList())
+        val revisions = items.mapNotNull { element ->
+            parseCoreRevision(repo, element as? JsonObject ?: return@mapNotNull null)
+        }
+        val totalCount = root.intValue("total_count")
+        return CoreRevisionPage(
+            revisions = revisions,
+            page = page,
+            hasNextPage = CoreRevisionSearch.hasNextPage(
+                linkHeader = payload.linkHeader,
+                page = page,
+                pageSize = pageSize,
+                totalCount = totalCount,
+                receivedCount = revisions.size
+            )
+        )
+    }
+
+    private fun searchRevisionCommitsOnBranch(
+        repo: String,
+        branchCandidates: List<String>,
+        query: String,
+        page: Int,
+        pageSize: Int
+    ): CoreRevisionPage {
+        val firstResultIndex = Math.multiplyExact(page - 1, pageSize)
+        val requiredMatchCount = Math.addExact(firstResultIndex, pageSize + 1)
+        val matches = mutableListOf<CoreRevision>()
+        var sourcePage = 1
+
+        while (matches.size < requiredMatchCount) {
+            val source = fetchRevisionCommits(
+                repo = repo,
+                branchCandidates = branchCandidates,
+                includeDefaultBranchFallback = false,
+                page = sourcePage,
+                pageSize = 100
+            )
+            matches += source.revisions.filter { revision ->
+                CoreRevisionSearch.matches(revision, query)
+            }
+            if (!source.hasNextPage) break
+            sourcePage += 1
+        }
+
+        return CoreRevisionPage(
+            revisions = matches.drop(firstResultIndex).take(pageSize),
+            page = page,
+            hasNextPage = matches.size > firstResultIndex + pageSize
+        )
+    }
+
+    private fun parseCoreRevision(repo: String, obj: JsonObject): CoreRevision? {
+        val sha = obj.stringValue("sha")
+        if (sha.isBlank()) return null
+        val commit = obj["commit"] as? JsonObject
+        val message = commit?.stringValue("message").orEmpty().trim()
+        val authorObject = commit?.get("author") as? JsonObject
+        val committerObject = commit?.get("committer") as? JsonObject
+        val githubAuthor = obj["author"] as? JsonObject
+        val title = message.lineSequence().firstOrNull()?.trim().orEmpty()
+            .ifBlank { "提交 ${sha.take(7)}" }
+        return CoreRevision(
+            commitSha = sha,
+            title = title,
+            message = message.ifBlank { title },
+            author = githubAuthor?.stringValue("login")
+                .orEmpty()
+                .ifBlank { authorObject?.stringValue("name").orEmpty() }
+                .ifBlank { "未知作者" },
+            committedAt = authorObject?.stringValue("date")
+                .orEmpty()
+                .ifBlank { committerObject?.stringValue("date").orEmpty() },
+            version = "",
+            archiveUrl = "https://api.github.com/repos/$repo/zipball/$sha"
+        )
+    }
+
+    private fun fetchRevisionVersion(repo: String, commitSha: String): String? {
+        CoreRevisionVersionResolver.globalsPaths(commitSha).firstNotNullOfOrNull { path ->
+            requestMapped(
+                urls = rawUrlCandidates(repo, path),
+                headers = mapOf("User-Agent" to USER_AGENT)
+            ) { body -> CoreRevisionVersionResolver.parseGlobalsVersion(body) }
+        }?.let { return it }
+
+        // raw.githubusercontent.com cannot read private repositories with our
+        // API-only credential. Fall back to the official Contents API at the
+        // exact commit; the response is requested as raw globals.js source.
+        return CoreRevisionVersionResolver.globalsFilePaths().firstNotNullOfOrNull { filePath ->
+            requestMapped(
+                urls = apiUrlCandidates(
+                    "repos/$repo/contents/$filePath?ref=${encodeUrlPart(commitSha)}"
+                ),
+                headers = githubApiHeaders(
+                    accept = "application/vnd.github.raw+json"
+                )
+            ) { body -> CoreRevisionVersionResolver.parseGlobalsVersion(body) }
+        }
+    }
+
+    private fun fetchRevisionDetailsFromGithub(
+        repo: String,
+        revision: CoreRevision
+    ): CoreRevisionDetails? {
+        val files = mutableListOf<CoreRevisionFileChange>()
+        val seenFilePages = mutableSetOf<List<String>>()
+        var additions = 0
+        var deletions = 0
+        var page = 1
+        while (true) {
+            val pagePayload = requestMapped(
+                urls = apiUrlCandidates(
+                    "repos/$repo/commits/${encodeUrlPart(revision.commitSha)}?per_page=100&page=$page"
+                ),
+                headers = githubApiHeaders()
+            ) { body ->
+                val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
+                    ?: return@requestMapped null
+                val filesArray = root["files"] as? JsonArray ?: JsonArray(emptyList())
+                val pageFiles = filesArray.mapNotNull { element ->
+                    val file = element as? JsonObject ?: return@mapNotNull null
+                    val path = file.stringValue("filename")
+                    if (path.isBlank()) return@mapNotNull null
+                    val patch = file.stringValue("patch")
+                    val status = file.stringValue("status").ifBlank { "modified" }
+                    CoreRevisionFileChange(
+                        path = path,
+                        previousPath = file.stringValue("previous_filename").ifBlank { null },
+                        status = status,
+                        additions = file.intValue("additions"),
+                        deletions = file.intValue("deletions"),
+                        changes = file.intValue("changes"),
+                        lines = CoreRevisionParser.parsePatch(patch),
+                        patchUnavailableReason = if (patch.isBlank()) {
+                            if (status == "removed" || status == "added" || status == "modified") {
+                                "GitHub 未返回文本补丁，文件可能是二进制或变动过大"
+                            } else {
+                                "此文件没有可显示的文本补丁"
+                            }
+                        } else {
+                            null
+                        }
+                    )
+                }
+                val stats = root["stats"] as? JsonObject
+                RevisionDetailsPage(
+                    files = pageFiles,
+                    additions = stats?.intValue("additions"),
+                    deletions = stats?.intValue("deletions")
+                )
+            } ?: return if (page == 1) null else break
+
+            val pageIdentity = pagePayload.files.map { "${it.status}:${it.path}" }
+            if (page > 1 && (pagePayload.files.isEmpty() || !seenFilePages.add(pageIdentity))) break
+            if (page == 1) seenFilePages += pageIdentity
+            if (page == 1) {
+                additions = pagePayload.additions ?: 0
+                deletions = pagePayload.deletions ?: 0
+            }
+            files += pagePayload.files
+            if (pagePayload.files.size < 100) break
+            page += 1
+        }
+        if (files.isEmpty()) return CoreRevisionDetails(
+            revision = revision,
+            files = emptyList(),
+            additions = additions,
+            deletions = deletions,
+            changedFiles = 0
+        )
+        return CoreRevisionDetails(
+            revision = revision,
+            files = files,
+            additions = additions.takeIf { it > 0 } ?: files.sumOf { it.additions },
+            deletions = deletions.takeIf { it > 0 } ?: files.sumOf { it.deletions },
+            changedFiles = files.size
+        )
+    }
+
+    private data class RevisionDetailsPage(
+        val files: List<CoreRevisionFileChange>,
+        val additions: Int?,
+        val deletions: Int?
+    )
+
+    private fun githubApiHeaders(
+        accept: String = "application/vnd.github+json"
+    ): Map<String, String> = mapOf(
+        "Accept" to accept,
+        "X-GitHub-Api-Version" to "2022-11-28",
+        "User-Agent" to USER_AGENT
+    )
+
+    private fun JsonObject.stringValue(key: String): String {
+        return (this[key] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+    }
+
+    private fun JsonObject.intValue(key: String): Int {
+        return (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+    }
+
     private fun parseCommitAsRelease(repo: String, obj: JsonObject): GithubRelease? {
         val sha = (obj["sha"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (sha.isBlank()) return null
@@ -1295,7 +1974,6 @@ class CoreRepositoryImpl @Inject constructor(
         return when {
             normalizedVersion.isNotBlank() && shortSha.isNotBlank() -> "$normalizedVersion@$shortSha"
             normalizedVersion.isNotBlank() -> normalizedVersion
-            shortSha.isNotBlank() -> shortSha
             else -> ""
         }
     }
@@ -1336,13 +2014,15 @@ class CoreRepositoryImpl @Inject constructor(
         val branch = resolveBranch(variant) ?: return null
         val repo = resolveRepo(variant)
         if (repo.isBlank()) return null
-        val commitSha = extractArchiveCommitSha(release.zipballUrl).orEmpty()
+        val commitSha = release.commitSha.ifBlank {
+            extractArchiveCommitSha(release.zipballUrl).orEmpty()
+        }
         return CoreSourceMetadata(
             repo = repo,
             branch = branch,
             commitSha = commitSha,
             commitPublishedAt = release.publishedAt,
-            versionLabel = versionHint.orEmpty()
+            versionLabel = release.version.ifBlank { versionHint.orEmpty() }
         )
     }
 
@@ -1429,9 +2109,7 @@ class CoreRepositoryImpl @Inject constructor(
             val remoteSource = resolveRemoteSource(variant)
                 ?: throw IOException("无法获取版本信息")
             val release = remoteSource.release
-            val versionHint = remoteSource.metadata?.versionLabel?.ifBlank { null } ?: release.tagName.ifBlank {
-                release.name.ifBlank { "" }
-            }.ifBlank { null }
+            val versionHint = remoteSource.metadata?.versionLabel?.ifBlank { null }
             downloadAndExtract(
                 operationId = operationId,
                 variant = variant,
@@ -1579,37 +2257,17 @@ class CoreRepositoryImpl @Inject constructor(
                 totalBytes = totalBytes
             )
 
-            NodeProjectManager.normalizeCoreLayout(stagingDir)
-            NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
-            NodeProjectManager.writeRuntimeDependencyRequirements(stagingDir)
-            writeCoreSourceMetadata(stagingDir, sourceMetadata)
-
-            if (!NodeProjectManager.hasValidCore(stagingDir)) {
-                throw IOException("核心文件不完整，缺少关键入口文件")
-            }
-            val pending = PendingCoreMutation(
+            finalizeStagedCore(
                 operationId = operationId,
-                repair = CoreDependencyRepairRequest(
-                    operationId = operationId,
-                    variant = variant,
-                    actionLabel = actionLabel,
-                    missingDependencies = collectMissingCoreRuntimeDependencies(stagingDir),
-                    candidateVersion = versionHint,
-                    onlineRepairSupported = RuntimeDependencyPackProtocol.supportsOnlineRepair(variant)
-                ),
+                variant = variant,
+                actionLabel = actionLabel,
                 stagingDir = stagingDir,
                 targetDir = targetDir,
                 mode = mode,
                 rootDirPath = location.rootDirPath,
+                versionHint = versionHint,
                 sourceMetadata = sourceMetadata
             )
-            if (pending.repair.missingDependencies.isNotEmpty()) {
-                setPendingCoreMutation(pending)
-                throw CoreDependencyRepairRequiredException(pending.repair)
-            }
-            mutationMutex.withLock {
-                applyStagedCore(pending)
-            }
         } catch (e: Exception) {
             if (e !is CoreDependencyRepairRequiredException) {
                 runCatching { stagingDir.deleteRecursively() }
@@ -1620,9 +2278,78 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+    private suspend fun finalizeStagedCore(
+        operationId: Long,
+        variant: ApiVariant,
+        actionLabel: String,
+        stagingDir: File,
+        targetDir: File,
+        mode: RunMode,
+        rootDirPath: String,
+        versionHint: String?,
+        sourceMetadata: CoreSourceMetadata?
+    ) {
+        val pending = prepareStagedCore(
+            operationId = operationId,
+            variant = variant,
+            actionLabel = actionLabel,
+            stagingDir = stagingDir,
+            targetDir = targetDir,
+            mode = mode,
+            rootDirPath = rootDirPath,
+            versionHint = versionHint,
+            sourceMetadata = sourceMetadata
+        )
+        if (pending.repair.missingDependencies.isNotEmpty()) {
+            setPendingCoreMutation(pending)
+            throw CoreDependencyRepairRequiredException(pending.repair)
+        }
+        mutationMutex.withLock {
+            applyStagedCore(pending)
+        }
+    }
+
+    private fun prepareStagedCore(
+        operationId: Long,
+        variant: ApiVariant,
+        actionLabel: String,
+        stagingDir: File,
+        targetDir: File,
+        mode: RunMode,
+        rootDirPath: String,
+        versionHint: String?,
+        sourceMetadata: CoreSourceMetadata?
+    ): PendingCoreMutation {
+        NodeProjectManager.normalizeCoreLayout(stagingDir)
+        NodeProjectManager.ensureCorePackageJson(stagingDir, versionHint)
+        NodeProjectManager.writeRuntimeDependencyRequirements(stagingDir)
+        writeCoreSourceMetadata(stagingDir, sourceMetadata)
+
+        if (!NodeProjectManager.hasValidCore(stagingDir)) {
+            throw IOException("核心文件不完整，缺少关键入口文件")
+        }
+        return PendingCoreMutation(
+            operationId = operationId,
+            repair = CoreDependencyRepairRequest(
+                operationId = operationId,
+                variant = variant,
+                actionLabel = actionLabel,
+                missingDependencies = collectMissingCoreRuntimeDependencies(stagingDir),
+                candidateVersion = versionHint,
+                onlineRepairSupported = RuntimeDependencyPackProtocol.supportsOnlineRepair(variant)
+            ),
+            stagingDir = stagingDir,
+            targetDir = targetDir,
+            mode = mode,
+            rootDirPath = rootDirPath,
+            sourceMetadata = sourceMetadata
+        )
+    }
+
     private fun applyStagedCore(pending: PendingCoreMutation) {
         var backupDir: File? = null
         var targetReplaced = false
+        val previousCandidate = loadPersistedCandidate()
         try {
             val operationMarker = File(pending.stagingDir, OPERATION_MARKER_FILE)
             if (operationMarker.exists() && !operationMarker.delete()) {
@@ -1640,7 +2367,30 @@ class CoreRepositoryImpl @Inject constructor(
                     throw IOException("Root 核心同步后仍缺少关键入口文件")
                 }
             }
-            backupDir?.deleteRecursively()
+            val recoveryPath = CoreCandidateRecoveryPolicy.selectRecoveryPath(
+                targetPath = pending.targetDir.absolutePath,
+                replacementBackupPath = backupDir?.absolutePath,
+                previousTargetPath = previousCandidate?.targetDirPath,
+                previousRecoveryPath = previousCandidate?.backupDirPath,
+                previousRecoveryAvailable = previousCandidate?.backupDirPath
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { File(it).isDirectory } == true
+            )
+            val recoveryDir = recoveryPath?.let(::File)
+            if (backupDir != null && backupDir != recoveryDir) {
+                runCatching { backupDir.deleteRecursively() }
+            }
+            saveCandidate(
+                PersistedCoreCandidate(
+                    variantKey = pending.repair.variant.key,
+                    runModeKey = pending.mode.key,
+                    actionLabel = pending.repair.actionLabel,
+                    installedAtMs = System.currentTimeMillis(),
+                    targetDirPath = pending.targetDir.absolutePath,
+                    rootDirPath = pending.rootDirPath,
+                    backupDirPath = recoveryDir?.absolutePath.orEmpty()
+                )
+            )
         } catch (error: Exception) {
             if (targetReplaced) {
                 runCatching { restoreCoreDirectory(pending.targetDir, backupDir) }
@@ -1721,6 +2471,9 @@ class CoreRepositoryImpl @Inject constructor(
         val projectDir = RuntimePaths.normalProjectDir(context)
         if (!projectDir.isDirectory) return
         val now = System.currentTimeMillis()
+        val activeBackupPath = loadPersistedCandidate()?.backupDirPath
+            ?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { File(it).canonicalPath }.getOrNull() }
         val candidates = buildList {
             addAll(projectDir.listFiles().orEmpty().filter { it.isDirectory })
             projectDir.listFiles().orEmpty()
@@ -1728,6 +2481,9 @@ class CoreRepositoryImpl @Inject constructor(
                 .forEach { coreDir -> addAll(coreDir.listFiles().orEmpty().filter { it.isDirectory }) }
         }
         candidates.distinctBy { it.absolutePath }.forEach { directory ->
+            if (activeBackupPath != null &&
+                runCatching { directory.canonicalPath }.getOrNull() == activeBackupPath
+            ) return@forEach
             val isKnownArtifact = directory.name.contains(".staging-") ||
                 directory.name.contains(".dependency-repair-") ||
                 directory.name.contains(".backup-") ||

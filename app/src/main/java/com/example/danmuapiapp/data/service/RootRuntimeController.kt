@@ -6,6 +6,7 @@ import com.example.danmuapiapp.data.repository.RuntimeOwnership
 import com.example.danmuapiapp.data.repository.determineRuntimeOwnershipFromHealth
 import com.example.danmuapiapp.data.repository.isRuntimeOwnershipAcceptedForRoot
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -43,6 +44,7 @@ object RootRuntimeController {
     private data class RuntimeEnvSnapshot(
         val variant: String,
         val port: Int,
+        val listenHost: String,
         val logLevel: String,
         val tokenConfigured: Boolean,
         val token: String
@@ -831,6 +833,7 @@ object RootRuntimeController {
             ENV_FILE=${shellQuote(rootEnvPath)}
             VARIANT=${shellQuote(snapshot.variant)}
             PORT=${shellQuote(snapshot.port.toString())}
+            LISTEN_HOST=${shellQuote(snapshot.listenHost)}
             LOG_LEVEL=${shellQuote(snapshot.logLevel)}
             TOKEN_CONFIGURED=${shellQuote(tokenConfigured)}
             TOKEN_VALUE=${shellQuote(snapshot.token)}
@@ -879,6 +882,7 @@ object RootRuntimeController {
 
             upsert_env "DANMU_API_VARIANT" "${'$'}VARIANT"
             upsert_env "DANMU_API_PORT" "${'$'}PORT"
+            upsert_env "DANMU_API_HOST" "${'$'}LISTEN_HOST"
             upsert_env "LOG_LEVEL" "${'$'}LOG_LEVEL"
             ensure_env_default "DANMU_API_LOG_TO_FILE" "0"
             ensure_env_default "DANMU_API_LOG_MAX_BYTES" "1048576"
@@ -913,12 +917,16 @@ object RootRuntimeController {
             else -> "stable"
         }
         val port = prefs.getInt("port", 9321).coerceIn(1, 65535)
+        val listenHost = RuntimeListenMode.fromKey(
+            prefs.getString(RuntimeListenMode.PREFERENCE_KEY, null)
+        )?.bindHost ?: RuntimeListenMode.Ipv4Only.bindHost
         val logLevel = prefs.getString("log_level", "info").orEmpty().trim().ifBlank { "info" }
         val tokenConfigured = prefs.contains("token")
         val token = RuntimeTokenNormalizer.normalizeInput(prefs.getString("token", ""))
         return RuntimeEnvSnapshot(
             variant = variant,
             port = port,
+            listenHost = listenHost,
             logLevel = logLevel,
             tokenConfigured = tokenConfigured,
             token = token

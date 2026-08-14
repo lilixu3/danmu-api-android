@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
@@ -82,6 +83,7 @@ fun ToolsScreen(
     onOpenDeviceAccess: () -> Unit,
     onOpenAdminMode: () -> Unit,
     onOpenCacheManagement: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -211,6 +213,14 @@ fun ToolsScreen(
                 onClick = onOpenConsole
             )
         }
+        ToolEntryCard(
+            title = "运行诊断",
+            subtitle = "检查核心、端口、工作目录、缓存接口与 GitHub 状态",
+            imageVector = Icons.Rounded.HealthAndSafety,
+            accent = MaterialTheme.colorScheme.primary,
+            badge = "一键检查",
+            onClick = onOpenDiagnostics
+        )
         ToolEntryCard(
             title = "请求记录",
             subtitle = "查看最近接口调用历史，适合排查异常请求",

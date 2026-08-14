@@ -11,6 +11,8 @@ import com.example.danmuapiapp.data.repository.SettingsRepositoryImpl
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
+import com.example.danmuapiapp.data.service.GithubPullRequestService
+import com.example.danmuapiapp.data.service.PullRequestMergeService
 import com.example.danmuapiapp.domain.model.AdminSessionState
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,8 @@ object CompatRuntimeGraph {
         val githubProxyService = GithubProxyService(context, httpClient)
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)
+        val githubPullRequestService = GithubPullRequestService(githubRemoteService)
+        val pullRequestMergeService = PullRequestMergeService(context, githubPullRequestService)
         val runtimeDependencyPackManager = RuntimeDependencyPackManager(
             context = context,
             httpClient = httpClient,
@@ -53,7 +57,9 @@ object CompatRuntimeGraph {
             githubRemoteService = githubRemoteService,
             githubProxyService = githubProxyService,
             settingsRepository = settingsRepository,
-            runtimeDependencyPackManager = runtimeDependencyPackManager
+            runtimeDependencyPackManager = runtimeDependencyPackManager,
+            githubPullRequestService = githubPullRequestService,
+            pullRequestMergeService = pullRequestMergeService
         )
         val runtimeRepository = RuntimeRepositoryImpl(
             context = context,

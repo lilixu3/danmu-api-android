@@ -12,7 +12,12 @@ interface RuntimeRepository {
     fun refreshRuntimeState()
     fun setAppForeground(foreground: Boolean)
     fun refreshLogs()
-    fun applyServiceConfig(port: Int, token: String, restartIfRunning: Boolean = true)
+    fun applyServiceConfig(
+        port: Int,
+        token: String,
+        restartIfRunning: Boolean = true,
+        listenMode: RuntimeListenMode? = null
+    )
     fun updatePort(port: Int)
     fun updateToken(token: String)
     fun updateVariant(variant: ApiVariant)
@@ -27,6 +32,7 @@ interface CoreRepository {
     val downloadProgress: StateFlow<CoreDownloadProgress>
     val pendingDependencyRepair: StateFlow<CoreDependencyRepairRequest?>
     val operationState: StateFlow<CoreOperationState>
+    val candidateState: StateFlow<CoreCandidateState?>
     fun isCoreInstalled(variant: ApiVariant): Boolean
     fun isCoreReady(variant: ApiVariant): Boolean
     fun refreshCoreInfo()
@@ -38,10 +44,44 @@ interface CoreRepository {
     suspend fun deleteCore(variant: ApiVariant): Result<Unit>
     suspend fun rollbackCore(variant: ApiVariant, release: GithubRelease): Result<Unit>
     suspend fun fetchReleaseHistory(variant: ApiVariant): List<GithubRelease>
+    suspend fun fetchRevisionHistory(
+        variant: ApiVariant,
+        page: Int,
+        pageSize: Int = 15,
+        query: String = ""
+    ): Result<CoreRevisionPage>
+    suspend fun fetchRevisionDetails(
+        variant: ApiVariant,
+        revision: CoreRevision
+    ): Result<CoreRevisionDetails>
+    suspend fun fetchPullRequests(
+        variant: ApiVariant,
+        page: Int,
+        pageSize: Int = 15,
+        filter: CorePullRequestFilter = CorePullRequestFilter.Open,
+        query: String = ""
+    ): Result<CorePullRequestPage>
+    suspend fun fetchPullRequestDetails(
+        variant: ApiVariant,
+        pullRequestNumber: Int
+    ): Result<CorePullRequest>
+    suspend fun fetchPullRequestFiles(
+        variant: ApiVariant,
+        pullRequestNumber: Int,
+        page: Int,
+        pageSize: Int = 15
+    ): Result<CorePullRequestFilePage>
+    suspend fun preparePullRequestStack(
+        variant: ApiVariant,
+        pullRequestNumbers: List<Int>
+    ): Result<CoreDependencyRepairRequest>
+    suspend fun rollbackCore(variant: ApiVariant, revision: CoreRevision): Result<Unit>
     suspend fun repairPendingDependenciesOnline(operationId: Long): Result<Unit>
     suspend fun repairPendingDependenciesFromArchive(operationId: Long, archiveUri: String): Result<Unit>
     suspend fun applyPendingCoreMutation(operationId: Long): Result<Unit>
     suspend fun discardPendingCoreMutation(operationId: Long): Result<Unit>
+    suspend fun confirmCandidateCore(variant: ApiVariant, runMode: RunMode): Result<Boolean>
+    suspend fun restoreCandidateCore(variant: ApiVariant, runMode: RunMode): Result<Boolean>
     suspend fun applyWorkDirectoryChange(
         targetPath: String?,
         migrateSelectedCore: Boolean
@@ -105,6 +145,7 @@ interface SettingsRepository {
     fun setLogMaxCount(count: Int)
     fun getIgnoredUpdateVersion(variant: ApiVariant): String?
     fun setIgnoredUpdateVersion(variant: ApiVariant, version: String?)
+    fun reloadFromStorage()
 }
 
 interface RequestRecordRepository {
@@ -127,9 +168,10 @@ interface AccessControlRepository {
 interface CacheRepository {
     val cacheStats: StateFlow<CacheStats>
     val cacheEntries: StateFlow<List<CacheEntry>>
+    val clearCapability: StateFlow<CacheClearCapability>
     val isLoading: StateFlow<Boolean>
     suspend fun refresh()
-    suspend fun clearAll(): Result<Unit>
+    suspend fun clear(items: Set<CacheClearItem>): Result<CacheClearResult>
 }
 
 interface DanmuDownloadRepository {

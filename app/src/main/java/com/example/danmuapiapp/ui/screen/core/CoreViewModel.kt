@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.data.service.GithubAccountService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
@@ -26,7 +27,8 @@ class CoreViewModel @Inject constructor(
     private val coreRepo: CoreRepository,
     private val runtimeRepo: RuntimeRepository,
     private val settingsRepo: SettingsRepository,
-    private val githubProxyService: GithubProxyService
+    private val githubProxyService: GithubProxyService,
+    private val githubAccountService: GithubAccountService
 ) : ViewModel() {
 
     val coreInfoList = coreRepo.coreInfoList
@@ -37,6 +39,8 @@ class CoreViewModel @Inject constructor(
     val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
+    val githubToken = settingsRepo.githubToken
+    val githubAccountStatus = githubAccountService.status
     val proxyOptions = githubProxyService.proxyOptions()
 
     var isOperating by mutableStateOf(false)
@@ -59,13 +63,35 @@ class CoreViewModel @Inject constructor(
         private set
     var showGearMenu by mutableStateOf<ApiVariant?>(null)
         private set
-    var showRollbackDialog by mutableStateOf(false)
+    var showRevisionHistory by mutableStateOf(false)
         private set
     var rollbackVariant by mutableStateOf<ApiVariant?>(null)
         private set
-    var releaseHistory by mutableStateOf<List<GithubRelease>>(emptyList())
+    var revisionHistory by mutableStateOf<List<CoreRevision>>(emptyList())
         private set
     var isLoadingHistory by mutableStateOf(false)
+        private set
+    var revisionHistoryError by mutableStateOf<String?>(null)
+        private set
+    var revisionSearchQuery by mutableStateOf("")
+        private set
+    var appliedRevisionSearchQuery by mutableStateOf("")
+        private set
+    var revisionPage by mutableStateOf(1)
+        private set
+    var revisionHasNextPage by mutableStateOf(false)
+        private set
+    var selectedRevisionDetails by mutableStateOf<CoreRevisionDetails?>(null)
+        private set
+    var selectedRevision by mutableStateOf<CoreRevision?>(null)
+        private set
+    var isLoadingRevisionDetails by mutableStateOf(false)
+        private set
+    var revisionDetailsError by mutableStateOf<String?>(null)
+        private set
+    var pendingRollbackRevision by mutableStateOf<CoreRevision?>(null)
+        private set
+    var showGithubTokenDialog by mutableStateOf(false)
         private set
     var showProxyPickerDialog by mutableStateOf(false)
         private set
@@ -78,11 +104,18 @@ class CoreViewModel @Inject constructor(
 
     private var pendingProxyAction: PendingProxyAction? = null
     private var proxyTestJob: Job? = null
+    private var githubAccountJob: Job? = null
+    private var githubAccountGeneration = 0L
+    private var revisionDetailsJob: Job? = null
+    private var revisionDetailsGeneration = 0L
+    private var revisionHistoryJob: Job? = null
+    private var revisionHistoryGeneration = 0L
 
     init {
         coreRepo.refreshCoreInfo()
         observeRuntimeDrivenCoreRefresh()
         observePendingDependencyRepair()
+        refreshGithubAccount()
     }
 
     private fun observePendingDependencyRepair() {
@@ -115,7 +148,7 @@ class CoreViewModel @Inject constructor(
         data class DoUpdate(val variant: ApiVariant) : PendingProxyAction
         data class Reinstall(val variant: ApiVariant) : PendingProxyAction
         data class LoadRollbackHistory(val variant: ApiVariant) : PendingProxyAction
-        data class Rollback(val variant: ApiVariant, val release: GithubRelease) : PendingProxyAction
+        data class Rollback(val variant: ApiVariant, val revision: CoreRevision) : PendingProxyAction
         data object RepairDependenciesOnline : PendingProxyAction
     }
 
@@ -126,9 +159,70 @@ class CoreViewModel @Inject constructor(
     }
 
     fun updateVariant(variant: ApiVariant) {
-        runtimeRepo.updateVariant(variant)
-        if (runtimeState.value.status == ServiceStatus.Running) {
-            runtimeRepo.restartService()
+        if (isOperating) return
+        val info = coreInfoList.value.firstOrNull { it.variant == variant }
+        if (info?.isInstalled != true) {
+            operationMessage = "${variantLabel(variant)}尚未安装，请先安装或配置仓库"
+            return
+        }
+        val previous = runtimeState.value
+        if (previous.variant == variant) return
+        viewModelScope.launch {
+            isOperating = true
+            try {
+                val expectsSameVariantRecovery = coreRepo.candidateState.value?.let { candidate ->
+                    candidate.variant == variant && candidate.hasRecoveryPoint
+                } == true
+                runtimeRepo.updateVariant(variant)
+                if (previous.status != ServiceStatus.Running) {
+                    operationMessage = "已切换到${variantLabel(variant)}"
+                    return@launch
+                }
+                runtimeRepo.restartService()
+                var sawRestart = false
+                val started = withTimeoutOrNull(45_000L) {
+                    runtimeState.first { state ->
+                        when (state.status) {
+                            ServiceStatus.Starting, ServiceStatus.Stopping -> {
+                                sawRestart = true
+                                false
+                            }
+                            ServiceStatus.Running -> sawRestart && state.variant == variant
+                            ServiceStatus.Error, ServiceStatus.Stopped -> sawRestart
+                        }
+                    }
+                }?.status == ServiceStatus.Running
+                if (started) {
+                    operationMessage = "已切换并启动${variantLabel(variant)}"
+                    return@launch
+                }
+                if (expectsSameVariantRecovery) {
+                    val recovered = withTimeoutOrNull(40_000L) {
+                        runtimeState.first { state ->
+                            state.variant == variant && state.status == ServiceStatus.Running
+                        }
+                    } != null
+                    if (recovered) {
+                        operationMessage = "新版本启动失败，已恢复该核心的上一个可用版本"
+                        return@launch
+                    }
+                }
+                runtimeRepo.updateVariant(previous.variant)
+                runtimeRepo.restartService()
+                val restored = withTimeoutOrNull(45_000L) {
+                    runtimeState.first { state ->
+                        state.variant == previous.variant && state.status == ServiceStatus.Running
+                    }
+                } != null
+                operationMessage = if (restored) {
+                    "切换失败，已恢复并启动${variantLabel(previous.variant)}"
+                } else {
+                    "切换失败，已恢复原核心选择，请查看运行日志"
+                }
+            } finally {
+                isOperating = false
+                coreRepo.refreshCoreInfo()
+            }
         }
     }
 
@@ -230,43 +324,273 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun loadRollbackHistory(variant: ApiVariant) {
+        cancelRevisionDetailsRequest()
         showGearMenu = null
         rollbackVariant = variant
-        showRollbackDialog = true
-        viewModelScope.launch {
+        showRevisionHistory = true
+        revisionHistoryError = null
+        revisionSearchQuery = ""
+        appliedRevisionSearchQuery = ""
+        revisionPage = 1
+        revisionHasNextPage = false
+        selectedRevision = null
+        selectedRevisionDetails = null
+        revisionDetailsError = null
+        loadRevisionPage(variant = variant, page = 1, query = "")
+    }
+
+    private fun loadRevisionPage(variant: ApiVariant, page: Int, query: String) {
+        revisionHistoryGeneration += 1
+        val generation = revisionHistoryGeneration
+        revisionHistoryJob?.cancel()
+        revisionHistoryJob = viewModelScope.launch {
             isLoadingHistory = true
-            releaseHistory = coreRepo.fetchReleaseHistory(variant)
-            if (releaseHistory.isEmpty()) {
-                operationMessage = "未获取到可回退版本，请在设置中检查 GitHub 代理"
-                promptProxyReselectIfNeeded(PendingProxyAction.LoadRollbackHistory(variant))
-            }
+            revisionHistoryError = null
+            coreRepo.fetchRevisionHistory(
+                variant = variant,
+                page = page,
+                pageSize = REVISION_PAGE_SIZE,
+                query = query
+            ).fold(
+                onSuccess = { result ->
+                    if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
+                    revisionHistory = result.revisions
+                    revisionPage = result.page
+                    revisionHasNextPage = result.hasNextPage
+                    appliedRevisionSearchQuery = query
+                },
+                onFailure = { error ->
+                    if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
+                    revisionHistory = emptyList()
+                    revisionHasNextPage = false
+                    revisionHistoryError = error.message ?: "无法读取提交记录"
+                    promptProxyReselectIfNeeded(PendingProxyAction.LoadRollbackHistory(variant))
+                }
+            )
+            if (!isCurrentRevisionPageRequest(generation, variant)) return@launch
             isLoadingHistory = false
+            revisionHistoryJob = null
+            refreshGithubAccountAfterApiUsage()
         }
+    }
+
+    private fun isCurrentRevisionPageRequest(
+        generation: Long,
+        variant: ApiVariant
+    ): Boolean = generation == revisionHistoryGeneration &&
+        showRevisionHistory && rollbackVariant == variant
+
+    fun previousRevisionPage() {
+        val variant = rollbackVariant ?: return
+        if (isLoadingHistory || revisionPage <= 1) return
+        loadRevisionPage(variant, revisionPage - 1, appliedRevisionSearchQuery)
+    }
+
+    fun nextRevisionPage() {
+        val variant = rollbackVariant ?: return
+        if (isLoadingHistory || !revisionHasNextPage) return
+        loadRevisionPage(variant, revisionPage + 1, appliedRevisionSearchQuery)
     }
 
     fun dismissRollbackDialog() {
-        showRollbackDialog = false
+        revisionHistoryGeneration += 1
+        revisionHistoryJob?.cancel()
+        revisionHistoryJob = null
+        isLoadingHistory = false
+        cancelRevisionDetailsRequest()
+        showRevisionHistory = false
         rollbackVariant = null
-        releaseHistory = emptyList()
+        revisionHistory = emptyList()
+        revisionHistoryError = null
+        revisionSearchQuery = ""
+        appliedRevisionSearchQuery = ""
+        revisionPage = 1
+        revisionHasNextPage = false
+        selectedRevision = null
+        selectedRevisionDetails = null
+        revisionDetailsError = null
+        pendingRollbackRevision = null
     }
 
-    fun rollbackTo(variant: ApiVariant, release: GithubRelease) {
-        requireProxyAndRun(PendingProxyAction.Rollback(variant, release))
+    fun updateRevisionSearchQuery(query: String) {
+        revisionSearchQuery = query
     }
 
-    private fun doRollbackTo(variant: ApiVariant, release: GithubRelease) {
-        showRollbackDialog = false
+    fun submitRevisionSearch() {
+        val variant = rollbackVariant ?: return
+        loadRevisionPage(variant, page = 1, query = revisionSearchQuery.trim())
+    }
+
+    fun openRevisionDetails(revision: CoreRevision) {
+        val variant = rollbackVariant ?: return
+        cancelRevisionDetailsRequest()
+        val generation = revisionDetailsGeneration
+        val revisionSha = revision.commitSha
+        selectedRevision = revision
+        selectedRevisionDetails = null
+        revisionDetailsError = null
+        revisionDetailsJob = viewModelScope.launch {
+            isLoadingRevisionDetails = true
+            val result = coreRepo.fetchRevisionDetails(variant, revision)
+            if (!isCurrentRevisionDetailsRequest(generation, variant, revisionSha)) return@launch
+            result.fold(
+                onSuccess = { selectedRevisionDetails = it },
+                onFailure = { revisionDetailsError = it.message ?: "无法获取变动详情" }
+            )
+            if (isCurrentRevisionDetailsRequest(generation, variant, revisionSha)) {
+                isLoadingRevisionDetails = false
+                revisionDetailsJob = null
+                refreshGithubAccountAfterApiUsage()
+            }
+        }
+    }
+
+    fun closeRevisionDetails() {
+        cancelRevisionDetailsRequest()
+        selectedRevision = null
+        selectedRevisionDetails = null
+        revisionDetailsError = null
+        isLoadingRevisionDetails = false
+    }
+
+    private fun cancelRevisionDetailsRequest() {
+        revisionDetailsGeneration += 1
+        revisionDetailsJob?.cancel()
+        revisionDetailsJob = null
+        isLoadingRevisionDetails = false
+    }
+
+    private fun isCurrentRevisionDetailsRequest(
+        generation: Long,
+        variant: ApiVariant,
+        revisionSha: String
+    ): Boolean {
+        return generation == revisionDetailsGeneration &&
+            showRevisionHistory &&
+            rollbackVariant == variant &&
+            selectedRevision?.commitSha == revisionSha
+    }
+
+    fun requestRollback(revision: CoreRevision) {
+        pendingRollbackRevision = revision
+    }
+
+    fun cancelRollbackRequest() {
+        pendingRollbackRevision = null
+    }
+
+    fun confirmRollback() {
+        val variant = rollbackVariant ?: return
+        val revision = pendingRollbackRevision ?: return
+        pendingRollbackRevision = null
+        requireProxyAndRun(PendingProxyAction.Rollback(variant, revision))
+    }
+
+    private fun doRollbackTo(variant: ApiVariant, revision: CoreRevision) {
+        cancelRevisionDetailsRequest()
+        showRevisionHistory = false
+        val versionLabel = revision.version.trim().takeIf { it.isNotBlank() }
+            ?.let { "v$it" }
+            ?: "提交 ${revision.shortSha}"
         viewModelScope.launch {
             performCoreMutation(
                 variant = variant,
-                actionMessage = "正在回退到 ${release.tagName}...",
-                successMessage = "已回退到 ${release.tagName}",
+                actionMessage = "正在回退到 $versionLabel...",
+                successMessage = "已回退到 $versionLabel",
                 stopTimeoutMessage = "${variantLabel(variant)} 回退前停止服务超时，请稍后重试",
                 failurePrefix = "回退失败",
-                pendingAction = PendingProxyAction.Rollback(variant, release),
-                applyBlock = { coreRepo.rollbackCore(variant, release) }
+                pendingAction = PendingProxyAction.Rollback(variant, revision),
+                applyBlock = { coreRepo.rollbackCore(variant, revision) }
             )
         }
+    }
+
+    fun openGithubTokenDialog() {
+        showGithubTokenDialog = true
+    }
+
+    fun dismissGithubTokenDialog() {
+        showGithubTokenDialog = false
+    }
+
+    fun refreshGithubAccount() {
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = viewModelScope.launch {
+            githubAccountService.refresh()
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+    }
+
+    fun validateAndSaveGithubToken(input: String) {
+        val token = input.trim()
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = viewModelScope.launch {
+            if (token.isBlank()) {
+                settingsRepo.setGithubToken("")
+                githubAccountService.refresh("")
+                if (generation != githubAccountGeneration) return@launch
+                operationMessage = "已使用匿名 GitHub 额度"
+                showGithubTokenDialog = false
+                githubAccountJob = null
+                return@launch
+            }
+            val result = githubAccountService.refresh(token)
+            if (generation != githubAccountGeneration) return@launch
+            when (result.tokenValid) {
+                true -> {
+                    val saveError = runCatching { settingsRepo.setGithubToken(token) }.exceptionOrNull()
+                    if (saveError != null) {
+                        githubAccountService.refresh()
+                        if (generation != githubAccountGeneration) return@launch
+                        operationMessage = saveError.message ?: "GitHub Token 安全保存失败"
+                        githubAccountJob = null
+                        return@launch
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    operationMessage = "GitHub Token 验证成功${result.login?.let { "：$it" }.orEmpty()}"
+                    showGithubTokenDialog = false
+                }
+                false, null -> {
+                    val errorMessage = if (result.tokenValid == false) {
+                        result.error ?: "GitHub Token 无效，未保存"
+                    } else {
+                        result.error ?: "暂时无法验证 Token，未保存"
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    operationMessage = errorMessage
+                }
+            }
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+    }
+
+    fun clearGithubToken() {
+        val generation = beginGithubAccountOperation()
+        settingsRepo.setGithubToken("")
+        githubAccountJob = viewModelScope.launch {
+            githubAccountService.refresh("")
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+        operationMessage = "已清空 GitHub Token，当前使用匿名额度"
+        showGithubTokenDialog = false
+    }
+
+    private fun beginGithubAccountOperation(): Long {
+        githubAccountGeneration += 1
+        githubAccountJob?.cancel()
+        githubAccountJob = null
+        return githubAccountGeneration
+    }
+
+    private fun refreshGithubAccountAfterApiUsage() {
+        if (githubAccountJob?.isActive == true) return
+        refreshGithubAccount()
+    }
+
+    companion object {
+        private const val REVISION_PAGE_SIZE = 15
     }
 
     fun openVariantSettingsDialog(variant: ApiVariant) {
@@ -549,7 +873,7 @@ class CoreViewModel @Inject constructor(
             is PendingProxyAction.DoUpdate -> doUpdateCore(action.variant)
             is PendingProxyAction.Reinstall -> doReinstallCore(action.variant)
             is PendingProxyAction.LoadRollbackHistory -> loadRollbackHistory(action.variant)
-            is PendingProxyAction.Rollback -> doRollbackTo(action.variant, action.release)
+            is PendingProxyAction.Rollback -> doRollbackTo(action.variant, action.revision)
             PendingProxyAction.RepairDependenciesOnline -> doRepairPendingDependenciesOnline()
         }
     }

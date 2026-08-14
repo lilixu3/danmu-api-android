@@ -16,11 +16,14 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
+import com.example.danmuapiapp.ui.navigation.CoreRoute
 import com.example.danmuapiapp.ui.navigation.Screen
 import com.example.danmuapiapp.ui.navigation.SettingsRoute
 import com.example.danmuapiapp.ui.navigation.ToolRoute
@@ -29,7 +32,9 @@ import com.example.danmuapiapp.ui.screen.cache.CacheManagementScreen
 import com.example.danmuapiapp.ui.screen.config.ConfigScreen
 import com.example.danmuapiapp.ui.screen.console.ConsoleScreen
 import com.example.danmuapiapp.ui.screen.core.CoreScreen
+import com.example.danmuapiapp.ui.screen.core.PullRequestLabScreen
 import com.example.danmuapiapp.ui.screen.deviceaccess.DeviceAccessScreen
+import com.example.danmuapiapp.ui.screen.diagnostics.DiagnosticsScreen
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadScreen
 import com.example.danmuapiapp.ui.screen.home.HomeScreen
 import com.example.danmuapiapp.ui.screen.push.PushDanmuScreen
@@ -221,6 +226,9 @@ private fun DanmuApiMainContent() {
                 HomeScreen(
                     onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
                     onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
+                    onOpenCoreManagement = {
+                        navController.navigateToTopLevelRoute(Screen.Core.route)
+                    },
                     onOpenAnnouncementRoute = { route ->
                         val isTopLevelRoute = Screen.entries.any { screen -> screen.route == route }
                         if (isTopLevelRoute) {
@@ -233,7 +241,19 @@ private fun DanmuApiMainContent() {
                     }
                 )
             }
-            composable(Screen.Core.route) { CoreScreen() }
+            composable(Screen.Core.route) {
+                CoreScreen(
+                    onOpenPullRequestLab = { variant ->
+                        navController.navigate(CoreRoute.pullRequestLab(variant.key))
+                    }
+                )
+            }
+            composable(
+                route = CoreRoute.PullRequestLab,
+                arguments = listOf(navArgument("variant") { type = NavType.StringType })
+            ) {
+                PullRequestLabScreen(onBack = { navController.popBackStack() })
+            }
             composable(Screen.Tools.route) {
                 ToolsScreen(
                     onOpenApiTest = { navController.navigate(ToolRoute.ApiTest) },
@@ -244,7 +264,8 @@ private fun DanmuApiMainContent() {
                     onOpenConfig = { navController.navigate(ToolRoute.Config) },
                     onOpenDeviceAccess = { navController.navigate(ToolRoute.DeviceAccess) },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
-                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) }
+                    onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
+                    onOpenDiagnostics = { navController.navigate(ToolRoute.Diagnostics) }
                 )
             }
             composable(Screen.Settings.route) {
@@ -339,6 +360,9 @@ private fun DanmuApiMainContent() {
                     onBack = { navController.popBackStack() },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
                 )
+            }
+            composable(ToolRoute.Diagnostics) {
+                DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
         }
     }

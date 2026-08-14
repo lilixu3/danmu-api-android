@@ -14,9 +14,13 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.service.AppBackupPreview
+import com.example.danmuapiapp.data.service.AppBackupSection
+import com.example.danmuapiapp.data.service.AppBackupService
 import com.example.danmuapiapp.data.service.DanmuQuickSettingsTileService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
+import com.example.danmuapiapp.data.service.GithubAccountService
 import com.example.danmuapiapp.data.service.FavoriteCacheStore
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NodeProjectManager
@@ -41,6 +45,7 @@ import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
 import com.example.danmuapiapp.domain.model.RunMode
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.WebDavConfig
 import com.example.danmuapiapp.domain.repository.CoreRepository
@@ -58,6 +63,7 @@ import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -75,7 +81,9 @@ class SettingsViewModel @Inject constructor(
     private val envConfigRepoLazy: Lazy<EnvConfigRepository>,
     private val githubProxyService: GithubProxyService,
     private val githubProxySpeedTester: GithubProxySpeedTester,
+    private val githubAccountService: GithubAccountService,
     private val webDavService: WebDavService,
+    private val appBackupService: AppBackupService,
     private val appUpdateService: AppUpdateService,
     private val tvConfigSyncClient: TvConfigSyncClient
 ) : ViewModel() {
@@ -87,6 +95,7 @@ class SettingsViewModel @Inject constructor(
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val githubProxy = settingsRepo.githubProxy
     val githubToken = settingsRepo.githubToken
+    val githubAccountStatus = githubAccountService.status
     val customRepo = settingsRepo.customRepo
     val tokenVisible = settingsRepo.tokenVisible
     val keepAlive = settingsRepo.keepAlive
@@ -110,6 +119,8 @@ class SettingsViewModel @Inject constructor(
     )
         private set
     var isRootAutoStartOperating by mutableStateOf(false)
+        private set
+    var isFullBackupOperating by mutableStateOf(false)
         private set
     var isRunModeSwitching by mutableStateOf(false)
         private set
@@ -197,6 +208,8 @@ class SettingsViewModel @Inject constructor(
         postMessage = { operationMessage = it }
     )
     private var pendingOnlineDependencyRepair = false
+    private var githubAccountJob: Job? = null
+    private var githubAccountGeneration = 0L
     private val dependencyRepairController = CoreDependencyRepairController(
         scope = viewModelScope,
         repository = coreRepo,
@@ -221,7 +234,11 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun saveServiceConfig(port: Int, token: String) {
+    fun saveServiceConfig(
+        port: Int,
+        token: String,
+        listenMode: RuntimeListenMode
+    ) {
         val normalizedToken = RuntimeTokenNormalizer.normalizeInput(token)
         val old = runtimeState.value
         if (old.runMode == RunMode.Normal && port in 1..1023) {
@@ -229,7 +246,9 @@ class SettingsViewModel @Inject constructor(
             return
         }
 
-        val changed = old.port != port || old.token != normalizedToken
+        val changed = old.port != port ||
+            old.token != normalizedToken ||
+            old.listenMode != listenMode
         if (!changed) {
             operationMessage = "配置未变化"
             return
@@ -238,10 +257,11 @@ class SettingsViewModel @Inject constructor(
         runtimeRepo.applyServiceConfig(
             port = port,
             token = normalizedToken,
-            restartIfRunning = true
+            restartIfRunning = true,
+            listenMode = listenMode
         )
         operationMessage = if (old.status == ServiceStatus.Running || old.status == ServiceStatus.Starting) {
-            "配置已保存，服务正在切换到新端口"
+            "配置已保存，服务正在应用新的监听设置"
         } else {
             "配置已保存"
         }
@@ -250,6 +270,10 @@ class SettingsViewModel @Inject constructor(
     fun restartService() = runtimeRepo.restartService()
 
     fun updateVariant(variant: ApiVariant) {
+        if (!coreRepo.isCoreInstalled(variant)) {
+            operationMessage = "${variant.label}尚未安装，请先到核心页安装或配置仓库"
+            return
+        }
         runtimeRepo.updateVariant(variant)
         if (runtimeState.value.status == ServiceStatus.Running) {
             runtimeRepo.restartService()
@@ -616,13 +640,71 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun saveGithubToken(token: String) {
-        settingsRepo.setGithubToken(token.trim())
-        operationMessage = if (token.isBlank()) "已清空 GitHub Token" else "GitHub Token 已保存"
+        val normalized = token.trim()
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = viewModelScope.launch {
+            if (normalized.isBlank()) {
+                settingsRepo.setGithubToken("")
+                githubAccountService.refresh("")
+                if (generation != githubAccountGeneration) return@launch
+                operationMessage = "已切换为匿名 GitHub 额度"
+                githubAccountJob = null
+                return@launch
+            }
+            val result = githubAccountService.refresh(normalized)
+            if (generation != githubAccountGeneration) return@launch
+            when (result.tokenValid) {
+                true -> {
+                    val saveError = runCatching { settingsRepo.setGithubToken(normalized) }.exceptionOrNull()
+                    if (saveError != null) {
+                        githubAccountService.refresh()
+                        if (generation != githubAccountGeneration) return@launch
+                        operationMessage = saveError.message ?: "GitHub Token 安全保存失败"
+                        githubAccountJob = null
+                        return@launch
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    operationMessage = "GitHub Token 验证成功${result.login?.let { "：$it" }.orEmpty()}"
+                }
+                false, null -> {
+                    val errorMessage = if (result.tokenValid == false) {
+                        result.error ?: "GitHub Token 无效，未保存"
+                    } else {
+                        result.error ?: "暂时无法验证 Token，未保存"
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    operationMessage = errorMessage
+                }
+            }
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
     }
 
     fun clearGithubToken() {
+        val generation = beginGithubAccountOperation()
         settingsRepo.setGithubToken("")
-        operationMessage = "已清空 GitHub Token"
+        githubAccountJob = viewModelScope.launch {
+            githubAccountService.refresh("")
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+        operationMessage = "已清空 GitHub Token，当前使用匿名额度"
+    }
+
+    fun refreshGithubAccount() {
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = viewModelScope.launch {
+            githubAccountService.refresh()
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+    }
+
+    private fun beginGithubAccountOperation(): Long {
+        githubAccountGeneration += 1
+        githubAccountJob?.cancel()
+        githubAccountJob = null
+        return githubAccountGeneration
     }
 
     fun openProxyPicker() {
@@ -761,6 +843,64 @@ class SettingsViewModel @Inject constructor(
         return "danmu_api_favorites_$ts.json"
     }
 
+    fun buildFullBackupFileName(): String {
+        val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        return "danmu_api_app_backup_$ts.json"
+    }
+
+    suspend fun createFullBackup(sections: Set<AppBackupSection>): Result<String> {
+        if (isFullBackupOperating) return Result.failure(IllegalStateException("备份任务正在进行"))
+        isFullBackupOperating = true
+        return try {
+            withContext(Dispatchers.IO) {
+                envConfigRepo.reload()
+                appBackupService.createBackup(sections, envConfigRepo.rawContent.value)
+            }
+        } finally {
+            isFullBackupOperating = false
+        }
+    }
+
+    fun inspectFullBackup(content: String): Result<AppBackupPreview> = appBackupService.inspect(content)
+
+    fun restoreFullBackup(content: String, sections: Set<AppBackupSection>) {
+        if (isFullBackupOperating) return
+        viewModelScope.launch {
+            isFullBackupOperating = true
+            val wasRunning = runtimeState.value.status == ServiceStatus.Running
+            envConfigRepo.reload()
+            val currentEnv = envConfigRepo.rawContent.value
+            val result = withContext(Dispatchers.IO) {
+                appBackupService.restore(content, sections, currentEnv)
+            }
+            result.fold(
+                onSuccess = { restored ->
+                    val envWrite = restored.mergedEnvironment?.let(envConfigRepo::saveRawContent)
+                        ?: Result.success(Unit)
+                    envWrite.fold(
+                        onSuccess = {
+                            restored.mergedEnvironment?.let(::applyRuntimeFromEnv)
+                            settingsRepo.reloadFromStorage()
+                            coreRepo.refreshCoreInfo()
+                            if (wasRunning) runtimeRepo.restartService()
+                            val favoriteText = restored.favoriteCount?.let { "，$it 项收藏" }.orEmpty()
+                            operationMessage = "完整备份恢复成功$favoriteText" +
+                                if (wasRunning) "，服务正在重启" else "；部分界面设置将在重启 App 后完全生效"
+                            runtimeRepo.addLog(LogLevel.Info, "已恢复完整备份：${restored.restoredSections.joinToString()}")
+                        },
+                        onFailure = { error ->
+                            operationMessage = "备份内容已校验，但 .env 写入失败：${error.message}"
+                        }
+                    )
+                },
+                onFailure = { error ->
+                    operationMessage = "完整备份恢复失败：${error.message ?: "文件无效"}"
+                }
+            )
+            isFullBackupOperating = false
+        }
+    }
+
     suspend fun exportFavoriteContent(): Result<FavoriteCacheStore.Snapshot> {
         return withContext(Dispatchers.IO) { FavoriteCacheStore.readCurrent(context) }
     }
@@ -848,30 +988,26 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
             isWebDavOperating = true
-            webDavOperatingText = "正在上传配置与收藏到 WebDAV..."
+            webDavOperatingText = "正在上传安全完整备份到 WebDAV..."
             envConfigRepo.reload()
             val content = envConfigRepo.rawContent.value
-            val favoriteSnapshot = withContext(Dispatchers.IO) {
-                FavoriteCacheStore.readCurrent(context)
+            val fullBundle = withContext(Dispatchers.IO) {
+                appBackupService.createBackup(AppBackupSection.entries.toSet(), content)
             }
-            if (favoriteSnapshot.isFailure) {
-                operationMessage = "WebDAV 备份失败：${favoriteSnapshot.exceptionOrNull()?.message}"
-            } else {
-                val envResult = webDavService.backupEnv(content)
-                if (envResult.isFailure) {
-                    operationMessage = "WebDAV 备份失败：${envResult.exceptionOrNull()?.message}"
-                } else {
-                    val favorites = favoriteSnapshot.getOrThrow()
-                    webDavService.backupFavorites(favorites.content).fold(
-                        onSuccess = {
-                            operationMessage = "WebDAV 备份成功：配置及 ${favorites.count} 项收藏"
-                        },
-                        onFailure = {
-                            operationMessage = "配置已上传，但收藏备份失败：${it.message}"
-                        }
-                    )
-                }
+            if (fullBundle.isFailure) {
+                operationMessage = "WebDAV 备份失败：${fullBundle.exceptionOrNull()?.message}"
+                isWebDavOperating = false
+                webDavOperatingText = ""
+                return@launch
             }
+            val bundleUpload = webDavService.backupAppBundle(fullBundle.getOrThrow())
+            if (bundleUpload.isFailure) {
+                operationMessage = "WebDAV 备份失败：${bundleUpload.exceptionOrNull()?.message}"
+                isWebDavOperating = false
+                webDavOperatingText = ""
+                return@launch
+            }
+            operationMessage = "WebDAV 完整备份成功，凭据未上传"
             isWebDavOperating = false
             webDavOperatingText = ""
         }
@@ -887,7 +1023,25 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
             isWebDavOperating = true
-            webDavOperatingText = "正在从 WebDAV 下载配置与收藏..."
+            webDavOperatingText = "正在从 WebDAV 下载完整备份..."
+            val bundleResult = webDavService.restoreAppBundle()
+            if (bundleResult.isFailure) {
+                operationMessage = "WebDAV 恢复失败：${bundleResult.exceptionOrNull()?.message}"
+                isWebDavOperating = false
+                webDavOperatingText = ""
+                return@launch
+            }
+            val fullBundle = bundleResult.getOrNull()
+            if (fullBundle != null) {
+                isWebDavOperating = false
+                webDavOperatingText = ""
+                val sections = appBackupService.inspect(fullBundle).getOrElse { error ->
+                    operationMessage = "云端完整备份无效：${error.message}"
+                    return@launch
+                }.sections
+                restoreFullBackup(fullBundle, sections)
+                return@launch
+            }
             val envResult = webDavService.restoreEnv()
             val favoriteResult = if (envResult.isSuccess) {
                 webDavService.restoreFavorites()
@@ -1144,10 +1298,13 @@ class SettingsViewModel @Inject constructor(
 
         val current = runtimeState.value
         val port = env["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: current.port
+        val listenMode = RuntimeListenMode.fromBindHost(env[RuntimeListenMode.ENV_KEY])
+            ?: RuntimeListenMode.Ipv4Only
         runtimeRepo.applyServiceConfig(
             port = port,
             token = RuntimeTokenNormalizer.normalizeInput(env["TOKEN"]),
-            restartIfRunning = false
+            restartIfRunning = false,
+            listenMode = listenMode
         )
         env["DANMU_API_VARIANT"]?.lowercase()?.let { raw ->
             ApiVariant.entries.firstOrNull { it.key == raw }?.let { runtimeRepo.updateVariant(it) }

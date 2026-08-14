@@ -29,6 +29,7 @@ import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
+import com.example.danmuapiapp.data.service.RuntimeNetworkAddressResolver
 import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
@@ -42,9 +43,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.Inet4Address
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
 import java.net.Socket
 import java.net.URL
 import java.time.Instant
@@ -81,6 +80,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NORMAL_RESTART_STOP_TIMEOUT_MS = 12_000L
         private const val NORMAL_STOP_TIMEOUT_MS = 8_000L
         private const val NORMAL_RESTART_START_TIMEOUT_MS = 15_000L
+        private const val CANDIDATE_HEALTHY_OBSERVATION_MS = 25_000L
         private const val HOT_RELOAD_DEBOUNCE_MS = 800L
         private const val HOT_RELOAD_MIN_INTERVAL_MS = 2500L
         private const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
@@ -246,6 +246,17 @@ class RuntimeRepositoryImpl @Inject constructor(
     private var normalPendingExplicitStart = false
     private val normalStoppedBroadcastSeq = AtomicLong(0L)
 
+    private data class CandidateStartAttempt(
+        val variant: ApiVariant,
+        val runMode: RunMode,
+        val startedAtMs: Long = System.currentTimeMillis()
+    )
+
+    @Volatile
+    private var candidateStartAttempt: CandidateStartAttempt? = null
+    private var candidateValidationJob: Job? = null
+    private val candidateRecoveryInFlight = AtomicBoolean(false)
+
     @Volatile
     private var appForeground = false
 
@@ -260,12 +271,16 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         val initState = _runtimeState.value
+        if (initState.status == ServiceStatus.Starting || initState.status == ServiceStatus.Running) {
+            armCandidateObservation(initState.variant, initState.runMode)
+        }
         if (shouldCloseRootShellSessionForMode(initState.runMode)) {
             RootShell.closeSession()
         }
         if (initState.status == ServiceStatus.Running) {
             val startedAt = ensureRuntimeStartedAt(initState.runMode, forceNew = false)
             startUptimeCounter(startedAt)
+            scheduleCandidateConfirmation()
         }
 
         scope.launch {
@@ -286,6 +301,24 @@ class RuntimeRepositoryImpl @Inject constructor(
             portFromEnv ?: 9321
         }
         val token = TokenDefaults.resolveTokenFromPrefs(prefs, context, defaultTokenEnvFile)
+        val listenModeFromPrefs = RuntimeListenMode.fromKey(
+            if (prefs.contains(RuntimeListenMode.PREFERENCE_KEY)) {
+                prefs.getString(RuntimeListenMode.PREFERENCE_KEY, null)
+            } else {
+                null
+            }
+        )
+        val listenModeFromEnv = RuntimeListenMode.fromBindHost(
+            envValues[RuntimeListenMode.ENV_KEY]
+        )
+        val listenMode = listenModeFromPrefs
+            ?: listenModeFromEnv
+            ?: RuntimeListenMode.Ipv4Only
+        if (listenModeFromPrefs == null && listenModeFromEnv != null) {
+            prefs.edit {
+                putString(RuntimeListenMode.PREFERENCE_KEY, listenModeFromEnv.key)
+            }
+        }
         val runtimeVariant = normalizeVariantKey(
             if (prefs.contains("variant")) prefs.getString("variant", null) else null
         )
@@ -334,16 +367,19 @@ class RuntimeRepositoryImpl @Inject constructor(
             0L
         }
 
+        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
         return RuntimeState(
             status = if (running) ServiceStatus.Running else ServiceStatus.Stopped,
             port = port,
             token = token,
             variant = variant,
             runMode = mode,
+            listenMode = listenMode,
             pid = if (running && mode == RunMode.Root) rootPid else null,
             uptimeSeconds = uptimeSeconds,
             localUrl = buildLocalUrl(port, token),
-            lanUrl = buildLanUrl(getLanIp(), port, token)
+            lanUrl = buildLanUrl(networkAddresses.ipv4, port, token),
+            lanIpv6Url = buildLanIpv6Url(networkAddresses.ipv6, port, token, listenMode)
         )
     }
 
@@ -393,12 +429,14 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun stopService() {
+        cancelCandidateObservation()
         launchSerializedUserOperation("停止服务") {
             stopServiceLocked()
         }
     }
 
     override fun restartService() {
+        cancelCandidateObservation()
         launchSerializedUserOperation("重启服务") {
             restartServiceLocked()
         }
@@ -442,11 +480,18 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun applyServiceConfig(port: Int, token: String, restartIfRunning: Boolean) {
+    override fun applyServiceConfig(
+        port: Int,
+        token: String,
+        restartIfRunning: Boolean,
+        listenMode: RuntimeListenMode?
+    ) {
+        cancelCandidateObservation()
         launchSerializedUserOperation("应用服务配置") {
             applyServiceConfigLocked(
                 port = port,
                 token = RuntimeTokenNormalizer.normalizeInput(token),
+                listenMode = listenMode ?: _runtimeState.value.listenMode,
                 restartIfRunning = restartIfRunning
             )
         }
@@ -470,6 +515,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateVariant(variant: ApiVariant) {
+        cancelCandidateObservation()
         persistSelectedVariant(variant, commit = true)
         _runtimeState.update { it.copy(variant = variant) }
     }
@@ -492,6 +538,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateRunMode(mode: RunMode) {
+        cancelCandidateObservation()
         launchSerializedUserOperation("切换运行模式") {
             val current = _runtimeState.value
             if (current.runMode == mode) return@launchSerializedUserOperation
@@ -580,6 +627,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private suspend fun applyServiceConfigLocked(
         port: Int,
         token: String,
+        listenMode: RuntimeListenMode,
         restartIfRunning: Boolean
     ) {
         if (port !in 1..65535) return
@@ -587,7 +635,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         val snapshot = _runtimeState.value
         val portChanged = snapshot.port != port
         val tokenChanged = snapshot.token != token
-        if (!portChanged && !tokenChanged) return
+        val listenModeChanged = snapshot.listenMode != listenMode
+        if (!portChanged && !tokenChanged && !listenModeChanged) return
 
         val wasActive = snapshot.status == ServiceStatus.Running ||
             snapshot.status == ServiceStatus.Starting
@@ -596,7 +645,9 @@ class RuntimeRepositoryImpl @Inject constructor(
                 port = port,
                 token = token,
                 applyPort = portChanged,
-                applyToken = tokenChanged
+                applyToken = tokenChanged,
+                listenMode = listenMode,
+                applyListenMode = listenModeChanged
             )
             syncRuntimeEnvFromPrefs(snapshot.runMode)
             return
@@ -615,6 +666,10 @@ class RuntimeRepositoryImpl @Inject constructor(
                 if (tokenChanged) {
                     if (isNotEmpty()) append("，")
                     append("Token 已更新")
+                }
+                if (listenModeChanged) {
+                    if (isNotEmpty()) append("，")
+                    append("监听 ${snapshot.listenMode.label} -> ${listenMode.label}")
                 }
             }.ifBlank { "配置已更新" }
             addLog(LogLevel.Info, "正在应用服务配置：$changedText")
@@ -642,7 +697,9 @@ class RuntimeRepositoryImpl @Inject constructor(
                 port = port,
                 token = token,
                 applyPort = portChanged,
-                applyToken = tokenChanged
+                applyToken = tokenChanged,
+                listenMode = listenMode,
+                applyListenMode = listenModeChanged
             )
             syncRuntimeEnvFromPrefs(oldMode)
             addLog(LogLevel.Info, "配置已写入，正在启动服务...")
@@ -658,7 +715,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         port: Int,
         token: String,
         applyPort: Boolean,
-        applyToken: Boolean
+        applyToken: Boolean,
+        listenMode: RuntimeListenMode,
+        applyListenMode: Boolean
     ) {
         prefs.edit(commit = true) {
             if (applyPort) {
@@ -671,9 +730,12 @@ class RuntimeRepositoryImpl @Inject constructor(
                     putString("token", token)
                 }
             }
+            if (applyListenMode) {
+                putString(RuntimeListenMode.PREFERENCE_KEY, listenMode.key)
+            }
         }
 
-        val lanIp = getLanIp()
+        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
         _runtimeState.update { state ->
             val nextPort = if (applyPort) port else state.port
             val nextToken = if (applyToken) {
@@ -681,11 +743,19 @@ class RuntimeRepositoryImpl @Inject constructor(
             } else {
                 state.token
             }
+            val nextListenMode = if (applyListenMode) listenMode else state.listenMode
             state.copy(
                 port = nextPort,
                 token = nextToken,
+                listenMode = nextListenMode,
                 localUrl = buildLocalUrl(nextPort, nextToken),
-                lanUrl = buildLanUrl(lanIp, nextPort, nextToken)
+                lanUrl = buildLanUrl(networkAddresses.ipv4, nextPort, nextToken),
+                lanIpv6Url = buildLanIpv6Url(
+                    networkAddresses.ipv6,
+                    nextPort,
+                    nextToken,
+                    nextListenMode
+                )
             )
         }
         VideoShellInjectionConfigPublisher.publishAsync(context)
@@ -932,6 +1002,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                     addLog(LogLevel.Error, "普通模式拉起前台服务失败: $reason")
                     return
                 }
+                armCandidateObservation(state.variant, state.runMode)
                 normalStartIssuedAtMs = System.currentTimeMillis()
 
                 scope.launch {
@@ -967,6 +1038,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             RunMode.Root -> {
+                armCandidateObservation(state.variant, state.runMode)
                 val result = RootRuntimeController.start(context, state.port, quickMode = false)
                 if (result.ok) {
                     markRunning(
@@ -1172,6 +1244,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                         statusMessage = "正在重启服务…"
                     )
                 }
+                armCandidateObservation(state.variant, state.runMode)
                 val result = RootRuntimeController.restart(context, state.port)
                 if (result.ok) {
                     markRunning(pid = RootRuntimeController.getPid(context), forceNewStart = true)
@@ -1266,7 +1339,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
         val startedAt = ensureRuntimeStartedAt(mode, forceNew = forceNewStart)
         val uptime = uptimeSecondsFrom(startedAt)
-        val lanIp = getLanIp()
+        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
 
         _runtimeState.update {
             it.copy(
@@ -1274,7 +1347,13 @@ class RuntimeRepositoryImpl @Inject constructor(
                 pid = pid ?: it.pid,
                 uptimeSeconds = uptime,
                 localUrl = buildLocalUrl(it.port, it.token),
-                lanUrl = buildLanUrl(lanIp, it.port, it.token),
+                lanUrl = buildLanUrl(networkAddresses.ipv4, it.port, it.token),
+                lanIpv6Url = buildLanIpv6Url(
+                    networkAddresses.ipv6,
+                    it.port,
+                    it.token,
+                    it.listenMode
+                ),
                 errorMessage = null,
                 statusMessage = statusMessage ?: "接口已就绪，可直接在局域网访问"
             )
@@ -1283,9 +1362,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         startUptimeCounter(startedAt)
         // 运行态改为事件驱动刷新时，这里启动热更新监听。
         handleWorkDirHotReload(_runtimeState.value)
+        scheduleCandidateConfirmation()
     }
 
     private fun markStopped(statusMessage: String? = null) {
+        val failedAttempt = candidateStartAttempt
         if (_runtimeState.value.runMode == RunMode.Normal) {
             normalStartIssuedAtMs = 0L
             normalPendingExplicitStart = false
@@ -1302,9 +1383,13 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
         uptimeJob?.cancel()
         stopWorkDirHotReload()
+        if (failedAttempt != null) {
+            triggerCandidateRecovery("候选核心启动后提前退出")
+        }
     }
 
     private fun markError(message: String, statusMessage: String? = message) {
+        val failedAttempt = candidateStartAttempt
         val state = _runtimeState.value
         val portOpen = isPortOpen(state.port)
         val rootProbablyRunning = state.runMode == RunMode.Root &&
@@ -1334,6 +1419,110 @@ class RuntimeRepositoryImpl @Inject constructor(
         uptimeJob?.cancel()
         if (!stillRunning) {
             stopWorkDirHotReload()
+        }
+        if (failedAttempt != null) {
+            triggerCandidateRecovery(message)
+        }
+    }
+
+    private fun armCandidateObservation(variant: ApiVariant, runMode: RunMode) {
+        val candidate = coreRepository.candidateState.value ?: return
+        if (candidate.variant != variant || candidate.runMode != runMode) return
+        candidateValidationJob?.cancel()
+        candidateStartAttempt = CandidateStartAttempt(variant, runMode)
+        addLog(LogLevel.Info, "${candidate.actionLabel}后的核心已进入启动观察期")
+    }
+
+    private fun cancelCandidateObservation() {
+        candidateValidationJob?.cancel()
+        candidateValidationJob = null
+        candidateStartAttempt = null
+    }
+
+    private fun scheduleCandidateConfirmation() {
+        val attempt = candidateStartAttempt ?: return
+        candidateValidationJob?.cancel()
+        candidateValidationJob = scope.launch {
+            delay(CANDIDATE_HEALTHY_OBSERVATION_MS)
+            val state = _runtimeState.value
+            val stillMatches = state.status == ServiceStatus.Running &&
+                state.variant == attempt.variant && state.runMode == attempt.runMode
+            val reachable = when (attempt.runMode) {
+                RunMode.Normal -> isNormalRuntimeReachable(state.port)
+                RunMode.Root -> isRootRuntimeOwnedByApp(state.port)
+            }
+            if (!stillMatches || !reachable || candidateStartAttempt != attempt) return@launch
+            coreRepository.confirmCandidateCore(attempt.variant, attempt.runMode).fold(
+                onSuccess = { confirmed ->
+                    if (confirmed) {
+                        addLog(LogLevel.Info, "候选核心已稳定运行，已确认为可用版本")
+                    }
+                },
+                onFailure = { error ->
+                    addLog(LogLevel.Warn, "确认候选核心失败：${error.message ?: "未知错误"}")
+                }
+            )
+            if (candidateStartAttempt == attempt) {
+                candidateStartAttempt = null
+                candidateValidationJob = null
+            }
+        }
+    }
+
+    private fun triggerCandidateRecovery(reason: String) {
+        val attempt = candidateStartAttempt ?: return
+        candidateValidationJob?.cancel()
+        candidateValidationJob = null
+        candidateStartAttempt = null
+        if (!candidateRecoveryInFlight.compareAndSet(false, true)) return
+
+        scope.launch {
+            try {
+                operationMutex.withLock {
+                    val candidate = coreRepository.candidateState.value
+                    if (candidate?.variant != attempt.variant || candidate.runMode != attempt.runMode) {
+                        return@withLock
+                    }
+                    if (!candidate.hasRecoveryPoint) {
+                        coreRepository.confirmCandidateCore(attempt.variant, attempt.runMode)
+                        addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
+                        return@withLock
+                    }
+
+                    addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
+                    val state = _runtimeState.value
+                    if (state.status != ServiceStatus.Stopped) {
+                        stopServiceLocked()
+                        val stopped = waitForRuntimeStopped(
+                            mode = attempt.runMode,
+                            oldPort = state.port,
+                            timeoutMs = NORMAL_STOP_TIMEOUT_MS
+                        )
+                        if (!stopped) {
+                            addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
+                            return@withLock
+                        }
+                    }
+
+                    coreRepository.restoreCandidateCore(attempt.variant, attempt.runMode).fold(
+                        onSuccess = { restored ->
+                            if (!restored) {
+                                addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
+                                return@fold
+                            }
+                            markStopped("新核心启动失败，已恢复上一个可用版本")
+                            addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
+                            startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
+                        },
+                        onFailure = { error ->
+                            markError("自动恢复失败：${error.message ?: "未知错误"}")
+                            addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
+                        }
+                    )
+                }
+            } finally {
+                candidateRecoveryInFlight.set(false)
+            }
         }
     }
 
@@ -1928,14 +2117,28 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun refreshRuntimeUrls(force: Boolean = false) {
-        val lanIp = getLanIp()
+        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
         _runtimeState.update { state ->
             val localUrl = buildLocalUrl(state.port, state.token)
-            val lanUrl = buildLanUrl(lanIp, state.port, state.token)
-            if (!force && state.localUrl == localUrl && state.lanUrl == lanUrl) {
+            val lanUrl = buildLanUrl(networkAddresses.ipv4, state.port, state.token)
+            val lanIpv6Url = buildLanIpv6Url(
+                networkAddresses.ipv6,
+                state.port,
+                state.token,
+                state.listenMode
+            )
+            if (!force &&
+                state.localUrl == localUrl &&
+                state.lanUrl == lanUrl &&
+                state.lanIpv6Url == lanIpv6Url
+            ) {
                 state
             } else {
-                state.copy(localUrl = localUrl, lanUrl = lanUrl)
+                state.copy(
+                    localUrl = localUrl,
+                    lanUrl = lanUrl,
+                    lanIpv6Url = lanIpv6Url
+                )
             }
         }
     }
@@ -2424,65 +2627,20 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun buildLocalUrl(port: Int, token: String): String {
-        val tokenPath = RuntimeTokenNormalizer.normalizeInput(token)
-            .takeIf { it.isNotEmpty() }
-            ?.let { "/$it" }
-            .orEmpty()
-        return "http://127.0.0.1:$port$tokenPath"
+        return RuntimeNetworkAddressResolver.buildHttpUrl("127.0.0.1", port, token)
     }
 
     private fun buildLanUrl(ip: String, port: Int, token: String): String {
-        val tokenPath = RuntimeTokenNormalizer.normalizeInput(token)
-            .takeIf { it.isNotEmpty() }
-            ?.let { "/$it" }
-            .orEmpty()
-        return "http://$ip:$port$tokenPath"
+        return RuntimeNetworkAddressResolver.buildHttpUrl(ip, port, token)
     }
 
-    private fun isUsableIpv4(ip: String): Boolean {
-        return ip != "0.0.0.0" && !ip.startsWith("169.254.")
-    }
-
-    private fun getLanIp(): String {
-        val activeNetworkIp = runCatching {
-            val cm = connectivityManager ?: return@runCatching null
-            val activeNetwork = cm.activeNetwork ?: return@runCatching null
-            val properties = cm.getLinkProperties(activeNetwork) ?: return@runCatching null
-            properties.linkAddresses
-                .asSequence()
-                .mapNotNull { it.address as? Inet4Address }
-                .mapNotNull { it.hostAddress }
-                .firstOrNull { isUsableIpv4(it) }
-        }.getOrNull()
-        if (!activeNetworkIp.isNullOrBlank()) {
-            return activeNetworkIp
-        }
-
-        try {
-            var fallbackIp: String? = null
-            NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { intf ->
-                if (!intf.isUp || intf.isLoopback) return@forEach
-                val name = (intf.name ?: "").lowercase()
-                val prefer = name.startsWith("wlan") ||
-                    name.startsWith("eth") ||
-                    name.startsWith("en") ||
-                    name.startsWith("rmnet")
-                intf.inetAddresses?.toList()?.forEach { addr ->
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        val ip = addr.hostAddress ?: return@forEach
-                        if (!isUsableIpv4(ip)) return@forEach
-                        if (prefer) return ip
-                        if (fallbackIp == null) {
-                            fallbackIp = ip
-                        }
-                    }
-                }
-            }
-            if (!fallbackIp.isNullOrBlank()) {
-                return fallbackIp
-            }
-        } catch (_: Exception) {
-        }
-        return "0.0.0.0"
+    private fun buildLanIpv6Url(
+        ip: String,
+        port: Int,
+        token: String,
+        listenMode: RuntimeListenMode
+    ): String {
+        if (listenMode != RuntimeListenMode.DualStack) return ""
+        return RuntimeNetworkAddressResolver.buildHttpUrl(ip, port, token)
     }
 }

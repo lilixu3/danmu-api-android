@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.RunMode
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
 
@@ -30,10 +31,13 @@ fun ServiceConfigScreen(
 
     var portText by remember(state.port) { mutableStateOf(state.port.toString()) }
     var tokenText by remember(state.token) { mutableStateOf(state.token) }
+    var listenMode by remember(state.listenMode) { mutableStateOf(state.listenMode) }
     var showTokenField by remember { mutableStateOf(false) }
     var portError by remember { mutableStateOf<String?>(null) }
 
-    val hasChange = portText.trim() != state.port.toString() || tokenText != state.token
+    val hasChange = portText.trim() != state.port.toString() ||
+        tokenText != state.token ||
+        listenMode != state.listenMode
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
@@ -58,7 +62,7 @@ fun ServiceConfigScreen(
         ) {
             SettingsPageHeader(
                 title = "服务配置",
-                subtitle = "端口与 Token 设置",
+                subtitle = "端口、访问凭据与监听网络",
                 onBack = onBack
             )
 
@@ -110,6 +114,68 @@ fun ServiceConfigScreen(
                 }
             }
 
+            SettingsGroup(title = "监听网络") {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        RuntimeListenMode.entries.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = listenMode == mode,
+                                onClick = { listenMode = mode },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index,
+                                    RuntimeListenMode.entries.size
+                                )
+                            ) {
+                                Text(mode.label)
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (listenMode == RuntimeListenMode.DualStack) {
+                                Icons.Rounded.WarningAmber
+                            } else {
+                                Icons.Rounded.Shield
+                            },
+                            contentDescription = null,
+                            tint = if (listenMode == RuntimeListenMode.DualStack) {
+                                MaterialTheme.colorScheme.tertiary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
+                        )
+                        Text(
+                            text = if (listenMode == RuntimeListenMode.DualStack) {
+                                "同时接受 IPv4 与 IPv6 连接。若路由器分配了公网 IPv6，服务可能从互联网访问，请保留访问 Token 与管理员认证。"
+                            } else {
+                                "保持现有 IPv4 局域网兼容性，不会通过 IPv6 对外监听。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if (listenMode == RuntimeListenMode.DualStack &&
+                        state.listenMode == RuntimeListenMode.DualStack &&
+                        state.lanIpv6Url.isBlank()
+                    ) {
+                        Text(
+                            text = "当前网络尚未分配可供其他设备访问的 IPv6 地址，服务仍可通过 IPv4 使用。",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                }
+            }
+
             GradientButton(
                 text = "保存配置",
                 onClick = {
@@ -122,7 +188,7 @@ fun ServiceConfigScreen(
                         portError = "普通模式仅支持 1024-65535，请切换 Root 模式后再使用低位端口"
                         return@GradientButton
                     }
-                    viewModel.saveServiceConfig(port, tokenText.trim())
+                    viewModel.saveServiceConfig(port, tokenText.trim(), listenMode)
                 },
                 enabled = hasChange,
                 modifier = Modifier.fillMaxWidth()

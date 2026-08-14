@@ -26,9 +26,9 @@ object RuntimePaths {
         MigrateSelectedCore
     }
 
-    private const val PREFS_WORK_DIR = "danmu_work_dir"
-    private const val KEY_CUSTOM_BASE_PATH = "custom_path"
-    private const val KEY_CUSTOM_BASE_URI = "custom_uri"
+    internal const val PREFS_WORK_DIR = "danmu_work_dir"
+    internal const val KEY_CUSTOM_BASE_PATH = "custom_path"
+    internal const val KEY_CUSTOM_BASE_URI = "custom_uri"
     private const val PREFS_RUNTIME = "runtime"
     private const val PREFS_LEGACY_RUNTIME_VARIANT = "danmu_api_variant"
     private const val KEY_RUNTIME_VARIANT = "variant"
@@ -79,6 +79,22 @@ object RuntimePaths {
 
     fun normalBaseDir(context: Context): File {
         return readCustomBaseDir(context) ?: defaultBaseDir(context)
+    }
+
+    internal fun normalWorkDirIdentity(context: Context): String {
+        return workDirIdentity(normalBaseDir(context))
+    }
+
+    internal fun workDirIdentity(baseDir: File): String {
+        val normalized = normalizeBaseDir(baseDir)
+        val path = runCatching { normalized.canonicalPath }
+            .getOrElse { normalized.absolutePath }
+            .trimEnd(File.separatorChar)
+        return path.ifBlank { File.separator }
+    }
+
+    internal fun isWorkDirSelectionPreference(key: String?): Boolean {
+        return key == KEY_CUSTOM_BASE_PATH || key == KEY_CUSTOM_BASE_URI
     }
 
     fun rootBaseDir(context: Context): File {

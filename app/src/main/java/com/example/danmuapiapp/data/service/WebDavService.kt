@@ -79,10 +79,14 @@ class WebDavService @Inject constructor(
 
     suspend fun backupFavorites(content: String): Result<String> = backupFile("favorites.json", content)
 
+    suspend fun backupAppBundle(content: String): Result<String> = backupFile("app-backup.json", content)
+
     suspend fun restoreEnv(): Result<String> = restoreFile(".env", missingAllowed = false)
         .mapCatching { it ?: throw IOException("云端不存在 .env") }
 
     suspend fun restoreFavorites(): Result<String?> = restoreFile("favorites.json", missingAllowed = true)
+
+    suspend fun restoreAppBundle(): Result<String?> = restoreFile("app-backup.json", missingAllowed = true)
 
     private suspend fun backupFile(fileName: String, content: String): Result<String> = withContext(Dispatchers.IO) {
         try {

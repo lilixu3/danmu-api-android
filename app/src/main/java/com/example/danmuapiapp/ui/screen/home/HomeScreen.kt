@@ -147,7 +147,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.app.ActivityCompat
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
-import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
 import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
@@ -191,6 +190,7 @@ private enum class HomeOverlay {
 fun HomeScreen(
     onOpenDanmuDownload: () -> Unit = {},
     onOpenCacheManagement: () -> Unit = {},
+    onOpenCoreManagement: () -> Unit = {},
     onOpenAnnouncementRoute: (String) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -551,7 +551,10 @@ fun HomeScreen(
                     cacheTileValue = cacheTileValue,
                     cacheTileBadge = cacheTileBadge,
                     cacheTileAccent = cacheTileAccent,
-                    onOpenCacheQuick = { activeOverlay = HomeOverlay.CacheQuick },
+                    onOpenCacheQuick = {
+                        viewModel.prepareCacheClearSelection()
+                        activeOverlay = HomeOverlay.CacheQuick
+                    },
                     token = state.token,
                     maskedToken = maskedToken,
                     tokenVisible = tokenVisible,
@@ -631,6 +634,7 @@ fun HomeScreen(
                     AccessGatewayPanel(
                         localUrl = state.localUrl,
                         lanUrl = state.lanUrl,
+                        lanIpv6Url = state.lanIpv6Url,
                         token = state.token,
                         maskedToken = maskedToken,
                         tokenVisible = tokenVisible,
@@ -643,6 +647,14 @@ fun HomeScreen(
                         onCopyLan = {
                             clipboardManager.nativeClipboard.setPrimaryClip(
                                 android.content.ClipData.newPlainText("局域网地址", state.lanUrl)
+                            )
+                        },
+                        onCopyLanIpv6 = {
+                            clipboardManager.nativeClipboard.setPrimaryClip(
+                                android.content.ClipData.newPlainText(
+                                    "IPv6 局域网地址",
+                                    state.lanIpv6Url
+                                )
                             )
                         }
                     )
@@ -688,7 +700,22 @@ fun HomeScreen(
             customRepo = customRepo,
             customRepoBranch = customRepoBranch,
             onDismiss = viewModel::dismissNoCoreDialog,
-            onInstall = viewModel::installAndStart
+            onInstall = viewModel::installAndStart,
+            onOpenCoreManagement = onOpenCoreManagement
+        )
+    }
+
+    viewModel.unavailableVariant?.let { unavailable ->
+        UnavailableVariantDialog(
+            variant = unavailable,
+            variantLabel = coreDisplayNames.resolve(unavailable),
+            customRepoConfigured = customRepo.isNotBlank(),
+            onDismiss = viewModel::dismissUnavailableVariantDialog,
+            onInstall = viewModel::installUnavailableVariant,
+            onOpenCoreManagement = {
+                viewModel.consumeUnavailableVariantForSettings()
+                onOpenCoreManagement()
+            }
         )
     }
 
@@ -714,6 +741,8 @@ fun HomeScreen(
             pid = state.pid,
             localUrl = state.localUrl,
             lanUrl = state.lanUrl,
+            lanIpv6Url = state.lanIpv6Url,
+            listenMode = state.listenMode,
             token = state.token,
             maskedToken = maskedToken,
             tokenVisible = tokenVisible,
@@ -1157,6 +1186,26 @@ fun HomeScreen(
         )
     }
 
+    if (activeOverlay == HomeOverlay.CacheQuick) {
+        val cacheCapability by viewModel.cacheClearCapability.collectAsStateWithLifecycle()
+        CacheQuickDialog(
+            cacheStats = cacheStats,
+            capability = cacheCapability,
+            selectedItems = viewModel.selectedCacheClearItems,
+            isLoading = isCacheLoading,
+            isClearing = viewModel.isClearingCache,
+            onToggleItem = viewModel::toggleCacheClearItem,
+            onSelectAll = viewModel::selectAllCacheClearItems,
+            onSelectNone = viewModel::clearCacheClearSelection,
+            onClear = viewModel::clearSelectedCache,
+            onOpenCacheManagement = {
+                activeOverlay = null
+                onOpenCacheManagement()
+            },
+            onDismiss = { activeOverlay = null }
+        )
+    }
+
     if (viewModel.showCacheAdminRequiredDialog) {
         AppDialog(
             onDismissRequest = viewModel::dismissCacheAdminRequiredDialog,
@@ -1175,22 +1224,6 @@ fun HomeScreen(
                     Text("知道了")
                 }
             }
-        )
-    }
-
-    if (activeOverlay == HomeOverlay.CacheQuick) {
-        CacheQuickDialog(
-            cacheStats = cacheStats,
-            cacheEntries = viewModel.cacheEntries.collectAsStateWithLifecycle().value,
-            isLoading = isCacheLoading,
-            isClearing = viewModel.isClearingCache,
-            onRefresh = viewModel::refreshCache,
-            onQuickClear = viewModel::quickClearCache,
-            onOpenCacheManagement = {
-                activeOverlay = null
-                onOpenCacheManagement()
-            },
-            onDismiss = { activeOverlay = null }
         )
     }
 }

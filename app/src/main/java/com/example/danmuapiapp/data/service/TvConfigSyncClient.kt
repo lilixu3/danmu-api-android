@@ -7,6 +7,9 @@ import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,7 +32,7 @@ class TvConfigSyncClient @Inject constructor(
             val request = Request.Builder()
                 .url(target.applyUrl)
                 .post(
-                    TvConfigSyncCodec.encodePayload(payload)
+                    encodeTvConfigSyncPayloadWithoutGithubToken(payload)
                         .toRequestBody("application/json; charset=utf-8".toMediaType())
                 )
                 .header("Accept", "application/json")
@@ -79,7 +82,8 @@ class TvConfigSyncClient @Inject constructor(
             ),
             settings = TvConfigSyncSettings(
                 githubProxy = settingsRepository.githubProxy.value,
-                githubToken = settingsRepository.githubToken.value,
+                // GitHub credentials are device-local and must never leave this device.
+                githubToken = "",
                 stableRepoDisplayName = displayNames.stable,
                 devRepoDisplayName = displayNames.dev,
                 customRepo = settingsRepository.customRepo.value,
@@ -96,4 +100,12 @@ class TvConfigSyncClient @Inject constructor(
             .distinct()
         return parts.joinToString(" ").ifBlank { "DanmuApi 手机端" }
     }
+}
+
+internal fun encodeTvConfigSyncPayloadWithoutGithubToken(payload: TvConfigSyncPayload): String {
+    val root = Json.parseToJsonElement(TvConfigSyncCodec.encodePayload(payload)).jsonObject
+    val settings = root["settings"]?.jsonObject ?: return root.toString()
+    return JsonObject(
+        root + ("settings" to JsonObject(settings - "githubToken"))
+    ).toString()
 }

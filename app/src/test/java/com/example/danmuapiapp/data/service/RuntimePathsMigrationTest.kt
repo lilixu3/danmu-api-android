@@ -10,6 +10,20 @@ import org.junit.Test
 class RuntimePathsMigrationTest {
 
     @Test
+    fun `工作目录身份使用规范路径且根目录保持有效`() {
+        assertEquals("/work/one", RuntimePaths.workDirIdentity(File("/work/./one/../one")))
+        assertEquals(File.separator, RuntimePaths.workDirIdentity(File(File.separator)))
+    }
+
+    @Test
+    fun `路径和 URI 偏好变化都会触发目录切换刷新`() {
+        assertTrue(RuntimePaths.isWorkDirSelectionPreference(RuntimePaths.KEY_CUSTOM_BASE_PATH))
+        assertTrue(RuntimePaths.isWorkDirSelectionPreference(RuntimePaths.KEY_CUSTOM_BASE_URI))
+        assertFalse(RuntimePaths.isWorkDirSelectionPreference("unrelated"))
+        assertFalse(RuntimePaths.isWorkDirSelectionPreference(null))
+    }
+
+    @Test
     fun `核心选择沿用运行时 偏好 旧偏好 环境变量 优先级`() {
         assertEquals(
             "dev",

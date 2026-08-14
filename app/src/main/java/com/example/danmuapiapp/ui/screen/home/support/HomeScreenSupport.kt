@@ -213,7 +213,8 @@ internal fun NoCoreDialog(
     customRepo: String,
     customRepoBranch: String,
     onDismiss: () -> Unit,
-    onInstall: (ApiVariant) -> Unit
+    onInstall: (ApiVariant) -> Unit,
+    onOpenCoreManagement: () -> Unit
 ) {
     AppDialog(
         onDismissRequest = onDismiss,
@@ -229,6 +230,18 @@ internal fun NoCoreDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                OutlinedButton(
+                    onClick = onOpenCoreManagement,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (currentVariant == ApiVariant.Custom && customRepo.isBlank()) {
+                        "设置自定义仓库"
+                    } else {
+                        "打开核心管理"
+                    })
+                }
                 ApiVariant.entries.filter { variant ->
                     variant != ApiVariant.Custom ||
                         resolveCoreVariantSourceText(variant, customRepo, customRepoBranch).isNotBlank()
@@ -262,6 +275,54 @@ internal fun NoCoreDialog(
                             }
                         }
                     }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+@Composable
+internal fun UnavailableVariantDialog(
+    variant: ApiVariant,
+    variantLabel: String,
+    customRepoConfigured: Boolean,
+    onDismiss: () -> Unit,
+    onInstall: () -> Unit,
+    onOpenCoreManagement: () -> Unit
+) {
+    val needsCustomRepo = variant == ApiVariant.Custom && !customRepoConfigured
+    AppDialog(
+        onDismissRequest = onDismiss,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Warning,
+        icon = { Icon(Icons.Rounded.DownloadForOffline, null) },
+        title = { Text("$variantLabel 尚未安装") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (needsCustomRepo) {
+                        "当前没有配置自定义仓库，因此不能切换。原核心会继续保持选中和运行。"
+                    } else {
+                        "当前版本没有可用核心文件，因此没有执行切换。可以现在安装，完成后会自动切换并启动。"
+                    }
+                )
+                OutlinedButton(
+                    onClick = onOpenCoreManagement,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (needsCustomRepo) "设置自定义仓库" else "打开核心管理")
+                }
+            }
+        },
+        confirmButton = if (needsCustomRepo) null else {
+            {
+                TextButton(onClick = onInstall) {
+                    Text("安装并切换")
                 }
             }
         },

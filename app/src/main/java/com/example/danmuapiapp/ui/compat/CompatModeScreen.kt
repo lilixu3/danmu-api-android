@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
@@ -731,7 +732,8 @@ private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
         }
         AccessAddressPanel(
             localUrl = runtime.localUrl,
-            lanUrl = runtime.lanUrl
+            lanUrl = runtime.lanUrl,
+            lanIpv6Url = runtime.lanIpv6Url
         )
     }
 }
@@ -739,7 +741,8 @@ private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
 @Composable
 private fun AccessAddressPanel(
     localUrl: String,
-    lanUrl: String
+    lanUrl: String,
+    lanIpv6Url: String
 ) {
     val hasLocal = localUrl.isNotBlank()
     val hasLan = lanUrl.isNotBlank()
@@ -789,29 +792,49 @@ private fun AccessAddressPanel(
                             modifier = Modifier.fillMaxWidth()
                         )
                         AddressEntry(
-                            label = "局域网访问",
+                            label = "IPv4 局域网",
                             value = lanUrl.ifBlank { "等待局域网地址" },
                             icon = Icons.Rounded.Wifi,
                             accent = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        if (lanIpv6Url.isNotBlank()) {
+                            AddressEntry(
+                                label = "IPv6 局域网",
+                                value = lanIpv6Url,
+                                icon = Icons.Rounded.Wifi,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AddressEntry(
-                            label = "本机访问",
-                            value = localUrl.ifBlank { "等待服务启动后生成" },
-                            icon = Icons.Rounded.Settings,
-                            accent = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AddressEntry(
-                            label = "局域网访问",
-                            value = lanUrl.ifBlank { "等待局域网地址" },
-                            icon = Icons.Rounded.Wifi,
-                            accent = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.weight(1f)
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            AddressEntry(
+                                label = "本机访问",
+                                value = localUrl.ifBlank { "等待服务启动后生成" },
+                                icon = Icons.Rounded.Settings,
+                                accent = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            AddressEntry(
+                                label = "IPv4 局域网",
+                                value = lanUrl.ifBlank { "等待局域网地址" },
+                                icon = Icons.Rounded.Wifi,
+                                accent = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (lanIpv6Url.isNotBlank()) {
+                            AddressEntry(
+                                label = "IPv6 局域网",
+                                value = lanIpv6Url,
+                                icon = Icons.Rounded.Wifi,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
             }
@@ -848,18 +871,20 @@ private fun AddressEntry(
                 maxLines = 1
             )
         }
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace,
-                lineHeight = 20.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 3,
-            overflow = TextOverflow.Clip
-        )
+        SelectionContainer {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 20.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Clip
+            )
+        }
     }
 }
 
