@@ -21,6 +21,7 @@ import com.example.danmuapiapp.domain.model.canApplyToCurrentCore
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.cancelTrackedJobs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -251,8 +252,7 @@ class PullRequestLabViewModel @Inject constructor(
     }
 
     private fun cancelPageEnrichment() {
-        pageEnrichmentJobs.values.forEach { it.cancel() }
-        pageEnrichmentJobs.clear()
+        pageEnrichmentJobs.cancelTrackedJobs()
         scheduledPullRequestNumbers.clear()
         firstContributionLookupAuthors.clear()
         inclusionLookupCount = 0
