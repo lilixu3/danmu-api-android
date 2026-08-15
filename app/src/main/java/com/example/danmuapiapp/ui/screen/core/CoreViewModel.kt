@@ -13,6 +13,7 @@ import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.RuntimeRestartEvidence
 import com.example.danmuapiapp.ui.common.awaitCoreRestart
+import com.example.danmuapiapp.ui.common.cancelTrackedJobs
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -452,8 +453,7 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun cancelRevisionVersionRequests() {
-        revisionVersionJobs.values.forEach { it.cancel() }
-        revisionVersionJobs.clear()
+        revisionVersionJobs.cancelTrackedJobs()
         revisionVersionLoadingShas = emptySet()
     }
 
