@@ -67,13 +67,12 @@ internal object RequestRecordInsights {
 
     fun clientIp(record: RequestRecord): String? {
         val fromScene = record.scene.substringAfter('/', "").trim()
-        if (fromScene.isNotBlank()) return fromScene
+        visibleClientIp(fromScene)?.let { return it }
         return record.responseSnippet
             ?.lineSequence()
             ?.firstOrNull { it.startsWith("客户端IP:") }
             ?.substringAfter(':')
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
+            ?.let(::visibleClientIp)
     }
 
     fun endpoint(url: String): String {
@@ -93,4 +92,8 @@ internal object RequestRecordInsights {
         append(' ')
         append(record.responseSnippet.orEmpty())
     }.lowercase()
+
+    private fun visibleClientIp(value: String?): String? {
+        return value?.trim()?.takeIf { it.isNotBlank() && '*' !in it }
+    }
 }

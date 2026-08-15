@@ -160,6 +160,7 @@ import kotlin.math.max
 internal fun HomeTopHeader(
     status: ServiceStatus,
     isRunning: Boolean,
+    isTransitioning: Boolean = false,
     uptime: String,
     unreadAnnouncementCount: Int = 0,
     hasQueueTasks: Boolean = false,
@@ -217,7 +218,11 @@ internal fun HomeTopHeader(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
                     Text(
-                        text = if (isRunning) "在线" else "离线",
+                        text = when {
+                            isTransitioning -> "切换中"
+                            isRunning -> "在线"
+                            else -> "离线"
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         color = statusAccentColor(status)
@@ -277,6 +282,7 @@ internal fun HomeTopHeader(
 internal fun MissionControlHero(
     status: ServiceStatus,
     statusMessage: String?,
+    transitionTitle: String? = null,
     isCoreInstalled: Boolean,
     isCoreInfoLoading: Boolean,
     runModeLabel: String,
@@ -311,7 +317,7 @@ internal fun MissionControlHero(
     val heroTitle = if (showMissingCore) {
         "核心未安装"
     } else {
-        statusTitle(status = status)
+        transitionTitle ?: statusTitle(status = status)
     }
     val heroSubtitle = if (showMissingCore) {
         "当前${variantLabel}尚未安装，请先下载核心后再启动服务"

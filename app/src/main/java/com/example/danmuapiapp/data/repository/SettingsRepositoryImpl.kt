@@ -71,9 +71,6 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _announcementBaseUrl = MutableStateFlow(DEFAULT_ANNOUNCEMENT_BASE_URL)
     override val announcementBaseUrl: StateFlow<String> = _announcementBaseUrl.asStateFlow()
 
-    private val _githubToken = MutableStateFlow(githubTokenStore.get("github_token"))
-    override val githubToken: StateFlow<String> = _githubToken.asStateFlow()
-
     private val _autoStart = MutableStateFlow(NormalAutoStartPrefs.isBootAutoStartEnabled(context))
     override val autoStart: StateFlow<Boolean> = _autoStart.asStateFlow()
 
@@ -190,7 +187,6 @@ class SettingsRepositoryImpl @Inject constructor(
         check(githubTokenStore.put("github_token", normalized)) {
             "无法使用 Android Keystore 安全保存 GitHub Token"
         }
-        _githubToken.value = normalized
     }
 
     override fun setAutoStart(enabled: Boolean) {

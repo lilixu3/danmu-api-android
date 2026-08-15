@@ -116,7 +116,6 @@ fun CoreScreen(
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
     val customBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val githubStatus by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
-    val githubToken by viewModel.githubToken.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var viewedVariantKey by rememberSaveable { mutableStateOf<String?>(null) }
     val viewedVariant = ApiVariant.entries.firstOrNull { it.key == viewedVariantKey }
@@ -209,7 +208,7 @@ fun CoreScreen(
     }
     if (viewModel.showGithubTokenDialog) {
         GithubTokenDialog(
-            initialToken = githubToken,
+            tokenConfigured = githubStatus.tokenConfigured,
             status = githubStatus,
             onValidate = viewModel::validateAndSaveGithubToken,
             onClear = viewModel::clearGithubToken,
@@ -776,13 +775,13 @@ private fun UpdateResultDialog(vm: CoreViewModel, names: CoreVariantDisplayNames
 
 @Composable
 private fun GithubTokenDialog(
-    initialToken: String,
+    tokenConfigured: Boolean,
     status: GithubAccountStatus,
     onValidate: (String) -> Unit,
     onClear: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var token by remember(initialToken) { mutableStateOf(initialToken) }
+    var token by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
     AppDialog(
         onDismissRequest = onDismiss,
@@ -797,6 +796,9 @@ private fun GithubTokenDialog(
                 onValueChange = { token = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Personal Access Token") },
+                placeholder = {
+                    if (tokenConfigured) Text("已配置；输入新 Token 以替换")
+                },
                 leadingIcon = { Icon(Icons.Rounded.Key, null) },
                 trailingIcon = {
                     IconButton(onClick = { visible = !visible }) {
@@ -825,7 +827,10 @@ private fun GithubTokenDialog(
             status.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         },
         confirmButton = {
-            Button(onClick = { onValidate(token) }, enabled = !status.isLoading) {
+            Button(
+                onClick = { onValidate(token) },
+                enabled = !status.isLoading && (token.isNotBlank() || !tokenConfigured)
+            ) {
                 if (status.isLoading) {
                     CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(7.dp))
@@ -835,7 +840,7 @@ private fun GithubTokenDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (initialToken.isNotBlank()) {
+                if (tokenConfigured) {
                     TextButton(onClick = onClear) { Text("清空 Token") }
                 }
                 TextButton(onClick = onDismiss) { Text("取消") }

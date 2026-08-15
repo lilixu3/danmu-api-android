@@ -6,6 +6,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal object CacheClearProtocol {
+    data class Response(
+        val success: Boolean?,
+        val message: String?,
+        val clearedItems: Set<String>?
+    )
+
     private val selectiveMarkers = listOf(
         "clearActions",
         "Array.isArray",
@@ -34,9 +40,21 @@ internal object CacheClearProtocol {
             .toString()
     }
 
-    fun parseClearedItems(raw: String): Set<String>? {
-        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
-        val cleared = root.optJSONObject("clearedItems") ?: return null
-        return cleared.keys().asSequence().toSet()
+    fun parseResponse(raw: String): Response {
+        val root = runCatching { JSONObject(raw) }.getOrNull()
+            ?: return Response(success = null, message = null, clearedItems = null)
+        val success = if (root.has("success") && !root.isNull("success")) {
+            root.optBoolean("success")
+        } else {
+            null
+        }
+        val message = root.optString("message")
+            .ifBlank { root.optString("errorMessage") }
+            .takeIf { it.isNotBlank() }
+        val cleared = root.optJSONObject("clearedItems")
+            ?.keys()
+            ?.asSequence()
+            ?.toSet()
+        return Response(success = success, message = message, clearedItems = cleared)
     }
 }

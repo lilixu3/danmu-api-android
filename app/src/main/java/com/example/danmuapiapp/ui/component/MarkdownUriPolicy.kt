@@ -20,8 +20,17 @@ internal object MarkdownUriPolicy {
     private fun parseAbsoluteUri(value: String): URI? {
         val normalized = value.trim()
         if (normalized.isEmpty() || normalized.any { it.isISOControl() }) return null
-        return runCatching { URI(normalized) }
-            .getOrNull()
+        return (runCatching { URI(normalized) }.getOrNull() ?: run {
+            val separator = normalized.indexOf(':')
+            if (separator <= 0) return null
+            runCatching {
+                URI(
+                    normalized.substring(0, separator),
+                    normalized.substring(separator + 1),
+                    null
+                )
+            }.getOrNull()
+        })
             ?.takeIf(URI::isAbsolute)
     }
 }

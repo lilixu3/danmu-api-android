@@ -27,8 +27,10 @@ import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.AppBackupPreview
+import com.example.danmuapiapp.data.service.AppBackupCodec
 import com.example.danmuapiapp.data.service.AppBackupSection
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,14 +66,19 @@ fun BackupRestoreScreen(
         val content = pendingExportContent
         pendingExportContent = null
         if (uri == null || content == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                output.write(content.toByteArray(Charsets.UTF_8))
-            } ?: error("无法写入目标文件")
-        }.onSuccess {
-            viewModel.postMessage("导出成功")
-        }.onFailure {
-            viewModel.postMessage("导出失败：${it.message}")
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                    } ?: error("无法写入目标文件")
+                }
+                viewModel.postMessage("导出成功")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("导出失败：${error.message}")
+            }
         }
     }
 
@@ -79,15 +86,20 @@ fun BackupRestoreScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                input.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
-            }.orEmpty()
-        }.onSuccess { content ->
-            pendingImportContent = content
-            showImportConfirmDialog = true
-        }.onFailure {
-            viewModel.postMessage("导入失败：${it.message}")
+        scope.launch {
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        AppBackupCodec.readUtf8(input, maxBytes = 2 * 1024 * 1024, label = ".env 文件")
+                    } ?: error("无法读取 .env 文件")
+                }
+                pendingImportContent = content
+                showImportConfirmDialog = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("导入失败：${error.message}")
+            }
         }
     }
 
@@ -97,14 +109,19 @@ fun BackupRestoreScreen(
         val content = pendingFavoriteExportContent
         pendingFavoriteExportContent = null
         if (uri == null || content == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                output.write(content.toByteArray(Charsets.UTF_8))
-            } ?: error("无法写入目标文件")
-        }.onSuccess {
-            viewModel.postMessage("收藏数据导出成功")
-        }.onFailure {
-            viewModel.postMessage("收藏数据导出失败：${it.message}")
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                    } ?: error("无法写入目标文件")
+                }
+                viewModel.postMessage("收藏数据导出成功")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("收藏数据导出失败：${error.message}")
+            }
         }
     }
 
@@ -112,15 +129,20 @@ fun BackupRestoreScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                input.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
-            }.orEmpty()
-        }.onSuccess { content ->
-            pendingFavoriteImportContent = content
-            showFavoriteImportConfirmDialog = true
-        }.onFailure {
-            viewModel.postMessage("收藏数据导入失败：${it.message}")
+        scope.launch {
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        AppBackupCodec.readUtf8(input, maxBytes = 8 * 1024 * 1024, label = "收藏文件")
+                    } ?: error("无法读取收藏文件")
+                }
+                pendingFavoriteImportContent = content
+                showFavoriteImportConfirmDialog = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("收藏数据导入失败：${error.message}")
+            }
         }
     }
 
@@ -130,14 +152,19 @@ fun BackupRestoreScreen(
         val content = pendingFullExportContent
         pendingFullExportContent = null
         if (uri == null || content == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                output.write(content.toByteArray(Charsets.UTF_8))
-            } ?: error("无法写入目标文件")
-        }.onSuccess {
-            viewModel.postMessage("完整备份已导出")
-        }.onFailure {
-            viewModel.postMessage("导出失败：${it.message}")
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(content.toByteArray(Charsets.UTF_8))
+                    } ?: error("无法写入目标文件")
+                }
+                viewModel.postMessage("完整备份已导出")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("导出失败：${error.message}")
+            }
         }
     }
 
@@ -145,21 +172,30 @@ fun BackupRestoreScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                ?: error("无法读取文件")
-        }.onSuccess { content ->
-            viewModel.inspectFullBackup(content).fold(
-                onSuccess = { preview ->
-                    pendingFullImportContent = content
-                    fullBackupPreview = preview
-                    selectedRestoreSections = preview.sections
-                    showFullBackupRestoreDialog = true
-                },
-                onFailure = { viewModel.postMessage("完整备份无效：${it.message}") }
-            )
-        }.onFailure {
-            viewModel.postMessage("读取备份失败：${it.message}")
+        scope.launch {
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        AppBackupCodec.readUtf8(input)
+                    } ?: error("无法读取文件")
+                }
+                val previewResult = withContext(Dispatchers.Default) {
+                    viewModel.inspectFullBackup(content)
+                }
+                previewResult.fold(
+                    onSuccess = { preview ->
+                        pendingFullImportContent = content
+                        fullBackupPreview = preview
+                        selectedRestoreSections = preview.sections
+                        showFullBackupRestoreDialog = true
+                    },
+                    onFailure = { viewModel.postMessage("完整备份无效：${it.message}") }
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                viewModel.postMessage("读取备份失败：${error.message}")
+            }
         }
     }
 
@@ -288,8 +324,15 @@ fun BackupRestoreScreen(
                     ) {
                         FilledTonalButton(
                             onClick = {
-                                pendingExportContent = viewModel.exportEnvContent()
-                                exportLauncher.launch(viewModel.buildExportFileName())
+                                scope.launch {
+                                    viewModel.exportEnvContent().fold(
+                                        onSuccess = { content ->
+                                            pendingExportContent = content
+                                            exportLauncher.launch(viewModel.buildExportFileName())
+                                        },
+                                        onFailure = { viewModel.postMessage("读取 .env 失败：${it.message}") }
+                                    )
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(14.dp),
@@ -667,7 +710,7 @@ private fun AppBackupSection.backupLabel(): String = when (this) {
 private fun AppBackupSection.backupDescription(): String = when (this) {
     AppBackupSection.Environment -> ".env 非敏感项，保留本机现有凭据"
     AppBackupSection.Favorites -> "当前模式的收藏、刷新计划与状态"
-    AppBackupSection.AppSettings -> "界面、运行、保活和下载偏好"
+    AppBackupSection.AppSettings -> "界面、端口、保活和下载偏好；保留本机运行模式"
     AppBackupSection.CoreSources -> "各工作目录仓库设置，不包含核心文件"
     AppBackupSection.AccessRules -> "访问模式与黑名单"
 }

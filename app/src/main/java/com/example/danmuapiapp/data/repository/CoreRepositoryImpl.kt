@@ -27,9 +27,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -70,6 +68,8 @@ class CoreRepositoryImpl @Inject constructor(
         private const val CANDIDATE_KEY = "pending_candidate"
         private const val MARKED_STAGING_RETENTION_MS = 60L * 60L * 1000L
         private const val LEGACY_STAGING_RETENTION_MS = 24L * 60L * 60L * 1000L
+        private const val REVISION_VERSION_FAILURE_TTL_MS = 60_000L
+        private const val MAX_REVISION_VERSION_CACHE_ENTRIES = 2_048
     }
 
     private fun logRecoverableWarning(message: String, throwable: Throwable) {
@@ -188,6 +188,9 @@ class CoreRepositoryImpl @Inject constructor(
     private var hasLoadedCoreInfoOnce = false
     private val refreshTicket = AtomicLong(0L)
     private val latestRemoteVersionCache = ConcurrentHashMap<ApiVariant, LatestRemoteVersionCacheEntry>()
+    private val revisionVersionCache = ConcurrentHashMap<String, String>()
+    private val revisionVersionFailureCache = ConcurrentHashMap<String, Long>()
+    private val revisionGlobalsPathCache = ConcurrentHashMap<String, String>()
 
     init {
         workDirPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
@@ -264,12 +267,15 @@ class CoreRepositoryImpl @Inject constructor(
 
     override suspend fun confirmCandidateCore(
         variant: ApiVariant,
-        runMode: RunMode
+        runMode: RunMode,
+        expectedInstalledAtMs: Long
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             mutationMutex.withLock {
                 val candidate = loadPersistedCandidate() ?: return@withLock false
-                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key) {
+                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key ||
+                    candidate.installedAtMs != expectedInstalledAtMs
+                ) {
                     return@withLock false
                 }
                 clearCandidate(candidate, deleteBackup = true)
@@ -280,12 +286,15 @@ class CoreRepositoryImpl @Inject constructor(
 
     override suspend fun restoreCandidateCore(
         variant: ApiVariant,
-        runMode: RunMode
+        runMode: RunMode,
+        expectedInstalledAtMs: Long
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             mutationMutex.withLock {
                 val candidate = loadPersistedCandidate() ?: return@withLock false
-                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key) {
+                if (candidate.variantKey != variant.key || candidate.runModeKey != runMode.key ||
+                    candidate.installedAtMs != expectedInstalledAtMs
+                ) {
                     return@withLock false
                 }
                 if (candidate.backupDirPath.isBlank()) {
@@ -452,6 +461,15 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun refreshCoreInfoAndAwait() {
+        refreshCoreInfo()
+        while (true) {
+            val activeRefresh = refreshAllJob ?: return
+            activeRefresh.join()
+            if (refreshAllJob === activeRefresh) return
+        }
+    }
+
     private data class LoadedCoreState(
         val info: CoreInfo,
         val localMetadata: CoreSourceMetadata?
@@ -485,7 +503,8 @@ class CoreRepositoryImpl @Inject constructor(
                 sourceMismatch = sourceMismatch,
                 sourceStatus = sourceStatus,
                 desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch },
-                pullRequestNumbers = localMetadata?.pullRequestNumbers.orEmpty()
+                pullRequestNumbers = localMetadata?.pullRequestNumbers.orEmpty(),
+                sourceCommitSha = localMetadata?.commitSha.orEmpty()
             ),
             localMetadata = localMetadata
         )
@@ -878,6 +897,8 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                     else it
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 logRecoverableWarning("checkAndMarkUpdate(${variant.key}) 失败", e)
             }
@@ -887,7 +908,11 @@ class CoreRepositoryImpl @Inject constructor(
     override suspend fun checkAllUpdates() {
         withContext(Dispatchers.IO) {
             ApiVariant.entries.forEach { variant ->
-                try { checkAndMarkUpdate(variant) } catch (e: Exception) {
+                try {
+                    checkAndMarkUpdate(variant)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
                     logRecoverableWarning("checkAllUpdates: ${variant.key} 更新检查失败", e)
                 }
             }
@@ -965,7 +990,7 @@ class CoreRepositoryImpl @Inject constructor(
         pageSize: Int,
         query: String
     ): Result<CoreRevisionPage> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             require(page > 0) { "页码无效" }
             require(pageSize in 1..100) { "每页数量无效" }
             val repo = resolveRepo(variant)
@@ -1008,21 +1033,22 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                 )
             }
-            val versionLookupLimit = Semaphore(6)
-            val commits = revisionPage.revisions.map { revision ->
-                async {
-                    versionLookupLimit.withPermit {
-                        revision.copy(
-                            version = fetchRevisionVersion(repo, revision.commitSha).orEmpty()
-                        )
-                    }
-                }
-            }.awaitAll()
             CoreRevisionPage(
-                revisions = commits,
+                revisions = revisionPage.revisions,
                 page = page,
                 hasNextPage = revisionPage.hasNextPage
             )
+        }
+    }
+
+    override suspend fun fetchRevisionVersion(
+        variant: ApiVariant,
+        revision: CoreRevision
+    ): Result<String?> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置核心仓库")
+            resolveRevisionVersion(repo, revision.commitSha)
         }
     }
 
@@ -1030,7 +1056,7 @@ class CoreRepositoryImpl @Inject constructor(
         variant: ApiVariant,
         revision: CoreRevision
     ): Result<CoreRevisionDetails> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val repo = resolveRepo(variant)
             if (repo.isBlank()) throw IOException("请先配置核心仓库")
             fetchRevisionDetailsFromGithub(repo, revision)
@@ -1043,15 +1069,20 @@ class CoreRepositoryImpl @Inject constructor(
         page: Int,
         pageSize: Int,
         filter: CorePullRequestFilter,
-        query: String
+        query: String,
+        forceRefresh: Boolean
     ): Result<CorePullRequestPage> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val repo = resolveRepo(variant)
             if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
             val branch = resolvePullRequestBaseBranch(variant, repo)
             val locallyMergedPullRequestNumbers = _coreInfoList.value
                 .firstOrNull { it.variant == variant && it.isReady }
                 ?.pullRequestNumbers
+                .orEmpty()
+            val installedCommitSha = _coreInfoList.value
+                .firstOrNull { it.variant == variant && it.isReady }
+                ?.sourceCommitSha
                 .orEmpty()
             githubPullRequestService.list(
                 repository = repo,
@@ -1060,7 +1091,31 @@ class CoreRepositoryImpl @Inject constructor(
                 pageSize = pageSize,
                 filter = filter,
                 locallyMergedPullRequestNumbers = locallyMergedPullRequestNumbers,
-                query = query
+                installedCommitSha = installedCommitSha,
+                query = query,
+                forceRefresh = forceRefresh
+            )
+        }
+    }
+
+    override suspend fun enrichPullRequestListItem(
+        variant: ApiVariant,
+        pullRequest: CorePullRequest,
+        allowFirstContributionLookup: Boolean,
+        allowInclusionLookup: Boolean
+    ): Result<CorePullRequest> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+            val coreInfo = _coreInfoList.value
+                .firstOrNull { it.variant == variant && it.isReady }
+            githubPullRequestService.enrichListItem(
+                repository = repo,
+                pullRequest = pullRequest,
+                installedCommitSha = coreInfo?.sourceCommitSha.orEmpty(),
+                locallyMergedNumbers = coreInfo?.pullRequestNumbers.orEmpty().toSet(),
+                allowFirstContributionLookup = allowFirstContributionLookup,
+                allowInclusionLookup = allowInclusionLookup
             )
         }
     }
@@ -1069,10 +1124,17 @@ class CoreRepositoryImpl @Inject constructor(
         variant: ApiVariant,
         pullRequestNumber: Int
     ): Result<CorePullRequest> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val repo = resolveRepo(variant)
             if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
-            githubPullRequestService.get(repo, pullRequestNumber)
+            val coreInfo = _coreInfoList.value
+                .firstOrNull { it.variant == variant && it.isReady }
+            githubPullRequestService.getWithCurrentCoreInclusion(
+                repository = repo,
+                pullRequestNumber = pullRequestNumber,
+                installedCommitSha = coreInfo?.sourceCommitSha.orEmpty(),
+                locallyMergedPullRequestNumbers = coreInfo?.pullRequestNumbers.orEmpty()
+            )
         }
     }
 
@@ -1082,7 +1144,7 @@ class CoreRepositoryImpl @Inject constructor(
         page: Int,
         pageSize: Int
     ): Result<CorePullRequestFilePage> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val repo = resolveRepo(variant)
             if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
             githubPullRequestService.listFiles(
@@ -1107,6 +1169,22 @@ class CoreRepositoryImpl @Inject constructor(
             val branch = resolvePullRequestBaseBranch(variant, repo)
             val mode = currentRunMode()
             val location = getCoreLocation(variant, mode)
+            val localMetadata = if (hasValidCore(variant, mode)) {
+                readLocalCoreSourceMetadata(variant, mode)
+            } else {
+                null
+            }
+            val canInheritInstalledStack = localMetadata != null &&
+                localMetadata.repo.equals(repo, ignoreCase = true) &&
+                localMetadata.branch.equals(branch, ignoreCase = true)
+            val installedCommitSha = localMetadata
+                ?.takeIf { canInheritInstalledStack }
+                ?.commitSha
+                .orEmpty()
+            val effectivePullRequestNumbers = buildList {
+                if (canInheritInstalledStack) addAll(localMetadata.pullRequestNumbers)
+                addAll(pullRequestNumbers)
+            }.distinct()
             val staging = createCoreTempDir(location.normalDir, "staging")
             stagingDir = staging
             writeOperationMarker(staging, operationId)
@@ -1114,8 +1192,9 @@ class CoreRepositoryImpl @Inject constructor(
             val merged = pullRequestMergeService.buildInto(
                 repository = repo,
                 baseBranch = branch,
-                pullRequestNumbers = pullRequestNumbers,
-                destination = staging
+                pullRequestNumbers = effectivePullRequestNumbers,
+                destination = staging,
+                preferredBaseCommitSha = installedCommitSha
             ) { stage, progress ->
                 updateDownloadProgress(
                     variant = variant,
@@ -1164,7 +1243,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun resolvePullRequestBaseBranch(variant: ApiVariant, repository: String): String {
+    private suspend fun resolvePullRequestBaseBranch(variant: ApiVariant, repository: String): String {
         return resolveBranch(variant)?.takeIf { it.isNotBlank() }
             ?: githubPullRequestService.resolveDefaultBranch(repository)
     }
@@ -1300,7 +1379,14 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                 }
                 RuntimeDependencyHealthChecker.clearPendingIssue(context, pending.repair.variant)
-                refreshCoreInfo()
+                if (
+                    pending.type == PendingCoreMutationType.ReplaceCore &&
+                    pending.repair.actionLabel in setOf("安装", "更新")
+                ) {
+                    refreshLatestInstalledCoreState(pending.repair.variant)
+                } else {
+                    refreshCoreInfo()
+                }
                 clearPendingCoreMutation(operationId, deleteStaging = true)
                 finishCoreOperation(operationId)
                 Result.success(Unit)
@@ -1533,7 +1619,7 @@ class CoreRepositoryImpl @Inject constructor(
         return fetchCommitHistoryFromAtom(repo, branchCandidates)
     }
 
-    private fun fetchRevisionCommits(
+    private suspend fun fetchRevisionCommits(
         repo: String,
         branchCandidates: List<String>,
         includeDefaultBranchFallback: Boolean,
@@ -1560,7 +1646,7 @@ class CoreRepositoryImpl @Inject constructor(
             }
         }.distinct()
 
-        val payload = githubRemoteService.requestTextResponse(
+        val payload = githubRemoteService.requestTextResponseCancellable(
             urls = urls,
             headers = githubApiHeaders(),
             bodyValidator = { body ->
@@ -1583,14 +1669,14 @@ class CoreRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun searchRevisionCommitsByAuthorOrKeyword(
+    private suspend fun searchRevisionCommitsByAuthorOrKeyword(
         repo: String,
         branchCandidates: List<String>,
         includeDefaultBranchFallback: Boolean,
         query: String,
         page: Int,
         pageSize: Int,
-        keywordSearch: () -> CoreRevisionPage
+        keywordSearch: suspend () -> CoreRevisionPage
     ): CoreRevisionPage {
         val authorQuery = CoreRevisionSearch.authorQuery(query) ?: return keywordSearch()
         val authorPage = fetchRevisionCommits(
@@ -1619,14 +1705,14 @@ class CoreRepositoryImpl @Inject constructor(
         return keywordSearch()
     }
 
-    private fun searchRevisionCommits(
+    private suspend fun searchRevisionCommits(
         repo: String,
         query: String,
         page: Int,
         pageSize: Int
     ): CoreRevisionPage {
         val githubQuery = CoreRevisionSearch.query(repo, query)
-        val payload = githubRemoteService.requestTextResponse(
+        val payload = githubRemoteService.requestTextResponseCancellable(
             urls = apiUrlCandidates(
                 "search/commits?q=${encodeUrlPart(githubQuery)}&sort=committer-date&order=desc" +
                     "&per_page=$pageSize&page=$page"
@@ -1657,7 +1743,7 @@ class CoreRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun searchRevisionCommitsOnBranch(
+    private suspend fun searchRevisionCommitsOnBranch(
         repo: String,
         branchCandidates: List<String>,
         query: String,
@@ -1717,19 +1803,39 @@ class CoreRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun fetchRevisionVersion(repo: String, commitSha: String): String? {
-        CoreRevisionVersionResolver.globalsPaths(commitSha).firstNotNullOfOrNull { path ->
-            requestMapped(
-                urls = rawUrlCandidates(repo, path),
+    private suspend fun resolveRevisionVersion(repo: String, commitSha: String): String? {
+        val normalizedRepo = repo.trim().lowercase()
+        val normalizedSha = commitSha.trim().lowercase()
+        val cacheKey = "$normalizedRepo:$normalizedSha"
+        revisionVersionCache[cacheKey]?.let { return it }
+        val now = System.currentTimeMillis()
+        revisionVersionFailureCache[cacheKey]?.let { failedAt ->
+            if (now - failedAt < REVISION_VERSION_FAILURE_TTL_MS) return null
+            revisionVersionFailureCache.remove(cacheKey, failedAt)
+        }
+
+        val preferredPath = revisionGlobalsPathCache[normalizedRepo]
+        val filePaths = buildList {
+            preferredPath?.let(::add)
+            addAll(CoreRevisionVersionResolver.globalsFilePaths())
+        }.distinct()
+        filePaths.forEach { filePath ->
+            val version = githubRemoteService.requestMappedCancellable(
+                urls = rawUrlCandidates(repo, "$commitSha/$filePath"),
                 headers = mapOf("User-Agent" to USER_AGENT)
             ) { body -> CoreRevisionVersionResolver.parseGlobalsVersion(body) }
-        }?.let { return it }
+            if (version != null) {
+                revisionGlobalsPathCache[normalizedRepo] = filePath
+                cacheRevisionVersion(cacheKey, version)
+                return version
+            }
+        }
 
         // raw.githubusercontent.com cannot read private repositories with our
         // API-only credential. Fall back to the official Contents API at the
         // exact commit; the response is requested as raw globals.js source.
-        return CoreRevisionVersionResolver.globalsFilePaths().firstNotNullOfOrNull { filePath ->
-            requestMapped(
+        filePaths.forEach { filePath ->
+            val version = githubRemoteService.requestMappedCancellable(
                 urls = apiUrlCandidates(
                     "repos/$repo/contents/$filePath?ref=${encodeUrlPart(commitSha)}"
                 ),
@@ -1737,10 +1843,26 @@ class CoreRepositoryImpl @Inject constructor(
                     accept = "application/vnd.github.raw+json"
                 )
             ) { body -> CoreRevisionVersionResolver.parseGlobalsVersion(body) }
+            if (version != null) {
+                revisionGlobalsPathCache[normalizedRepo] = filePath
+                cacheRevisionVersion(cacheKey, version)
+                return version
+            }
         }
+        revisionVersionFailureCache[cacheKey] = now
+        return null
     }
 
-    private fun fetchRevisionDetailsFromGithub(
+    private fun cacheRevisionVersion(cacheKey: String, version: String) {
+        if (revisionVersionCache.size >= MAX_REVISION_VERSION_CACHE_ENTRIES) {
+            revisionVersionCache.clear()
+            revisionVersionFailureCache.clear()
+        }
+        revisionVersionCache[cacheKey] = version
+        revisionVersionFailureCache.remove(cacheKey)
+    }
+
+    private suspend fun fetchRevisionDetailsFromGithub(
         repo: String,
         revision: CoreRevision
     ): CoreRevisionDetails? {
@@ -1750,14 +1872,14 @@ class CoreRepositoryImpl @Inject constructor(
         var deletions = 0
         var page = 1
         while (true) {
-            val pagePayload = requestMapped(
+            val pagePayload = githubRemoteService.requestMappedCancellable(
                 urls = apiUrlCandidates(
                     "repos/$repo/commits/${encodeUrlPart(revision.commitSha)}?per_page=100&page=$page"
                 ),
                 headers = githubApiHeaders()
             ) { body ->
                 val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
-                    ?: return@requestMapped null
+                    ?: return@requestMappedCancellable null
                 val filesArray = root["files"] as? JsonArray ?: JsonArray(emptyList())
                 val pageFiles = filesArray.mapNotNull { element ->
                     val file = element as? JsonObject ?: return@mapNotNull null
@@ -2011,15 +2133,19 @@ class CoreRepositoryImpl @Inject constructor(
         release: GithubRelease,
         versionHint: String?
     ): CoreSourceMetadata? {
-        val branch = resolveBranch(variant) ?: return null
         val repo = resolveRepo(variant)
         if (repo.isBlank()) return null
-        val commitSha = release.commitSha.ifBlank {
+        val archiveCommitSha = release.commitSha.ifBlank {
             extractArchiveCommitSha(release.zipballUrl).orEmpty()
+        }
+        val commitSha = archiveCommitSha.ifBlank {
+            release.tagName.takeIf { it.isNotBlank() }
+                ?.let { tag -> fetchBranchHead(repo, tag)?.sha }
+                .orEmpty()
         }
         return CoreSourceMetadata(
             repo = repo,
-            branch = branch,
+            branch = resolveBranch(variant).orEmpty(),
             commitSha = commitSha,
             commitPublishedAt = release.publishedAt,
             versionLabel = release.version.ifBlank { versionHint.orEmpty() }
@@ -2109,18 +2235,55 @@ class CoreRepositoryImpl @Inject constructor(
             val remoteSource = resolveRemoteSource(variant)
                 ?: throw IOException("无法获取版本信息")
             val release = remoteSource.release
-            val versionHint = remoteSource.metadata?.versionLabel?.ifBlank { null }
+            val sourceMetadata = remoteSource.metadata ?: buildReleaseInstallMetadata(
+                variant = variant,
+                release = release,
+                versionHint = release.version.ifBlank { release.tagName }.ifBlank { null }
+            )
+            val versionHint = sourceMetadata?.versionLabel?.ifBlank { null }
+                ?: release.version.ifBlank { release.tagName }.ifBlank { null }
             downloadAndExtract(
                 operationId = operationId,
                 variant = variant,
                 zipUrl = release.zipballUrl,
                 versionHint = versionHint,
                 actionLabel = actionLabel,
-                sourceMetadata = remoteSource.metadata
+                sourceMetadata = sourceMetadata
             )
-            persistResolvedCustomSourceIfNeeded(variant, remoteSource.metadata)
-            refreshCoreInfo()
+            persistResolvedCustomSourceIfNeeded(variant, sourceMetadata)
+            refreshLatestInstalledCoreState(variant)
         }
+    }
+
+    private fun refreshLatestInstalledCoreState(variant: ApiVariant) {
+        latestRemoteVersionCache.remove(variant)
+        _coreInfoList.value = _coreInfoList.value.map { info ->
+            if (info.variant == variant) {
+                info.copy(hasVersionUpdate = false, availableVersion = null)
+            } else {
+                info
+            }
+        }
+        refreshCoreInfo()
+    }
+
+    private fun buildReleaseInstallMetadata(
+        variant: ApiVariant,
+        release: GithubRelease,
+        versionHint: String?
+    ): CoreSourceMetadata? {
+        val repo = resolveRepo(variant)
+        if (repo.isBlank()) return null
+        val commitSha = release.commitSha.ifBlank {
+            extractArchiveCommitSha(release.zipballUrl).orEmpty()
+        }
+        return CoreSourceMetadata(
+            repo = repo,
+            branch = resolveBranch(variant).orEmpty(),
+            commitSha = commitSha,
+            commitPublishedAt = release.publishedAt,
+            versionLabel = release.version.ifBlank { versionHint.orEmpty() }
+        )
     }
 
     private fun persistResolvedCustomSourceIfNeeded(
@@ -2155,6 +2318,7 @@ class CoreRepositoryImpl @Inject constructor(
         val location = getCoreLocation(variant, mode)
         val targetDir = location.normalDir
         val stagingDir = createCoreTempDir(targetDir, "staging")
+        var effectiveSourceMetadata = sourceMetadata
         writeOperationMarker(stagingDir, operationId)
 
         updateDownloadProgress(
@@ -2241,7 +2405,16 @@ class CoreRepositoryImpl @Inject constructor(
                     }
 
                     val extracted = extractDanmuFolder(streamWithProgress, stagingDir)
-                    if (!extracted) throw IOException("核心压缩包中未找到 danmu_api 或 danmu-api 目录")
+                    if (!extracted.extractedAny) {
+                        throw IOException("核心压缩包中未找到 danmu_api 或 danmu-api 目录")
+                    }
+                    if (effectiveSourceMetadata?.commitSha.isNullOrBlank() &&
+                        !extracted.commitSha.isNullOrBlank()
+                    ) {
+                        effectiveSourceMetadata = effectiveSourceMetadata?.copy(
+                            commitSha = extracted.commitSha
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 runCatching { stagingDir.deleteRecursively() }
@@ -2266,7 +2439,7 @@ class CoreRepositoryImpl @Inject constructor(
                 mode = mode,
                 rootDirPath = location.rootDirPath,
                 versionHint = versionHint,
-                sourceMetadata = sourceMetadata
+                sourceMetadata = effectiveSourceMetadata
             )
         } catch (e: Exception) {
             if (e !is CoreDependencyRepairRequiredException) {
@@ -2715,13 +2888,22 @@ class CoreRepositoryImpl @Inject constructor(
         return VersionParts(core = core, preRelease = preRelease)
     }
 
-    private fun extractDanmuFolder(zipStream: InputStream, outDir: File): Boolean {
+    private data class CoreArchiveExtraction(
+        val extractedAny: Boolean,
+        val commitSha: String?
+    )
+
+    private fun extractDanmuFolder(zipStream: InputStream, outDir: File): CoreArchiveExtraction {
         var extractedAny = false
+        var commitSha: String? = null
 
         ZipInputStream(BufferedInputStream(zipStream)).use { zis ->
             while (true) {
                 val entry = zis.nextEntry ?: break
                 val name = entry.name ?: ""
+                if (commitSha == null) {
+                    commitSha = CoreArchiveSourceResolver.inferCommitSha(name)
+                }
                 val rel = resolveDanmuRelativePath(name)
                 val rootFileName = resolveRootLevelFileName(name)
                 if (rel == null && rootFileName == null) {
@@ -2752,7 +2934,7 @@ class CoreRepositoryImpl @Inject constructor(
                 zis.closeEntry()
             }
         }
-        return extractedAny
+        return CoreArchiveExtraction(extractedAny = extractedAny, commitSha = commitSha)
     }
 
     private fun resolveRootLevelFileName(entryName: String): String? {

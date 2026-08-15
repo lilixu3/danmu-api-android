@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -95,11 +96,13 @@ internal fun CoreRevisionHistoryPanel(
                     page = viewModel.revisionPage,
                     hasNextPage = viewModel.revisionHasNextPage,
                     isLoading = viewModel.isLoadingHistory,
+                    loadingVersionShas = viewModel.revisionVersionLoadingShas,
                     error = viewModel.revisionHistoryError,
                     onQueryChange = viewModel::updateRevisionSearchQuery,
                     onSearch = viewModel::submitRevisionSearch,
                     onPreviousPage = viewModel::previousRevisionPage,
                     onNextPage = viewModel::nextRevisionPage,
+                    onVisible = viewModel::onRevisionVisible,
                     onOpen = viewModel::openRevisionDetails,
                     onRollback = viewModel::requestRollback
                 )
@@ -108,6 +111,7 @@ internal fun CoreRevisionHistoryPanel(
                     revision = selected,
                     details = details,
                     isLoading = viewModel.isLoadingRevisionDetails,
+                    isVersionLoading = selected.commitSha in viewModel.revisionVersionLoadingShas,
                     error = viewModel.revisionDetailsError,
                     onRollback = { viewModel.requestRollback(selected) }
                 )
@@ -121,7 +125,14 @@ internal fun CoreRevisionHistoryPanel(
             style = AppDialogStyle.Confirm,
             tone = AppDialogTone.Warning,
             icon = { Icon(Icons.Rounded.Restore, null) },
-            title = { Text("回退到 ${revision.displayVersion}？") },
+            title = {
+                val target = if (revision.commitSha in viewModel.revisionVersionLoadingShas) {
+                    "提交 ${revision.shortSha}"
+                } else {
+                    revision.displayVersion
+                }
+                Text("回退到 $target？")
+            },
             text = {
                 Text("将用提交 ${revision.shortSha} 替换当前核心。运行中的对应核心会先安全停止，完成后自动重启。")
             },
@@ -190,11 +201,13 @@ private fun RevisionList(
     page: Int,
     hasNextPage: Boolean,
     isLoading: Boolean,
+    loadingVersionShas: Set<String>,
     error: String?,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    onVisible: (CoreRevision) -> Unit,
     onOpen: (CoreRevision) -> Unit,
     onRollback: (CoreRevision) -> Unit
 ) {
@@ -241,7 +254,13 @@ private fun RevisionList(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(revisions, key = { it.commitSha }) { revision ->
-                        RevisionRow(revision, onOpen, onRollback)
+                        RevisionRow(
+                            revision = revision,
+                            isVersionLoading = revision.commitSha in loadingVersionShas,
+                            onVisible = { onVisible(revision) },
+                            onOpen = onOpen,
+                            onRollback = onRollback
+                        )
                     }
                 }
             }
@@ -285,9 +304,14 @@ private fun EmptyRevisionState(message: String) {
 @Composable
 private fun RevisionRow(
     revision: CoreRevision,
+    isVersionLoading: Boolean,
+    onVisible: () -> Unit,
     onOpen: (CoreRevision) -> Unit,
     onRollback: (CoreRevision) -> Unit
 ) {
+    LaunchedEffect(revision.commitSha) {
+        onVisible()
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -306,7 +330,7 @@ private fun RevisionRow(
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Text(
-                    formatRevisionVersion(revision),
+                    formatRevisionVersion(revision, isVersionLoading),
                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -339,6 +363,7 @@ private fun RevisionDetails(
     revision: CoreRevision,
     details: CoreRevisionDetails?,
     isLoading: Boolean,
+    isVersionLoading: Boolean,
     error: String?,
     onRollback: () -> Unit
 ) {
@@ -358,10 +383,16 @@ private fun RevisionDetails(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                item(key = "commit-summary") {
-                    RevisionCommitSummary(revision = revision, details = details)
+                item(key = "commit-summary", contentType = "revision-summary") {
+                    RevisionCommitSummary(
+                        revision = revision,
+                        isVersionLoading = isVersionLoading
+                    )
                 }
-                item(key = "file-heading") {
+                item(key = "commit-metrics", contentType = "revision-metrics") {
+                    RevisionDiffMetrics(details = details)
+                }
+                item(key = "file-heading", contentType = "diff-heading") {
                     Text(
                         "变更文件",
                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
@@ -369,7 +400,11 @@ private fun RevisionDetails(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-                items(details.files, key = { "${it.status}:${it.path}" }) { file ->
+                items(
+                    items = details.files,
+                    key = { "${it.status}:${it.path}" },
+                    contentType = { "core-diff-file" }
+                ) { file ->
                     CoreFileDiff(
                         file = file,
                         expanded = expandedFiles[file.path] == true,
@@ -402,18 +437,17 @@ private fun RevisionDetails(
 @Composable
 private fun RevisionCommitSummary(
     revision: CoreRevision,
-    details: CoreRevisionDetails
+    isVersionLoading: Boolean
 ) {
     val body = revision.message
         .lineSequence()
         .drop(1)
         .joinToString("\n")
         .trim()
-    val addedColor = diffAddedColor()
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                formatRevisionVersion(revision),
+                formatRevisionVersion(revision, isVersionLoading),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -444,11 +478,15 @@ private fun RevisionCommitSummary(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DiffMetric(Icons.Rounded.Code, "${details.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
-            DiffMetric(Icons.Rounded.Add, "+${details.additions}", addedColor)
-            DiffMetric(Icons.Rounded.DeleteOutline, "-${details.deletions}", MaterialTheme.colorScheme.error)
-        }
+    }
+}
+
+@Composable
+private fun RevisionDiffMetrics(details: CoreRevisionDetails) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        DiffMetric(Icons.Rounded.Code, "${details.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
+        DiffMetric(Icons.Rounded.Add, "+${details.additions}", diffAddedColor())
+        DiffMetric(Icons.Rounded.DeleteOutline, "-${details.deletions}", MaterialTheme.colorScheme.error)
     }
 }
 
@@ -595,7 +633,11 @@ private fun formatCommitTime(raw: String): String {
     }.getOrDefault(raw.take(16).replace('T', ' '))
 }
 
-private fun formatRevisionVersion(revision: CoreRevision): String {
+private fun formatRevisionVersion(
+    revision: CoreRevision,
+    isVersionLoading: Boolean = false
+): String {
+    if (isVersionLoading && revision.version.isBlank()) return "读取中"
     return revision.version.trim().takeIf { it.isNotBlank() }?.let { "v$it" }
         ?: revision.displayVersion
 }

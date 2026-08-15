@@ -44,7 +44,11 @@ object CompatRuntimeGraph {
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)
         val githubPullRequestService = GithubPullRequestService(githubRemoteService)
-        val pullRequestMergeService = PullRequestMergeService(context, githubPullRequestService)
+        val pullRequestMergeService = PullRequestMergeService(
+            context,
+            githubPullRequestService,
+            githubProxyService
+        )
         val runtimeDependencyPackManager = RuntimeDependencyPackManager(
             context = context,
             httpClient = httpClient,

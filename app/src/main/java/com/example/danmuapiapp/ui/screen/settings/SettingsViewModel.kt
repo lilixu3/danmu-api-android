@@ -17,6 +17,7 @@ import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.service.AppBackupPreview
 import com.example.danmuapiapp.data.service.AppBackupSection
 import com.example.danmuapiapp.data.service.AppBackupService
+import com.example.danmuapiapp.data.service.BackupEnvironmentPolicy
 import com.example.danmuapiapp.data.service.DanmuQuickSettingsTileService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
@@ -63,7 +64,9 @@ import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -94,7 +97,6 @@ class SettingsViewModel @Inject constructor(
     val runtimeState = runtimeRepo.runtimeState
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val githubProxy = settingsRepo.githubProxy
-    val githubToken = settingsRepo.githubToken
     val githubAccountStatus = githubAccountService.status
     val customRepo = settingsRepo.customRepo
     val tokenVisible = settingsRepo.tokenVisible
@@ -633,12 +635,6 @@ class SettingsViewModel @Inject constructor(
         return githubProxyService.currentSelectedOption().name
     }
 
-    fun githubTokenSummary(): String {
-        val token = githubToken.value.trim()
-        if (token.isBlank()) return "未配置"
-        return "已配置（${token.length} 位）"
-    }
-
     fun saveGithubToken(token: String) {
         val normalized = token.trim()
         val generation = beginGithubAccountOperation()
@@ -819,23 +815,30 @@ class SettingsViewModel @Inject constructor(
         return "danmu_api_$ts.env"
     }
 
-    fun exportEnvContent(): String {
-        envConfigRepo.reload()
-        return envConfigRepo.rawContent.value.ifBlank { "# DanmuApiApp .env\n" }
+    suspend fun exportEnvContent(): Result<String> {
+        return withContext(Dispatchers.IO) {
+            envConfigRepo.readCurrentRawContent()
+                .map { it.ifBlank { "# DanmuApiApp .env\n" } }
+        }
     }
 
     fun importEnvContent(content: String) {
-        envConfigRepo.saveRawContent(content).fold(
-            onSuccess = {
-                applyRuntimeFromEnv(content)
-                operationMessage = "导入成功，已覆盖当前 .env，建议重启服务"
-                runtimeRepo.addLog(LogLevel.Info, "已导入 .env 配置，建议重启服务")
-            },
-            onFailure = {
-                operationMessage = "导入失败：${it.message ?: "写入 .env 失败"}"
-                runtimeRepo.addLog(LogLevel.Error, "导入 .env 配置失败：${it.message ?: "写入失败"}")
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                envConfigRepo.saveRawContent(content)
             }
-        )
+            result.fold(
+                onSuccess = {
+                    applyRuntimeFromEnv(content)
+                    operationMessage = "导入成功，已覆盖当前 .env，建议重启服务"
+                    runtimeRepo.addLog(LogLevel.Info, "已导入 .env 配置，建议重启服务")
+                },
+                onFailure = {
+                    operationMessage = "导入失败：${it.message ?: "写入 .env 失败"}"
+                    runtimeRepo.addLog(LogLevel.Error, "导入 .env 配置失败：${it.message ?: "写入失败"}")
+                }
+            )
+        }
     }
 
     fun buildFavoriteExportFileName(): String {
@@ -853,8 +856,10 @@ class SettingsViewModel @Inject constructor(
         isFullBackupOperating = true
         return try {
             withContext(Dispatchers.IO) {
-                envConfigRepo.reload()
-                appBackupService.createBackup(sections, envConfigRepo.rawContent.value)
+                envConfigRepo.readCurrentRawContent().fold(
+                    onSuccess = { appBackupService.createBackup(sections, it) },
+                    onFailure = { Result.failure(it) }
+                )
             }
         } finally {
             isFullBackupOperating = false
@@ -867,37 +872,41 @@ class SettingsViewModel @Inject constructor(
         if (isFullBackupOperating) return
         viewModelScope.launch {
             isFullBackupOperating = true
-            val wasRunning = runtimeState.value.status == ServiceStatus.Running
-            envConfigRepo.reload()
-            val currentEnv = envConfigRepo.rawContent.value
-            val result = withContext(Dispatchers.IO) {
-                appBackupService.restore(content, sections, currentEnv)
-            }
-            result.fold(
-                onSuccess = { restored ->
-                    val envWrite = restored.mergedEnvironment?.let(envConfigRepo::saveRawContent)
-                        ?: Result.success(Unit)
-                    envWrite.fold(
-                        onSuccess = {
-                            restored.mergedEnvironment?.let(::applyRuntimeFromEnv)
-                            settingsRepo.reloadFromStorage()
-                            coreRepo.refreshCoreInfo()
-                            if (wasRunning) runtimeRepo.restartService()
-                            val favoriteText = restored.favoriteCount?.let { "，$it 项收藏" }.orEmpty()
-                            operationMessage = "完整备份恢复成功$favoriteText" +
-                                if (wasRunning) "，服务正在重启" else "；部分界面设置将在重启 App 后完全生效"
-                            runtimeRepo.addLog(LogLevel.Info, "已恢复完整备份：${restored.restoredSections.joinToString()}")
-                        },
-                        onFailure = { error ->
-                            operationMessage = "备份内容已校验，但 .env 写入失败：${error.message}"
-                        }
-                    )
-                },
-                onFailure = { error ->
-                    operationMessage = "完整备份恢复失败：${error.message ?: "文件无效"}"
+            try {
+                val wasRunning = runtimeState.value.status == ServiceStatus.Running
+                val currentEnv = withContext(Dispatchers.IO) {
+                    envConfigRepo.readCurrentRawContent().getOrThrow()
                 }
-            )
-            isFullBackupOperating = false
+                val result = withContext(Dispatchers.IO) {
+                    appBackupService.restore(
+                        raw = content,
+                        selectedSections = sections,
+                        currentEnvContent = currentEnv,
+                        environmentWriter = envConfigRepo::saveRawContent
+                    )
+                }
+                result.fold(
+                    onSuccess = { restored ->
+                        restored.mergedEnvironment?.let(::applyRuntimeFromEnv)
+                        settingsRepo.reloadFromStorage()
+                        coreRepo.refreshCoreInfo()
+                        if (wasRunning) runtimeRepo.restartService()
+                        val favoriteText = restored.favoriteCount?.let { "，$it 项收藏" }.orEmpty()
+                        operationMessage = "完整备份恢复成功$favoriteText" +
+                            if (wasRunning) "，服务正在重启" else "；部分界面设置将在重启 App 后完全生效"
+                        runtimeRepo.addLog(LogLevel.Info, "已恢复完整备份：${restored.restoredSections.joinToString()}")
+                    },
+                    onFailure = { error ->
+                        operationMessage = "完整备份恢复失败：${error.message ?: "文件无效"}"
+                    }
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                operationMessage = "完整备份恢复失败：${error.message ?: "无法读取当前配置"}"
+            } finally {
+                isFullBackupOperating = false
+            }
         }
     }
 
@@ -989,27 +998,33 @@ class SettingsViewModel @Inject constructor(
             }
             isWebDavOperating = true
             webDavOperatingText = "正在上传安全完整备份到 WebDAV..."
-            envConfigRepo.reload()
-            val content = envConfigRepo.rawContent.value
-            val fullBundle = withContext(Dispatchers.IO) {
-                appBackupService.createBackup(AppBackupSection.entries.toSet(), content)
-            }
-            if (fullBundle.isFailure) {
-                operationMessage = "WebDAV 备份失败：${fullBundle.exceptionOrNull()?.message}"
+            try {
+                val fullBundle = withContext(Dispatchers.IO) {
+                    envConfigRepo.readCurrentRawContent().fold(
+                        onSuccess = { content ->
+                            appBackupService.createBackup(AppBackupSection.entries.toSet(), content)
+                        },
+                        onFailure = { Result.failure(it) }
+                    )
+                }
+                if (fullBundle.isFailure) {
+                    operationMessage = "WebDAV 备份失败：${fullBundle.exceptionOrNull()?.message}"
+                    return@launch
+                }
+                val bundleUpload = webDavService.backupAppBundle(fullBundle.getOrThrow())
+                if (bundleUpload.isFailure) {
+                    operationMessage = "WebDAV 备份失败：${bundleUpload.exceptionOrNull()?.message}"
+                    return@launch
+                }
+                operationMessage = "WebDAV 完整备份成功，凭据未上传"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                operationMessage = "WebDAV 备份失败：${error.message ?: "未知错误"}"
+            } finally {
                 isWebDavOperating = false
                 webDavOperatingText = ""
-                return@launch
             }
-            val bundleUpload = webDavService.backupAppBundle(fullBundle.getOrThrow())
-            if (bundleUpload.isFailure) {
-                operationMessage = "WebDAV 备份失败：${bundleUpload.exceptionOrNull()?.message}"
-                isWebDavOperating = false
-                webDavOperatingText = ""
-                return@launch
-            }
-            operationMessage = "WebDAV 完整备份成功，凭据未上传"
-            isWebDavOperating = false
-            webDavOperatingText = ""
         }
     }
 
@@ -1024,82 +1039,104 @@ class SettingsViewModel @Inject constructor(
             }
             isWebDavOperating = true
             webDavOperatingText = "正在从 WebDAV 下载完整备份..."
-            val bundleResult = webDavService.restoreAppBundle()
-            if (bundleResult.isFailure) {
-                operationMessage = "WebDAV 恢复失败：${bundleResult.exceptionOrNull()?.message}"
-                isWebDavOperating = false
-                webDavOperatingText = ""
-                return@launch
-            }
-            val fullBundle = bundleResult.getOrNull()
-            if (fullBundle != null) {
-                isWebDavOperating = false
-                webDavOperatingText = ""
-                val sections = appBackupService.inspect(fullBundle).getOrElse { error ->
-                    operationMessage = "云端完整备份无效：${error.message}"
+            try {
+                val bundleResult = webDavService.restoreAppBundle()
+                if (bundleResult.isFailure) {
+                    operationMessage = "WebDAV 恢复失败：${bundleResult.exceptionOrNull()?.message}"
                     return@launch
-                }.sections
-                restoreFullBackup(fullBundle, sections)
-                return@launch
-            }
-            val envResult = webDavService.restoreEnv()
-            val favoriteResult = if (envResult.isSuccess) {
-                webDavService.restoreFavorites()
-            } else {
-                Result.success(null)
-            }
-            when {
-                envResult.isFailure -> {
-                    operationMessage = "WebDAV 恢复失败：${envResult.exceptionOrNull()?.message}"
                 }
-                favoriteResult.isFailure -> {
-                    operationMessage = "WebDAV 恢复失败：${favoriteResult.exceptionOrNull()?.message}"
-                }
-                else -> {
-                    val envContent = envResult.getOrThrow()
-                    val favoriteContent = favoriteResult.getOrNull()
-                    val validatedFavorites = favoriteContent?.let { raw ->
-                        runCatching { FavoriteCacheStore.snapshotOf(raw) }
+                val fullBundle = bundleResult.getOrNull()
+                if (fullBundle != null) {
+                    val preview = withContext(Dispatchers.Default) {
+                        appBackupService.inspect(fullBundle)
                     }
-                    if (validatedFavorites?.isFailure == true) {
-                        operationMessage = "WebDAV 收藏备份无效：${validatedFavorites.exceptionOrNull()?.message}"
-                    } else {
-                        envConfigRepo.saveRawContent(envContent).fold(
-                            onSuccess = {
-                                val favoriteWrite = validatedFavorites?.getOrNull()?.let { snapshot ->
-                                    withContext(Dispatchers.IO) {
-                                        FavoriteCacheStore.writeCurrent(context, snapshot.content)
-                                    }
-                                } ?: Result.success(null)
-                                favoriteWrite.fold(
-                                    onSuccess = { snapshot ->
-                                        applyRuntimeFromEnv(envContent)
-                                        val wasRunning = runtimeState.value.status == ServiceStatus.Running
-                                        if (wasRunning) runtimeRepo.restartService()
-                                        val favoriteSummary = snapshot?.let { "，恢复 ${it.count} 项收藏" }
-                                            ?: "，云端无收藏备份，已保留本地收藏"
-                                        operationMessage = if (wasRunning) {
-                                            "WebDAV 恢复成功$favoriteSummary，服务正在重启"
-                                        } else {
-                                            "WebDAV 恢复成功$favoriteSummary"
-                                        }
-                                        runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置与收藏")
-                                    },
-                                    onFailure = {
-                                        operationMessage = "配置已恢复，但收藏写入失败：${it.message}"
-                                    }
-                                )
-                            },
-                            onFailure = {
-                                operationMessage = "WebDAV 恢复失败：${it.message ?: "写入 .env 失败"}"
-                                runtimeRepo.addLog(LogLevel.Error, "WebDAV 恢复写入 .env 失败：${it.message ?: "写入失败"}")
-                            }
+                    val sections = preview.getOrElse { error ->
+                        operationMessage = "云端完整备份无效：${error.message}"
+                        return@launch
+                    }.sections
+                    restoreFullBackup(fullBundle, sections)
+                    return@launch
+                }
+                val envResult = webDavService.restoreEnv()
+                val favoriteResult = if (envResult.isSuccess) {
+                    webDavService.restoreFavorites()
+                } else {
+                    Result.success(null)
+                }
+                when {
+                    envResult.isFailure -> {
+                        operationMessage = "WebDAV 恢复失败：${envResult.exceptionOrNull()?.message}"
+                    }
+                    favoriteResult.isFailure -> {
+                        operationMessage = "WebDAV 恢复失败：${favoriteResult.exceptionOrNull()?.message}"
+                    }
+                    else -> {
+                        restoreLegacyWebDavBackup(
+                            envContent = envResult.getOrThrow(),
+                            favoriteContent = favoriteResult.getOrNull()
                         )
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                operationMessage = "WebDAV 恢复失败：${error.message ?: "未知错误"}"
+            } finally {
+                isWebDavOperating = false
+                webDavOperatingText = ""
             }
-            isWebDavOperating = false
-            webDavOperatingText = ""
+        }
+    }
+
+    private suspend fun restoreLegacyWebDavBackup(
+        envContent: String,
+        favoriteContent: String?
+    ) {
+        val validatedFavorite = favoriteContent?.let { FavoriteCacheStore.snapshotOf(it) }
+        val previousEnv = withContext(Dispatchers.IO) {
+            envConfigRepo.readCurrentRawContent().getOrThrow()
+        }
+        val safeEnvContent = BackupEnvironmentPolicy.merge(
+            current = previousEnv,
+            restored = BackupEnvironmentPolicy.exportValues(envContent)
+        )
+        val previousFavorite = if (validatedFavorite != null) {
+            withContext(Dispatchers.IO) { FavoriteCacheStore.readCurrent(context).getOrThrow() }
+        } else null
+
+        try {
+            withContext(Dispatchers.IO) {
+                envConfigRepo.saveRawContent(safeEnvContent).getOrThrow()
+            }
+            val restoredFavorite = validatedFavorite?.let { snapshot ->
+                withContext(Dispatchers.IO) {
+                    FavoriteCacheStore.writeCurrent(context, snapshot.content).getOrThrow()
+                }
+            }
+            applyRuntimeFromEnv(safeEnvContent)
+            val wasRunning = runtimeState.value.status == ServiceStatus.Running
+            if (wasRunning) runtimeRepo.restartService()
+            val favoriteSummary = restoredFavorite?.let { "，恢复 ${it.count} 项收藏" }
+                ?: "，云端无收藏备份，已保留本地收藏"
+            operationMessage = if (wasRunning) {
+                "WebDAV 恢复成功$favoriteSummary，服务正在重启"
+            } else {
+                "WebDAV 恢复成功$favoriteSummary"
+            }
+            runtimeRepo.addLog(LogLevel.Info, "已从 WebDAV 恢复配置与收藏")
+        } catch (error: Throwable) {
+            val rollbackErrors = mutableListOf<Throwable>()
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { envConfigRepo.saveRawContent(previousEnv).getOrThrow() }
+                    .exceptionOrNull()?.let(rollbackErrors::add)
+                if (previousFavorite != null) {
+                    runCatching {
+                        FavoriteCacheStore.writeCurrent(context, previousFavorite.content).getOrThrow()
+                    }.exceptionOrNull()?.let(rollbackErrors::add)
+                }
+            }
+            rollbackErrors.forEach(error::addSuppressed)
+            throw error
         }
     }
 
@@ -1299,7 +1336,7 @@ class SettingsViewModel @Inject constructor(
         val current = runtimeState.value
         val port = env["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: current.port
         val listenMode = RuntimeListenMode.fromBindHost(env[RuntimeListenMode.ENV_KEY])
-            ?: RuntimeListenMode.Ipv4Only
+            ?: current.listenMode
         runtimeRepo.applyServiceConfig(
             port = port,
             token = RuntimeTokenNormalizer.normalizeInput(env["TOKEN"]),

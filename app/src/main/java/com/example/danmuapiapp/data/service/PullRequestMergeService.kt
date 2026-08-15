@@ -19,6 +19,7 @@ import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.ProgressMonitor
 import org.eclipse.jgit.merge.MergeStrategy
 import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.TagOpt
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -30,13 +31,15 @@ import javax.inject.Singleton
 @Singleton
 class PullRequestMergeService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val pullRequestService: GithubPullRequestService
+    private val pullRequestService: GithubPullRequestService,
+    private val githubProxyService: GithubProxyService
 ) {
     suspend fun buildInto(
         repository: String,
         baseBranch: String,
         pullRequestNumbers: List<Int>,
         destination: File,
+        preferredBaseCommitSha: String = "",
         onProgress: (stage: String, progress: Float?) -> Unit
     ): PullRequestStackResult = withContext(Dispatchers.IO) {
         val numbers = pullRequestNumbers.distinct()
@@ -47,6 +50,7 @@ class PullRequestMergeService @Inject constructor(
         val pullRequests = numbers.map { number -> pullRequestService.get(repository, number) }
         validatePlan(repository, baseBranch, pullRequests)
         currentCoroutineContext().ensureActive()
+        val remoteCandidates = gitRemoteCandidates(repository)
 
         val workRoot = File(context.cacheDir, "pull-request-lab")
         val workTree = File(workRoot, "merge-${UUID.randomUUID()}")
@@ -56,14 +60,17 @@ class PullRequestMergeService @Inject constructor(
         var git: Git? = null
         try {
             onProgress("正在获取 $baseBranch 基线", null)
-            git = Git.cloneRepository()
-                .setURI("https://github.com/$repository.git")
-                .setDirectory(workTree)
-                .setBranch("refs/heads/$baseBranch")
-                .setBranchesToClone(listOf("refs/heads/$baseBranch"))
-                .setCloneAllBranches(false)
-                .setProgressMonitor(monitor)
-                .call()
+            val clonedBase = cloneBaseBranch(
+                remoteCandidates = remoteCandidates,
+                baseBranch = baseBranch,
+                workTree = workTree,
+                monitor = monitor,
+                onProgress = onProgress
+            )
+            git = clonedBase.git
+            val fetchRemoteCandidates = listOf(clonedBase.remote)
+                .plus(remoteCandidates)
+                .distinct()
             currentCoroutineContext().ensureActive()
 
             git.repository.config.apply {
@@ -71,8 +78,22 @@ class PullRequestMergeService @Inject constructor(
                 setString("user", null, "email", "local-pr-lab@localhost")
                 save()
             }
-            val baseCommitSha = git.repository.resolve(Constants.HEAD)?.name
-                ?: throw IOException("无法确定目标分支基线提交")
+            val baseCommitSha = checkoutBuildBase(
+                git = git,
+                preferredCommitSha = preferredBaseCommitSha,
+                baseBranch = baseBranch,
+                remoteCandidates = fetchRemoteCandidates,
+                monitor = monitor,
+                onProgress = onProgress
+            )
+            ensurePullRequestBasesAvailable(
+                git = git,
+                pullRequests = pullRequests,
+                baseBranch = baseBranch,
+                remoteCandidates = fetchRemoteCandidates,
+                monitor = monitor,
+                onProgress = onProgress
+            )
 
             val refs = pullRequests.mapIndexed { index, pullRequest ->
                 currentCoroutineContext().ensureActive()
@@ -81,13 +102,13 @@ class PullRequestMergeService @Inject constructor(
                     index.toFloat() / pullRequests.size.toFloat()
                 )
                 val localRef = "refs/remotes/pull/${pullRequest.number}/head"
-                git.fetch()
-                    .setRemote("origin")
-                    .setRefSpecs(RefSpec("+refs/pull/${pullRequest.number}/head:$localRef"))
-                    .setProgressMonitor(monitor)
-                    .call()
-                val commitId = git.repository.resolve(localRef)
-                    ?: throw IOException("无法获取 PR #${pullRequest.number} 的提交")
+                val commitId = fetchPullRequestHead(
+                    git = git,
+                    remoteCandidates = fetchRemoteCandidates,
+                    pullRequestNumber = pullRequest.number,
+                    localRef = localRef,
+                    monitor = monitor
+                )
                 if (pullRequest.headSha.isNotBlank() &&
                     !commitId.name.equals(pullRequest.headSha, ignoreCase = true)
                 ) {
@@ -137,7 +158,9 @@ class PullRequestMergeService @Inject constructor(
         pullRequests: List<CorePullRequest>
     ) {
         pullRequests.forEach { pullRequest ->
-            if (!pullRequest.state.equals("open", ignoreCase = true)) {
+            val canMergeLocally = pullRequest.state.equals("open", ignoreCase = true) ||
+                !pullRequest.mergedAt.isNullOrBlank()
+            if (!canMergeLocally) {
                 throw IOException("PR #${pullRequest.number} 已关闭，请刷新列表")
             }
             if (!pullRequest.baseRef.equals(baseBranch, ignoreCase = true)) {
@@ -150,6 +173,170 @@ class PullRequestMergeService @Inject constructor(
             }
         }
     }
+
+    private fun gitRemoteCandidates(repository: String): List<String> {
+        val original = "https://github.com/$repository.git"
+        return PullRequestGitSourcePolicy.candidates(
+            original = original,
+            proxyCandidates = githubProxyService.buildUrlCandidates(original)
+        )
+    }
+
+    private suspend fun cloneBaseBranch(
+        remoteCandidates: List<String>,
+        baseBranch: String,
+        workTree: File,
+        monitor: ProgressMonitor,
+        onProgress: (stage: String, progress: Float?) -> Unit
+    ): ClonedBase {
+        var lastFailure: Exception? = null
+        remoteCandidates.forEachIndexed { index, remote ->
+            currentCoroutineContext().ensureActive()
+            if (index > 0) onProgress("当前 Git 线路不可用，正在切换", null)
+            runCatching { workTree.deleteRecursively() }
+            try {
+                val cloned = Git.cloneRepository()
+                    .setURI(remote)
+                    .setDirectory(workTree)
+                    .setBranch("refs/heads/$baseBranch")
+                    .setBranchesToClone(listOf("refs/heads/$baseBranch"))
+                    .setCloneAllBranches(false)
+                    .setNoTags()
+                    .setDepth(GIT_SHALLOW_DEPTH)
+                    .setTimeout(GIT_TRANSPORT_TIMEOUT_SECONDS)
+                    .setProgressMonitor(monitor)
+                    .call()
+                return ClonedBase(git = cloned, remote = remote)
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                lastFailure = error
+            }
+        }
+        throw IOException(
+            "无法获取 $baseBranch 基线：${lastFailure?.message ?: "Git 线路不可用"}",
+            lastFailure
+        )
+    }
+
+    private suspend fun fetchPullRequestHead(
+        git: Git,
+        remoteCandidates: List<String>,
+        pullRequestNumber: Int,
+        localRef: String,
+        monitor: ProgressMonitor
+    ): ObjectId {
+        var lastFailure: Exception? = null
+        remoteCandidates.forEach { remote ->
+            currentCoroutineContext().ensureActive()
+            try {
+                git.fetch()
+                    .setRemote(remote)
+                    .setRefSpecs(RefSpec("+refs/pull/$pullRequestNumber/head:$localRef"))
+                    .setTagOpt(TagOpt.NO_TAGS)
+                    .setTimeout(GIT_TRANSPORT_TIMEOUT_SECONDS)
+                    .setProgressMonitor(monitor)
+                    .call()
+                return git.repository.resolve(localRef)
+                    ?: throw IOException("远端未返回 PR #$pullRequestNumber 的提交")
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                lastFailure = error
+            }
+        }
+        throw IOException(
+            "无法获取 PR #$pullRequestNumber 的提交：${lastFailure?.message ?: "Git 线路不可用"}",
+            lastFailure
+        )
+    }
+
+    private suspend fun checkoutBuildBase(
+        git: Git,
+        preferredCommitSha: String,
+        baseBranch: String,
+        remoteCandidates: List<String>,
+        monitor: ProgressMonitor,
+        onProgress: (stage: String, progress: Float?) -> Unit
+    ): String {
+        val requested = preferredCommitSha.trim()
+        if (requested.isBlank()) {
+            return git.repository.resolve(Constants.HEAD)?.name
+                ?: throw IOException("无法确定目标分支基线提交")
+        }
+        if (!COMMIT_SHA_PATTERN.matches(requested)) {
+            throw IOException("当前核心的提交标识无效，无法在该版本上并入 PR")
+        }
+        var commit = git.repository.resolve("$requested^{commit}")
+        if (commit == null && isShallowRepository(git)) {
+            onProgress("当前核心较旧，正在补充基线历史", null)
+            fetchFullBaseHistory(git, baseBranch, remoteCandidates, monitor)
+            commit = git.repository.resolve("$requested^{commit}")
+        }
+        commit ?: throw IOException("当前核心版本已不在仓库历史中，无法在该版本上并入 PR")
+        runCatching {
+            git.checkout().setName(commit.name).call()
+        }.getOrElse { error ->
+            throw IOException("无法切换到当前核心版本，PR 尚未应用", error)
+        }
+        return commit.name
+    }
+
+    private suspend fun ensurePullRequestBasesAvailable(
+        git: Git,
+        pullRequests: List<CorePullRequest>,
+        baseBranch: String,
+        remoteCandidates: List<String>,
+        monitor: ProgressMonitor,
+        onProgress: (stage: String, progress: Float?) -> Unit
+    ) {
+        if (!isShallowRepository(git)) return
+        val hasMissingBase = pullRequests.asSequence()
+            .map(CorePullRequest::baseSha)
+            .filter(COMMIT_SHA_PATTERN::matches)
+            .any { sha -> git.repository.resolve("$sha^{commit}") == null }
+        if (!hasMissingBase) return
+        onProgress("选中的 PR 基线较旧，正在补充历史", null)
+        fetchFullBaseHistory(git, baseBranch, remoteCandidates, monitor)
+    }
+
+    private suspend fun fetchFullBaseHistory(
+        git: Git,
+        baseBranch: String,
+        remoteCandidates: List<String>,
+        monitor: ProgressMonitor
+    ) {
+        var lastFailure: Exception? = null
+        remoteCandidates.forEach { remote ->
+            currentCoroutineContext().ensureActive()
+            try {
+                git.fetch()
+                    .setRemote(remote)
+                    .setRefSpecs(
+                        RefSpec("+refs/heads/$baseBranch:refs/remotes/origin/$baseBranch")
+                    )
+                    .setUnshallow(true)
+                    .setTagOpt(TagOpt.NO_TAGS)
+                    .setTimeout(GIT_TRANSPORT_TIMEOUT_SECONDS)
+                    .setProgressMonitor(monitor)
+                    .call()
+                return
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                lastFailure = error
+            }
+        }
+        throw IOException(
+            "无法补充基线历史：${lastFailure?.message ?: "Git 线路不可用"}",
+            lastFailure
+        )
+    }
+
+    private fun isShallowRepository(git: Git): Boolean =
+        File(git.repository.directory, "shallow").isFile
+
+    private data class ClonedBase(
+        val git: Git,
+        val remote: String
+    )
 
     private fun locateCoreDirectory(workTree: File): File? {
         return listOf(
@@ -207,6 +394,18 @@ class PullRequestMergeService @Inject constructor(
     companion object {
         private const val MAX_CORE_FILES = 30_000
         private const val MAX_CORE_BYTES = 512L * 1024L * 1024L
+        private const val GIT_TRANSPORT_TIMEOUT_SECONDS = 30
+        private const val GIT_SHALLOW_DEPTH = 128
+        private val COMMIT_SHA_PATTERN = Regex("^[0-9a-fA-F]{7,40}$")
+    }
+}
+
+internal object PullRequestGitSourcePolicy {
+    fun candidates(original: String, proxyCandidates: List<String>): List<String> {
+        return (proxyCandidates + original)
+            .map(String::trim)
+            .filter { it.startsWith("https://") || it.startsWith("http://") }
+            .distinct()
     }
 }
 

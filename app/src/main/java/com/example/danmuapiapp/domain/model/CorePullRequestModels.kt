@@ -17,12 +17,24 @@ data class CorePullRequest(
     val authorAssociation: String = "",
     val firstContribution: PullRequestFirstContribution? = null,
     val mergedAt: String? = null,
+    val mergeCommitSha: String = "",
     val closedAt: String? = null,
     val mergeable: Boolean? = null,
     val additions: Int? = null,
     val deletions: Int? = null,
-    val changedFiles: Int? = null
+    val changedFiles: Int? = null,
+    val currentCoreInclusion: CorePullRequestInclusion = CorePullRequestInclusion.Unknown
 )
+
+enum class CorePullRequestInclusion {
+    Unknown,
+    NotIncluded,
+    Included,
+    LocalMerge;
+
+    val isIncluded: Boolean
+        get() = this == Included || this == LocalMerge
+}
 
 enum class PullRequestFirstContribution {
     Github,
@@ -46,6 +58,15 @@ fun CorePullRequest.effectiveStatus(locallyMerged: Boolean = false): CorePullReq
     locallyMerged || !mergedAt.isNullOrBlank() -> CorePullRequestStatus.Merged
     state.equals("open", ignoreCase = true) -> CorePullRequestStatus.Open
     else -> CorePullRequestStatus.Closed
+}
+
+fun CorePullRequest.canApplyToCurrentCore(locallyMerged: Boolean = false): Boolean {
+    if (locallyMerged || currentCoreInclusion.isIncluded) return false
+    return when (effectiveStatus()) {
+        CorePullRequestStatus.Open -> true
+        CorePullRequestStatus.Merged -> currentCoreInclusion == CorePullRequestInclusion.NotIncluded
+        CorePullRequestStatus.Closed -> false
+    }
 }
 
 fun CorePullRequest.matchesFilter(
