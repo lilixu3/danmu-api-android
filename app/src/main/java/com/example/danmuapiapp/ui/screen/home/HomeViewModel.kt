@@ -28,6 +28,8 @@ import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
+import com.example.danmuapiapp.ui.common.RuntimeRestartEvidence
+import com.example.danmuapiapp.ui.common.awaitCoreRestart
 import com.example.danmuapiapp.ui.common.buildRootSwitchDeniedMessage
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import com.example.danmuapiapp.ui.screen.home.support.resolveAutoCoreUpdatePrompt
@@ -62,12 +64,6 @@ class HomeViewModel @Inject constructor(
     private val cacheRepo: CacheRepository,
     private val adminSessionRepository: AdminSessionRepository
 ) : ViewModel() {
-    private data class RestartSnapshot(
-        val runMode: RunMode,
-        val pid: Int?,
-        val uptimeSeconds: Long
-    )
-
     companion object {
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
         private const val REQUEST_RECORD_REFRESH_DELAY_MS = 900L
@@ -495,10 +491,10 @@ class HomeViewModel @Inject constructor(
             val requestedItems = selectedCacheClearItems
             cacheRepo.clear(requestedItems).fold(
                 onSuccess = { result ->
-                    appUpdateMessage = if (result.usedSelectiveProtocol) {
-                        "已清理 ${result.clearedItems.size} 项缓存"
-                    } else {
-                        "缓存已全部清理"
+                    appUpdateMessage = when {
+                        !result.isVerified -> "清理请求已完成，但当前核心未返回确认详情，请刷新后核对"
+                        result.usedSelectiveProtocol -> "已清理 ${result.clearedItems.size} 项缓存"
+                        else -> "缓存已全部清理"
                     }
                 },
                 onFailure = { appUpdateMessage = "清理失败：${it.message}" }
@@ -1139,13 +1135,14 @@ class HomeViewModel @Inject constructor(
                 runtimeRepo.updateVariant(variant)
 
                 if (wasRunning) {
-                    val restartSnapshot = current.toRestartSnapshot()
+                    val restartSnapshot = RuntimeRestartEvidence.snapshot(current)
                     runtimeRepo.addLog(LogLevel.Info, "正在重启服务以应用核心切换...")
                     runtimeRepo.restartService()
-                    val restarted = waitForRestartAfterCoreSwitch(
+                    val restarted = runtimeState.awaitCoreRestart(
+                        targetVariant = variant,
                         beforeRestart = restartSnapshot,
                         timeoutMs = 45_000
-                    )
+                    ).status
                     if (restarted != ServiceStatus.Running) {
                         val reason = when (restarted) {
                             ServiceStatus.Error -> "切换后服务启动失败，请查看日志"
@@ -1212,55 +1209,6 @@ class HomeViewModel @Inject constructor(
         val s = seconds % 60
         return if (h > 0) String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s)
         else String.format(Locale.getDefault(), "%02d:%02d", m, s)
-    }
-
-    private suspend fun waitForRestartAfterCoreSwitch(
-        beforeRestart: RestartSnapshot,
-        timeoutMs: Long
-    ): ServiceStatus? {
-        var sawRestartProgress = false
-        val result = withTimeoutOrNull(timeoutMs) {
-            runtimeState.first { state ->
-                when (state.status) {
-                    ServiceStatus.Starting,
-                    ServiceStatus.Stopping,
-                    ServiceStatus.Stopped -> {
-                        sawRestartProgress = true
-                        false
-                    }
-
-                    ServiceStatus.Error -> true
-
-                    ServiceStatus.Running -> {
-                        sawRestartProgress || state.isRunningAfterRestart(beforeRestart)
-                    }
-                }
-            }.status
-        }
-        return result ?: runtimeState.value.status.takeIf {
-            it == ServiceStatus.Stopped || it == ServiceStatus.Error
-        }
-    }
-
-    private fun RuntimeState.toRestartSnapshot(): RestartSnapshot {
-        return RestartSnapshot(
-            runMode = runMode,
-            pid = pid,
-            uptimeSeconds = uptimeSeconds
-        )
-    }
-
-    private fun RuntimeState.isRunningAfterRestart(snapshot: RestartSnapshot): Boolean {
-        if (status != ServiceStatus.Running) return false
-        return when (runMode) {
-            RunMode.Root -> {
-                val pidChanged = pid != null && snapshot.pid != null && pid != snapshot.pid
-                val uptimeReset = uptimeSeconds < snapshot.uptimeSeconds
-                pidChanged || uptimeReset
-            }
-
-            RunMode.Normal -> uptimeSeconds < snapshot.uptimeSeconds
-        }
     }
 
     fun dismissProxyPickerDialog() {

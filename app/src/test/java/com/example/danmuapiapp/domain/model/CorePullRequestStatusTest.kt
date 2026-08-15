@@ -59,9 +59,44 @@ class CorePullRequestStatusTest {
         assertFalse(pullRequest.matchesFilter(CorePullRequestFilter.Merged))
     }
 
+    @Test
+    fun `remote merged pull request missing from current core can be applied locally`() {
+        val pullRequest = pullRequest(
+            state = "closed",
+            mergedAt = "2026-08-13T13:00:00Z",
+            inclusion = CorePullRequestInclusion.NotIncluded
+        )
+
+        assertTrue(pullRequest.canApplyToCurrentCore())
+    }
+
+    @Test
+    fun `pull request already included in current core cannot be selected again`() {
+        val pullRequest = pullRequest(
+            state = "closed",
+            mergedAt = "2026-08-13T13:00:00Z",
+            inclusion = CorePullRequestInclusion.Included
+        )
+
+        assertFalse(pullRequest.canApplyToCurrentCore())
+        assertFalse(pullRequest.canApplyToCurrentCore(locallyMerged = true))
+    }
+
+    @Test
+    fun `remote merged pull request with unknown local state stays non selectable`() {
+        val pullRequest = pullRequest(
+            state = "closed",
+            mergedAt = "2026-08-13T13:00:00Z",
+            inclusion = CorePullRequestInclusion.Unknown
+        )
+
+        assertFalse(pullRequest.canApplyToCurrentCore())
+    }
+
     private fun pullRequest(
         state: String,
-        mergedAt: String? = null
+        mergedAt: String? = null,
+        inclusion: CorePullRequestInclusion = CorePullRequestInclusion.Unknown
     ) = CorePullRequest(
         number = 441,
         state = state,
@@ -76,6 +111,7 @@ class CorePullRequestStatusTest {
         baseSha = "2222222222222222222222222222222222222222",
         baseRef = "main",
         baseRepository = "owner/repo",
-        mergedAt = mergedAt
+        mergedAt = mergedAt,
+        currentCoreInclusion = inclusion
     )
 }

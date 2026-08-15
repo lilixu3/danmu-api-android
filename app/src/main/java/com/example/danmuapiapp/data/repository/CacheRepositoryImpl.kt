@@ -48,11 +48,13 @@ class CacheRepositoryImpl @Inject constructor(
 
     companion object {
         private const val RUNTIME_PREFS_NAME = "runtime"
+        private const val CAPABILITY_PREFS_NAME = "cache_clear_capability"
         private const val DEFAULT_PORT = 9321
     }
 
 
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+    private val capabilityPrefs = context.getSharedPreferences(CAPABILITY_PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _cacheStats = MutableStateFlow(CacheStats())
     override val cacheStats: StateFlow<CacheStats> = _cacheStats.asStateFlow()
@@ -65,12 +67,14 @@ class CacheRepositoryImpl @Inject constructor(
 
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private var capabilityIdentity: String? = null
+    private var capabilitySourceFingerprint: String? = null
 
     override suspend fun refresh() {
         _isLoading.value = true
         try {
             val runtime = resolveRuntimeApiAccess()
-            _clearCapability.value = CacheClearCapability(detectClearSupport())
+            refreshClearCapabilityWithoutPassiveRootProbe()
             val previousStats = _cacheStats.value
             val result = fetchReqRecordStats(runtime)
             val animeSummary = fetchAnimeCacheSummary(runtime)
@@ -106,7 +110,7 @@ class CacheRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clear(items: Set<CacheClearItem>): Result<CacheClearResult> {
-        return runCatching {
+        return runCatchingCancellable {
             require(items.isNotEmpty()) { "请至少选择一项缓存" }
             val runtime = resolveRuntimeApiAccess()
             val adminState = adminSessionRepository.sessionState.value
@@ -123,7 +127,16 @@ class CacheRepositoryImpl @Inject constructor(
                 }
             }
 
-            val support = detectClearSupport()
+            val identity = currentCapabilityIdentity()
+            val sourceFingerprint = currentCapabilitySourceFingerprint()
+            val support = _clearCapability.value.support.takeIf {
+                capabilityIdentity == identity &&
+                    capabilitySourceFingerprint == sourceFingerprint &&
+                    it != CacheClearSupport.Unknown
+            } ?: detectClearSupport()
+            capabilityIdentity = identity
+            capabilitySourceFingerprint = sourceFingerprint
+            persistClearCapability(capabilityIdentity.orEmpty(), support)
             _clearCapability.value = CacheClearCapability(support)
             val allItems = CacheClearItem.entries.toSet()
             if (support != CacheClearSupport.Selective && items != allItems) {
@@ -138,28 +151,32 @@ class CacheRepositoryImpl @Inject constructor(
                 .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val result = httpClient.newCall(request).execute().use { response ->
+            val result = httpClient.newCall(request).executeCancellable().use { response ->
                 val body = runCatching { response.body.string() }.getOrDefault("")
                 response.code to body
             }
             val code = result.first
             val body = result.second
             if (code in 200..299) {
-                val clearedAt = System.currentTimeMillis()
-                val clearedKeys = CacheClearProtocol.parseClearedItems(body)
-                val effectiveItems = if (useSelective) {
-                    items.filterTo(linkedSetOf()) { item ->
-                        clearedKeys == null || item.wireKey in clearedKeys
-                    }
-                } else {
-                    allItems
+                val response = CacheClearProtocol.parseResponse(body)
+                if (response.success == false) {
+                    throw Exception(response.message ?: "核心拒绝了缓存清理请求")
                 }
-                applyOptimisticClear(effectiveItems, clearedAt)
+                val clearedAt = System.currentTimeMillis()
+                val effectiveItems = response.clearedItems?.let { clearedKeys ->
+                    val requestedItems = if (useSelective) items else allItems
+                    requestedItems.filterTo(linkedSetOf()) { it.wireKey in clearedKeys }
+                }.orEmpty()
+                val isVerified = response.clearedItems != null
+                if (isVerified) applyOptimisticClear(effectiveItems, clearedAt)
                 refresh()
-                _cacheStats.value = _cacheStats.value.copy(lastClearedAt = clearedAt)
-                return@runCatching CacheClearResult(
+                if (isVerified) {
+                    _cacheStats.value = _cacheStats.value.copy(lastClearedAt = clearedAt)
+                }
+                return@runCatchingCancellable CacheClearResult(
                     clearedItems = effectiveItems,
-                    usedSelectiveProtocol = useSelective
+                    usedSelectiveProtocol = useSelective,
+                    isVerified = isVerified
                 )
             }
 
@@ -199,6 +216,83 @@ class CacheRepositoryImpl @Inject constructor(
             readNormalClearProtocolSources(coreDir)
         }
         return CacheClearProtocol.detectSupport(sources.systemApi, sources.worker)
+    }
+
+    private fun refreshClearCapabilityWithoutPassiveRootProbe() {
+        val mode = RuntimePaths.currentRunMode(context)
+        val identity = currentCapabilityIdentity()
+        val sourceFingerprint = currentCapabilitySourceFingerprint()
+        if (capabilityIdentity == identity &&
+            capabilitySourceFingerprint == sourceFingerprint &&
+            _clearCapability.value.support != CacheClearSupport.Unknown
+        ) {
+            return
+        }
+        if (mode == RunMode.Root) {
+            val mirrorSupport = detectClearSupportFromNormalMirror()
+            val support = if (mirrorSupport != CacheClearSupport.Unknown) {
+                persistClearCapability(identity, mirrorSupport)
+                mirrorSupport
+            } else {
+                readPersistedClearCapability(identity)
+            }
+            capabilityIdentity = identity
+            capabilitySourceFingerprint = sourceFingerprint
+            _clearCapability.value = CacheClearCapability(support)
+            return
+        }
+        capabilityIdentity = identity
+        capabilitySourceFingerprint = sourceFingerprint
+        val support = detectClearSupport()
+        persistClearCapability(identity, support)
+        _clearCapability.value = CacheClearCapability(support)
+    }
+
+    private fun currentCapabilityIdentity(): String {
+        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
+            .orEmpty()
+            .ifBlank { ApiVariant.Stable.key }
+        return "${RuntimePaths.currentRunMode(context).name}:$variantKey"
+    }
+
+    private fun currentCapabilitySourceFingerprint(): String {
+        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
+            .orEmpty()
+            .ifBlank { ApiVariant.Stable.key }
+        val mode = RuntimePaths.currentRunMode(context)
+        val coreDir = if (mode == RunMode.Root) {
+            File(RuntimePaths.normalProjectDir(context), "danmu_api_$variantKey")
+        } else {
+            File(RuntimePaths.projectDir(context, mode), "danmu_api_$variantKey")
+        }
+        return (systemApiCandidates(coreDir) + workerCandidates(coreDir))
+            .asSequence()
+            .filter { it.isFile }
+            .joinToString("|") { file ->
+                "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+            }
+            .ifBlank { "missing" }
+    }
+
+    private fun detectClearSupportFromNormalMirror(): CacheClearSupport {
+        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
+            .orEmpty()
+            .ifBlank { ApiVariant.Stable.key }
+        val mirrorDir = File(RuntimePaths.normalProjectDir(context), "danmu_api_$variantKey")
+        val sources = readNormalClearProtocolSources(mirrorDir)
+        return CacheClearProtocol.detectSupport(sources.systemApi, sources.worker)
+    }
+
+    private fun persistClearCapability(identity: String, support: CacheClearSupport) {
+        if (identity.isBlank() || support == CacheClearSupport.Unknown) return
+        if (capabilityPrefs.getString(identity, null) == support.name) return
+        capabilityPrefs.edit().putString(identity, support.name).apply()
+    }
+
+    private fun readPersistedClearCapability(identity: String): CacheClearSupport {
+        val raw = capabilityPrefs.getString(identity, null) ?: return CacheClearSupport.Unknown
+        return CacheClearSupport.entries.firstOrNull { it.name == raw }
+            ?: CacheClearSupport.Unknown
     }
 
     private data class CacheClearProtocolSources(

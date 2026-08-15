@@ -94,6 +94,10 @@ class EnvConfigRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun readCurrentRawContent(): Result<String> {
+        return readEnvText(envFile())
+    }
+
     override fun setValue(key: String, value: String) {
         val isRuntimeToken = key.equals("TOKEN", ignoreCase = true)
         val normalizedValue = if (isRuntimeToken) {

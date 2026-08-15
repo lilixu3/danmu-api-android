@@ -65,6 +65,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -82,8 +83,10 @@ import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CorePullRequest
 import com.example.danmuapiapp.domain.model.CorePullRequestFilter
 import com.example.danmuapiapp.domain.model.CorePullRequestFilePage
+import com.example.danmuapiapp.domain.model.CorePullRequestInclusion
 import com.example.danmuapiapp.domain.model.CorePullRequestStatus
 import com.example.danmuapiapp.domain.model.PullRequestFirstContribution
+import com.example.danmuapiapp.domain.model.canApplyToCurrentCore
 import com.example.danmuapiapp.domain.model.effectiveStatus
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -91,6 +94,7 @@ import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.AppModalPanel
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
+import com.example.danmuapiapp.ui.component.rememberSimpleMarkdownState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -285,6 +289,9 @@ fun PullRequestLabScreen(
                                 alreadyIncluded = alreadyIncluded,
                                 showOpenState = viewModel.selectedFilter == CorePullRequestFilter.All,
                                 enabled = !viewModel.isBuilding && !viewModel.isActivating,
+                                enrichmentKey = viewModel.listContentGeneration,
+                                enrichmentEnabled = !viewModel.isLoading,
+                                onVisible = { viewModel.onPullRequestVisible(pullRequest) },
                                 onToggle = { viewModel.toggleSelection(pullRequest) },
                                 onOpenDetails = { viewModel.openPullRequestDetails(pullRequest) }
                             )
@@ -654,12 +661,20 @@ private fun PullRequestCard(
     alreadyIncluded: Boolean,
     showOpenState: Boolean,
     enabled: Boolean,
+    enrichmentKey: Long,
+    enrichmentEnabled: Boolean,
+    onVisible: () -> Unit,
     onToggle: () -> Unit,
     onOpenDetails: () -> Unit
 ) {
+    LaunchedEffect(enrichmentKey, enrichmentEnabled, pullRequest.number) {
+        if (enrichmentEnabled) onVisible()
+    }
     val selected = selectedPosition != null
-    val effectiveStatus = pullRequest.effectiveStatus(alreadyIncluded)
-    val selectable = effectiveStatus == CorePullRequestStatus.Open
+    val locallyIncluded = alreadyIncluded ||
+        pullRequest.currentCoreInclusion == CorePullRequestInclusion.LocalMerge
+    val effectiveStatus = pullRequest.effectiveStatus(locallyIncluded)
+    val selectable = pullRequest.canApplyToCurrentCore(alreadyIncluded)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -699,9 +714,17 @@ private fun PullRequestCard(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         when {
-                            alreadyIncluded -> StatusBadge("本地已并入", StatusBadgeTone.Merged)
+                            locallyIncluded -> StatusBadge("本地已并入", StatusBadgeTone.Merged)
                             effectiveStatus == CorePullRequestStatus.Merged -> {
-                                StatusBadge("已合并", StatusBadgeTone.Merged)
+                                when (pullRequest.currentCoreInclusion) {
+                                    CorePullRequestInclusion.Included -> {
+                                        StatusBadge("当前版本已包含", StatusBadgeTone.Merged)
+                                    }
+                                    CorePullRequestInclusion.NotIncluded -> {
+                                        StatusBadge("已合并 · 未包含", StatusBadgeTone.Warning)
+                                    }
+                                    else -> StatusBadge("已合并 · 待确认", StatusBadgeTone.Merged)
+                                }
                             }
                             effectiveStatus == CorePullRequestStatus.Closed -> {
                                 StatusBadge("已关闭", StatusBadgeTone.Closed)
@@ -982,11 +1005,11 @@ private fun PullRequestDetailsPanel(
 ) {
     val expandedFiles = remember(
         pullRequest.baseRepository,
-        pullRequest.number,
-        pullRequest.headSha
+        pullRequest.number
     ) {
         mutableStateMapOf<String, Boolean>()
     }
+    val retainedMarkdownState = rememberSimpleMarkdownState(pullRequest.body)
     AppModalPanel(
         onDismissRequest = onClose,
         maxWidth = 980.dp,
@@ -1027,14 +1050,41 @@ private fun PullRequestDetailsPanel(
                 contentPadding = PaddingValues(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                item(key = "pr-summary") {
+                item(key = "pr-summary", contentType = "pr-summary") {
                     PullRequestDetailsSummary(
                         pullRequest = pullRequest,
-                        locallyMerged = locallyMerged,
-                        filePage = filePage
+                        locallyMerged = locallyMerged
                     )
                 }
-                item(key = "files-title") {
+                if (pullRequest.body.isNotBlank()) {
+                    item(key = "pr-description", contentType = "pr-description") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    "变更说明",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                SimpleMarkdownText(
+                                    markdown = pullRequest.body,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    retainedMarkdownState = retainedMarkdownState
+                                )
+                            }
+                        }
+                    }
+                }
+                item(key = "pr-metrics", contentType = "pr-metrics") {
+                    PullRequestDiffMetrics(pullRequest = pullRequest, filePage = filePage)
+                }
+                item(key = "files-title", contentType = "diff-heading") {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1069,7 +1119,11 @@ private fun PullRequestDetailsPanel(
                         )
                     }
                 }
-                items(filePage?.files.orEmpty(), key = { "${it.status}:${it.path}" }) { file ->
+                items(
+                    items = filePage?.files.orEmpty(),
+                    key = { "${it.status}:${it.path}" },
+                    contentType = { "core-diff-file" }
+                ) { file ->
                     CoreFileDiff(
                         file = file,
                         expanded = expandedFiles[file.path] == true,
@@ -1127,20 +1181,19 @@ private fun PullRequestDetailsPanel(
 @Composable
 private fun PullRequestDetailsSummary(
     pullRequest: CorePullRequest,
-    locallyMerged: Boolean,
-    filePage: CorePullRequestFilePage?
+    locallyMerged: Boolean
 ) {
-    val addedColor = diffAddedColor()
-    val visibleAdditions = pullRequest.additions ?: filePage?.files?.sumOf { it.additions } ?: 0
-    val visibleDeletions = pullRequest.deletions ?: filePage?.files?.sumOf { it.deletions } ?: 0
-    val visibleFiles = pullRequest.changedFiles ?: filePage?.files?.size ?: 0
-    val hasRepositoryTotals = pullRequest.changedFiles != null &&
-        pullRequest.additions != null &&
-        pullRequest.deletions != null
-    val effectiveStatus = pullRequest.effectiveStatus(locallyMerged)
+    val locallyIncluded = locallyMerged ||
+        pullRequest.currentCoreInclusion == CorePullRequestInclusion.LocalMerge
+    val effectiveStatus = pullRequest.effectiveStatus(locallyIncluded)
     val statusLabel = when {
-        locallyMerged -> "本地已并入"
-        effectiveStatus == CorePullRequestStatus.Merged -> "已合并"
+        locallyIncluded -> "本地已并入"
+        effectiveStatus == CorePullRequestStatus.Merged -> when (pullRequest.currentCoreInclusion) {
+            CorePullRequestInclusion.Included -> "GitHub 已合并 · 当前核心已包含"
+            CorePullRequestInclusion.NotIncluded -> "GitHub 已合并 · 当前核心未包含"
+            CorePullRequestInclusion.LocalMerge -> "本地已并入"
+            CorePullRequestInclusion.Unknown -> "GitHub 已合并 · 本地状态待确认"
+        }
         effectiveStatus == CorePullRequestStatus.Closed -> "已关闭"
         pullRequest.draft -> "草稿"
         else -> "开放"
@@ -1180,37 +1233,28 @@ private fun PullRequestDetailsSummary(
         pullRequest.firstContribution?.let { firstContribution ->
             FirstContributorBadge(firstContribution)
         }
-        if (pullRequest.body.isNotBlank()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Text(
-                        "变更说明",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    SimpleMarkdownText(
-                        markdown = pullRequest.body,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DiffMetric(
-                Icons.Rounded.Code,
-                if (hasRepositoryTotals) "$visibleFiles 个文件" else "本页 $visibleFiles 个文件",
-                MaterialTheme.colorScheme.primary
-            )
-            DiffMetric(Icons.Rounded.Add, "+$visibleAdditions", addedColor)
-            DiffMetric(Icons.Rounded.DeleteOutline, "-$visibleDeletions", MaterialTheme.colorScheme.error)
-        }
+    }
+}
+
+@Composable
+private fun PullRequestDiffMetrics(
+    pullRequest: CorePullRequest,
+    filePage: CorePullRequestFilePage?
+) {
+    val visibleAdditions = pullRequest.additions ?: filePage?.files?.sumOf { it.additions } ?: 0
+    val visibleDeletions = pullRequest.deletions ?: filePage?.files?.sumOf { it.deletions } ?: 0
+    val visibleFiles = pullRequest.changedFiles ?: filePage?.files?.size ?: 0
+    val hasRepositoryTotals = pullRequest.changedFiles != null &&
+        pullRequest.additions != null &&
+        pullRequest.deletions != null
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        DiffMetric(
+            Icons.Rounded.Code,
+            if (hasRepositoryTotals) "$visibleFiles 个文件" else "本页 $visibleFiles 个文件",
+            MaterialTheme.colorScheme.primary
+        )
+        DiffMetric(Icons.Rounded.Add, "+$visibleAdditions", diffAddedColor())
+        DiffMetric(Icons.Rounded.DeleteOutline, "-$visibleDeletions", MaterialTheme.colorScheme.error)
     }
 }
 

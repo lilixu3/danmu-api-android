@@ -155,6 +155,7 @@ import com.example.danmuapiapp.domain.model.AppAnnouncement
 import com.example.danmuapiapp.domain.model.AnnouncementSeverity
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.domain.model.RuntimeTransitionKind
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
@@ -244,8 +245,22 @@ fun HomeScreen(
         hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
     }
 
+    val runtimeTransition = state.transition
+    val presentedStatus = if (runtimeTransition != null) {
+        ServiceStatus.Starting
+    } else {
+        state.status
+    }
+    val runtimeTransitionTitle = when (runtimeTransition?.kind) {
+        RuntimeTransitionKind.ApplyingPullRequests -> "正在应用 PR 组合"
+        RuntimeTransitionKind.SwitchingRunMode -> "正在切换运行模式"
+        RuntimeTransitionKind.Restarting -> "服务正在重启"
+        RuntimeTransitionKind.RecoveringCore -> "正在恢复核心"
+        null -> null
+    }
     val isRunning = state.status == ServiceStatus.Running
-    val isTransitioning = state.status == ServiceStatus.Starting ||
+    val isTransitioning = runtimeTransition != null ||
+        state.status == ServiceStatus.Starting ||
         state.status == ServiceStatus.Stopping
     val currentCoreInfo = coreList.find { it.variant == state.variant }
     val isCoreInstalled = currentCoreInfo?.isInstalled == true
@@ -316,16 +331,19 @@ fun HomeScreen(
     val hasQueueTasks = queueSummary.total > 0
     val unreadAnnouncementCount = unreadAnnouncements.size
     val cacheTileValue = when {
+        runtimeTransition != null -> "服务切换中"
         !isRunning -> "服务未运行"
         cacheStats.reqRecordsCount > 0 -> "${cacheStats.reqRecordsCount} 条记录"
         else -> "暂无记录"
     }
     val cacheTileBadge = when {
+        runtimeTransition != null -> "进行中"
         !isRunning -> null
         cacheStats.todayReqNum > 0 -> "今日 ${cacheStats.todayReqNum}"
         else -> "无数据"
     }
     val cacheTileAccent = when {
+        runtimeTransition != null -> MaterialTheme.colorScheme.primary
         !isRunning -> MaterialTheme.colorScheme.onSurfaceVariant
         cacheStats.reqRecordsCount > 0 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -506,8 +524,9 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 HomeTopHeader(
-                    status = state.status,
+                    status = presentedStatus,
                     isRunning = isRunning,
+                    isTransitioning = runtimeTransition != null,
                     uptime = uptimeText,
                     unreadAnnouncementCount = unreadAnnouncementCount,
                     hasQueueTasks = hasQueueTasks,
@@ -519,8 +538,9 @@ fun HomeScreen(
                 )
 
                 MissionControlHero(
-                    status = state.status,
-                    statusMessage = state.statusMessage,
+                    status = presentedStatus,
+                    statusMessage = runtimeTransition?.message ?: state.statusMessage,
+                    transitionTitle = runtimeTransitionTitle,
                     isCoreInstalled = isCoreInstalled,
                     isCoreInfoLoading = isCoreInfoLoading,
                     runModeLabel = when (state.runMode) {
@@ -531,7 +551,7 @@ fun HomeScreen(
                     variantLabel = currentVariantLabel,
                     isRunning = isRunning,
                     isInstalling = viewModel.isInstallingCore,
-                    isSwitching = viewModel.isSwitchingCore,
+                    isSwitching = viewModel.isSwitchingCore || runtimeTransition != null,
                     isUpdating = viewModel.isUpdatingCore,
                     isActionBusy = isHeroChipBusy,
                     isDarkTheme = isDarkTheme,
@@ -545,7 +565,7 @@ fun HomeScreen(
                 )
 
                 SnapshotStrip(
-                    status = state.status,
+                    status = presentedStatus,
                     isDarkTheme = isDarkTheme,
                     runMode = state.runMode,
                     cacheTileValue = cacheTileValue,
@@ -600,12 +620,12 @@ fun HomeScreen(
                 }
 
                 ActionDeck(
-                    status = state.status,
+                    status = presentedStatus,
                     isRunning = isRunning,
                     isTransitioning = isBusy,
-                    isStarting = state.status == ServiceStatus.Starting,
+                    isStarting = presentedStatus == ServiceStatus.Starting,
                     isInstalling = viewModel.isInstallingCore,
-                    isSwitching = viewModel.isSwitchingCore,
+                    isSwitching = viewModel.isSwitchingCore || runtimeTransition != null,
                     isUpdating = viewModel.isUpdatingCore,
                     isCoreInfoLoading = isCoreInfoLoading,
                     isDarkTheme = isDarkTheme,
@@ -619,7 +639,7 @@ fun HomeScreen(
                     sourceMismatch = sourceMismatch,
                     sourceUnknownLegacy = sourceUnknownLegacy,
                     availableVersion = availableVersion,
-                    coreOperationMessage = coreOperationStatus(
+                    coreOperationMessage = runtimeTransition?.message ?: coreOperationStatus(
                         isInstalling = viewModel.isInstallingCore,
                         isSwitching = viewModel.isSwitchingCore,
                         isUpdating = viewModel.isUpdatingCore
@@ -661,7 +681,7 @@ fun HomeScreen(
                 }
 
                 AnimatedVisibility(
-                    visible = state.errorMessage != null,
+                    visible = runtimeTransition == null && state.errorMessage != null,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
@@ -733,7 +753,7 @@ fun HomeScreen(
 
     if (activeOverlay == HomeOverlay.RuntimeInfo) {
         ServiceRuntimeInfoDialog(
-            status = state.status,
+            status = presentedStatus,
             uptime = uptimeText,
             runMode = state.runMode,
             variantLabel = currentVariantLabel,

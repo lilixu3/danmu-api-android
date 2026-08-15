@@ -23,13 +23,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.73"
+    ?: "1.0.5.74"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 159
+    ?: 160
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -313,7 +313,7 @@ dependencies {
     implementation(libs.okhttp)
 
     // PR 实验室使用成熟的纯 Java Git 实现执行本地三方合并。
-    implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.5.202508271544-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:6.3.0.202209071007-r")
     implementation("org.slf4j:slf4j-nop:1.7.36")
 
     // LSPosed / libxposed API 102 目标：minApiVersion 仍为 101，运行时通过能力检测兼容 101+。

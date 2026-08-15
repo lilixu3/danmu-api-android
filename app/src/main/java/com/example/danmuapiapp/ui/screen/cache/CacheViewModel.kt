@@ -102,8 +102,11 @@ class CacheViewModel @Inject constructor(
             val requested = selectedItems
             cacheRepository.clear(requested).fold(
                 onSuccess = { result ->
-                    val count = result.clearedItems.size
-                    message = if (result.usedSelectiveProtocol) "已清理 $count 项缓存" else "缓存已全部清理"
+                    message = when {
+                        !result.isVerified -> "清理请求已完成，但当前核心未返回确认详情，请刷新后核对"
+                        result.usedSelectiveProtocol -> "已清理 ${result.clearedItems.size} 项缓存"
+                        else -> "缓存已全部清理"
+                    }
                 },
                 onFailure = { message = "清理失败：${it.message}" }
             )

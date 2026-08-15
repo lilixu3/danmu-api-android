@@ -231,7 +231,7 @@ class CompatTvConfigSyncServer(
         val syncedEnv = DotEnvCodec.parse(payload.envContent)
         val listenMode = RuntimeListenMode.fromBindHost(
             syncedEnv[RuntimeListenMode.ENV_KEY]
-        ) ?: RuntimeListenMode.Ipv4Only
+        ) ?: runtimeSnapshot.listenMode
 
         settingsRepository.setGithubProxy(payload.settings.githubProxy)
         githubProxyService.setSelectedProxy(payload.settings.githubProxy)

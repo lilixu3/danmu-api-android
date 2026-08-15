@@ -51,6 +51,7 @@ import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.ImageData
 import com.mikepenz.markdown.model.ImageTransformer
+import com.mikepenz.markdown.model.MarkdownState
 import com.mikepenz.markdown.model.NoOpImageTransformerImpl
 import com.mikepenz.markdown.model.markdownDimens
 import com.mikepenz.markdown.model.markdownPadding
@@ -73,6 +74,7 @@ fun SimpleMarkdownText(
     modifier: Modifier = Modifier,
     maxLinesPerParagraph: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
+    retainedMarkdownState: MarkdownState? = null,
 ) {
     if (markdown.isBlank()) return
 
@@ -87,7 +89,7 @@ fun SimpleMarkdownText(
     val normalizedMarkdown = remember(markdown) {
         normalizeMarkdownLineEndings(markdown)
     }
-    val markdownState = rememberMarkdownState(
+    val markdownState = retainedMarkdownState ?: rememberMarkdownState(
         content = normalizedMarkdown,
         retainState = true,
     )
@@ -214,6 +216,17 @@ fun SimpleMarkdownText(
             },
         )
     }
+}
+
+@Composable
+internal fun rememberSimpleMarkdownState(markdown: String): MarkdownState {
+    val normalizedMarkdown = remember(markdown) {
+        normalizeMarkdownLineEndings(markdown)
+    }
+    return rememberMarkdownState(
+        content = normalizedMarkdown,
+        retainState = true,
+    )
 }
 
 internal fun normalizeMarkdownLineEndings(markdown: String): String =

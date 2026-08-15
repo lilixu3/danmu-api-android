@@ -67,13 +67,18 @@ fun GithubTokenScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val savedToken by viewModel.githubToken.collectAsStateWithLifecycle()
     val status by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    var tokenText by remember(savedToken) { mutableStateOf(savedToken) }
+    var tokenText by remember { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refreshGithubAccount() }
+    LaunchedEffect(status.isLoading, status.tokenValid) {
+        if (!status.isLoading && status.tokenValid == true) {
+            tokenText = ""
+            showToken = false
+        }
+    }
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
             snackbar.showSnackbar(it)
@@ -124,6 +129,9 @@ fun GithubTokenScreen(
                         value = tokenText,
                         onValueChange = { tokenText = it },
                         label = { Text("Token") },
+                        placeholder = {
+                            if (status.tokenConfigured) Text("已配置；输入新 Token 以替换")
+                        },
                         leadingIcon = { Icon(Icons.Rounded.Key, null) },
                         trailingIcon = {
                             IconButton(onClick = { showToken = !showToken }) {
@@ -142,7 +150,8 @@ fun GithubTokenScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
                             onClick = { viewModel.saveGithubToken(tokenText) },
-                            enabled = !status.isLoading,
+                            enabled = !status.isLoading &&
+                                (tokenText.isNotBlank() || !status.tokenConfigured),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
@@ -157,7 +166,7 @@ fun GithubTokenScreen(
                                 tokenText = ""
                                 viewModel.clearGithubToken()
                             },
-                            enabled = savedToken.isNotBlank() || tokenText.isNotBlank(),
+                            enabled = status.tokenConfigured || tokenText.isNotBlank(),
                             shape = RoundedCornerShape(8.dp)
                         ) { Text("清空") }
                     }

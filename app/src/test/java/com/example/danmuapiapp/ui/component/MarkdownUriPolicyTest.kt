@@ -8,6 +8,7 @@ class MarkdownUriPolicyTest {
     @Test
     fun `links allow web and email schemes`() {
         assertTrue(MarkdownUriPolicy.canOpenLink("https://github.com/owner/repo/pull/1"))
+        assertTrue(MarkdownUriPolicy.canOpenLink("https://github.com/owner/repo/issues/中文说明"))
         assertTrue(MarkdownUriPolicy.canOpenLink("http://example.com/path"))
         assertTrue(MarkdownUriPolicy.canOpenLink("mailto:owner@example.com"))
     }
@@ -24,6 +25,7 @@ class MarkdownUriPolicyTest {
     @Test
     fun `images require absolute https urls`() {
         assertTrue(MarkdownUriPolicy.canLoadImage("https://user-images.githubusercontent.com/a.png"))
+        assertTrue(MarkdownUriPolicy.canLoadImage("https://example.com/预览/图片.png"))
         assertFalse(MarkdownUriPolicy.canLoadImage("http://example.com/a.png"))
         assertFalse(MarkdownUriPolicy.canLoadImage("file:///sdcard/a.png"))
         assertFalse(MarkdownUriPolicy.canLoadImage("//example.com/a.png"))

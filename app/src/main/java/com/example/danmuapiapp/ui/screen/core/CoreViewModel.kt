@@ -11,15 +11,21 @@ import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
+import com.example.danmuapiapp.ui.common.RuntimeRestartEvidence
+import com.example.danmuapiapp.ui.common.awaitCoreRestart
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -39,7 +45,6 @@ class CoreViewModel @Inject constructor(
     val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
-    val githubToken = settingsRepo.githubToken
     val githubAccountStatus = githubAccountService.status
     val proxyOptions = githubProxyService.proxyOptions()
 
@@ -72,6 +77,8 @@ class CoreViewModel @Inject constructor(
     var isLoadingHistory by mutableStateOf(false)
         private set
     var revisionHistoryError by mutableStateOf<String?>(null)
+        private set
+    var revisionVersionLoadingShas by mutableStateOf<Set<String>>(emptySet())
         private set
     var revisionSearchQuery by mutableStateOf("")
         private set
@@ -109,7 +116,11 @@ class CoreViewModel @Inject constructor(
     private var revisionDetailsJob: Job? = null
     private var revisionDetailsGeneration = 0L
     private var revisionHistoryJob: Job? = null
+    private val revisionVersionJobs = mutableMapOf<String, Job>()
+    private val revisionVersionLookupSemaphore = Semaphore(REVISION_VERSION_LOOKUP_CONCURRENCY)
     private var revisionHistoryGeneration = 0L
+    private val revisionPageCache = linkedMapOf<RevisionPageCacheKey, CachedRevisionPage>()
+    private var activeRevisionPageCacheKey: RevisionPageCacheKey? = null
 
     init {
         coreRepo.refreshCoreInfo()
@@ -160,39 +171,41 @@ class CoreViewModel @Inject constructor(
 
     fun updateVariant(variant: ApiVariant) {
         if (isOperating) return
-        val info = coreInfoList.value.firstOrNull { it.variant == variant }
-        if (info?.isInstalled != true) {
-            operationMessage = "${variantLabel(variant)}尚未安装，请先安装或配置仓库"
-            return
-        }
-        val previous = runtimeState.value
-        if (previous.variant == variant) return
+        if (runtimeState.value.variant == variant) return
         viewModelScope.launch {
             isOperating = true
             try {
+                val info = coreInfoList.value.firstOrNull { it.variant == variant }
+                val ready = withContext(Dispatchers.IO) {
+                    coreRepo.isCoreReady(variant)
+                } && info?.sourceMismatch != true
+                if (!ready) {
+                    operationMessage = if (info?.sourceMismatch == true) {
+                        "${variantLabel(variant)}来源与设置不一致，请先重新下载核心"
+                    } else {
+                        "${variantLabel(variant)}尚未安装，请先安装或配置仓库"
+                    }
+                    return@launch
+                }
+
+                val previous = runtimeState.value
+                if (previous.variant == variant) return@launch
                 val expectsSameVariantRecovery = coreRepo.candidateState.value?.let { candidate ->
                     candidate.variant == variant && candidate.hasRecoveryPoint
                 } == true
+                val restartSnapshot = RuntimeRestartEvidence.snapshot(previous)
                 runtimeRepo.updateVariant(variant)
                 if (previous.status != ServiceStatus.Running) {
                     operationMessage = "已切换到${variantLabel(variant)}"
                     return@launch
                 }
                 runtimeRepo.restartService()
-                var sawRestart = false
-                val started = withTimeoutOrNull(45_000L) {
-                    runtimeState.first { state ->
-                        when (state.status) {
-                            ServiceStatus.Starting, ServiceStatus.Stopping -> {
-                                sawRestart = true
-                                false
-                            }
-                            ServiceStatus.Running -> sawRestart && state.variant == variant
-                            ServiceStatus.Error, ServiceStatus.Stopped -> sawRestart
-                        }
-                    }
-                }?.status == ServiceStatus.Running
-                if (started) {
+                val restartResult = runtimeState.awaitCoreRestart(
+                    targetVariant = variant,
+                    beforeRestart = restartSnapshot,
+                    timeoutMs = 45_000L
+                )
+                if (restartResult.status == ServiceStatus.Running) {
                     operationMessage = "已切换并启动${variantLabel(variant)}"
                     return@launch
                 }
@@ -206,6 +219,16 @@ class CoreViewModel @Inject constructor(
                         operationMessage = "新版本启动失败，已恢复该核心的上一个可用版本"
                         return@launch
                     }
+                }
+                if (RuntimeRestartEvidence.isConfirmedRunning(
+                        state = runtimeState.value,
+                        targetVariant = variant,
+                        beforeRestart = restartSnapshot,
+                        sawProgress = restartResult.sawProgress
+                    )
+                ) {
+                    operationMessage = "已切换并启动${variantLabel(variant)}"
+                    return@launch
                 }
                 runtimeRepo.updateVariant(previous.variant)
                 runtimeRepo.restartService()
@@ -249,11 +272,14 @@ class CoreViewModel @Inject constructor(
         val label = variantLabel(variant)
         viewModelScope.launch {
             isOperating = true
-            coreRepo.deleteCore(variant).fold(
-                onSuccess = { operationMessage = "$label 已删除" },
-                onFailure = { operationMessage = "删除失败: ${it.message}" }
-            )
-            isOperating = false
+            try {
+                coreRepo.deleteCore(variant).fold(
+                    onSuccess = { operationMessage = "$label 已删除" },
+                    onFailure = { operationMessage = "删除失败: ${it.message}" }
+                )
+            } finally {
+                isOperating = false
+            }
         }
     }
 
@@ -264,13 +290,16 @@ class CoreViewModel @Inject constructor(
     private fun doCheckUpdate(variant: ApiVariant) {
         viewModelScope.launch {
             isCheckingUpdate = true
-            settingsRepo.setIgnoredUpdateVersion(variant, null)
-            coreRepo.checkAndMarkUpdate(variant)
-            val info = coreInfoList.value.find { it.variant == variant }
-            updateDialogVariant = variant
-            updateDialogInfo = info
-            showUpdateDialog = true
-            isCheckingUpdate = false
+            try {
+                settingsRepo.setIgnoredUpdateVersion(variant, null)
+                coreRepo.checkAndMarkUpdate(variant)
+                val info = coreInfoList.value.find { it.variant == variant }
+                updateDialogVariant = variant
+                updateDialogInfo = info
+                showUpdateDialog = true
+            } finally {
+                isCheckingUpdate = false
+            }
         }
     }
 
@@ -343,26 +372,46 @@ class CoreViewModel @Inject constructor(
         revisionHistoryGeneration += 1
         val generation = revisionHistoryGeneration
         revisionHistoryJob?.cancel()
+        cancelRevisionVersionRequests()
+        val cacheKey = revisionPageCacheKey(variant, page, query)
+        val cached = revisionPageCache[cacheKey]?.takeIf {
+            System.currentTimeMillis() - it.cachedAtMs < REVISION_PAGE_CACHE_TTL_MS
+        }
+        if (cached != null) {
+            revisionHistoryError = null
+            revisionHistory = cached.page.revisions
+            revisionPage = cached.page.page
+            revisionHasNextPage = cached.page.hasNextPage
+            appliedRevisionSearchQuery = query
+            isLoadingHistory = false
+            revisionHistoryJob = null
+            activeRevisionPageCacheKey = cacheKey
+            return
+        }
         revisionHistoryJob = viewModelScope.launch {
             isLoadingHistory = true
             revisionHistoryError = null
-            coreRepo.fetchRevisionHistory(
+            val result = coreRepo.fetchRevisionHistory(
                 variant = variant,
                 page = page,
                 pageSize = REVISION_PAGE_SIZE,
                 query = query
-            ).fold(
+            )
+            result.fold(
                 onSuccess = { result ->
                     if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
                     revisionHistory = result.revisions
                     revisionPage = result.page
                     revisionHasNextPage = result.hasNextPage
                     appliedRevisionSearchQuery = query
+                    activeRevisionPageCacheKey = cacheKey
+                    cacheRevisionPage(cacheKey, result)
                 },
                 onFailure = { error ->
                     if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
                     revisionHistory = emptyList()
                     revisionHasNextPage = false
+                    activeRevisionPageCacheKey = null
                     revisionHistoryError = error.message ?: "无法读取提交记录"
                     promptProxyReselectIfNeeded(PendingProxyAction.LoadRollbackHistory(variant))
                 }
@@ -371,6 +420,92 @@ class CoreViewModel @Inject constructor(
             isLoadingHistory = false
             revisionHistoryJob = null
             refreshGithubAccountAfterApiUsage()
+        }
+    }
+
+    fun onRevisionVisible(revision: CoreRevision) {
+        val variant = rollbackVariant ?: return
+        val generation = revisionHistoryGeneration
+        val commitSha = revision.commitSha
+        if (!isCurrentRevisionPageRequest(generation, variant) ||
+            revision.version.isNotBlank() ||
+            commitSha in revisionVersionJobs
+        ) {
+            return
+        }
+        revisionVersionLoadingShas = revisionVersionLoadingShas + commitSha
+        revisionVersionJobs[commitSha] = viewModelScope.launch {
+            try {
+                val version = revisionVersionLookupSemaphore.withPermit {
+                    coreRepo.fetchRevisionVersion(variant, revision).getOrNull()
+                }
+                if (isCurrentRevisionPageRequest(generation, variant)) {
+                    applyRevisionVersion(commitSha, version)
+                }
+            } finally {
+                revisionVersionJobs.remove(commitSha)
+                if (isCurrentRevisionPageRequest(generation, variant)) {
+                    revisionVersionLoadingShas = revisionVersionLoadingShas - commitSha
+                }
+            }
+        }
+    }
+
+    private fun cancelRevisionVersionRequests() {
+        revisionVersionJobs.values.forEach { it.cancel() }
+        revisionVersionJobs.clear()
+        revisionVersionLoadingShas = emptySet()
+    }
+
+    private fun applyRevisionVersion(commitSha: String, version: String?) {
+        val resolvedVersion = version.orEmpty()
+        revisionHistory = revisionHistory.map { revision ->
+            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
+        }
+        selectedRevision = selectedRevision?.let { revision ->
+            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
+        }
+        selectedRevisionDetails = selectedRevisionDetails?.let { details ->
+            if (details.revision.commitSha == commitSha) {
+                details.copy(revision = details.revision.copy(version = resolvedVersion))
+            } else {
+                details
+            }
+        }
+        pendingRollbackRevision = pendingRollbackRevision?.let { revision ->
+            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
+        }
+        revisionVersionLoadingShas = revisionVersionLoadingShas - commitSha
+        activeRevisionPageCacheKey?.let { key ->
+            val cached = revisionPageCache[key] ?: return@let
+            revisionPageCache[key] = cached.copy(
+                page = cached.page.copy(revisions = revisionHistory)
+            )
+        }
+    }
+
+    private fun revisionPageCacheKey(
+        variant: ApiVariant,
+        page: Int,
+        query: String
+    ): RevisionPageCacheKey {
+        val sourceFingerprint = if (variant == ApiVariant.Custom) {
+            settingsRepo.customCoreSource.value.let { "${it.repo}:${it.branch}" }
+        } else {
+            variant.key
+        }
+        return RevisionPageCacheKey(
+            variant = variant,
+            page = page,
+            query = query,
+            sourceFingerprint = sourceFingerprint
+        )
+    }
+
+    private fun cacheRevisionPage(key: RevisionPageCacheKey, page: CoreRevisionPage) {
+        revisionPageCache[key] = CachedRevisionPage(page, System.currentTimeMillis())
+        while (revisionPageCache.size > MAX_REVISION_PAGE_CACHE_ENTRIES) {
+            revisionPageCache.remove(revisionPageCache.keys.first())
         }
     }
 
@@ -396,7 +531,10 @@ class CoreViewModel @Inject constructor(
         revisionHistoryGeneration += 1
         revisionHistoryJob?.cancel()
         revisionHistoryJob = null
+        cancelRevisionVersionRequests()
+        activeRevisionPageCacheKey = null
         isLoadingHistory = false
+        revisionVersionLoadingShas = emptySet()
         cancelRevisionDetailsRequest()
         showRevisionHistory = false
         rollbackVariant = null
@@ -423,6 +561,7 @@ class CoreViewModel @Inject constructor(
 
     fun openRevisionDetails(revision: CoreRevision) {
         val variant = rollbackVariant ?: return
+        onRevisionVisible(revision)
         cancelRevisionDetailsRequest()
         val generation = revisionDetailsGeneration
         val revisionSha = revision.commitSha
@@ -472,6 +611,7 @@ class CoreViewModel @Inject constructor(
     }
 
     fun requestRollback(revision: CoreRevision) {
+        onRevisionVisible(revision)
         pendingRollbackRevision = revision
     }
 
@@ -591,7 +731,22 @@ class CoreViewModel @Inject constructor(
 
     companion object {
         private const val REVISION_PAGE_SIZE = 15
+        private const val REVISION_VERSION_LOOKUP_CONCURRENCY = 1
+        private const val REVISION_PAGE_CACHE_TTL_MS = 2L * 60L * 1000L
+        private const val MAX_REVISION_PAGE_CACHE_ENTRIES = 12
     }
+
+    private data class RevisionPageCacheKey(
+        val variant: ApiVariant,
+        val page: Int,
+        val query: String,
+        val sourceFingerprint: String
+    )
+
+    private data class CachedRevisionPage(
+        val page: CoreRevisionPage,
+        val cachedAtMs: Long
+    )
 
     fun openVariantSettingsDialog(variant: ApiVariant) {
         showGearMenu = null
@@ -674,21 +829,24 @@ class CoreViewModel @Inject constructor(
         showDependencyRepairDialog = false
         viewModelScope.launch {
             isOperating = true
-            operationMessage = progressMessage
-            repairBlock(request.operationId).fold(
-                onSuccess = {
-                    val latestRequest = pendingDependencyRepair.value
-                        ?.takeIf { it.operationId == request.operationId }
-                        ?: request
-                    operationMessage = "依赖校验通过，正在继续${latestRequest.actionLabel}..."
-                    applyRepairedPendingCore(latestRequest)
-                },
-                onFailure = { error ->
-                    operationMessage = "依赖修复失败：${error.message ?: "未知错误"}"
-                    showDependencyRepairDialog = pendingDependencyRepair.value != null
-                }
-            )
-            isOperating = false
+            try {
+                operationMessage = progressMessage
+                repairBlock(request.operationId).fold(
+                    onSuccess = {
+                        val latestRequest = pendingDependencyRepair.value
+                            ?.takeIf { it.operationId == request.operationId }
+                            ?: request
+                        operationMessage = "依赖校验通过，正在继续${latestRequest.actionLabel}..."
+                        applyRepairedPendingCore(latestRequest)
+                    },
+                    onFailure = { error ->
+                        operationMessage = "依赖修复失败：${error.message ?: "未知错误"}"
+                        showDependencyRepairDialog = pendingDependencyRepair.value != null
+                    }
+                )
+            } finally {
+                isOperating = false
+            }
         }
     }
 
@@ -746,52 +904,54 @@ class CoreViewModel @Inject constructor(
         applyBlock: suspend () -> Result<Unit>
     ) {
         isOperating = true
-        operationMessage = actionMessage
-        val applyPlan = decideCoreApplyPlan(runtimeState.value, variant)
+        try {
+            operationMessage = actionMessage
+            val applyPlan = decideCoreApplyPlan(runtimeState.value, variant)
 
-        if (applyPlan.shouldStopServiceBeforeApply) {
-            operationMessage = "正在停止服务以安全应用 ${variantLabel(variant)} 变更..."
-            runtimeRepo.stopService()
-            val stopped = waitForRuntimeStoppedBeforeCoreMutation()
-            if (!stopped) {
-                operationMessage = stopTimeoutMessage
-                isOperating = false
-                return
+            if (applyPlan.shouldStopServiceBeforeApply) {
+                operationMessage = "正在停止服务以安全应用 ${variantLabel(variant)} 变更..."
+                runtimeRepo.stopService()
+                val stopped = waitForRuntimeStoppedBeforeCoreMutation()
+                if (!stopped) {
+                    operationMessage = stopTimeoutMessage
+                    return
+                }
             }
-        }
 
-        applyBlock().fold(
-            onSuccess = {
-                val restartPlan = decideCoreApplyPlan(runtimeState.value, variant)
-                when (
-                    if (restartPlan.shouldRestartServiceAfterApply) {
-                        restartRuntimeAfterCoreMutation(variant)
+            applyBlock().fold(
+                onSuccess = {
+                    val restartPlan = decideCoreApplyPlan(runtimeState.value, variant)
+                    when (
+                        if (restartPlan.shouldRestartServiceAfterApply) {
+                            restartRuntimeAfterCoreMutation(variant)
+                        } else {
+                            PostApplyRestartResult.None
+                        }
+                    ) {
+                        PostApplyRestartResult.Restarting -> {
+                            operationMessage = "${successMessage}，服务正在重启以应用变更"
+                        }
+                        PostApplyRestartResult.StopTimeout -> {
+                            operationMessage = "${successMessage}，但服务自动重启前停止超时，请稍后手动重启服务"
+                        }
+                        PostApplyRestartResult.None -> {
+                            operationMessage = successMessage
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    if (error is CoreDependencyRepairRequiredException) {
+                        operationMessage = "${variantLabel(variant)}${error.request.actionLabel}已暂停，等待修复依赖"
+                        showDependencyRequiredPrompt = true
                     } else {
-                        PostApplyRestartResult.None
-                    }
-                ) {
-                    PostApplyRestartResult.Restarting -> {
-                        operationMessage = "${successMessage}，服务正在重启以应用变更"
-                    }
-                    PostApplyRestartResult.StopTimeout -> {
-                        operationMessage = "${successMessage}，但服务自动重启前停止超时，请稍后手动重启服务"
-                    }
-                    PostApplyRestartResult.None -> {
-                        operationMessage = successMessage
+                        operationMessage = "$failurePrefix: ${error.message}"
+                        promptProxyReselectIfNeeded(pendingAction)
                     }
                 }
-            },
-            onFailure = { error ->
-                if (error is CoreDependencyRepairRequiredException) {
-                    operationMessage = "${variantLabel(variant)}${error.request.actionLabel}已暂停，等待修复依赖"
-                    showDependencyRequiredPrompt = true
-                } else {
-                    operationMessage = "$failurePrefix: ${error.message}"
-                    promptProxyReselectIfNeeded(pendingAction)
-                }
-            }
-        )
-        isOperating = false
+            )
+        } finally {
+            isOperating = false
+        }
     }
 
     private suspend fun restartRuntimeAfterCoreMutation(variant: ApiVariant): PostApplyRestartResult {

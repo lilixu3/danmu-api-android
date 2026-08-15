@@ -75,12 +75,13 @@ fun SettingsHubScreen(
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val adminSessionState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val hideFromRecents by viewModel.hideFromRecents.collectAsStateWithLifecycle()
+    val githubAccountStatus by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val runModeLabel = state.runMode.label
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
     val proxyLabel = viewModel.currentProxyLabel()
-    val githubTokenConfigured = viewModel.githubTokenSummary() != "未配置"
+    val githubTokenConfigured = githubAccountStatus.tokenConfigured
 
     val runModeSummary = if (state.runMode == RunMode.Root) {
         "适合长期后台、自启和低端口监听"

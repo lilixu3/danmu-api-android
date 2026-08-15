@@ -4,12 +4,16 @@ import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import com.example.danmuapiapp.domain.model.CorePullRequest
 import com.example.danmuapiapp.domain.model.CorePullRequestFilter
 import com.example.danmuapiapp.domain.model.CorePullRequestFilePage
+import com.example.danmuapiapp.domain.model.CorePullRequestInclusion
 import com.example.danmuapiapp.domain.model.CorePullRequestPage
 import com.example.danmuapiapp.domain.model.CoreRevisionFileChange
 import com.example.danmuapiapp.domain.model.PullRequestFirstContribution
 import com.example.danmuapiapp.domain.model.matchesFilter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -30,22 +34,31 @@ class GithubPullRequestService @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
     private val repositoryInfoCache = ConcurrentHashMap<String, GithubRepositoryInfo>()
     private val repositoryContributorCache = ConcurrentHashMap<String, Boolean>()
+    private val repositoryContributorFailureCache = ConcurrentHashMap<String, Long>()
+    private val currentCoreInclusionCache = ConcurrentHashMap<String, CorePullRequestInclusion>()
+    private val currentCoreInclusionFailureCache = ConcurrentHashMap<String, Long>()
+    private val pullRequestDetailsCache = ConcurrentHashMap<String, PullRequestDetailsCacheEntry>()
+    private val listSourcePageCache = ConcurrentHashMap<PullRequestListSourceCacheKey, CachedPullRequestSourcePage>()
+    private val searchSourcePageCache = ConcurrentHashMap<PullRequestSearchSourceCacheKey, CachedPullRequestSearchSourcePage>()
+    private val contributorLookupLocks = ConcurrentHashMap<String, Mutex>()
+    private val inclusionLookupLocks = ConcurrentHashMap<String, Mutex>()
+    private val pullRequestDetailsLocks = ConcurrentHashMap<String, Mutex>()
 
-    fun resolveDefaultBranch(repository: String): String {
+    suspend fun resolveDefaultBranch(repository: String): String {
         val repo = validateRepository(repository)
         return repositoryInfo(repo).defaultBranch
     }
 
-    private fun repositoryInfo(repository: String): GithubRepositoryInfo {
+    private suspend fun repositoryInfo(repository: String): GithubRepositoryInfo {
         repositoryInfoCache[repository]?.let { return it }
-        val info = githubRemoteService.requestMapped(
+        val info = githubRemoteService.requestMappedCancellable(
             urls = githubRemoteService.apiUrlCandidates("repos/$repository"),
             headers = githubHeaders()
         ) { body ->
             val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
-                ?: return@requestMapped null
+                ?: return@requestMappedCancellable null
             val defaultBranch = string(root, "default_branch").takeIf { it.isNotBlank() }
-                ?: return@requestMapped null
+                ?: return@requestMappedCancellable null
             GithubRepositoryInfo(
                 defaultBranch = defaultBranch,
                 isPrivate = (root["private"] as? JsonPrimitive)?.booleanOrNull ?: false
@@ -62,12 +75,15 @@ class GithubPullRequestService @Inject constructor(
         pageSize: Int,
         filter: CorePullRequestFilter,
         locallyMergedPullRequestNumbers: Collection<Int>,
-        query: String = ""
+        installedCommitSha: String = "",
+        query: String = "",
+        forceRefresh: Boolean = false
     ): CorePullRequestPage {
         val repo = validateRepository(repository)
         val repositoryInfo = repositoryInfo(repo)
         val branch = baseBranch.trim().takeIf { it.isNotBlank() }
             ?: throw IOException("PR 目标分支不能为空")
+        if (forceRefresh) invalidateSourcePageCache(repo, branch)
         val safePage = page.coerceAtLeast(1)
         val safePageSize = pageSize.coerceIn(1, 100)
         val targetStartLong = (safePage - 1L) * safePageSize
@@ -94,6 +110,7 @@ class GithubPullRequestService @Inject constructor(
                 filter = filter,
                 locallyMergedNumbers = locallyMergedNumbers,
                 locallyMergedSet = locallyMergedSet,
+                installedCommitSha = installedCommitSha,
                 query = normalizedQuery
             )
         }
@@ -110,7 +127,12 @@ class GithubPullRequestService @Inject constructor(
                 repository = repo,
                 baseBranch = branch,
                 isPrivateRepository = repositoryInfo.isPrivate,
-                items = sourcePage.items,
+                items = applyCachedListMetadata(
+                    repository = repo,
+                    pullRequests = sourcePage.items,
+                    installedCommitSha = installedCommitSha,
+                    locallyMergedNumbers = locallyMergedSet
+                ),
                 filter = filter,
                 page = safePage,
                 hasPreviousPage = safePage > 1,
@@ -121,9 +143,7 @@ class GithubPullRequestService @Inject constructor(
         val matching = mutableListOf<CorePullRequest>()
         if (filter == CorePullRequestFilter.Merged) {
             locallyMergedNumbers.forEach { number ->
-                currentCoroutineContext().ensureActive()
-                matching += runCatching { get(repo, number) }
-                    .getOrElse { localPullRequestPlaceholder(repo, branch, number) }
+                matching += localPullRequestPlaceholder(repo, branch, number)
             }
         }
 
@@ -155,7 +175,12 @@ class GithubPullRequestService @Inject constructor(
             repository = repo,
             baseBranch = branch,
             isPrivateRepository = repositoryInfo.isPrivate,
-            items = matching.drop(targetStart).take(safePageSize),
+            items = applyCachedListMetadata(
+                repository = repo,
+                pullRequests = matching.drop(targetStart).take(safePageSize),
+                installedCommitSha = installedCommitSha,
+                locallyMergedNumbers = locallyMergedSet
+            ),
             filter = filter,
             page = safePage,
             hasPreviousPage = safePage > 1,
@@ -172,6 +197,7 @@ class GithubPullRequestService @Inject constructor(
         filter: CorePullRequestFilter,
         locallyMergedNumbers: List<Int>,
         locallyMergedSet: Set<Int>,
+        installedCommitSha: String,
         query: String
     ): CorePullRequestPage {
         val targetStartLong = (page - 1L) * pageSize
@@ -191,8 +217,7 @@ class GithubPullRequestService @Inject constructor(
         if (filter == CorePullRequestFilter.Merged) {
             locallyMergedNumbers.forEach { number ->
                 currentCoroutineContext().ensureActive()
-                val pullRequest = runCatching { get(repository, number) }
-                    .getOrElse { localPullRequestPlaceholder(repository, baseBranch, number) }
+                val pullRequest = getOrPlaceholder(repository, baseBranch, number)
                 if (GithubPullRequestSearchQuery.matchesLocal(pullRequest, query)) {
                     matching += pullRequest
                 }
@@ -236,9 +261,12 @@ class GithubPullRequestService @Inject constructor(
             repository = repository,
             baseBranch = baseBranch,
             isPrivateRepository = repositoryInfo.isPrivate,
-            items = matching.drop(targetStart).take(pageSize).map { pullRequest ->
-                resolveFirstContribution(repository, pullRequest)
-            },
+            items = applyCachedListMetadata(
+                repository = repository,
+                pullRequests = matching.drop(targetStart).take(pageSize),
+                installedCommitSha = installedCommitSha,
+                locallyMergedNumbers = locallyMergedSet
+            ),
             filter = filter,
             page = page,
             hasPreviousPage = page > 1,
@@ -246,14 +274,22 @@ class GithubPullRequestService @Inject constructor(
         )
     }
 
-    private fun requestSearchPage(
+    private suspend fun requestSearchPage(
         repository: String,
         baseBranch: String,
         query: String,
         page: Int,
         pageSize: Int
     ): GithubPullRequestSearchSourcePage {
-        val response = githubRemoteService.requestTextResponse(
+        val cacheKey = PullRequestSearchSourceCacheKey(
+            repository = repository.lowercase(),
+            baseBranch = baseBranch.lowercase(),
+            query = query,
+            page = page,
+            pageSize = pageSize
+        )
+        cachedSearchSourcePage(cacheKey)?.let { return it }
+        val response = githubRemoteService.requestTextResponseCancellable(
             urls = githubRemoteService.apiUrlCandidates(
                 "search/issues?q=${encode(query)}&sort=updated&order=desc" +
                     "&per_page=$pageSize&page=$page"
@@ -271,16 +307,24 @@ class GithubPullRequestService @Inject constructor(
             totalCount = payload.totalCount,
             hasNextPage = response.linkHeader?.contains("rel=\"next\"") == true ||
                 (response.linkHeader == null && page * pageSize < payload.totalCount)
-        )
+        ).also { cacheSearchSourcePage(cacheKey, it) }
     }
 
-    private fun requestListPage(
+    private suspend fun requestListPage(
         repository: String,
         baseBranch: String,
         state: String,
         page: Int,
         pageSize: Int
     ): GithubPullRequestSourcePage {
+        val cacheKey = PullRequestListSourceCacheKey(
+            repository = repository.lowercase(),
+            baseBranch = baseBranch.lowercase(),
+            state = state.lowercase(),
+            page = page,
+            pageSize = pageSize
+        )
+        cachedListSourcePage(cacheKey)?.let { return it }
         val path = buildString {
             append("repos/")
             append(repository)
@@ -293,17 +337,17 @@ class GithubPullRequestService @Inject constructor(
             append("&page=")
             append(page)
         }
-        val response = githubRemoteService.requestTextResponse(
+        val response = githubRemoteService.requestTextResponseCancellable(
             urls = githubRemoteService.apiUrlCandidates(path),
             headers = githubHeaders()
         ) ?: throw IOException("无法读取 PR 列表，请检查网络、Token 与 API 额度")
         val items = GithubPullRequestPayloadParser.parseList(response.body)
             ?: throw IOException("GitHub 返回了无法识别的 PR 数据")
         return GithubPullRequestSourcePage(
-            items = items.map { resolveFirstContribution(repository, it) },
+            items = items,
             hasNextPage = response.linkHeader?.contains("rel=\"next\"") == true ||
                 (response.linkHeader == null && items.size == pageSize)
-        )
+        ).also { cacheListSourcePage(cacheKey, it) }
     }
 
     private fun localPullRequestPlaceholder(
@@ -326,19 +370,184 @@ class GithubPullRequestService @Inject constructor(
         baseRepository = repository
     )
 
-    fun get(repository: String, pullRequestNumber: Int): CorePullRequest {
+    suspend fun get(repository: String, pullRequestNumber: Int): CorePullRequest {
         val repo = validateRepository(repository)
         if (pullRequestNumber <= 0) throw IOException("PR 编号无效")
-        val body = githubRemoteService.requestText(
-            urls = githubRemoteService.apiUrlCandidates("repos/$repo/pulls/$pullRequestNumber"),
-            headers = githubHeaders()
-        ) ?: throw IOException("无法读取 PR #$pullRequestNumber，可能已关闭、删除或无权访问")
-        val pullRequest = GithubPullRequestPayloadParser.parseOne(body)
-            ?: throw IOException("GitHub 返回了无法识别的 PR #$pullRequestNumber 数据")
-        return resolveFirstContribution(repo, pullRequest)
+        val cacheKey = "${repo.lowercase()}:$pullRequestNumber"
+        cachedPullRequestDetails(cacheKey)?.let { return it }
+        return mutexFor(pullRequestDetailsLocks, cacheKey).withLock {
+            cachedPullRequestDetails(cacheKey)?.let { return@withLock it }
+            val body = githubRemoteService.requestTextCancellable(
+                urls = githubRemoteService.apiUrlCandidates("repos/$repo/pulls/$pullRequestNumber"),
+                headers = githubHeaders()
+            ) ?: throw IOException("无法读取 PR #$pullRequestNumber，可能已关闭、删除或无权访问")
+            val pullRequest = GithubPullRequestPayloadParser.parseOne(body)
+                ?: throw IOException("GitHub 返回了无法识别的 PR #$pullRequestNumber 数据")
+            resolveFirstContribution(repo, pullRequest).also { resolved ->
+                if (pullRequestDetailsCache.size >= MAX_PULL_REQUEST_DETAILS_CACHE_ENTRIES) {
+                    pullRequestDetailsCache.clear()
+                }
+                pullRequestDetailsCache[cacheKey] = PullRequestDetailsCacheEntry(
+                    pullRequest = resolved,
+                    cachedAtMs = System.currentTimeMillis()
+                )
+            }
+        }
     }
 
-    fun listFiles(
+    suspend fun getWithCurrentCoreInclusion(
+        repository: String,
+        pullRequestNumber: Int,
+        installedCommitSha: String,
+        locallyMergedPullRequestNumbers: Collection<Int>
+    ): CorePullRequest {
+        val repo = validateRepository(repository)
+        val pullRequest = get(repo, pullRequestNumber)
+        return resolveCurrentCoreInclusion(
+            repository = repo,
+            pullRequest = pullRequest,
+            installedCommitSha = installedCommitSha,
+            locallyMerged = pullRequestNumber in locallyMergedPullRequestNumbers
+        )
+    }
+
+    suspend fun enrichListItem(
+        repository: String,
+        pullRequest: CorePullRequest,
+        installedCommitSha: String,
+        locallyMergedNumbers: Set<Int>,
+        allowFirstContributionLookup: Boolean,
+        allowInclusionLookup: Boolean
+    ): CorePullRequest {
+        val repo = validateRepository(repository)
+        currentCoroutineContext().ensureActive()
+        val withContribution = if (allowFirstContributionLookup) {
+            resolveFirstContribution(repo, pullRequest)
+        } else {
+            applyCachedFirstContribution(repo, pullRequest)
+        }
+        if (!allowInclusionLookup) {
+            return withContribution.copy(
+                currentCoreInclusion = pullRequest.currentCoreInclusion
+            )
+        }
+        val locallyMerged = pullRequest.number in locallyMergedNumbers
+        val detailed = if (!locallyMerged &&
+            installedCommitSha.isNotBlank() &&
+            !withContribution.mergedAt.isNullOrBlank() &&
+            withContribution.mergeCommitSha.isBlank()
+        ) {
+            try {
+                get(repo, withContribution.number)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                withContribution
+            }
+        } else {
+            withContribution
+        }
+        return resolveCurrentCoreInclusion(
+            repository = repo,
+            pullRequest = detailed,
+            installedCommitSha = installedCommitSha,
+            locallyMerged = locallyMerged
+        )
+    }
+
+    private fun applyCachedListMetadata(
+        repository: String,
+        pullRequests: List<CorePullRequest>,
+        installedCommitSha: String,
+        locallyMergedNumbers: Set<Int>
+    ): List<CorePullRequest> = pullRequests.map { pullRequest ->
+        val withContribution = applyCachedFirstContribution(repository, pullRequest)
+        val locallyMerged = pullRequest.number in locallyMergedNumbers
+        val installed = installedCommitSha.trim().lowercase()
+        val merged = withContribution.mergeCommitSha.trim().lowercase()
+        val inclusion = when {
+            locallyMerged -> CorePullRequestInclusion.LocalMerge
+            withContribution.mergedAt.isNullOrBlank() -> CorePullRequestInclusion.NotIncluded
+            installed == merged && COMMIT_SHA_PATTERN.matches(installed) -> {
+                CorePullRequestInclusion.Included
+            }
+            COMMIT_SHA_PATTERN.matches(installed) && COMMIT_SHA_PATTERN.matches(merged) -> {
+                currentCoreInclusionCache[inclusionCacheKey(repository, merged, installed)]
+                    ?: CorePullRequestInclusion.Unknown
+            }
+            else -> CorePullRequestInclusion.Unknown
+        }
+        withContribution.copy(currentCoreInclusion = inclusion)
+    }
+
+    private suspend fun resolveCurrentCoreInclusion(
+        repository: String,
+        pullRequest: CorePullRequest,
+        installedCommitSha: String,
+        locallyMerged: Boolean
+    ): CorePullRequest {
+        val inclusion = when {
+            locallyMerged -> CorePullRequestInclusion.LocalMerge
+            pullRequest.mergedAt.isNullOrBlank() -> CorePullRequestInclusion.NotIncluded
+            else -> resolveMergedPullRequestInclusion(
+                repository = repository,
+                installedCommitSha = installedCommitSha,
+                mergeCommitSha = pullRequest.mergeCommitSha
+            )
+        }
+        return pullRequest.copy(currentCoreInclusion = inclusion)
+    }
+
+    private suspend fun resolveMergedPullRequestInclusion(
+        repository: String,
+        installedCommitSha: String,
+        mergeCommitSha: String
+    ): CorePullRequestInclusion {
+        val installed = installedCommitSha.trim().lowercase()
+        val merged = mergeCommitSha.trim().lowercase()
+        if (!COMMIT_SHA_PATTERN.matches(installed) || !COMMIT_SHA_PATTERN.matches(merged)) {
+            return CorePullRequestInclusion.Unknown
+        }
+        if (installed == merged) return CorePullRequestInclusion.Included
+
+        val cacheKey = inclusionCacheKey(repository, merged, installed)
+        currentCoreInclusionCache[cacheKey]?.let { return it }
+        if (isRecentFailure(currentCoreInclusionFailureCache[cacheKey])) {
+            return CorePullRequestInclusion.Unknown
+        }
+        return mutexFor(inclusionLookupLocks, cacheKey).withLock {
+            currentCoreInclusionCache[cacheKey]?.let { return@withLock it }
+            if (isRecentFailure(currentCoreInclusionFailureCache[cacheKey])) {
+                return@withLock CorePullRequestInclusion.Unknown
+            }
+            val compareStatus = githubRemoteService.requestMappedCancellable(
+                urls = githubRemoteService.apiUrlCandidates(
+                    "repos/$repository/compare/$merged...$installed?per_page=1&page=1"
+                ),
+                headers = githubHeaders()
+            ) { body ->
+                val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
+                    ?: return@requestMappedCancellable null
+                string(root, "status").takeIf { it.isNotBlank() }
+            }
+            val inclusion = PullRequestCurrentCorePolicy.fromCompareStatus(compareStatus)
+            if (inclusion != CorePullRequestInclusion.Unknown) {
+                if (currentCoreInclusionCache.size >= MAX_INCLUSION_CACHE_ENTRIES) {
+                    currentCoreInclusionCache.clear()
+                }
+                currentCoreInclusionCache[cacheKey] = inclusion
+                currentCoreInclusionFailureCache.remove(cacheKey)
+            } else {
+                currentCoreInclusionFailureCache[cacheKey] = System.currentTimeMillis()
+            }
+            inclusion
+        }
+    }
+
+    private fun inclusionCacheKey(repository: String, merged: String, installed: String): String =
+        "${repository.lowercase()}:$merged:$installed"
+
+    suspend fun listFiles(
         repository: String,
         pullRequestNumber: Int,
         page: Int,
@@ -348,7 +557,7 @@ class GithubPullRequestService @Inject constructor(
         if (pullRequestNumber <= 0) throw IOException("PR 编号无效")
         val safePage = page.coerceAtLeast(1)
         val safePageSize = pageSize.coerceIn(1, 100)
-        val response = githubRemoteService.requestTextResponse(
+        val response = githubRemoteService.requestTextResponseCancellable(
             urls = githubRemoteService.apiUrlCandidates(
                 "repos/$repo/pulls/$pullRequestNumber/files?per_page=$safePageSize&page=$safePage"
             ),
@@ -381,7 +590,7 @@ class GithubPullRequestService @Inject constructor(
     private fun encode(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
-    private fun resolveFirstContribution(
+    private suspend fun resolveFirstContribution(
         repository: String,
         pullRequest: CorePullRequest
     ): CorePullRequest {
@@ -389,33 +598,194 @@ class GithubPullRequestService @Inject constructor(
             return pullRequest
         }
         val cacheKey = "$repository:${pullRequest.author}".lowercase()
-        val hasExistingContribution = repositoryContributorCache[cacheKey]
-            ?: fetchHasExistingContribution(repository, pullRequest.author)?.also { result ->
-                repositoryContributorCache[cacheKey] = result
+        val hasExistingContribution = repositoryContributorCache[cacheKey] ?: run {
+            if (isRecentFailure(repositoryContributorFailureCache[cacheKey])) {
+                null
+            } else {
+                mutexFor(contributorLookupLocks, cacheKey).withLock {
+                    repositoryContributorCache[cacheKey] ?: run {
+                        if (isRecentFailure(repositoryContributorFailureCache[cacheKey])) {
+                            null
+                        } else {
+                            fetchHasExistingContribution(repository, pullRequest.author).also { result ->
+                                if (result == null) {
+                                    repositoryContributorFailureCache[cacheKey] = System.currentTimeMillis()
+                                } else {
+                                    repositoryContributorCache[cacheKey] = result
+                                    repositoryContributorFailureCache.remove(cacheKey)
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        }
         return PullRequestFirstContributionPolicy.applyRepositoryLookup(
             pullRequest = pullRequest,
             hasExistingContribution = hasExistingContribution
         )
     }
 
-    private fun fetchHasExistingContribution(repository: String, author: String): Boolean? {
-        val response = githubRemoteService.requestMapped(
+    private fun applyCachedFirstContribution(
+        repository: String,
+        pullRequest: CorePullRequest
+    ): CorePullRequest {
+        if (!PullRequestFirstContributionPolicy.needsRepositoryLookup(pullRequest)) {
+            return pullRequest
+        }
+        return PullRequestFirstContributionPolicy.applyRepositoryLookup(
+            pullRequest = pullRequest,
+            hasExistingContribution = repositoryContributorCache[
+                "$repository:${pullRequest.author}".lowercase()
+            ]
+        )
+    }
+
+    private suspend fun fetchHasExistingContribution(repository: String, author: String): Boolean? {
+        return githubRemoteService.requestMappedCancellable(
             urls = githubRemoteService.apiUrlCandidates(
                 "repos/$repository/commits?author=${encode(author)}&per_page=1"
             ),
             headers = githubHeaders()
         ) { body ->
             val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray
-                ?: return@requestMapped null
+                ?: return@requestMappedCancellable null
             root.isNotEmpty()
         }
-        return response
+    }
+
+    private fun cachedPullRequestDetails(cacheKey: String): CorePullRequest? {
+        val cached = pullRequestDetailsCache[cacheKey] ?: return null
+        if (System.currentTimeMillis() - cached.cachedAtMs < PULL_REQUEST_DETAILS_CACHE_TTL_MS) {
+            return cached.pullRequest
+        }
+        pullRequestDetailsCache.remove(cacheKey, cached)
+        return null
+    }
+
+    private fun cachedListSourcePage(cacheKey: PullRequestListSourceCacheKey): GithubPullRequestSourcePage? {
+        val cached = listSourcePageCache[cacheKey] ?: return null
+        if (System.currentTimeMillis() - cached.cachedAtMs < SOURCE_PAGE_CACHE_TTL_MS) {
+            return cached.page
+        }
+        listSourcePageCache.remove(cacheKey, cached)
+        return null
+    }
+
+    private fun cachedSearchSourcePage(cacheKey: PullRequestSearchSourceCacheKey): GithubPullRequestSearchSourcePage? {
+        val cached = searchSourcePageCache[cacheKey] ?: return null
+        if (System.currentTimeMillis() - cached.cachedAtMs < SOURCE_PAGE_CACHE_TTL_MS) {
+            return cached.page
+        }
+        searchSourcePageCache.remove(cacheKey, cached)
+        return null
+    }
+
+    private fun cacheListSourcePage(
+        cacheKey: PullRequestListSourceCacheKey,
+        page: GithubPullRequestSourcePage
+    ) {
+        if (listSourcePageCache.size >= MAX_SOURCE_PAGE_CACHE_ENTRIES) {
+            listSourcePageCache.clear()
+        }
+        listSourcePageCache[cacheKey] = CachedPullRequestSourcePage(page, System.currentTimeMillis())
+    }
+
+    private fun cacheSearchSourcePage(
+        cacheKey: PullRequestSearchSourceCacheKey,
+        page: GithubPullRequestSearchSourcePage
+    ) {
+        if (searchSourcePageCache.size >= MAX_SOURCE_PAGE_CACHE_ENTRIES) {
+            searchSourcePageCache.clear()
+        }
+        searchSourcePageCache[cacheKey] = CachedPullRequestSearchSourcePage(page, System.currentTimeMillis())
+    }
+
+    private fun invalidateSourcePageCache(repository: String, baseBranch: String) {
+        val normalizedRepository = repository.lowercase()
+        val normalizedBranch = baseBranch.lowercase()
+        listSourcePageCache.keys.removeAll { key ->
+            key.repository == normalizedRepository && key.baseBranch == normalizedBranch
+        }
+        searchSourcePageCache.keys.removeAll { key ->
+            key.repository == normalizedRepository && key.baseBranch == normalizedBranch
+        }
+    }
+
+    private fun isRecentFailure(failedAtMs: Long?): Boolean = failedAtMs != null &&
+        System.currentTimeMillis() - failedAtMs < LOOKUP_FAILURE_TTL_MS
+
+    private fun mutexFor(cache: ConcurrentHashMap<String, Mutex>, key: String): Mutex {
+        cache[key]?.let { return it }
+        if (cache.size >= MAX_LOOKUP_LOCKS) cache.clear()
+        val candidate = Mutex()
+        return cache.putIfAbsent(key, candidate) ?: candidate
+    }
+
+    private suspend fun getOrPlaceholder(
+        repository: String,
+        baseBranch: String,
+        number: Int
+    ): CorePullRequest = try {
+        get(repository, number)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        localPullRequestPlaceholder(repository, baseBranch, number)
     }
 
     companion object {
         private const val SOURCE_PAGE_SIZE = 100
+        private const val MAX_INCLUSION_CACHE_ENTRIES = 512
+        private const val MAX_PULL_REQUEST_DETAILS_CACHE_ENTRIES = 256
+        private const val MAX_SOURCE_PAGE_CACHE_ENTRIES = 16
+        private const val MAX_LOOKUP_LOCKS = 512
+        private const val LOOKUP_FAILURE_TTL_MS = 30_000L
+        private const val PULL_REQUEST_DETAILS_CACHE_TTL_MS = 30_000L
+        private const val SOURCE_PAGE_CACHE_TTL_MS = 2L * 60L * 1000L
         private val REPOSITORY_PATTERN = Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+        private val COMMIT_SHA_PATTERN = Regex("[0-9a-f]{7,40}")
+    }
+}
+
+private data class PullRequestDetailsCacheEntry(
+    val pullRequest: CorePullRequest,
+    val cachedAtMs: Long
+)
+
+private data class PullRequestListSourceCacheKey(
+    val repository: String,
+    val baseBranch: String,
+    val state: String,
+    val page: Int,
+    val pageSize: Int
+)
+
+private data class PullRequestSearchSourceCacheKey(
+    val repository: String,
+    val baseBranch: String,
+    val query: String,
+    val page: Int,
+    val pageSize: Int
+)
+
+private data class CachedPullRequestSourcePage(
+    val page: GithubPullRequestSourcePage,
+    val cachedAtMs: Long
+)
+
+private data class CachedPullRequestSearchSourcePage(
+    val page: GithubPullRequestSearchSourcePage,
+    val cachedAtMs: Long
+)
+
+internal object PullRequestCurrentCorePolicy {
+    fun fromCompareStatus(status: String?): CorePullRequestInclusion = when {
+        status.equals("ahead", ignoreCase = true) ||
+            status.equals("identical", ignoreCase = true) -> CorePullRequestInclusion.Included
+        status.equals("behind", ignoreCase = true) ||
+            status.equals("diverged", ignoreCase = true) -> CorePullRequestInclusion.NotIncluded
+        else -> CorePullRequestInclusion.Unknown
     }
 }
 
@@ -513,6 +883,7 @@ internal object GithubPullRequestPayloadParser {
             authorAssociation = authorAssociation,
             firstContribution = parseFirstContribution(authorAssociation),
             mergedAt = string(root, "merged_at").ifBlank { null },
+            mergeCommitSha = string(root, "merge_commit_sha"),
             closedAt = string(root, "closed_at").ifBlank { null },
             mergeable = (root["mergeable"] as? JsonPrimitive)?.booleanOrNull,
             additions = (root["additions"] as? JsonPrimitive)?.intOrNull,
@@ -664,6 +1035,21 @@ internal object GithubPullRequestSearchQuery {
 }
 
 internal object PullRequestFirstContributionPolicy {
+    fun authorsNeedingLookup(
+        pullRequests: List<CorePullRequest>,
+        limit: Int,
+        isCached: (String) -> Boolean
+    ): List<String> {
+        if (limit <= 0) return emptyList()
+        return pullRequests.asSequence()
+            .filter(::needsRepositoryLookup)
+            .map(CorePullRequest::author)
+            .distinctBy { it.lowercase() }
+            .filterNot(isCached)
+            .take(limit)
+            .toList()
+    }
+
     fun needsRepositoryLookup(pullRequest: CorePullRequest): Boolean {
         if (pullRequest.firstContribution != null) return false
         if (!pullRequest.state.equals("open", ignoreCase = true)) return false

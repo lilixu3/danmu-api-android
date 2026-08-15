@@ -25,5 +25,16 @@ class SensitiveDataRedactorTest {
         assertFalse(redacted.contains("2408:8215"))
         assertTrue(redacted.contains("<IP>"))
     }
-}
 
+    @Test
+    fun redactsQuotedValuesWithSpacesAndShortRuntimeTokens() {
+        val redacted = SensitiveDataRedactor.redact(
+            "\"token\": \"abc def\" host.local:9321/x http://127.0.0.1:9321/ab"
+        )
+
+        assertFalse(redacted.contains("abc def"))
+        assertFalse(redacted.contains("/x"))
+        assertFalse(redacted.contains("/ab"))
+        assertTrue(redacted.contains("\"****\""))
+    }
+}
