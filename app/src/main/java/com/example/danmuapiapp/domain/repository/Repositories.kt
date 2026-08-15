@@ -10,6 +10,7 @@ interface RuntimeRepository {
     fun stopService()
     fun restartService()
     fun refreshRuntimeState()
+    suspend fun refreshRuntimeStateAndAwait()
     fun setAppForeground(foreground: Boolean)
     fun refreshLogs()
     fun applyServiceConfig(
@@ -22,6 +23,9 @@ interface RuntimeRepository {
     fun updateToken(token: String)
     fun updateVariant(variant: ApiVariant)
     fun updateRunMode(mode: RunMode)
+    fun beginRuntimeTransition(kind: RuntimeTransitionKind, message: String): Long
+    fun updateRuntimeTransition(id: Long, message: String)
+    fun endRuntimeTransition(id: Long)
     fun clearLogs()
     fun addLog(level: LogLevel, message: String)
 }
@@ -36,6 +40,7 @@ interface CoreRepository {
     fun isCoreInstalled(variant: ApiVariant): Boolean
     fun isCoreReady(variant: ApiVariant): Boolean
     fun refreshCoreInfo()
+    suspend fun refreshCoreInfoAndAwait()
     suspend fun checkUpdate(variant: ApiVariant): GithubRelease?
     suspend fun checkAndMarkUpdate(variant: ApiVariant)
     suspend fun checkAllUpdates()
@@ -50,6 +55,10 @@ interface CoreRepository {
         pageSize: Int = 15,
         query: String = ""
     ): Result<CoreRevisionPage>
+    suspend fun fetchRevisionVersion(
+        variant: ApiVariant,
+        revision: CoreRevision
+    ): Result<String?>
     suspend fun fetchRevisionDetails(
         variant: ApiVariant,
         revision: CoreRevision
@@ -59,8 +68,15 @@ interface CoreRepository {
         page: Int,
         pageSize: Int = 15,
         filter: CorePullRequestFilter = CorePullRequestFilter.Open,
-        query: String = ""
+        query: String = "",
+        forceRefresh: Boolean = false
     ): Result<CorePullRequestPage>
+    suspend fun enrichPullRequestListItem(
+        variant: ApiVariant,
+        pullRequest: CorePullRequest,
+        allowFirstContributionLookup: Boolean,
+        allowInclusionLookup: Boolean
+    ): Result<CorePullRequest>
     suspend fun fetchPullRequestDetails(
         variant: ApiVariant,
         pullRequestNumber: Int
@@ -80,8 +96,16 @@ interface CoreRepository {
     suspend fun repairPendingDependenciesFromArchive(operationId: Long, archiveUri: String): Result<Unit>
     suspend fun applyPendingCoreMutation(operationId: Long): Result<Unit>
     suspend fun discardPendingCoreMutation(operationId: Long): Result<Unit>
-    suspend fun confirmCandidateCore(variant: ApiVariant, runMode: RunMode): Result<Boolean>
-    suspend fun restoreCandidateCore(variant: ApiVariant, runMode: RunMode): Result<Boolean>
+    suspend fun confirmCandidateCore(
+        variant: ApiVariant,
+        runMode: RunMode,
+        expectedInstalledAtMs: Long
+    ): Result<Boolean>
+    suspend fun restoreCandidateCore(
+        variant: ApiVariant,
+        runMode: RunMode,
+        expectedInstalledAtMs: Long
+    ): Result<Boolean>
     suspend fun applyWorkDirectoryChange(
         targetPath: String?,
         migrateSelectedCore: Boolean
@@ -97,7 +121,6 @@ interface CoreRepository {
 interface SettingsRepository {
     val githubProxy: StateFlow<String>
     val announcementBaseUrl: StateFlow<String>
-    val githubToken: StateFlow<String>
     val autoStart: StateFlow<Boolean>
     val keepAlive: StateFlow<Boolean>
     val keepAliveHeartbeatEnabled: StateFlow<Boolean>

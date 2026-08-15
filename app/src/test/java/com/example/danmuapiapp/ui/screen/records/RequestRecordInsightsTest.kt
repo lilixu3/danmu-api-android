@@ -39,6 +39,16 @@ class RequestRecordInsightsTest {
         assertEquals(2, insight.topFailureCount)
     }
 
+    @Test
+    fun summarizeDoesNotCountMaskedClientAddress() {
+        val records = listOf(
+            record(1, "/api/a", true, "***"),
+            record(2, "/api/b", true, "2408:8215::1")
+        )
+
+        assertEquals(1, RequestRecordInsights.summarize(records).uniqueClients)
+    }
+
     private fun record(
         id: Long,
         url: String,

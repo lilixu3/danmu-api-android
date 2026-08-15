@@ -26,7 +26,8 @@ data class CacheClearCapability(
 
 data class CacheClearResult(
     val clearedItems: Set<CacheClearItem>,
-    val usedSelectiveProtocol: Boolean
+    val usedSelectiveProtocol: Boolean,
+    val isVerified: Boolean
 )
 
 data class CacheStats(

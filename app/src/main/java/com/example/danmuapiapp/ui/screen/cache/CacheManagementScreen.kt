@@ -7,7 +7,7 @@ import com.example.danmuapiapp.ui.component.AppDialogTone
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -218,7 +218,12 @@ fun CacheManagementScreen(
                     }
                 }
                 if (entries.isNotEmpty()) {
-                    items(entries) { entry ->
+                    itemsIndexed(
+                        items = entries,
+                        key = { index, entry ->
+                            "${entry.type}|${entry.key}|${entry.createdAt}|$index"
+                        }
+                    ) { _, entry ->
                         CacheEntryCard(entry = entry)
                     }
                 } else if (stats.isAvailable && !isLoading) {

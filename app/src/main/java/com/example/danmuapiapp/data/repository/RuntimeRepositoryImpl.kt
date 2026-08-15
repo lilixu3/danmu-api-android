@@ -120,6 +120,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private val _runtimeState = MutableStateFlow(loadInitialState())
     override val runtimeState: StateFlow<RuntimeState> = _runtimeState.asStateFlow()
+    private val runtimeTransitionSequence = AtomicLong(0L)
 
     private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
     override val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
@@ -249,6 +250,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private data class CandidateStartAttempt(
         val variant: ApiVariant,
         val runMode: RunMode,
+        val candidateInstalledAtMs: Long,
         val startedAtMs: Long = System.currentTimeMillis()
     )
 
@@ -444,25 +446,35 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     override fun refreshRuntimeState() {
         scope.launch {
-            runCatching {
-                operationMutex.withLock {
-                    if (shouldCloseRootShellSessionForMode(_runtimeState.value.runMode)) {
-                        RootShell.closeSession()
-                    }
-                    reconcileInitialState()
-                    if (_runtimeState.value.runMode == RunMode.Normal) {
-                        reconcileNormalStateLocked()
-                    } else if (_runtimeState.value.runMode == RunMode.Root) {
-                        reconcileRootStateLocked()
-                    }
-                }
-            }.onFailure {
+            try {
+                refreshRuntimeStateNow()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
                 AppDiagnosticLogger.w(
                     context,
                     "RuntimeRepo",
-                    "主动刷新运行状态失败：${it.message ?: "未知错误"}",
-                    it
+                    "主动刷新运行状态失败：${error.message ?: "未知错误"}",
+                    error
                 )
+            }
+        }
+    }
+
+    override suspend fun refreshRuntimeStateAndAwait() {
+        refreshRuntimeStateNow()
+    }
+
+    private suspend fun refreshRuntimeStateNow() {
+        operationMutex.withLock {
+            if (shouldCloseRootShellSessionForMode(_runtimeState.value.runMode)) {
+                RootShell.closeSession()
+            }
+            reconcileInitialState()
+            if (_runtimeState.value.runMode == RunMode.Normal) {
+                reconcileNormalStateLocked()
+            } else if (_runtimeState.value.runMode == RunMode.Root) {
+                reconcileRootStateLocked()
             }
         }
     }
@@ -520,6 +532,37 @@ class RuntimeRepositoryImpl @Inject constructor(
         _runtimeState.update { it.copy(variant = variant) }
     }
 
+    override fun beginRuntimeTransition(kind: RuntimeTransitionKind, message: String): Long {
+        val id = runtimeTransitionSequence.incrementAndGet()
+        _runtimeState.update { state ->
+            state.copy(
+                transition = RuntimeTransition(
+                    id = id,
+                    kind = kind,
+                    message = message
+                )
+            )
+        }
+        return id
+    }
+
+    override fun updateRuntimeTransition(id: Long, message: String) {
+        _runtimeState.update { state ->
+            val current = state.transition
+            if (current?.id == id) {
+                state.copy(transition = current.copy(message = message))
+            } else {
+                state
+            }
+        }
+    }
+
+    override fun endRuntimeTransition(id: Long) {
+        _runtimeState.update { state ->
+            if (state.transition?.id == id) state.copy(transition = null) else state
+        }
+    }
+
     private fun persistSelectedVariant(variant: ApiVariant, commit: Boolean) {
         prefs.edit(commit = commit) { putString("variant", variant.key) }
         context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE).edit(commit = commit) {
@@ -551,57 +594,73 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
             }
 
-            val shouldResume = current.status == ServiceStatus.Running ||
-                current.status == ServiceStatus.Starting
-
-            if (shouldResume) {
-                stopServiceLocked()
-                waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
-            }
-
-            val favoriteSync = FavoriteCacheStore.synchronizeModes(
-                context = context,
-                preferredMode = current.runMode,
-                otherMode = mode
+            val transitionId = beginRuntimeTransition(
+                kind = RuntimeTransitionKind.SwitchingRunMode,
+                message = "正在从${current.runMode.label}模式切换到${mode.label}模式…"
             )
-            if (favoriteSync.isFailure) {
-                val detail = favoriteSync.exceptionOrNull()?.message ?: "未知错误"
-                addLog(LogLevel.Error, "运行模式切换失败：收藏数据同步失败：$detail")
-                if (shouldResume) startServiceLocked()
-                return@launchSerializedUserOperation
-            }
-            addLog(LogLevel.Info, "已同步 ${favoriteSync.getOrThrow().count} 项收藏到 ${mode.label} 模式")
+            try {
+                val shouldResume = current.status == ServiceStatus.Running ||
+                    current.status == ServiceStatus.Starting
 
-            clearRuntimeStartedAt()
-            RuntimeModePrefs.put(context, mode)
-            val rootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
-            if (shouldSyncRootAutoStartModeFlag(mode, rootAutoStartEnabled)) {
-                val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
-                if (!flagResult.ok) {
-                    addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
+                if (shouldResume) {
+                    updateRuntimeTransition(transitionId, "正在安全停止${current.runMode.label}模式服务…")
+                    stopServiceLocked()
+                    waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
                 }
-            } else if (rootAutoStartEnabled) {
-                addLog(LogLevel.Info, "已切换到普通模式：跳过 Root 开机触发模式同步，避免普通模式触发 Root 授权")
-            }
-            if (shouldCloseRootShellSessionForMode(mode)) {
-                RootShell.closeSession()
-            }
-            _runtimeState.update {
-                it.copy(
-                    runMode = mode,
-                    status = ServiceStatus.Stopped,
-                    uptimeSeconds = 0,
-                    pid = null,
-                    errorMessage = null,
-                    statusMessage = null
+
+                updateRuntimeTransition(transitionId, "正在同步运行数据并切换到${mode.label}模式…")
+                val favoriteSync = FavoriteCacheStore.synchronizeModes(
+                    context = context,
+                    preferredMode = current.runMode,
+                    otherMode = mode
                 )
-            }
-            stopWorkDirHotReload()
+                if (favoriteSync.isFailure) {
+                    val detail = favoriteSync.exceptionOrNull()?.message ?: "未知错误"
+                    addLog(LogLevel.Error, "运行模式切换失败：收藏数据同步失败：$detail")
+                    if (shouldResume) {
+                        updateRuntimeTransition(transitionId, "模式切换失败，正在恢复原服务…")
+                        startServiceLocked(startingStatusMessage = "正在恢复原服务…")
+                    }
+                    return@launchSerializedUserOperation
+                }
+                addLog(LogLevel.Info, "已同步 ${favoriteSync.getOrThrow().count} 项收藏到 ${mode.label} 模式")
 
-            addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
+                clearRuntimeStartedAt()
+                RuntimeModePrefs.put(context, mode)
+                val rootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
+                if (shouldSyncRootAutoStartModeFlag(mode, rootAutoStartEnabled)) {
+                    val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
+                    if (!flagResult.ok) {
+                        addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
+                    }
+                } else if (rootAutoStartEnabled) {
+                    addLog(LogLevel.Info, "已切换到普通模式：跳过 Root 开机触发模式同步，避免普通模式触发 Root 授权")
+                }
+                if (shouldCloseRootShellSessionForMode(mode)) {
+                    RootShell.closeSession()
+                }
+                _runtimeState.update {
+                    it.copy(
+                        runMode = mode,
+                        status = ServiceStatus.Stopped,
+                        uptimeSeconds = 0,
+                        pid = null,
+                        errorMessage = null,
+                        statusMessage = null
+                    )
+                }
+                stopWorkDirHotReload()
 
-            if (shouldResume) {
-                startServiceLocked()
+                addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
+
+                if (shouldResume) {
+                    updateRuntimeTransition(transitionId, "已切换到${mode.label}模式，正在启动服务…")
+                    startServiceLocked(
+                        startingStatusMessage = "已切换到${mode.label}模式，正在启动服务…"
+                    )
+                }
+            } finally {
+                endRuntimeTransition(transitionId)
             }
         }
     }
@@ -659,6 +718,10 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (suppressStopTimeout) {
             pendingNormalRestart = true
         }
+        val transitionId = beginRuntimeTransition(
+            kind = RuntimeTransitionKind.Restarting,
+            message = "正在应用服务配置并重启…"
+        )
 
         try {
             val changedText = buildString {
@@ -674,6 +737,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             }.ifBlank { "配置已更新" }
             addLog(LogLevel.Info, "正在应用服务配置：$changedText")
 
+            updateRuntimeTransition(transitionId, "正在安全停止旧服务并应用配置…")
             val stopBroadcastSeqBefore = normalStoppedBroadcastSeq.get()
             stopServiceLocked()
             val stopped = if (oldMode == RunMode.Normal) {
@@ -703,8 +767,10 @@ class RuntimeRepositoryImpl @Inject constructor(
             )
             syncRuntimeEnvFromPrefs(oldMode)
             addLog(LogLevel.Info, "配置已写入，正在启动服务...")
+            updateRuntimeTransition(transitionId, "配置已写入，正在重新启动服务…")
             startServiceLocked(startingStatusMessage = "正在重启服务以应用新配置…")
         } finally {
+            endRuntimeTransition(transitionId)
             if (suppressStopTimeout) {
                 pendingNormalRestart = false
             }
@@ -1429,7 +1495,11 @@ class RuntimeRepositoryImpl @Inject constructor(
         val candidate = coreRepository.candidateState.value ?: return
         if (candidate.variant != variant || candidate.runMode != runMode) return
         candidateValidationJob?.cancel()
-        candidateStartAttempt = CandidateStartAttempt(variant, runMode)
+        candidateStartAttempt = CandidateStartAttempt(
+            variant = variant,
+            runMode = runMode,
+            candidateInstalledAtMs = candidate.installedAtMs
+        )
         addLog(LogLevel.Info, "${candidate.actionLabel}后的核心已进入启动观察期")
     }
 
@@ -1445,14 +1515,25 @@ class RuntimeRepositoryImpl @Inject constructor(
         candidateValidationJob = scope.launch {
             delay(CANDIDATE_HEALTHY_OBSERVATION_MS)
             val state = _runtimeState.value
+            val candidate = coreRepository.candidateState.value
             val stillMatches = state.status == ServiceStatus.Running &&
-                state.variant == attempt.variant && state.runMode == attempt.runMode
+                state.variant == attempt.variant && state.runMode == attempt.runMode &&
+                CoreCandidateRecoveryPolicy.matchesAttempt(
+                    candidate = candidate,
+                    variant = attempt.variant,
+                    runMode = attempt.runMode,
+                    installedAtMs = attempt.candidateInstalledAtMs
+                )
             val reachable = when (attempt.runMode) {
                 RunMode.Normal -> isNormalRuntimeReachable(state.port)
                 RunMode.Root -> isRootRuntimeOwnedByApp(state.port)
             }
             if (!stillMatches || !reachable || candidateStartAttempt != attempt) return@launch
-            coreRepository.confirmCandidateCore(attempt.variant, attempt.runMode).fold(
+            coreRepository.confirmCandidateCore(
+                attempt.variant,
+                attempt.runMode,
+                attempt.candidateInstalledAtMs
+            ).fold(
                 onSuccess = { confirmed ->
                     if (confirmed) {
                         addLog(LogLevel.Info, "候选核心已稳定运行，已确认为可用版本")
@@ -1479,46 +1560,71 @@ class RuntimeRepositoryImpl @Inject constructor(
         scope.launch {
             try {
                 operationMutex.withLock {
-                    val candidate = coreRepository.candidateState.value
-                    if (candidate?.variant != attempt.variant || candidate.runMode != attempt.runMode) {
+                    val candidate = coreRepository.candidateState.value ?: return@withLock
+                    if (!CoreCandidateRecoveryPolicy.matchesAttempt(
+                            candidate = candidate,
+                            variant = attempt.variant,
+                            runMode = attempt.runMode,
+                            installedAtMs = attempt.candidateInstalledAtMs
+                        )
+                    ) {
                         return@withLock
                     }
                     if (!candidate.hasRecoveryPoint) {
-                        coreRepository.confirmCandidateCore(attempt.variant, attempt.runMode)
+                        coreRepository.confirmCandidateCore(
+                            attempt.variant,
+                            attempt.runMode,
+                            attempt.candidateInstalledAtMs
+                        )
                         addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
                         return@withLock
                     }
 
-                    addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
-                    val state = _runtimeState.value
-                    if (state.status != ServiceStatus.Stopped) {
-                        stopServiceLocked()
-                        val stopped = waitForRuntimeStopped(
-                            mode = attempt.runMode,
-                            oldPort = state.port,
-                            timeoutMs = NORMAL_STOP_TIMEOUT_MS
-                        )
-                        if (!stopped) {
-                            addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
-                            return@withLock
-                        }
-                    }
-
-                    coreRepository.restoreCandidateCore(attempt.variant, attempt.runMode).fold(
-                        onSuccess = { restored ->
-                            if (!restored) {
-                                addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
-                                return@fold
-                            }
-                            markStopped("新核心启动失败，已恢复上一个可用版本")
-                            addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
-                            startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
-                        },
-                        onFailure = { error ->
-                            markError("自动恢复失败：${error.message ?: "未知错误"}")
-                            addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
-                        }
+                    val transitionId = beginRuntimeTransition(
+                        kind = RuntimeTransitionKind.RecoveringCore,
+                        message = "新核心启动异常，正在恢复上一个可用版本…"
                     )
+                    try {
+                        addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
+                        val state = _runtimeState.value
+                        if (state.status != ServiceStatus.Stopped) {
+                            updateRuntimeTransition(transitionId, "正在安全停止异常核心…")
+                            stopServiceLocked()
+                            val stopped = waitForRuntimeStopped(
+                                mode = attempt.runMode,
+                                oldPort = state.port,
+                                timeoutMs = NORMAL_STOP_TIMEOUT_MS
+                            )
+                            if (!stopped) {
+                                addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
+                                return@withLock
+                            }
+                        }
+
+                        updateRuntimeTransition(transitionId, "正在恢复上一个可用核心…")
+                        coreRepository.restoreCandidateCore(
+                            attempt.variant,
+                            attempt.runMode,
+                            attempt.candidateInstalledAtMs
+                        ).fold(
+                            onSuccess = { restored ->
+                                if (!restored) {
+                                    addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
+                                    return@fold
+                                }
+                                markStopped("新核心启动失败，已恢复上一个可用版本")
+                                addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
+                                updateRuntimeTransition(transitionId, "已恢复上一个版本，正在重新启动服务…")
+                                startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
+                            },
+                            onFailure = { error ->
+                                markError("自动恢复失败：${error.message ?: "未知错误"}")
+                                addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
+                            }
+                        )
+                    } finally {
+                        endRuntimeTransition(transitionId)
+                    }
                 }
             } finally {
                 candidateRecoveryInFlight.set(false)

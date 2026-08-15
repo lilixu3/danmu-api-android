@@ -1,7 +1,11 @@
 package com.example.danmuapiapp.data.remote.github
 
+import android.util.Log
+import com.example.danmuapiapp.data.repository.executeCancellable
 import com.example.danmuapiapp.data.service.CoreVersionParser
 import com.example.danmuapiapp.data.service.GithubProxyService
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -20,6 +24,7 @@ class GithubRemoteService @Inject constructor(
 ) {
     companion object {
         const val UserAgent = "DanmuApiApp"
+        private const val TAG = "GithubRemoteService"
         private const val GithubAccept = "application/vnd.github+json"
     }
 
@@ -82,24 +87,29 @@ class GithubRemoteService @Inject constructor(
         bodyValidator: (String) -> Boolean = { true }
     ): TextResponsePayload? {
         for (url in urls) {
-            repeat(2) { attempt ->
+            var attempt = 0
+            while (attempt < 2) {
                 try {
                     val request = Request.Builder().url(url).apply {
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    metadataHttpClient.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) return@use
-                        val body = response.body.string()
+                    val response = metadataHttpClient.newCall(request).execute()
+                    response.use {
+                        if (!it.isSuccessful) break
+                        val body = it.body.string()
                         if (body.isBlank() || !bodyValidator(body)) return@use
                         return TextResponsePayload(
-                            finalUrl = response.request.url.toString(),
+                            finalUrl = it.request.url.toString(),
                             body = body,
-                            linkHeader = response.header("Link")
+                            linkHeader = it.header("Link")
                         )
                     }
-                } catch (_: Exception) {
-                    if (attempt == 0) Thread.sleep(500)
+                    break
+                } catch (error: Exception) {
+                    Log.w(TAG, "GitHub 请求失败：$url", error)
+                    attempt += 1
+                    if (attempt < 2 && !sleepBeforeRetry()) break
                 }
             }
         }
@@ -112,24 +122,115 @@ class GithubRemoteService @Inject constructor(
         mapper: (String) -> T?
     ): T? {
         for (url in urls) {
-            repeat(2) { attempt ->
+            var attempt = 0
+            while (attempt < 2) {
                 try {
                     val request = Request.Builder().url(url).apply {
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    metadataHttpClient.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) return@use
-                        val body = response.body.string()
+                    val response = metadataHttpClient.newCall(request).execute()
+                    response.use {
+                        if (!it.isSuccessful) break
+                        val body = it.body.string()
                         val mapped = mapper(body)
                         if (mapped != null) return mapped
                     }
-                } catch (_: Exception) {
-                    if (attempt == 0) Thread.sleep(500)
+                    break
+                } catch (error: Exception) {
+                    Log.w(TAG, "GitHub 请求失败：$url", error)
+                    attempt += 1
+                    if (attempt < 2 && !sleepBeforeRetry()) break
                 }
             }
         }
         return null
+    }
+
+    suspend fun requestTextCancellable(
+        urls: List<String>,
+        headers: Map<String, String>
+    ): String? = requestMappedCancellable(urls, headers) { body ->
+        body.takeIf { it.isNotBlank() }
+    }
+
+    suspend fun requestTextResponseCancellable(
+        urls: List<String>,
+        headers: Map<String, String>,
+        bodyValidator: (String) -> Boolean = { true }
+    ): TextResponsePayload? {
+        for (url in urls) {
+            var attempt = 0
+            while (attempt < 2) {
+                try {
+                    val request = Request.Builder().url(url).apply {
+                        headers.forEach { (key, value) -> header(key, value) }
+                        githubProxyService.applyGithubAuth(this, url)
+                    }.build()
+                    val response = metadataHttpClient.newCall(request).executeCancellable()
+                    response.use {
+                        if (!it.isSuccessful) break
+                        val body = it.body.string()
+                        if (body.isBlank() || !bodyValidator(body)) break
+                        return TextResponsePayload(
+                            finalUrl = it.request.url.toString(),
+                            body = body,
+                            linkHeader = it.header("Link")
+                        )
+                    }
+                    break
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "GitHub 请求失败：$url", error)
+                    attempt += 1
+                    if (attempt < 2) delay(500)
+                }
+            }
+        }
+        return null
+    }
+
+    suspend fun <T> requestMappedCancellable(
+        urls: List<String>,
+        headers: Map<String, String>,
+        mapper: (String) -> T?
+    ): T? {
+        for (url in urls) {
+            var attempt = 0
+            while (attempt < 2) {
+                try {
+                    val request = Request.Builder().url(url).apply {
+                        headers.forEach { (key, value) -> header(key, value) }
+                        githubProxyService.applyGithubAuth(this, url)
+                    }.build()
+                    val response = metadataHttpClient.newCall(request).executeCancellable()
+                    response.use {
+                        if (!it.isSuccessful) break
+                        val mapped = mapper(it.body.string())
+                        if (mapped != null) return mapped
+                    }
+                    break
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "GitHub 请求失败：$url", error)
+                    attempt += 1
+                    if (attempt < 2) delay(500)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun sleepBeforeRetry(): Boolean {
+        return try {
+            Thread.sleep(500)
+            true
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
     }
 
     fun fetchLatestRelease(repo: String): ReleasePayload? {

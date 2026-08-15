@@ -11,12 +11,13 @@ import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CorePullRequest
 import com.example.danmuapiapp.domain.model.CorePullRequestFilter
 import com.example.danmuapiapp.domain.model.CorePullRequestFilePage
+import com.example.danmuapiapp.domain.model.CorePullRequestInclusion
 import com.example.danmuapiapp.domain.model.CorePullRequestPage
-import com.example.danmuapiapp.domain.model.CorePullRequestStatus
 import com.example.danmuapiapp.domain.model.PullRequestMergeConflictException
 import com.example.danmuapiapp.domain.model.RuntimeState
+import com.example.danmuapiapp.domain.model.RuntimeTransitionKind
 import com.example.danmuapiapp.domain.model.ServiceStatus
-import com.example.danmuapiapp.domain.model.effectiveStatus
+import com.example.danmuapiapp.domain.model.canApplyToCurrentCore
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
@@ -29,6 +30,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -72,6 +75,8 @@ class PullRequestLabViewModel @Inject constructor(
         private set
     var isLoading by mutableStateOf(false)
         private set
+    var listContentGeneration by mutableStateOf(0L)
+        private set
     var isBuilding by mutableStateOf(false)
         private set
     var isActivating by mutableStateOf(false)
@@ -101,6 +106,12 @@ class PullRequestLabViewModel @Inject constructor(
     private var activateAfterDependencyRepair = false
     private var knownLocallyMergedPullRequests = locallyMergedPullRequestNumbers()
     private var refreshAfterLocalMergeChange = false
+    private val pageCache = linkedMapOf<PullRequestPageCacheKey, CachedPullRequestPage>()
+    private val pageEnrichmentJobs = mutableMapOf<Int, Job>()
+    private val scheduledPullRequestNumbers = mutableSetOf<Int>()
+    private val firstContributionLookupAuthors = linkedSetOf<String>()
+    private var inclusionLookupCount = 0
+    private val pageEnrichmentSemaphore = Semaphore(PAGE_ENRICHMENT_CONCURRENCY)
 
     init {
         loadPage(1)
@@ -119,11 +130,23 @@ class PullRequestLabViewModel @Inject constructor(
         }
     }
 
-    fun loadPage(page: Int) {
+    fun loadPage(page: Int, forceRefresh: Boolean = false) {
         if (isBuilding || isActivating) return
         val targetPage = page.coerceAtLeast(1)
         pageLoadJob?.cancel()
+        cancelPageEnrichment()
         val generation = ++pageGeneration
+        listContentGeneration = generation
+        val cacheKey = currentPageCacheKey(targetPage)
+        val cached = pageCache[cacheKey]
+            ?.takeIf { !forceRefresh && System.currentTimeMillis() - it.cachedAtMs < PAGE_CACHE_TTL_MS }
+        if (cached != null) {
+            errorMessage = null
+            isLoading = false
+            pageLoadJob = null
+            applyLoadedPage(cached.page)
+            return
+        }
         pageLoadJob = viewModelScope.launch {
             isLoading = true
             errorMessage = null
@@ -132,15 +155,13 @@ class PullRequestLabViewModel @Inject constructor(
                 page = targetPage,
                 pageSize = PAGE_SIZE,
                 filter = selectedFilter,
-                query = appliedSearchQuery
+                query = appliedSearchQuery,
+                forceRefresh = forceRefresh
             ).fold(
                 onSuccess = { loaded ->
                     if (generation != pageGeneration) return@fold
-                    pageData = loaded
-                    val refreshed = loaded.items.associateBy { it.number }
-                    selectedPullRequests = selectedPullRequests.map { selected ->
-                        refreshed[selected.number] ?: selected
-                    }
+                    applyLoadedPage(loaded)
+                    cachePage(cacheKey, loaded)
                 },
                 onFailure = { error ->
                     if (generation == pageGeneration) {
@@ -152,7 +173,117 @@ class PullRequestLabViewModel @Inject constructor(
         }
     }
 
-    fun refresh() = loadPage(pageData?.page ?: 1)
+    fun refresh() = loadPage(pageData?.page ?: 1, forceRefresh = true)
+
+    fun onPullRequestVisible(pullRequest: CorePullRequest) {
+        if (isLoading || isBuilding || isActivating) return
+        val currentPage = pageData ?: return
+        val current = currentPage.items.firstOrNull { it.number == pullRequest.number } ?: return
+        if (current.number in scheduledPullRequestNumbers) return
+        val author = current.author.trim().lowercase()
+        val needsFirstContributionLookup = current.firstContribution == null &&
+            current.state.equals("open", ignoreCase = true) &&
+            author.isNotBlank() && author != "unknown" &&
+            (current.authorAssociation.isBlank() ||
+                current.authorAssociation.equals("NONE", ignoreCase = true))
+        val allowFirstContributionLookup = needsFirstContributionLookup &&
+            author !in firstContributionLookupAuthors &&
+            firstContributionLookupAuthors.size < MAX_FIRST_CONTRIBUTION_LOOKUPS_PER_PAGE
+        val installedCommitSha = coreInfoList.value
+            .firstOrNull { it.variant == variant && it.isReady }
+            ?.sourceCommitSha
+            .orEmpty()
+        val needsInclusionLookup = current.currentCoreInclusion == CorePullRequestInclusion.Unknown &&
+            !current.mergedAt.isNullOrBlank() &&
+            installedCommitSha.isNotBlank() &&
+            current.number !in locallyMergedPullRequestNumbers()
+        val allowInclusionLookup = needsInclusionLookup &&
+            inclusionLookupCount < MAX_INCLUSION_LOOKUPS_PER_PAGE
+        if (!allowFirstContributionLookup && !allowInclusionLookup) return
+        scheduledPullRequestNumbers += current.number
+        if (allowFirstContributionLookup) firstContributionLookupAuthors += author
+        if (allowInclusionLookup) inclusionLookupCount += 1
+
+        val generation = pageGeneration
+        pageEnrichmentJobs[current.number] = viewModelScope.launch {
+            val result = pageEnrichmentSemaphore.withPermit {
+                coreRepository.enrichPullRequestListItem(
+                    variant = variant,
+                    pullRequest = current,
+                    allowFirstContributionLookup = allowFirstContributionLookup,
+                    allowInclusionLookup = allowInclusionLookup
+                )
+            }
+            if (generation != pageGeneration) return@launch
+            result.onSuccess(::applyEnrichedPullRequest)
+            pageEnrichmentJobs.remove(current.number)
+        }
+    }
+
+    private fun applyLoadedPage(loaded: CorePullRequestPage) {
+        pageData = loaded
+        val refreshed = loaded.items.associateBy { it.number }
+        selectedPullRequests = selectedPullRequests.map { selected ->
+            refreshed[selected.number] ?: selected
+        }
+    }
+
+    private fun applyEnrichedPullRequest(enriched: CorePullRequest) {
+        val currentPage = pageData ?: return
+        if (currentPage.items.none { it.number == enriched.number }) return
+        val items = currentPage.items.map { item ->
+            when {
+                item.number == enriched.number -> enriched
+                enriched.firstContribution != null &&
+                    item.firstContribution == null &&
+                    item.author.equals(enriched.author, ignoreCase = true) -> {
+                    item.copy(firstContribution = enriched.firstContribution)
+                }
+                else -> item
+            }
+        }
+        val updatedPage = currentPage.copy(items = items)
+        pageData = updatedPage
+        selectedPullRequests = selectedPullRequests.map { selected ->
+            items.firstOrNull { it.number == selected.number } ?: selected
+        }
+        cachePage(currentPageCacheKey(updatedPage.page), updatedPage)
+    }
+
+    private fun cancelPageEnrichment() {
+        pageEnrichmentJobs.values.forEach { it.cancel() }
+        pageEnrichmentJobs.clear()
+        scheduledPullRequestNumbers.clear()
+        firstContributionLookupAuthors.clear()
+        inclusionLookupCount = 0
+    }
+
+    private fun currentPageCacheKey(page: Int): PullRequestPageCacheKey = PullRequestPageCacheKey(
+        filter = selectedFilter,
+        page = page,
+        query = appliedSearchQuery,
+        coreFingerprint = currentCoreFingerprint()
+    )
+
+    private fun currentCoreFingerprint(): String {
+        val core = coreInfoList.value.firstOrNull { it.variant == variant && it.isReady }
+        return buildString {
+            append(core?.sourceCommitSha.orEmpty())
+            append(':')
+            append(core?.pullRequestNumbers.orEmpty().sorted().joinToString(","))
+        }
+    }
+
+    private fun cachePage(key: PullRequestPageCacheKey, page: CorePullRequestPage) {
+        pageCache[key] = CachedPullRequestPage(page, System.currentTimeMillis())
+        while (pageCache.size > MAX_PAGE_CACHE_ENTRIES) {
+            pageCache.remove(pageCache.keys.first())
+        }
+    }
+
+    private fun invalidatePageCache() {
+        pageCache.clear()
+    }
 
     fun toggleSearch() {
         if (isBuilding || isActivating) return
@@ -205,7 +336,7 @@ class PullRequestLabViewModel @Inject constructor(
     fun toggleSelection(pullRequest: CorePullRequest) {
         if (isBuilding || isActivating) return
         val alreadyIncluded = pullRequest.number in locallyMergedPullRequestNumbers()
-        if (pullRequest.effectiveStatus(alreadyIncluded) != CorePullRequestStatus.Open) return
+        if (!pullRequest.canApplyToCurrentCore(alreadyIncluded)) return
         selectedPullRequests = if (selectedPullRequests.any { it.number == pullRequest.number }) {
             selectedPullRequests.filterNot { it.number == pullRequest.number }
         } else {
@@ -257,6 +388,7 @@ class PullRequestLabViewModel @Inject constructor(
             val filesResult = filesDeferred.await()
             if (generation == detailsGeneration) {
                 detailsResult.onSuccess { openedPullRequest = it }
+                detailsResult.onSuccess(::applyEnrichedPullRequest)
                 filesResult.fold(
                     onSuccess = { pullRequestFilePage = it },
                     onFailure = {
@@ -455,10 +587,23 @@ class PullRequestLabViewModel @Inject constructor(
         val wasActive = previous.status == ServiceStatus.Running ||
             previous.status == ServiceStatus.Starting
         var stoppedForApply = false
+        var runtimeTransitionId: Long? = null
         try {
             val applyPlan = decidePullRequestApplyPlan(previous, variant, shouldActivate)
+            if (applyPlan.shouldStartTargetAfterApply) {
+                runtimeTransitionId = runtimeRepository.beginRuntimeTransition(
+                    kind = RuntimeTransitionKind.ApplyingPullRequests,
+                    message = "正在安全应用 PR 组合并重启服务…"
+                )
+            }
             stoppedForApply = if (applyPlan.shouldAwaitStopped) {
                 statusMessage = "PR 组合已准备完成，正在安全停止服务"
+                runtimeTransitionId?.let { transitionId ->
+                    runtimeRepository.updateRuntimeTransition(
+                        transitionId,
+                        "PR 组合已准备完成，正在安全停止旧服务…"
+                    )
+                }
                 stoppedForApply = applyPlan.shouldStartTargetAfterApply
                 if (applyPlan.shouldRequestStop) runtimeRepository.stopService()
                 val stopped = withTimeoutOrNull(25_000L) {
@@ -478,12 +623,24 @@ class PullRequestLabViewModel @Inject constructor(
             }
 
             statusMessage = "正在原子应用 PR 组合"
+            runtimeTransitionId?.let { transitionId ->
+                runtimeRepository.updateRuntimeTransition(
+                    transitionId,
+                    "旧服务已停止，正在原子应用 PR 组合…"
+                )
+            }
             val applyResult = coreRepository.applyPendingCoreMutation(request.operationId)
             val applyError = applyResult.exceptionOrNull()
             if (applyError != null) {
                 errorMessage = applyError.message ?: "应用 PR 组合失败"
                 restoreInterruptedService(previous, stoppedForApply, wasActive)
                 return@withContext
+            }
+            runtimeTransitionId?.let { transitionId ->
+                runtimeRepository.updateRuntimeTransition(
+                    transitionId,
+                    "PR 组合已应用，正在启动服务…"
+                )
             }
             finishInstallation(
                 shouldActivate = shouldActivate,
@@ -494,6 +651,7 @@ class PullRequestLabViewModel @Inject constructor(
             errorMessage = error.message ?: "应用 PR 组合时发生异常"
             restoreInterruptedService(previous, stoppedForApply, wasActive)
         } finally {
+            runtimeTransitionId?.let(runtimeRepository::endRuntimeTransition)
             isActivating = false
             refreshAfterLocalMergeChangeIfIdle()
         }
@@ -508,10 +666,11 @@ class PullRequestLabViewModel @Inject constructor(
     private fun refreshAfterLocalMergeChangeIfIdle() {
         if (!refreshAfterLocalMergeChange || isBuilding || isActivating) return
         refreshAfterLocalMergeChange = false
-        loadPage(1)
+        invalidatePageCache()
+        loadPage(1, forceRefresh = true)
     }
 
-    private fun restoreInterruptedService(
+    private suspend fun restoreInterruptedService(
         previous: RuntimeState,
         stoppedForApply: Boolean,
         wasActive: Boolean
@@ -520,6 +679,13 @@ class PullRequestLabViewModel @Inject constructor(
             runtimeRepository.updateVariant(previous.variant)
             runtimeRepository.startService()
             statusMessage = "PR 组合未应用，正在恢复原服务"
+            withTimeoutOrNull(8_000L) {
+                runtimeState.first { state ->
+                    state.status == ServiceStatus.Starting ||
+                        state.status == ServiceStatus.Running ||
+                        state.status == ServiceStatus.Error
+                }
+            }
         }
     }
 
@@ -639,5 +805,22 @@ class PullRequestLabViewModel @Inject constructor(
         const val PAGE_SIZE = 15
         const val PULL_REQUEST_FILE_PAGE_SIZE = 15
         private const val MAX_SEARCH_QUERY_LENGTH = 180
+        private const val PAGE_CACHE_TTL_MS = 2L * 60L * 1000L
+        private const val MAX_PAGE_CACHE_ENTRIES = 12
+        private const val PAGE_ENRICHMENT_CONCURRENCY = 3
+        private const val MAX_FIRST_CONTRIBUTION_LOOKUPS_PER_PAGE = 4
+        private const val MAX_INCLUSION_LOOKUPS_PER_PAGE = 4
     }
+
+    private data class PullRequestPageCacheKey(
+        val filter: CorePullRequestFilter,
+        val page: Int,
+        val query: String,
+        val coreFingerprint: String
+    )
+
+    private data class CachedPullRequestPage(
+        val page: CorePullRequestPage,
+        val cachedAtMs: Long
+    )
 }

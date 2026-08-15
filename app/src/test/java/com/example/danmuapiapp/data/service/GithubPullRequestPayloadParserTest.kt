@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import com.example.danmuapiapp.domain.model.CorePullRequestFilter
+import com.example.danmuapiapp.domain.model.CorePullRequestInclusion
 import com.example.danmuapiapp.domain.model.PullRequestFirstContribution
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,6 +72,7 @@ class GithubPullRequestPayloadParserTest {
               "title": "Detail",
               "draft": true,
               "merged_at": "2026-08-13T13:00:00Z",
+              "merge_commit_sha": "1234567890abcdef1234567890abcdef12345678",
               "closed_at": "2026-08-13T13:00:00Z",
               "mergeable": true,
               "additions": 25,
@@ -90,6 +92,7 @@ class GithubPullRequestPayloadParserTest {
         assertTrue(pullRequest.draft)
         assertEquals(PullRequestFirstContribution.Github, pullRequest.firstContribution)
         assertEquals("2026-08-13T13:00:00Z", pullRequest.mergedAt)
+        assertEquals("1234567890abcdef1234567890abcdef12345678", pullRequest.mergeCommitSha)
         assertEquals("2026-08-13T13:00:00Z", pullRequest.closedAt)
         assertEquals(true, pullRequest.mergeable)
         assertEquals(25, pullRequest.additions)
@@ -103,6 +106,30 @@ class GithubPullRequestPayloadParserTest {
         assertNull(GithubPullRequestPayloadParser.parseList("not-json"))
         assertNull(GithubPullRequestPayloadParser.parseOne("[]"))
         assertNull(GithubPullRequestPayloadParser.parseOne("{\"title\":\"missing number\"}"))
+    }
+
+    @Test
+    fun `maps github comparison status to current core inclusion`() {
+        assertEquals(
+            CorePullRequestInclusion.Included,
+            PullRequestCurrentCorePolicy.fromCompareStatus("ahead")
+        )
+        assertEquals(
+            CorePullRequestInclusion.Included,
+            PullRequestCurrentCorePolicy.fromCompareStatus("identical")
+        )
+        assertEquals(
+            CorePullRequestInclusion.NotIncluded,
+            PullRequestCurrentCorePolicy.fromCompareStatus("behind")
+        )
+        assertEquals(
+            CorePullRequestInclusion.NotIncluded,
+            PullRequestCurrentCorePolicy.fromCompareStatus("diverged")
+        )
+        assertEquals(
+            CorePullRequestInclusion.Unknown,
+            PullRequestCurrentCorePolicy.fromCompareStatus(null)
+        )
     }
 
     @Test
@@ -248,6 +275,24 @@ class GithubPullRequestPayloadParserTest {
         assertFalse(PullRequestFirstContributionPolicy.needsRepositoryLookup(unknown))
         assertFalse(PullRequestFirstContributionPolicy.needsRepositoryLookup(mannequin))
         assertFalse(PullRequestFirstContributionPolicy.needsRepositoryLookup(closed))
+    }
+
+    @Test
+    fun `first contribution fallback is bounded to visible uncached authors`() {
+        val pullRequests = (1..10).map { index ->
+            pullRequestWithAssociation("NONE").copy(
+                number = index,
+                author = "author-$index"
+            )
+        }
+
+        val authors = PullRequestFirstContributionPolicy.authorsNeedingLookup(
+            pullRequests = pullRequests,
+            limit = 4,
+            isCached = { it == "author-2" }
+        )
+
+        assertEquals(listOf("author-1", "author-3", "author-4", "author-5"), authors)
     }
 
     @Test

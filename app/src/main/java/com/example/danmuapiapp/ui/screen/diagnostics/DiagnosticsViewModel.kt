@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.service.GithubAccountService
 import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.repository.runCatchingCancellable
 import com.example.danmuapiapp.data.util.SensitiveDataRedactor
 import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.domain.model.LogLevel
@@ -24,12 +25,12 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class DiagnosticLevel { Good, Info, Warning, Error }
 
@@ -65,21 +66,48 @@ class DiagnosticsViewModel @Inject constructor(
         if (_uiState.value.isRunning) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRunning = true)
-            val result = withContext(Dispatchers.IO) {
-                val cacheRefresh = async { runCatching { cacheRepository.refresh() } }
-                val githubRefresh = async { runCatching { githubAccountService.refresh() } }
-                runtimeRepository.refreshRuntimeState()
-                coreRepository.refreshCoreInfo()
-                cacheRefresh.await()
-                githubRefresh.await()
-                delay(350L)
-                buildSnapshot()
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val runtimeRefresh = async {
+                        withTimeoutOrNull(DIAGNOSTIC_REFRESH_TIMEOUT_MS) {
+                            runCatchingCancellable { runtimeRepository.refreshRuntimeStateAndAwait() }
+                                .isSuccess
+                        } ?: false
+                    }
+                    val coreRefresh = async {
+                        withTimeoutOrNull(DIAGNOSTIC_REFRESH_TIMEOUT_MS) {
+                            runCatchingCancellable { coreRepository.refreshCoreInfoAndAwait() }
+                                .isSuccess
+                        } ?: false
+                    }
+                    val cacheRefresh = async {
+                        withTimeoutOrNull(DIAGNOSTIC_REFRESH_TIMEOUT_MS) {
+                            runCatchingCancellable { cacheRepository.refresh() }.isSuccess
+                        } ?: false
+                    }
+                    val githubRefresh = async {
+                        withTimeoutOrNull(DIAGNOSTIC_REFRESH_TIMEOUT_MS) {
+                            runCatchingCancellable { githubAccountService.refresh() }.isSuccess
+                        } ?: false
+                    }
+                    val incompleteRefreshes = buildList {
+                        if (!runtimeRefresh.await()) add("运行状态")
+                        if (!coreRefresh.await()) add("核心状态")
+                        if (!cacheRefresh.await()) add("缓存状态")
+                        if (!githubRefresh.await()) add("GitHub 状态")
+                    }
+                    buildSnapshot(incompleteRefreshes)
+                }
+                _uiState.value = result.copy(isRunning = false)
+            } finally {
+                if (_uiState.value.isRunning) {
+                    _uiState.value = _uiState.value.copy(isRunning = false)
+                }
             }
-            _uiState.value = result.copy(isRunning = false)
         }
     }
 
-    private fun buildSnapshot(): DiagnosticsUiState {
+    private fun buildSnapshot(incompleteRefreshes: List<String>): DiagnosticsUiState {
         val now = System.currentTimeMillis()
         val runtime = runtimeRepository.runtimeState.value
         val selectedCore = coreRepository.coreInfoList.value.firstOrNull { it.variant == runtime.variant }
@@ -97,6 +125,15 @@ class DiagnosticsViewModel @Inject constructor(
         }.getOrDefault(false)
 
         val checks = buildList {
+            if (incompleteRefreshes.isNotEmpty()) {
+                add(
+                    DiagnosticCheck(
+                        title = "状态刷新",
+                        detail = "${incompleteRefreshes.joinToString("、")}未能及时刷新，相关结果可能沿用上次状态",
+                        level = DiagnosticLevel.Warning
+                    )
+                )
+            }
             add(
                 DiagnosticCheck(
                     title = "运行状态",
@@ -241,6 +278,10 @@ class DiagnosticsViewModel @Inject constructor(
     fun defaultFileName(): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
         return "danmu-api-diagnostics-$stamp.txt"
+    }
+
+    companion object {
+        private const val DIAGNOSTIC_REFRESH_TIMEOUT_MS = 20_000L
     }
 }
 

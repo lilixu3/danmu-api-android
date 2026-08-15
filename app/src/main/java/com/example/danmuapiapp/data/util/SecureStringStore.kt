@@ -34,7 +34,8 @@ class SecureStringStore(
             if (raw.isBlank()) return raw
             val migrated = migratePlainValue(key, raw)
             if (migrated || allowPlaintextFallback) return raw
-            prefs.edit { remove(key) }
+            // Keep the original value so a transient Keystore failure cannot
+            // irreversibly destroy a credential that may be recoverable later.
             return defaultValue
         }
         val cipherText = raw.removePrefix(CIPHER_PREFIX)

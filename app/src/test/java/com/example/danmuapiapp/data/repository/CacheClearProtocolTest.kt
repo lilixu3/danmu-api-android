@@ -47,10 +47,30 @@ class CacheClearProtocolTest {
 
     @Test
     fun `parses cleared item keys from response`() {
-        val keys = CacheClearProtocol.parseClearedItems(
+        val response = CacheClearProtocol.parseResponse(
             """{"success":true,"clearedItems":{"commentCache":0,"requestHistory":0}}"""
         )
 
-        assertEquals(setOf("commentCache", "requestHistory"), keys)
+        assertEquals(true, response.success)
+        assertEquals(setOf("commentCache", "requestHistory"), response.clearedItems)
+    }
+
+    @Test
+    fun `parses explicit application failure from successful http response`() {
+        val response = CacheClearProtocol.parseResponse(
+            """{"success":false,"message":"清理被核心拒绝"}"""
+        )
+
+        assertEquals(false, response.success)
+        assertEquals("清理被核心拒绝", response.message)
+        assertEquals(null, response.clearedItems)
+    }
+
+    @Test
+    fun `successful response without cleared items remains unverified`() {
+        val response = CacheClearProtocol.parseResponse("""{"success":true}""")
+
+        assertEquals(true, response.success)
+        assertEquals(null, response.clearedItems)
     }
 }

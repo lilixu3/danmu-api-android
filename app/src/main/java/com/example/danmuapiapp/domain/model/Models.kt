@@ -6,6 +6,19 @@ enum class ServiceStatus {
     Stopped, Starting, Running, Stopping, Error
 }
 
+enum class RuntimeTransitionKind {
+    ApplyingPullRequests,
+    SwitchingRunMode,
+    Restarting,
+    RecoveringCore
+}
+
+data class RuntimeTransition(
+    val id: Long,
+    val kind: RuntimeTransitionKind,
+    val message: String
+)
+
 enum class ApiVariant(val key: String, val label: String, val repo: String) {
     Stable("stable", "稳定版", "huangxd-/danmu_api"),
     Dev("dev", "开发版", "lilixu3/danmu_api"),
@@ -48,7 +61,8 @@ data class RuntimeState(
     val lanUrl: String = "",
     val lanIpv6Url: String = "",
     val errorMessage: String? = null,
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    val transition: RuntimeTransition? = null
 )
 
 data class CoreInfo(
@@ -61,7 +75,8 @@ data class CoreInfo(
     val sourceMismatch: Boolean = false,
     val sourceStatus: CoreSourceStatus = CoreSourceStatus.NotApplicable,
     val desiredSource: String? = null,
-    val pullRequestNumbers: List<Int> = emptyList()
+    val pullRequestNumbers: List<Int> = emptyList(),
+    val sourceCommitSha: String = ""
 ) {
     val isReady: Boolean
         get() = isInstalled && !sourceMismatch

@@ -15,6 +15,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories {
         google()
+        maven("https://maven.aliyun.com/repository/central") {
+            content { includeGroup("org.eclipse.jgit") }
+        }
         mavenCentral()
         maven("https://maven.aliyun.com/repository/jcenter")
     }

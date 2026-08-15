@@ -9,6 +9,7 @@ interface EnvConfigRepository {
     val isCatalogLoading: StateFlow<Boolean>
     val rawContent: StateFlow<String>
     fun reload()
+    fun readCurrentRawContent(): Result<String>
     fun setValue(key: String, value: String)
     fun deleteKey(key: String)
     fun saveRawContent(content: String): Result<String>
