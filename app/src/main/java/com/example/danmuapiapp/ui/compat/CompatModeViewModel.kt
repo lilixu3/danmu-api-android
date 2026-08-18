@@ -12,6 +12,8 @@ import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
+import com.example.danmuapiapp.domain.model.CoreBranchCatalog
+import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequiredException
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
@@ -26,12 +28,14 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.domain.model.normalizeGithubBranch
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -54,12 +58,17 @@ data class CompatModeUiState(
     val syncState: CompatTvConfigSyncServer.UiState = CompatTvConfigSyncServer.UiState(),
     val appUpdate: CompatAppUpdateUiState = CompatAppUpdateUiState(),
     val coreDisplayNames: CoreVariantDisplayNames = CoreVariantDisplayNames(),
+    val coreBranchSelections: CoreBranchSelections = CoreBranchSelections(),
     val customCoreSource: ResolvedCustomCoreSource = ResolvedCustomCoreSource(),
     val customRepo: String = "",
     val customRepoBranch: String = "",
     val nightMode: NightModePreference = NightModePreference.FollowSystem,
     val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM,
-    val pendingDependencyRepair: CoreDependencyRepairRequest? = null
+    val pendingDependencyRepair: CoreDependencyRepairRequest? = null,
+    val branchDialogVariant: ApiVariant? = null,
+    val branchCatalog: CoreBranchCatalog? = null,
+    val isLoadingBranches: Boolean = false,
+    val branchLoadError: String? = null
 )
 
 data class CompatKeepAliveUiState(
@@ -108,6 +117,8 @@ class CompatModeViewModel(
         proxyOptionsProvider = { proxyOptions }
     )
     private var pendingProxyAction: PendingProxyAction? = null
+    private var branchLoadJob: Job? = null
+    private var branchLoadGeneration = 0L
 
     val showProxyPickerDialog: Boolean
         get() = proxyPickerController.uiState.isVisible
@@ -126,6 +137,7 @@ class CompatModeViewModel(
         data class Install(val variant: ApiVariant) : PendingProxyAction
         data class Update(val variant: ApiVariant) : PendingProxyAction
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+        data class SwitchBranch(val variant: ApiVariant, val branch: String) : PendingProxyAction
         data object RepairDependenciesOnline : PendingProxyAction
     }
 
@@ -143,6 +155,7 @@ class CompatModeViewModel(
                 currentVersion = graph.appUpdateService.currentVersionName()
             ),
             coreDisplayNames = graph.settingsRepository.coreDisplayNames.value,
+            coreBranchSelections = graph.settingsRepository.coreBranchSelections.value,
             customCoreSource = graph.settingsRepository.customCoreSource.value,
             customRepo = graph.settingsRepository.customRepo.value,
             customRepoBranch = graph.settingsRepository.customRepoBranch.value,
@@ -193,9 +206,7 @@ class CompatModeViewModel(
     fun onActivityResumed(activity: Activity) {
         graph.appUpdateService.tryResumePendingInstall(activity)
         refreshKeepAliveUi()
-        viewModelScope.launch(Dispatchers.IO) {
-            graph.coreRepository.checkAllUpdates()
-        }
+        graph.updateChecker.onAppResume()
     }
 
     fun refreshCoreInfo() {
@@ -307,6 +318,113 @@ class CompatModeViewModel(
         graph.coreRepository.refreshCoreInfo()
     }
 
+    fun openBranchDialog(variant: ApiVariant) {
+        if (_uiState.value.isOperating) return
+        if (_uiState.value.coreInfos.firstOrNull { it.variant == variant }?.isInstalled != true) {
+            emitEvent("请先安装 ${resolveVariantLabel(variant)}")
+            return
+        }
+        if (!canOperateVariant(variant)) return
+        _uiState.update {
+            it.copy(
+                branchDialogVariant = variant,
+                branchCatalog = null,
+                branchLoadError = null
+            )
+        }
+        loadBranches(variant)
+    }
+
+    fun retryLoadBranches() {
+        _uiState.value.branchDialogVariant?.let(::loadBranches)
+    }
+
+    fun dismissBranchDialog() {
+        branchLoadGeneration += 1
+        branchLoadJob?.cancel()
+        branchLoadJob = null
+        _uiState.update {
+            it.copy(
+                branchDialogVariant = null,
+                branchCatalog = null,
+                isLoadingBranches = false,
+                branchLoadError = null
+            )
+        }
+    }
+
+    private fun loadBranches(variant: ApiVariant) {
+        branchLoadGeneration += 1
+        val generation = branchLoadGeneration
+        branchLoadJob?.cancel()
+        _uiState.update { it.copy(isLoadingBranches = true, branchLoadError = null) }
+        branchLoadJob = viewModelScope.launch {
+            graph.coreRepository.fetchBranches(variant).fold(
+                onSuccess = { catalog ->
+                    if (generation != branchLoadGeneration) return@fold
+                    _uiState.update { it.copy(branchCatalog = catalog) }
+                },
+                onFailure = { error ->
+                    if (generation != branchLoadGeneration) return@fold
+                    _uiState.update {
+                        it.copy(branchLoadError = error.message ?: "无法读取仓库分支")
+                    }
+                }
+            )
+            if (generation == branchLoadGeneration) {
+                _uiState.update { it.copy(isLoadingBranches = false) }
+                branchLoadJob = null
+            }
+        }
+    }
+
+    fun switchCoreBranch(branch: String) {
+        val variant = _uiState.value.branchDialogVariant ?: return
+        val normalized = normalizeGithubBranch(branch)
+        if (normalized.isBlank()) return
+        val current = graph.settingsRepository.coreBranchSelections.value.resolve(variant)
+        dismissBranchDialog()
+        if (normalized.equals(current, ignoreCase = true)) {
+            emitEvent("${resolveVariantLabel(variant)} 当前已使用 $normalized 分支")
+            return
+        }
+        if (!graph.githubProxyService.hasUserSelectedProxy()) {
+            pendingProxyAction = PendingProxyAction.SwitchBranch(variant, normalized)
+            emitEvent("切换分支前，请先选择 GitHub 线路")
+            proxyPickerController.open()
+            return
+        }
+        doSwitchCoreBranch(variant, normalized)
+    }
+
+    private fun doSwitchCoreBranch(variant: ApiVariant, branch: String) {
+        performCoreOperation("正在切换 ${resolveVariantLabel(variant)} 分支") {
+            graph.coreRepository.switchCoreBranch(variant, branch).fold(
+                onSuccess = {
+                    graph.coreRepository.refreshCoreInfo()
+                    val state = _uiState.value.runtimeState
+                    if (state.variant == variant && state.status == ServiceStatus.Running) {
+                        graph.runtimeRepository.restartService()
+                        emitEvent("${resolveVariantLabel(variant)} 已切换到 $branch，正在重启服务")
+                    } else {
+                        emitEvent("${resolveVariantLabel(variant)} 已切换到 $branch 分支")
+                    }
+                },
+                onFailure = { error ->
+                    if (error is CoreDependencyRepairRequiredException) {
+                        emitEvent("${resolveVariantLabel(variant)}切换已暂停，等待修复依赖")
+                    } else {
+                        emitEvent("切换分支失败：${error.message ?: "未知错误"}")
+                    }
+                    if (error !is CoreDependencyRepairRequiredException && graph.githubProxyService.isUsingProxy()) {
+                        pendingProxyAction = PendingProxyAction.SwitchBranch(variant, branch)
+                        proxyPickerController.open()
+                    }
+                }
+            )
+        }
+    }
+
     fun installCore(variant: ApiVariant) {
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
@@ -402,6 +520,9 @@ class CompatModeViewModel(
                 graph.coreRepository.checkAndMarkUpdate(variant)
                 val refreshed = graph.coreRepository.coreInfoList.value.find { it.variant == variant }
                 when {
+                    refreshed?.updateCheckError != null -> {
+                        emitEvent("${resolveVariantLabel(variant)} 检查更新失败：${refreshed.updateCheckError}")
+                    }
                     refreshed?.sourceMismatch == true -> {
                         emitEvent("${resolveVariantLabel(variant)} 需替换为 ${refreshed.desiredSource ?: "目标仓库"}")
                     }
@@ -494,6 +615,7 @@ class CompatModeViewModel(
                 is PendingProxyAction.Install -> doInstallCore(action.variant)
                 is PendingProxyAction.Update -> doUpdateCore(action.variant)
                 is PendingProxyAction.CheckUpdate -> doCheckCoreUpdate(action.variant)
+                is PendingProxyAction.SwitchBranch -> doSwitchCoreBranch(action.variant, action.branch)
                 PendingProxyAction.RepairDependenciesOnline -> {
                     dependencyRepairController.repairOnlineNow()
                 }
@@ -748,6 +870,11 @@ class CompatModeViewModel(
         viewModelScope.launch {
             graph.settingsRepository.coreDisplayNames.collectLatest { names ->
                 _uiState.update { it.copy(coreDisplayNames = names) }
+            }
+        }
+        viewModelScope.launch {
+            graph.settingsRepository.coreBranchSelections.collectLatest { selections ->
+                _uiState.update { it.copy(coreBranchSelections = selections) }
             }
         }
         viewModelScope.launch {

@@ -97,7 +97,8 @@ class CoreRepositoryImpl @Inject constructor(
 
     private data class CoreRemoteSource(
         val release: GithubRelease,
-        val metadata: CoreSourceMetadata? = null
+        val metadata: CoreSourceMetadata? = null,
+        val remoteCommit: CoreRemoteCommit? = null
     )
 
     private enum class PendingCoreMutationType {
@@ -130,7 +131,10 @@ class CoreRepositoryImpl @Inject constructor(
     private data class BranchHeadInfo(
         val sha: String,
         val publishedAt: String,
-        val title: String
+        val title: String,
+        val message: String,
+        val author: String,
+        val htmlUrl: String
     )
 
     private data class LatestRemoteVersionCacheEntry(
@@ -138,6 +142,8 @@ class CoreRepositoryImpl @Inject constructor(
         val repo: String,
         val branch: String
     )
+
+    private val updateComparisonCache = ConcurrentHashMap<String, CoreUpdateComparison>()
 
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
@@ -188,6 +194,8 @@ class CoreRepositoryImpl @Inject constructor(
     private var hasLoadedCoreInfoOnce = false
     private val refreshTicket = AtomicLong(0L)
     private val latestRemoteVersionCache = ConcurrentHashMap<ApiVariant, LatestRemoteVersionCacheEntry>()
+    private val branchRemoteSourceCache = ConcurrentHashMap<String, CoreRemoteSource>()
+    private val defaultBranchCache = ConcurrentHashMap<String, String>()
     private val revisionVersionCache = ConcurrentHashMap<String, String>()
     private val revisionVersionFailureCache = ConcurrentHashMap<String, Long>()
     private val revisionGlobalsPathCache = ConcurrentHashMap<String, String>()
@@ -196,8 +204,10 @@ class CoreRepositoryImpl @Inject constructor(
         workDirPrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
         runtimePrefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
         repoScope.launch {
-            settingsRepository.customCoreSource
-                .map { it.repo to it.branch }
+            combine(
+                settingsRepository.customCoreSource,
+                settingsRepository.coreBranchSelections
+            ) { customSource, selections -> customSource.repo to selections }
                 .distinctUntilChanged()
                 .collect {
                     refreshCoreInfo()
@@ -483,12 +493,18 @@ class CoreRepositoryImpl @Inject constructor(
         val installed = hasValidCore(variant, mode)
         val version = if (installed) readLocalCoreVersion(variant, mode) else null
         val localMetadata = if (installed) readLocalCoreSourceMetadata(variant, mode) else null
-        val desiredSourceText = if (variant == ApiVariant.Custom && installed) buildDesiredCustomSourceText() else ""
-        val sourceStatus = if (variant == ApiVariant.Custom && installed) {
-            resolveCustomSourceStatus(
+        val desiredRepo = resolveRepo(variant)
+        val desiredBranch = resolveBranch(variant)
+        val shouldTrackSource = installed && desiredRepo.isNotBlank() &&
+            (variant == ApiVariant.Custom || !desiredBranch.isNullOrBlank())
+        val desiredSourceText = if (shouldTrackSource) {
+            formatCoreSourceText(desiredRepo, desiredBranch)
+        } else ""
+        val sourceStatus = if (shouldTrackSource) {
+            resolveCoreSourceStatus(
                 localMetadata = localMetadata,
-                desiredRepo = resolveRepo(variant),
-                desiredBranch = resolveBranch(variant)
+                desiredRepo = desiredRepo,
+                desiredBranch = desiredBranch
             )
         } else {
             CoreSourceStatus.NotApplicable
@@ -525,29 +541,42 @@ class CoreRepositoryImpl @Inject constructor(
             ?: latestRemoteVersionCache[refreshedInfo.variant]
                 ?.takeIf { it.repo == resolveRepo(refreshedInfo.variant) && it.branch == (resolveBranch(refreshedInfo.variant) ?: "") }
                 ?.versionLabel
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-            ?: return refreshedInfo
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            .orEmpty()
 
         val previousAvailable = parseAvailableVersionLabel(latestKnownVersionLabel)
         val localVersion = refreshedInfo.version?.removePrefix("v")?.trim().orEmpty()
         val localSha = refreshedMetadata?.commitSha?.trim().orEmpty()
+        val remoteSha = previousInfo?.remoteCommit?.sha?.trim().orEmpty()
+            .ifBlank { previousAvailable.commitSha }
         val stillHasUpdate = when {
-            previousAvailable.commitSha.isNotBlank() && localSha.isNotBlank() ->
-                commitShasEquivalent(previousAvailable.commitSha, localSha).not()
-            previousAvailable.commitSha.isNotBlank() -> true
+            remoteSha.isNotBlank() && localSha.isNotBlank() && commitShasEquivalent(remoteSha, localSha) -> false
+            previousInfo?.updateRelation == CoreUpdateRelation.Identical ||
+                previousInfo?.updateRelation == CoreUpdateRelation.LocalAhead -> false
+            previousInfo?.updateRelation?.hasRemoteUpdate == true -> true
+            remoteSha.isNotBlank() && localSha.isNotBlank() -> true
+            remoteSha.isNotBlank() -> true
             localVersion.isBlank() || previousAvailable.version.isBlank() ->
-                true
+                previousInfo?.hasVersionUpdate == true
             else -> compareVersions(previousAvailable.version, localVersion) > 0
         }
-        return if (stillHasUpdate) {
-            refreshedInfo.copy(
-                hasVersionUpdate = true,
-                availableVersion = latestKnownVersionLabel
-            )
-        } else {
-            refreshedInfo
-        }
+        return refreshedInfo.copy(
+            availableVersion = latestKnownVersionLabel.ifBlank { null }.takeIf { stillHasUpdate },
+            hasVersionUpdate = stillHasUpdate,
+            remoteVersion = previousInfo?.remoteVersion,
+            remoteBranch = previousInfo?.remoteBranch,
+            remoteCommit = previousInfo?.remoteCommit,
+            updateRelation = if (
+                remoteSha.isNotBlank() && localSha.isNotBlank() && commitShasEquivalent(remoteSha, localSha)
+            ) {
+                CoreUpdateRelation.Identical
+            } else {
+                previousInfo?.updateRelation ?: CoreUpdateRelation.Unknown
+            },
+            updateCheckError = previousInfo?.updateCheckError,
+            updateCheckedAtEpochMillis = previousInfo?.updateCheckedAtEpochMillis
+        )
     }
 
     private data class CoreLocation(
@@ -637,43 +666,89 @@ class CoreRepositoryImpl @Inject constructor(
     }
 
     private fun resolveBranch(variant: ApiVariant): String? {
-        return if (variant == ApiVariant.Custom) {
-            currentCustomCoreSource().branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
-        } else {
-            null
-        }
+        return settingsRepository.coreBranchSelections.value
+            .resolve(variant)
+            .ifBlank { null }
     }
 
     private fun resolveBranchCandidates(variant: ApiVariant): List<String> {
-        return if (variant == ApiVariant.Custom) {
-            listOf(resolveBranch(variant) ?: DEFAULT_CUSTOM_CORE_BRANCH)
-        } else {
-            defaultBranchCandidates()
-        }
+        return resolveBranch(variant)?.let(::listOf) ?: defaultBranchCandidates()
     }
 
-    private fun resolveRemoteSource(variant: ApiVariant): CoreRemoteSource? {
+    private fun resolveRemoteSource(
+        variant: ApiVariant,
+        branchOverride: String? = null
+    ): CoreRemoteSource? {
         val repo = resolveRepo(variant)
         if (repo.isBlank()) return null
 
-        val branch = resolveBranch(variant)
+        val requestedBranch = normalizeGithubBranch(branchOverride)
+            .takeIf { it.isNotBlank() }
+            ?: resolveBranch(variant)
+        val branch = requestedBranch ?: resolveDefaultRemoteBranch(repo)
         if (!branch.isNullOrBlank()) {
             return fetchBranchRemoteSource(repo, branch)
                 ?: throw IOException("未找到分支 $branch，请检查仓库与分支名")
         }
 
-        fetchLatestRelease(repo)?.let { return CoreRemoteSource(release = it) }
+        // Older GitHub mirrors may not expose repository metadata or branches.
+        return fetchLatestRelease(repo)?.let { CoreRemoteSource(release = it) }
+    }
 
-        resolveBranchCandidates(variant).forEach { candidate ->
-            fetchBranchRemoteSource(repo, candidate)?.let { return it }
+    override suspend fun fetchBranches(variant: ApiVariant): Result<CoreBranchCatalog> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val repo = resolveRepo(variant)
+                if (repo.isBlank()) throw IOException("请先配置核心仓库")
+                val catalog = buildCoreBranchCatalog(
+                    variant = variant,
+                    repo = repo,
+                    defaultBranch = fetchDefaultBranch(repo),
+                    branches = fetchBranchList(repo)
+                )
+                if (catalog.branches.isEmpty()) {
+                    throw IOException("未读取到仓库分支，请检查仓库权限或 GitHub 线路")
+                }
+                catalog
+            }
         }
-        return null
+
+    private fun resolveDefaultRemoteBranch(repo: String): String? {
+        defaultBranchCache[repo.lowercase()]?.takeIf { it.isNotBlank() }?.let { return it }
+        fetchDefaultBranch(repo)?.takeIf { it.isNotBlank() }?.let { branch ->
+            defaultBranchCache[repo.lowercase()] = branch
+            return branch
+        }
+        return buildCoreBranchCatalog(
+            variant = ApiVariant.Custom,
+            repo = repo,
+            defaultBranch = null,
+            branches = fetchBranchList(repo)
+        ).defaultBranch.ifBlank { null }
     }
 
     private fun fetchBranchRemoteSource(repo: String, branch: String): CoreRemoteSource? {
-        val resolvedBranch = resolveRemoteBranchName(repo, branch) ?: return null
+        val normalizedBranch = branch.trim()
+            .removePrefix("refs/heads/")
+            .trim()
+            .trim('/')
+        if (normalizedBranch.isBlank()) return null
+        val directHead = fetchBranchHead(repo, normalizedBranch)
+        val resolvedBranch = if (directHead != null) {
+            normalizedBranch
+        } else {
+            resolveRemoteBranchName(repo, normalizedBranch) ?: return null
+        }
+        val head = directHead.takeIf { resolvedBranch == normalizedBranch }
+            ?: fetchBranchHead(repo, resolvedBranch)
+        val cacheKey = "${repo.lowercase()}:${resolvedBranch.lowercase()}"
+        branchRemoteSourceCache[cacheKey]?.takeIf { cached ->
+            head != null && cached.metadata?.commitSha?.let {
+                commitShasEquivalent(it, head.sha)
+            } == true
+        }?.let { return it }
+
         val versionLabel = fetchVersionFromGlobals(repo, listOf(resolvedBranch)).orEmpty()
-        val head = fetchBranchHead(repo, resolvedBranch)
         if (head == null) {
             if (versionLabel.isBlank()) return null
             val fallback = buildBranchRemoteFallbackPlan(repo, resolvedBranch, versionLabel)
@@ -692,7 +767,7 @@ class CoreRepositoryImpl @Inject constructor(
                     commitPublishedAt = "",
                     versionLabel = fallback.versionLabel
                 )
-            )
+            ).also { branchRemoteSourceCache[cacheKey] = it }
         }
 
         val shortSha = head.sha.take(7)
@@ -718,8 +793,16 @@ class CoreRepositoryImpl @Inject constructor(
                 commitSha = head.sha,
                 commitPublishedAt = head.publishedAt,
                 versionLabel = versionLabel
+            ),
+            remoteCommit = CoreRemoteCommit(
+                sha = head.sha,
+                title = head.title,
+                message = head.message,
+                author = head.author,
+                committedAt = head.publishedAt,
+                htmlUrl = head.htmlUrl
             )
-        )
+        ).also { branchRemoteSourceCache[cacheKey] = it }
     }
 
     private fun resolveRemoteBranchName(repo: String, requestedBranch: String): String? {
@@ -729,7 +812,6 @@ class CoreRepositoryImpl @Inject constructor(
             .trim('/')
         if (normalized.isBlank()) return null
 
-        if (fetchBranchHead(repo, normalized) != null) return normalized
         if (!fetchVersionFromGlobals(repo, listOf(normalized)).isNullOrBlank()) return normalized
 
         val branches = fetchBranchList(repo)
@@ -743,22 +825,57 @@ class CoreRepositoryImpl @Inject constructor(
         return suffixMatches.singleOrNull()
     }
 
-    private fun fetchBranchList(repo: String): List<String> {
-        val apiBranches = requestMapped(
-            urls = apiUrlCandidates("repos/$repo/branches?per_page=100"),
+    private fun fetchDefaultBranch(repo: String): String? {
+        val apiDefault = requestMapped(
+            urls = apiUrlCandidates("repos/$repo"),
             headers = mapOf(
                 "Accept" to "application/vnd.github+json",
                 "User-Agent" to USER_AGENT
             )
         ) { body ->
-            val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray
+            val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
                 ?: return@requestMapped null
-            root.mapNotNull { element ->
-                ((element as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
-                    ?.takeIf { it.isNotBlank() }
-            }.takeIf { it.isNotEmpty() }
+            (root["default_branch"] as? JsonPrimitive)?.contentOrNull
+                ?.let(::normalizeGithubBranch)
+                ?.takeIf { it.isNotBlank() }
         }
-        if (!apiBranches.isNullOrEmpty()) return apiBranches
+        if (!apiDefault.isNullOrBlank()) return apiDefault
+
+        return requestMapped(
+            urls = withProxyCandidates("https://github.com/$repo"),
+            headers = mapOf("User-Agent" to USER_AGENT)
+        ) { body ->
+            Regex("""[\"']defaultBranch[\"']\s*:\s*[\"']([^\"']+)[\"']""")
+                .find(body)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let(::normalizeGithubBranch)
+                ?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    private fun fetchBranchList(repo: String): List<String> {
+        val fetchedBranches = mutableListOf<String>()
+        for (page in 1..5) {
+            val pageBranches = requestMapped(
+                urls = apiUrlCandidates("repos/$repo/branches?per_page=100&page=$page"),
+                headers = mapOf(
+                    "Accept" to "application/vnd.github+json",
+                    "User-Agent" to USER_AGENT
+                )
+            ) { body ->
+                val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray
+                    ?: return@requestMapped null
+                root.mapNotNull { element ->
+                    ((element as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                }
+            } ?: break
+            fetchedBranches.addAll(pageBranches)
+            if (pageBranches.size < 100) break
+        }
+        val apiBranches = fetchedBranches.distinct()
+        if (apiBranches.isNotEmpty()) return apiBranches
 
         return fetchBranchListFromHtml(repo)
     }
@@ -800,10 +917,18 @@ class CoreRepositoryImpl @Inject constructor(
             val title = message.lineSequence().firstOrNull()?.trim().orEmpty().ifBlank { "提交 ${sha.take(7)}" }
             val authorObj = commitObj?.get("author") as? JsonObject
             val publishedAt = (authorObj?.get("date") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            val accountObj = root["author"] as? JsonObject
+            val author = (authorObj?.get("name") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                .ifBlank {
+                    (accountObj?.get("login") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                }
             BranchHeadInfo(
                 sha = sha,
                 publishedAt = publishedAt,
-                title = title
+                title = title,
+                message = message,
+                author = author.ifBlank { "未知作者" },
+                htmlUrl = (root["html_url"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
             )
         }
     }
@@ -821,6 +946,16 @@ class CoreRepositoryImpl @Inject constructor(
 
     override suspend fun updateCore(variant: ApiVariant): Result<Unit> =
         installOrUpdateCore(variant, actionLabel = "更新")
+
+    override suspend fun switchCoreBranch(variant: ApiVariant, branch: String): Result<Unit> {
+        val normalizedBranch = normalizeGithubBranch(branch)
+        if (normalizedBranch.isBlank()) return Result.failure(IOException("分支名不能为空"))
+        return installOrUpdateCore(
+            variant = variant,
+            actionLabel = "切换分支",
+            branchOverride = normalizedBranch
+        )
+    }
 
     override suspend fun deleteCore(variant: ApiVariant): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -845,10 +980,12 @@ class CoreRepositoryImpl @Inject constructor(
 
     override suspend fun checkAndMarkUpdate(variant: ApiVariant) {
         withContext(Dispatchers.IO) {
+            val checkedAt = System.currentTimeMillis()
             try {
                 val info = _coreInfoList.value.find { it.variant == variant } ?: return@withContext
                 if (!info.isInstalled) return@withContext
-                val remoteSource = resolveRemoteSource(variant) ?: return@withContext
+                val remoteSource = resolveRemoteSource(variant)
+                    ?: throw IOException("无法读取远程核心信息")
                 val remoteVersion = remoteSource.metadata?.versionLabel
                     ?.removePrefix("v")
                     ?.trim()
@@ -857,8 +994,10 @@ class CoreRepositoryImpl @Inject constructor(
                 val localMetadata = readLocalCoreSourceMetadata(variant, currentRunMode())
                 val remoteSha = remoteSource.metadata?.commitSha?.trim().orEmpty()
                 val localSha = localMetadata?.commitSha?.trim().orEmpty()
-                val sourceStatus = if (variant == ApiVariant.Custom) {
-                    resolveCustomSourceStatus(
+                val sourceStatus = if (
+                    variant == ApiVariant.Custom || !resolveBranch(variant).isNullOrBlank()
+                ) {
+                    resolveCoreSourceStatus(
                         localMetadata = localMetadata,
                         desiredRepo = resolveRepo(variant),
                         desiredBranch = resolveBranch(variant)
@@ -867,13 +1006,19 @@ class CoreRepositoryImpl @Inject constructor(
                     CoreSourceStatus.NotApplicable
                 }
                 val sourceMismatch = sourceStatus == CoreSourceStatus.Mismatched
-                val hasVersionUpdate = when {
-                    sourceMismatch -> false
-                    remoteSha.isNotBlank() && localSha.isNotBlank() -> !commitShasEquivalent(remoteSha, localSha)
-                    remoteVersion.isNotBlank() && localVersion.isNotBlank() ->
-                        compareVersions(remoteVersion, localVersion) > 0
-                    else -> false
+                val relation = when {
+                    sourceMismatch -> CoreUpdateRelation.Unknown
+                    remoteSha.isNotBlank() && localSha.isNotBlank() &&
+                        commitShasEquivalent(remoteSha, localSha) -> CoreUpdateRelation.Identical
+                    remoteSha.isNotBlank() && localSha.isNotBlank() -> CoreUpdateRelation.Changed
+                    remoteVersion.isNotBlank() && localVersion.isNotBlank() -> when {
+                        compareVersions(remoteVersion, localVersion) > 0 -> CoreUpdateRelation.Changed
+                        compareVersions(remoteVersion, localVersion) < 0 -> CoreUpdateRelation.LocalAhead
+                        else -> CoreUpdateRelation.Identical
+                    }
+                    else -> CoreUpdateRelation.Unknown
                 }
+                val hasVersionUpdate = !sourceMismatch && relation.hasRemoteUpdate
                 val availableVersionLabel = buildLatestVersionLabel(remoteVersion, remoteSha)
                 if (availableVersionLabel.isNotBlank()) {
                     latestRemoteVersionCache[variant] = LatestRemoteVersionCacheEntry(
@@ -884,7 +1029,20 @@ class CoreRepositoryImpl @Inject constructor(
                 } else {
                     latestRemoteVersionCache.remove(variant)
                 }
-                val desiredSource = buildDesiredCustomSourceText().ifBlank { null }
+                val desiredSource = formatCoreSourceText(
+                    resolveRepo(variant),
+                    resolveBranch(variant)
+                ).ifBlank { null }
+                val remoteCommit = remoteSource.remoteCommit ?: remoteSha.takeIf { it.isNotBlank() }?.let { sha ->
+                    CoreRemoteCommit(
+                        sha = sha,
+                        title = remoteSource.release.body.lineSequence().firstOrNull()?.trim().orEmpty()
+                            .ifBlank { "提交 ${sha.take(7)}" },
+                        message = remoteSource.release.body,
+                        committedAt = remoteSource.release.publishedAt,
+                        htmlUrl = "https://github.com/${resolveRepo(variant)}/commit/$sha"
+                    )
+                }
                 _coreInfoList.value = _coreInfoList.value.map {
                     if (it.variant == variant) {
                         it.copy(
@@ -892,7 +1050,14 @@ class CoreRepositoryImpl @Inject constructor(
                             hasVersionUpdate = hasVersionUpdate,
                             sourceMismatch = sourceMismatch,
                             sourceStatus = sourceStatus,
-                            desiredSource = desiredSource.takeIf { sourceMismatch }
+                            desiredSource = desiredSource.takeIf { sourceMismatch },
+                            remoteVersion = remoteVersion.ifBlank { null },
+                            remoteBranch = remoteSource.metadata?.branch?.ifBlank { null }
+                                ?: resolveBranch(variant),
+                            remoteCommit = remoteCommit,
+                            updateRelation = relation,
+                            updateCheckError = null,
+                            updateCheckedAtEpochMillis = checkedAt
                         )
                     }
                     else it
@@ -901,6 +1066,17 @@ class CoreRepositoryImpl @Inject constructor(
                 throw cancelled
             } catch (e: Exception) {
                 logRecoverableWarning("checkAndMarkUpdate(${variant.key}) 失败", e)
+                _coreInfoList.value = _coreInfoList.value.map { info ->
+                    if (info.variant == variant) {
+                        info.copy(
+                            updateCheckError = e.message?.takeIf { it.isNotBlank() }
+                                ?: "无法连接 GitHub",
+                            updateCheckedAtEpochMillis = checkedAt
+                        )
+                    } else {
+                        info
+                    }
+                }
             }
         }
     }
@@ -916,6 +1092,88 @@ class CoreRepositoryImpl @Inject constructor(
                     logRecoverableWarning("checkAllUpdates: ${variant.key} 更新检查失败", e)
                 }
             }
+        }
+    }
+
+    override suspend fun fetchUpdateComparison(
+        variant: ApiVariant
+    ): Result<CoreUpdateComparison> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            var info = _coreInfoList.value.firstOrNull { it.variant == variant }
+                ?: throw IOException("未找到核心状态")
+            if (!info.isInstalled) throw IOException("核心尚未安装")
+            if (info.sourceMismatch) throw IOException("当前核心来源与设置不一致")
+
+            if (info.remoteCommit == null) {
+                checkAndMarkUpdate(variant)
+                info = _coreInfoList.value.firstOrNull { it.variant == variant }
+                    ?: throw IOException("未找到核心状态")
+                info.updateCheckError?.let { throw IOException(it) }
+            }
+
+            val repo = resolveRepo(variant)
+            if (repo.isBlank()) throw IOException("请先配置核心仓库")
+            val localMetadata = readLocalCoreSourceMetadata(variant, currentRunMode())
+            val localSha = localMetadata?.commitSha?.trim().orEmpty()
+            if (localSha.isBlank()) {
+                throw IOException("当前安装缺少提交标记，重新安装后才能查看版本差异")
+            }
+            val remoteCommit = info.remoteCommit
+                ?: throw IOException("尚未读取到远程最新提交")
+            val remoteSha = remoteCommit.sha.trim()
+            if (remoteSha.isBlank()) throw IOException("远程最新提交信息不完整")
+            val branch = info.remoteBranch?.trim().orEmpty()
+                .ifBlank { resolveBranch(variant).orEmpty() }
+                .ifBlank { localMetadata?.branch.orEmpty() }
+
+            val comparison = if (commitShasEquivalent(localSha, remoteSha)) {
+                CoreUpdateComparisonParser.identical(
+                    repo = repo,
+                    branch = branch,
+                    commit = remoteCommit
+                )
+            } else {
+                val cacheKey = "${repo.lowercase()}:${localSha.lowercase()}:${remoteSha.lowercase()}"
+                updateComparisonCache[cacheKey] ?: githubRemoteService.requestMappedCancellable(
+                    urls = apiUrlCandidates(
+                        "repos/$repo/compare/${encodeUrlPart(localSha)}...${encodeUrlPart(remoteSha)}"
+                    ),
+                    headers = githubApiHeaders()
+                ) { body ->
+                    CoreUpdateComparisonParser.parse(
+                        raw = body,
+                        repo = repo,
+                        branch = branch,
+                        localCommitSha = localSha,
+                        fallbackRemoteCommit = remoteCommit
+                    )
+                }?.also { parsed ->
+                    if (updateComparisonCache.size >= 24) updateComparisonCache.clear()
+                    updateComparisonCache[cacheKey] = parsed
+                } ?: throw IOException("无法获取已安装版本与远程版本的差异")
+            }
+
+            val hasUpdate = comparison.relation.hasRemoteUpdate ||
+                (comparison.relation == CoreUpdateRelation.Unknown &&
+                    !commitShasEquivalent(localSha, remoteSha))
+            val availableVersionLabel = buildLatestVersionLabel(
+                info.remoteVersion.orEmpty(),
+                remoteSha
+            )
+            _coreInfoList.value = _coreInfoList.value.map { current ->
+                if (current.variant == variant) {
+                    current.copy(
+                        availableVersion = availableVersionLabel.ifBlank { null }
+                            .takeIf { hasUpdate },
+                        hasVersionUpdate = hasUpdate,
+                        updateRelation = comparison.relation,
+                        updateCheckError = null
+                    )
+                } else {
+                    current
+                }
+            }
+            comparison
         }
     }
 
@@ -1368,7 +1626,7 @@ class CoreRepositoryImpl @Inject constructor(
                     when (pending.type) {
                         PendingCoreMutationType.ReplaceCore -> {
                             applyStagedCore(pending)
-                            persistResolvedCustomSourceIfNeeded(
+                            persistResolvedCoreSourceIfNeeded(
                                 variant = pending.repair.variant,
                                 metadata = pending.sourceMetadata
                             )
@@ -1381,7 +1639,7 @@ class CoreRepositoryImpl @Inject constructor(
                 RuntimeDependencyHealthChecker.clearPendingIssue(context, pending.repair.variant)
                 if (
                     pending.type == PendingCoreMutationType.ReplaceCore &&
-                    pending.repair.actionLabel in setOf("安装", "更新")
+                    pending.repair.actionLabel in setOf("安装", "更新", "切换分支")
                 ) {
                     refreshLatestInstalledCoreState(pending.repair.variant)
                 } else {
@@ -2157,14 +2415,7 @@ class CoreRepositoryImpl @Inject constructor(
         return match?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
     }
 
-    private fun buildDesiredCustomSourceText(): String {
-        return currentCustomCoreSource()
-            .takeIf { it.isValidRepo }
-            ?.sourceText
-            .orEmpty()
-    }
-
-    private fun resolveCustomSourceStatus(
+    private fun resolveCoreSourceStatus(
         localMetadata: CoreSourceMetadata?,
         desiredRepo: String,
         desiredBranch: String?
@@ -2174,10 +2425,13 @@ class CoreRepositoryImpl @Inject constructor(
 
         val localRepo = normalizeGithubRepo(localMetadata.repo)
         val localBranch = normalizeGithubBranch(localMetadata.branch)
-        val targetBranch = normalizeGithubBranch(desiredBranch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
+        val targetBranch = normalizeGithubBranch(desiredBranch)
         return when {
-            localRepo.isBlank() || localBranch.isBlank() -> CoreSourceStatus.UnknownLegacy
+            localRepo.isBlank() -> CoreSourceStatus.UnknownLegacy
             !localRepo.equals(desiredRepo, ignoreCase = true) -> CoreSourceStatus.Mismatched
+            targetBranch.isBlank() && localBranch.isBlank() -> CoreSourceStatus.UnknownLegacy
+            targetBranch.isBlank() -> CoreSourceStatus.Matched
+            localBranch.isBlank() -> CoreSourceStatus.Mismatched
             !branchesEquivalent(localBranch, targetBranch) -> CoreSourceStatus.Mismatched
             else -> CoreSourceStatus.Matched
         }
@@ -2229,10 +2483,11 @@ class CoreRepositoryImpl @Inject constructor(
 
     private suspend fun installOrUpdateCore(
         variant: ApiVariant,
-        actionLabel: String
+        actionLabel: String,
+        branchOverride: String? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runOwnedCoreOperation(variant, actionLabel) { operationId ->
-            val remoteSource = resolveRemoteSource(variant)
+            val remoteSource = resolveRemoteSource(variant, branchOverride)
                 ?: throw IOException("无法获取版本信息")
             val release = remoteSource.release
             val sourceMetadata = remoteSource.metadata ?: buildReleaseInstallMetadata(
@@ -2250,7 +2505,7 @@ class CoreRepositoryImpl @Inject constructor(
                 actionLabel = actionLabel,
                 sourceMetadata = sourceMetadata
             )
-            persistResolvedCustomSourceIfNeeded(variant, sourceMetadata)
+            persistResolvedCoreSourceIfNeeded(variant, sourceMetadata)
             refreshLatestInstalledCoreState(variant)
         }
     }
@@ -2259,7 +2514,16 @@ class CoreRepositoryImpl @Inject constructor(
         latestRemoteVersionCache.remove(variant)
         _coreInfoList.value = _coreInfoList.value.map { info ->
             if (info.variant == variant) {
-                info.copy(hasVersionUpdate = false, availableVersion = null)
+                info.copy(
+                    hasVersionUpdate = false,
+                    availableVersion = null,
+                    remoteVersion = null,
+                    remoteBranch = null,
+                    remoteCommit = null,
+                    updateRelation = CoreUpdateRelation.Unknown,
+                    updateCheckError = null,
+                    updateCheckedAtEpochMillis = null
+                )
             } else {
                 info
             }
@@ -2286,13 +2550,14 @@ class CoreRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun persistResolvedCustomSourceIfNeeded(
+    private fun persistResolvedCoreSourceIfNeeded(
         variant: ApiVariant,
         metadata: CoreSourceMetadata?
     ) {
-        if (variant != ApiVariant.Custom || metadata == null) return
+        if (metadata == null) return
         val normalizedRepo = normalizeGithubRepo(metadata.repo)
-        val normalizedBranch = normalizeGithubBranch(metadata.branch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
+        val normalizedBranch = normalizeGithubBranch(metadata.branch)
+        if (normalizedRepo.isBlank() || normalizedBranch.isBlank()) return
         val currentRepo = resolveRepo(variant)
         val currentBranch = resolveBranch(variant).orEmpty()
         if (normalizedRepo.equals(currentRepo, ignoreCase = true) &&
@@ -2300,10 +2565,14 @@ class CoreRepositoryImpl @Inject constructor(
         ) {
             return
         }
-        settingsRepository.saveCustomCoreSource(
-            repoInput = normalizedRepo,
-            branchInput = normalizedBranch
-        )
+        if (variant == ApiVariant.Custom) {
+            settingsRepository.saveCustomCoreSource(
+                repoInput = normalizedRepo,
+                branchInput = normalizedBranch
+            )
+        } else if (normalizedRepo.equals(currentRepo, ignoreCase = true)) {
+            settingsRepository.setCoreBranch(variant, normalizedBranch)
+        }
     }
 
     private suspend fun downloadAndExtract(

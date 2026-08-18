@@ -315,6 +315,12 @@ internal fun CacheQuickDialog(
         },
         actions = {
             DialogActionButton(
+                text = "取消",
+                icon = Icons.Rounded.Close,
+                onClick = onDismiss,
+                enabled = !isClearing
+            )
+            DialogActionButton(
                 text = "完整管理",
                 icon = Icons.AutoMirrored.Rounded.OpenInNew,
                 onClick = onOpenCacheManagement

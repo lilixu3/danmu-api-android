@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.core
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.CallMerge
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudOff
@@ -47,7 +50,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +63,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,6 +74,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -80,6 +84,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
+import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreSourceStatus
@@ -89,6 +94,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCoreVariantRepo
+import com.example.danmuapiapp.domain.model.resolveCoreVariantBranch
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.common.CustomCoreSettingsForm
 import com.example.danmuapiapp.ui.common.rememberCustomCoreSettingsFormState
@@ -96,7 +102,10 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
+import com.example.danmuapiapp.ui.component.CoreBranchPickerDialog
+import com.example.danmuapiapp.ui.component.CoreUpdateAvailableDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.ui.component.shouldOfferCoreUpdateActions
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -113,6 +122,7 @@ fun CoreScreen(
     val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val displayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
+    val branchSelections by viewModel.coreBranchSelections.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
     val customBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val githubStatus by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
@@ -159,12 +169,12 @@ fun CoreScreen(
                 CoreControlPanel(
                     info = viewedInfo,
                     runtimeVariant = runtimeState.variant,
-                    serviceStatus = runtimeState.status,
                     viewModel = viewModel,
                     progress = downloadProgress,
                     pendingRepair = pendingDependencyRepair,
                     customRepo = customRepo,
                     customBranch = customBranch,
+                    branchSelections = branchSelections,
                     displayNames = displayNames,
                     onOpenPullRequestLab = onOpenPullRequestLab
                 )
@@ -191,7 +201,20 @@ fun CoreScreen(
     )
 
     if (viewModel.showUpdateDialog) UpdateResultDialog(viewModel, displayNames)
+    if (viewModel.showUpdateDetails) CoreUpdateDetailsPanel(viewModel, displayNames)
     if (viewModel.showRevisionHistory) CoreRevisionHistoryPanel(viewModel)
+    viewModel.branchDialogVariant?.let { variant ->
+        CoreBranchPickerDialog(
+            variantLabel = displayNames.resolve(variant),
+            catalog = viewModel.branchCatalog,
+            currentBranch = branchSelections.resolve(variant),
+            isLoading = viewModel.isLoadingBranches,
+            errorMessage = viewModel.branchLoadError,
+            onRetry = viewModel::retryLoadBranches,
+            onConfirm = viewModel::switchBranch,
+            onDismiss = viewModel::dismissBranchDialog
+        )
+    }
     viewModel.showVariantSettingsDialog?.let { variant ->
         VariantSettingsDialog(
             variant = variant,
@@ -413,17 +436,29 @@ private fun CoreLoadingPanel() {
 private fun CoreControlPanel(
     info: CoreInfo,
     runtimeVariant: ApiVariant,
-    serviceStatus: ServiceStatus,
     viewModel: CoreViewModel,
     progress: CoreDownloadProgress,
     pendingRepair: CoreDependencyRepairRequest?,
     customRepo: String,
     customBranch: String,
+    branchSelections: CoreBranchSelections,
     displayNames: CoreVariantDisplayNames,
     onOpenPullRequestLab: (ApiVariant) -> Unit
 ) {
     val isDarkTheme = LocalAppDarkTheme.current
-    val source = resolveCoreVariantSourceText(info.variant, customRepo, customBranch)
+    val source = resolveCoreVariantSourceText(
+        info.variant,
+        customRepo,
+        customBranch,
+        branchSelections
+    )
+    val sourceRepo = resolveCoreVariantRepo(info.variant, customRepo)
+    val sourceBranch = resolveCoreVariantBranch(
+        info.variant,
+        customRepo,
+        customBranch,
+        branchSelections
+    )
     val label = displayNames.resolve(info.variant)
     var deleteConfirm by remember(info.variant) { mutableStateOf(false) }
     var menuExpanded by remember(info.variant) { mutableStateOf(false) }
@@ -455,221 +490,306 @@ private fun CoreControlPanel(
                         else MaterialTheme.colorScheme.outlineVariant
                     )
             )
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.padding(start = 18.dp, top = 14.dp, end = 18.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            if (isCurrent) "当前使用" else "可切换核心",
+                            text = if (isCurrent) "当前核心" else "可切换核心",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (isCurrent) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
-                                label,
+                                text = label,
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            StatusPill(coreStatusText(info, repairing), info.needsAttention || repairing)
+                            CoreStatusPill(
+                                text = coreStatusText(info, repairing),
+                                attention = info.needsAttention || repairing
+                            )
                         }
                     }
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Rounded.MoreVert, "更多操作") }
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Rounded.MoreVert, "更多操作")
+                        }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(
                                 text = { Text(if (info.variant == ApiVariant.Custom) "编辑名称与仓库" else "编辑显示名称") },
-                                onClick = { menuExpanded = false; viewModel.openVariantSettingsDialog(info.variant) },
+                                onClick = {
+                                    menuExpanded = false
+                                    viewModel.openVariantSettingsDialog(info.variant)
+                                },
                                 leadingIcon = { Icon(Icons.Rounded.Edit, null) }
                             )
                             if (info.isInstalled) {
                                 DropdownMenuItem(
                                     text = { Text("重新安装") },
-                                    onClick = { menuExpanded = false; viewModel.reinstallCore(info.variant) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.reinstallCore(info.variant)
+                                    },
                                     leadingIcon = { Icon(Icons.Rounded.Sync, null) }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("删除核心") },
-                                    onClick = { menuExpanded = false; deleteConfirm = true },
-                                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) }
+                                    onClick = {
+                                        menuExpanded = false
+                                        deleteConfirm = true
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Rounded.DeleteOutline,
+                                            null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
                                 )
                             }
                         }
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("已安装版本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(
-                        if (info.isInstalled) formatCoreVersionValue(info.version) else "未安装",
+                        text = "已安装版本",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (info.isInstalled) formatCoreVersionValue(info.version) else "未安装",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Medium,
                         color = if (info.isInstalled) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (info.pullRequestNumbers.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.padding(top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.CallMerge,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "已合并 PR",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = info.pullRequestNumbers.joinToString("  ") { "#$it" },
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     if (info.hasVersionUpdate) {
                         Text(
-                            "可更新：${formatCoreVersionTransition(info.version, info.availableVersion)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    if (info.pullRequestNumbers.isNotEmpty()) {
-                        Text(
-                            "本地 PR 组合：${info.pullRequestNumbers.joinToString(" + ") { "#$it" }}",
+                            text = "可更新：${formatCoreVersionTransition(info.version, info.availableVersion)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                CoreCommitSummary(
+                    info = info,
+                    isCheckingUpdate = viewModel.isCheckingUpdate
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.CallMerge,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = sourceRepo.ifBlank { "尚未配置仓库" },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = if (sourceRepo.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val canPickBranch = info.isInstalled && source.isNotBlank() && !busy && !repairing
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 126.dp)
+                        .clickable(enabled = canPickBranch) {
+                            viewModel.openBranchDialog(info.variant)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        when {
-                            source.isNotBlank() -> source
-                            info.variant == ApiVariant.Custom -> "尚未配置仓库"
-                            else -> info.variant.repo
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        text = sourceBranch
+                            ?: info.remoteBranch?.takeIf { it.isNotBlank() }
+                            ?: "默认分支",
+                        modifier = Modifier.widthIn(max = 96.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (canPickBranch) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowDropDown,
+                        contentDescription = "展开分支列表",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (canPickBranch) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+            }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
 
-                when {
-                    repairing -> Button(
-                        onClick = viewModel::openDependencyRepairDialog,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Build, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("修复核心依赖")
-                    }
-                    needsSource -> Button(
-                        onClick = { viewModel.openVariantSettingsDialog(info.variant) },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Settings, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("配置核心仓库")
-                    }
-                    !info.isInstalled -> Button(
-                        onClick = { viewModel.installCore(info.variant) },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("安装此核心")
-                    }
-                    info.sourceMismatch -> Button(
-                        onClick = { viewModel.reinstallCore(info.variant) },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Sync, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("按当前仓库重新安装")
-                    }
-                    !isCurrent -> Button(
-                        onClick = { viewModel.updateVariant(info.variant) },
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.SwapHoriz, null, Modifier.size(19.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("切换到此核心")
-                    }
-                    else -> FilledTonalButton(
-                        onClick = {},
-                        enabled = false,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.CheckCircle, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            if (serviceStatus == ServiceStatus.Running) "当前核心 · 服务运行中"
-                            else "当前使用的核心"
-                        )
-                    }
-                }
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                CoreContextAction(
+                    info = info,
+                    isCurrent = isCurrent,
+                    repairing = repairing,
+                    needsSource = needsSource,
+                    busy = busy,
+                    viewModel = viewModel
+                )
 
                 if (info.isInstalled) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        FilledTonalButton(
+                    val hasContextAction = repairing || needsSource || info.sourceMismatch || !isCurrent
+                    if (hasContextAction) Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
                             onClick = {
-                                if (info.needsAttention) viewModel.doUpdate(info.variant)
-                                else viewModel.checkUpdate(info.variant)
+                                when {
+                                    info.sourceMismatch ||
+                                        info.sourceStatus == CoreSourceStatus.UnknownLegacy ->
+                                        viewModel.doUpdate(info.variant)
+                                    info.hasVersionUpdate -> viewModel.openUpdatePrompt(info.variant)
+                                    else -> viewModel.checkUpdate(info.variant)
+                                }
                             },
                             enabled = !busy && !repairing,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).height(46.dp),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Icon(
-                                if (info.needsAttention) Icons.Rounded.SystemUpdate else Icons.Rounded.Refresh,
-                                null,
-                                Modifier.size(18.dp)
+                            if (viewModel.isCheckingUpdate) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(
+                                    if (info.needsAttention) Icons.Rounded.SystemUpdate else Icons.Rounded.Refresh,
+                                    null,
+                                    Modifier.size(19.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                when {
+                                    info.sourceMismatch ||
+                                        info.sourceStatus == CoreSourceStatus.UnknownLegacy -> "应用变更"
+                                    info.hasVersionUpdate -> "查看更新"
+                                    else -> "检查更新"
+                                },
+                                maxLines = 1
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (info.needsAttention) "应用更新" else "检查更新", maxLines = 1)
                         }
                         OutlinedButton(
                             onClick = { viewModel.openRollbackDialog(info.variant) },
                             enabled = !busy,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).height(46.dp),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Icon(Icons.Rounded.History, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Rounded.History, null, Modifier.size(19.dp))
+                            Spacer(Modifier.width(7.dp))
                             Text("版本回退", maxLines = 1)
                         }
                     }
                 }
 
-                if (!needsSource) {
-                    OutlinedButton(
-                        onClick = { onOpenPullRequestLab(info.variant) },
-                        enabled = !busy && !repairing,
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.CallMerge, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text("PR 实验室 · 本地组合测试")
-                    }
-                }
+                DownloadProgressBlock(
+                    progress = progress,
+                    variant = info.variant,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
 
-                DownloadProgressBlock(progress, info.variant)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = viewModel::openProxyPickerManually, shape = RoundedCornerShape(8.dp)) {
-                        Icon(Icons.Rounded.CloudOff, null, Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("下载线路")
-                    }
-                    TextButton(
-                        onClick = { viewModel.openVariantSettingsDialog(info.variant) },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Settings, null, Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("核心设置")
-                    }
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CoreShortcutButton(
+                    icon = Icons.Rounded.CloudOff,
+                    label = "下载线路",
+                    enabled = !busy,
+                    onClick = viewModel::openProxyPickerManually,
+                    modifier = Modifier.weight(1f)
+                )
+                VerticalDivider(
+                    modifier = Modifier.height(54.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                )
+                CoreShortcutButton(
+                    icon = Icons.AutoMirrored.Rounded.CallMerge,
+                    label = "PR 实验室",
+                    enabled = !needsSource && !busy && !repairing,
+                    onClick = { onOpenPullRequestLab(info.variant) },
+                    modifier = Modifier.weight(1f)
+                )
+                VerticalDivider(
+                    modifier = Modifier.height(54.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                )
+                CoreShortcutButton(
+                    icon = Icons.Rounded.Settings,
+                    label = "核心设置",
+                    onClick = { viewModel.openVariantSettingsDialog(info.variant) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
@@ -694,8 +814,196 @@ private fun CoreControlPanel(
 }
 
 @Composable
-private fun DownloadProgressBlock(progress: CoreDownloadProgress, variant: ApiVariant) {
-    AnimatedVisibility(progress.inProgress && progress.variant == variant) {
+private fun CoreStatusPill(text: String, attention: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = if (attention) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (attention) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun CoreCommitSummary(
+    info: CoreInfo,
+    isCheckingUpdate: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val isDarkTheme = LocalAppDarkTheme.current
+    val hasCheckError = !info.updateCheckError.isNullOrBlank()
+    val badgeText = when {
+        isCheckingUpdate -> "检查中"
+        info.remoteCommit != null -> info.remoteCommit.shortSha
+        info.sourceCommitSha.isNotBlank() -> info.sourceCommitSha.take(7)
+        info.isInstalled -> "本地"
+        else -> "未安装"
+    }
+    val headline = when {
+        isCheckingUpdate -> "正在读取远程版本与提交信息"
+        hasCheckError -> "上次检查失败：${info.updateCheckError}"
+        !info.remoteCommit?.title.isNullOrBlank() -> info.remoteCommit.title
+        info.pullRequestNumbers.isNotEmpty() ->
+            "本地 PR 组合：${info.pullRequestNumbers.joinToString(" + ") { "#$it" }}"
+        info.isInstalled -> "本地核心已就绪，检查更新后显示远程提交信息"
+        else -> "安装核心后可检查版本与提交信息"
+    }
+    val containerColor = when {
+        hasCheckError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = if (isDarkTheme) 0.46f else 0.62f)
+        else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDarkTheme) 0.42f else 0.58f)
+    }
+    val badgeColor = when {
+        hasCheckError -> MaterialTheme.colorScheme.error.copy(alpha = if (isDarkTheme) 0.22f else 0.12f)
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.22f else 0.11f)
+    }
+    val accentColor = if (hasCheckError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+
+    Surface(
+        modifier = modifier.fillMaxWidth().heightIn(min = 60.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = containerColor
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(shape = RoundedCornerShape(6.dp), color = badgeColor) {
+                Text(
+                    text = badgeText,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accentColor,
+                    maxLines = 1
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = headline,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (hasCheckError) MaterialTheme.colorScheme.onErrorContainer
+                    else MaterialTheme.colorScheme.onPrimaryContainer,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoreContextAction(
+    info: CoreInfo,
+    isCurrent: Boolean,
+    repairing: Boolean,
+    needsSource: Boolean,
+    busy: Boolean,
+    viewModel: CoreViewModel
+) {
+    when {
+        repairing -> Button(
+            onClick = viewModel::openDependencyRepairDialog,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Rounded.Build, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("修复核心依赖")
+        }
+        needsSource -> Button(
+            onClick = { viewModel.openVariantSettingsDialog(info.variant) },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Rounded.Settings, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("配置核心仓库")
+        }
+        !info.isInstalled -> Button(
+            onClick = { viewModel.installCore(info.variant) },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("安装此核心")
+        }
+        info.sourceMismatch -> Button(
+            onClick = { viewModel.reinstallCore(info.variant) },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Rounded.Sync, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("按当前仓库重新安装")
+        }
+        !isCurrent -> Button(
+            onClick = { viewModel.updateVariant(info.variant) },
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Rounded.SwapHoriz, null, Modifier.size(19.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("切换到此核心")
+        }
+    }
+}
+
+@Composable
+private fun CoreShortcutButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(78.dp),
+        color = Color.Transparent,
+        contentColor = if (enabled) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(25.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun DownloadProgressBlock(
+    progress: CoreDownloadProgress,
+    variant: ApiVariant,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = progress.inProgress && progress.variant == variant,
+        modifier = modifier
+    ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val percent = progress.progress?.let { "${(it * 100).toInt().coerceIn(0, 100)}%" } ?: "处理中"
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -716,21 +1024,6 @@ private fun DownloadProgressBlock(progress: CoreDownloadProgress, variant: ApiVa
     }
 }
 
-@Composable
-private fun StatusPill(text: String, attention: Boolean) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = if (attention) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest
-    ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = if (attention) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
 private fun coreStatusText(info: CoreInfo, repairing: Boolean): String = when {
     repairing -> "待修复"
     info.sourceMismatch -> "来源变更"
@@ -745,29 +1038,73 @@ private fun coreStatusText(info: CoreInfo, repairing: Boolean): String = when {
 private fun UpdateResultDialog(vm: CoreViewModel, names: CoreVariantDisplayNames) {
     val info = vm.updateDialogInfo
     val variant = vm.updateDialogVariant
+    val failed = info?.updateCheckError != null
+    val hasVersionUpdate = shouldOfferCoreUpdateActions(
+        hasVersionUpdate = info?.hasVersionUpdate == true,
+        hasCheckError = failed,
+        sourceMismatch = info?.sourceMismatch == true,
+        sourceUnknownLegacy = info?.sourceStatus == CoreSourceStatus.UnknownLegacy
+    )
+    if (hasVersionUpdate && variant != null && info != null) {
+        CoreUpdateAvailableDialog(
+            variantLabel = names.resolve(variant),
+            currentVersion = info.version,
+            latestVersion = info.availableVersion ?: info.remoteVersion,
+            remoteCommit = info.remoteCommit,
+            onDismiss = vm::dismissUpdateDialog,
+            onShowDetails = { vm.openUpdateDetails(variant) },
+            onUpdateNow = { vm.doUpdate(variant) }
+        )
+        return
+    }
+    val canApply = info != null && !failed && (
+        info.sourceMismatch ||
+            info.sourceStatus == CoreSourceStatus.UnknownLegacy
+        )
     AppDialog(
         onDismissRequest = vm::dismissUpdateDialog,
         style = AppDialogStyle.Status,
-        tone = if (info?.needsAttention == true) AppDialogTone.Info else AppDialogTone.Success,
-        icon = { Icon(if (info?.needsAttention == true) Icons.Rounded.SystemUpdate else Icons.Rounded.CheckCircle, null) },
-        title = { Text(if (info?.needsAttention == true) "发现核心变更" else "当前已是最新") },
+        tone = when {
+            failed -> AppDialogTone.Danger
+            info?.needsAttention == true -> AppDialogTone.Info
+            else -> AppDialogTone.Success
+        },
+        icon = {
+            Icon(
+                when {
+                    failed -> Icons.Rounded.ErrorOutline
+                    info?.needsAttention == true -> Icons.Rounded.SystemUpdate
+                    else -> Icons.Rounded.CheckCircle
+                },
+                null
+            )
+        },
+        title = {
+            Text(
+                when {
+                    failed -> "检查更新失败"
+                    info?.needsAttention == true -> "发现核心变更"
+                    else -> "当前已是最新"
+                }
+            )
+        },
         text = {
             Text(
                 when {
                     info == null -> "未能读取核心状态"
+                    failed -> info.updateCheckError.orEmpty()
                     info.sourceMismatch -> "${names.resolve(info.variant)} 的当前来源与设置不一致，需要重新下载。"
                     info.sourceStatus == CoreSourceStatus.UnknownLegacy -> "旧版安装缺少来源标记，重新下载后将写入当前来源。"
-                    info.hasVersionUpdate -> formatCoreVersionTransition(info.version, info.availableVersion)
                     else -> "${names.resolve(info.variant)} 暂无可用更新。"
                 }
             )
         },
         confirmButton = {
-            if (info?.needsAttention == true && variant != null) {
-                Button(onClick = { vm.doUpdate(variant) }) { Text("应用变更") }
+            if (canApply && variant != null) {
+                Button(onClick = { vm.doUpdate(variant) }) { Text("重新下载") }
             } else TextButton(onClick = vm::dismissUpdateDialog) { Text("完成") }
         },
-        dismissButton = if (info?.needsAttention == true) {
+        dismissButton = if (canApply) {
             { TextButton(onClick = vm::dismissUpdateDialog) { Text("稍后") } }
         } else null
     )

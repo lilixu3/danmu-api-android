@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
@@ -104,10 +105,13 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
+import com.example.danmuapiapp.domain.model.resolveCoreVariantBranch
+import com.example.danmuapiapp.domain.model.resolveCoreVariantRepo
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.CoreBranchPickerDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import java.util.Locale
@@ -123,6 +127,10 @@ data class CompatModeActions(
     val onInstallCore: (ApiVariant) -> Unit,
     val onUpdateCore: (ApiVariant) -> Unit,
     val onCheckCoreUpdate: (ApiVariant) -> Unit,
+    val onOpenBranchPicker: (ApiVariant) -> Unit,
+    val onRetryBranches: () -> Unit,
+    val onSwitchCoreBranch: (String) -> Unit,
+    val onDismissBranchPicker: () -> Unit,
     val onDeleteCore: (ApiVariant) -> Unit,
     val onSaveCustomCore: (String, String) -> Unit,
     val onToggleKeepAliveProfile: () -> Unit,
@@ -261,6 +269,19 @@ fun CompatModeScreen(
                 onConfirm = actions.onConfirmProxySelection,
                 onDismiss = actions.onDismissProxyPicker,
                 confirmText = "保存线路"
+            )
+        }
+
+        uiState.branchDialogVariant?.let { variant ->
+            CoreBranchPickerDialog(
+                variantLabel = resolveVariantLabel(uiState, variant),
+                catalog = uiState.branchCatalog,
+                currentBranch = uiState.coreBranchSelections.resolve(variant),
+                isLoading = uiState.isLoadingBranches,
+                errorMessage = uiState.branchLoadError,
+                onRetry = actions.onRetryBranches,
+                onConfirm = actions.onSwitchCoreBranch,
+                onDismiss = actions.onDismissBranchPicker
             )
         }
 
@@ -1450,6 +1471,13 @@ private fun CoreVariantCard(
         else -> MaterialTheme.colorScheme.outline
     }
     val sourceText = resolveVariantSource(uiState, info.variant)
+    val sourceRepo = resolveCoreVariantRepo(info.variant, uiState.customRepo)
+    val sourceBranch = resolveCoreVariantBranch(
+        variant = info.variant,
+        customRepo = uiState.customRepo,
+        customBranch = uiState.customRepoBranch,
+        branchSelections = uiState.coreBranchSelections
+    )
     val mainText = when {
         hasPendingDependencyRepair -> "修复依赖"
         !info.isInstalled -> "下载核心"
@@ -1512,11 +1540,51 @@ private fun CoreVariantCard(
                     )
                     if (sourceText.isNotBlank()) {
                         Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = sourceText,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (info.isInstalled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = sourceRepo,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "·",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                TextButton(
+                                    onClick = { actions.onOpenBranchPicker(info.variant) },
+                                    enabled = !uiState.isOperating && !hasPendingDependencyRepair,
+                                    modifier = Modifier.widthIn(max = 220.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = sourceBranch ?: "默认分支",
+                                        modifier = Modifier.widthIn(max = 175.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Rounded.ArrowDropDown,
+                                        contentDescription = "展开分支列表",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = sourceText,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 if (info.variant == ApiVariant.Custom) {
@@ -1691,7 +1759,7 @@ private fun CustomCoreEditor(
                     Text(
                         text = when {
                             source.isValidRepo -> "当前来源：${source.sourceText}"
-                            source.isConfigured -> "仓库已配置，等待有效分支"
+                            source.isConfigured -> "仓库格式无效"
                             else -> "未配置自定义仓库"
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
@@ -1713,7 +1781,7 @@ private fun CustomCoreEditor(
                         Text(
                             text = when {
                                 source.isValidRepo -> "当前来源：${source.sourceText}"
-                                source.isConfigured -> "仓库已配置，等待有效分支"
+                                source.isConfigured -> "仓库格式无效"
                                 else -> "未配置自定义仓库"
                             },
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
@@ -1746,7 +1814,7 @@ private fun CustomCoreEditor(
                                 onValueChange = { branchText = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("分支") },
-                                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
+                                placeholder = { Text(source.suggestedBranch.ifBlank { "自动检测" }) },
                                 singleLine = true,
                                 maxLines = 1,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -1771,7 +1839,7 @@ private fun CustomCoreEditor(
                                 onValueChange = { branchText = it },
                                 modifier = Modifier.widthIn(min = 170.dp).weight(0.55f),
                                 label = { Text("分支") },
-                                placeholder = { Text(source.suggestedBranch.ifBlank { "main" }) },
+                                placeholder = { Text(source.suggestedBranch.ifBlank { "自动检测" }) },
                                 singleLine = true,
                                 maxLines = 1,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -2158,7 +2226,8 @@ private fun resolveVariantSource(
     return resolveCoreVariantSourceText(
         variant = variant,
         customRepo = uiState.customRepo,
-        customBranch = uiState.customRepoBranch
+        customBranch = uiState.customRepoBranch,
+        branchSelections = uiState.coreBranchSelections
     )
 }
 

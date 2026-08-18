@@ -29,6 +29,7 @@ let _mainServer = null;
 let _proxyServer = null;
 let _shutdownPromise = null;
 let _directFavoriteSchedulerStop = () => {};
+let _directFavoriteSchedulerSync = async () => {};
 let _directFavoriteSchedulerGeneration = 0;
 
 let _coreWatchers = [];
@@ -416,31 +417,47 @@ function _stopDirectFavoriteScheduler() {
   _directFavoriteSchedulerGeneration += 1;
   try { _directFavoriteSchedulerStop(); } catch {}
   _directFavoriteSchedulerStop = () => {};
+  _directFavoriteSchedulerSync = async () => {};
 }
 
-function _scheduleDirectFavoriteScheduler(variantKey, info) {
+async function _scheduleDirectFavoriteScheduler(variantKey, info) {
   _stopDirectFavoriteScheduler();
   const generation = _directFavoriteSchedulerGeneration;
-  void startFavoriteSchedulerHost({
-    projectDir: __dirname,
-    variantDir: info.dir,
-    env: process.env,
-    port: PORT,
-    log,
-  }).then((result) => {
+  try {
+    const result = await startFavoriteSchedulerHost({
+      projectDir: __dirname,
+      variantDir: info.dir,
+      env: process.env,
+      port: PORT,
+      log,
+    });
     if (generation !== _directFavoriteSchedulerGeneration) {
       try { result?.stop?.(); } catch {}
       return;
     }
     _directFavoriteSchedulerStop = result?.stop || (() => {});
+    _directFavoriteSchedulerSync = result?.sync || (async () => {});
     if (result?.supported) {
       log('[danmu_api]', `Favorite scheduler attached to direct core (${variantKey})`);
     }
-  }).catch((error) => {
+  } catch (error) {
     if (generation === _directFavoriteSchedulerGeneration) {
       log('[danmu_api]', 'Favorite scheduler initialization skipped:', error?.message || error);
     }
-  });
+  }
+}
+
+function _wrapDirectFavoritePersistence(coreHandler) {
+  return async (...args) => {
+    const req = args[0];
+    try {
+      return await coreHandler(...args);
+    } finally {
+      if (_isFavoriteMutationRequest(req?.url, req?.method)) {
+        await _directFavoriteSchedulerSync();
+      }
+    }
+  };
 }
 
 function _sendWorkerRequest(state, payload, timeoutMs = 30000) {
@@ -586,18 +603,23 @@ async function _loadHandleRequestForVariant(options = {}) {
         // try next layout
       }
     }
-    return { handler: mod.handleRequest, info: i, variantKey, coreGlobals };
+    return {
+      handler: _wrapDirectFavoritePersistence(mod.handleRequest),
+      info: i,
+      variantKey,
+      coreGlobals,
+    };
   };
 
   try {
     const loaded = await tryLoad(v);
-    handleRequest = loaded.handler;
-    _directCoreGlobals = loaded.coreGlobals || null;
     if (loaded.viaWorker) {
       _stopDirectFavoriteScheduler();
     } else {
-      _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
+      await _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
     }
+    handleRequest = loaded.handler;
+    _directCoreGlobals = loaded.coreGlobals || null;
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -609,13 +631,13 @@ async function _loadHandleRequestForVariant(options = {}) {
       try {
         console.log('[danmu_api]', 'Attempting fallback to stable...');
         const loaded = await tryLoad('stable');
-        handleRequest = loaded.handler;
-        _directCoreGlobals = loaded.coreGlobals || null;
         if (loaded.viaWorker) {
           _stopDirectFavoriteScheduler();
         } else {
-          _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
+          await _scheduleDirectFavoriteScheduler(loaded.variantKey, loaded.info);
         }
+        handleRequest = loaded.handler;
+        _directCoreGlobals = loaded.coreGlobals || null;
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;
@@ -1784,6 +1806,7 @@ function _isLoopbackIp(ip) {
 }
 
 const QUIET_CORE_LOG_PATH_RE = /(^|\/)api\/(?:logs|reqrecords|cache\/animes)(?=(["'\s?#]|$))/i;
+const FAVORITE_MUTATION_PATH_RE = /^\/api\/(?:v2\/)?favorite\/(?:add|remove|refresh|schedule)\/?$/i;
 
 function _stripLikelyTokenPrefix(pathname) {
   const parts = String(pathname || '/').split('/').filter(Boolean);
@@ -1791,6 +1814,16 @@ function _stripLikelyTokenPrefix(pathname) {
     return '/' + parts.slice(1).join('/');
   }
   return String(pathname || '/');
+}
+
+function _isFavoriteMutationRequest(url, method) {
+  if (String(method || '').toUpperCase() !== 'POST') return false;
+  try {
+    const pathname = _stripLikelyTokenPrefix(new URL(String(url || '')).pathname || '/');
+    return FAVORITE_MUTATION_PATH_RE.test(pathname);
+  } catch {
+    return false;
+  }
 }
 
 function _isQuietCoreLogRequest(urlObj, clientIp) {

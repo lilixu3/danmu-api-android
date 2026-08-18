@@ -128,6 +128,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
+import com.example.danmuapiapp.domain.model.CoreRemoteCommit
 import com.example.danmuapiapp.domain.model.CoreSourceStatus
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
@@ -137,7 +138,9 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
+import com.example.danmuapiapp.ui.component.CoreUpdateAvailableDialog
 import com.example.danmuapiapp.ui.component.StatusIndicator
+import com.example.danmuapiapp.ui.component.shouldOfferCoreUpdateActions
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
@@ -154,16 +157,36 @@ internal fun UpdatePromptDialog(
     variantLabel: String?,
     currentVersion: String?,
     latestVersion: String?,
+    remoteCommit: CoreRemoteCommit?,
     sourceMismatch: Boolean,
     sourceUnknownLegacy: Boolean,
     desiredSource: String?,
+    onShowDetails: () -> Unit,
     onUpdate: () -> Unit,
-    onIgnore: () -> Unit
+    onDismiss: () -> Unit
 ) {
     if (variantLabel.isNullOrBlank()) return
     if (!sourceMismatch && !sourceUnknownLegacy && latestVersion.isNullOrBlank()) return
+    if (shouldOfferCoreUpdateActions(
+            hasVersionUpdate = !latestVersion.isNullOrBlank(),
+            hasCheckError = false,
+            sourceMismatch = sourceMismatch,
+            sourceUnknownLegacy = sourceUnknownLegacy
+        )
+    ) {
+        CoreUpdateAvailableDialog(
+            variantLabel = variantLabel,
+            currentVersion = currentVersion,
+            latestVersion = latestVersion,
+            remoteCommit = remoteCommit,
+            onDismiss = onDismiss,
+            onShowDetails = onShowDetails,
+            onUpdateNow = onUpdate
+        )
+        return
+    }
     AppDialog(
-        onDismissRequest = onIgnore,
+        onDismissRequest = onDismiss,
         style = AppDialogStyle.Confirm,
         tone = AppDialogTone.Brand,
         icon = { Icon(Icons.Rounded.SystemUpdateAlt, null) },
@@ -198,8 +221,8 @@ internal fun UpdatePromptDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onIgnore) {
-                Text(if (sourceMismatch || sourceUnknownLegacy) "稍后" else "忽略")
+            TextButton(onClick = onDismiss) {
+                Text("稍后")
             }
         }
     )

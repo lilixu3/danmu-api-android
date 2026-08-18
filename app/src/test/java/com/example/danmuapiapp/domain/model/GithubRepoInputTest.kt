@@ -24,7 +24,7 @@ class GithubRepoInputTest {
     }
 
     @Test
-    fun `仓库首页链接未填写分支时应回落到 main`() {
+    fun `仓库首页链接未填写分支时应等待远端默认分支`() {
         val resolved = resolveCustomCoreSource(
             repoInput = "https://github.com/lilixu3/danmu_api",
             branchInput = ""
@@ -32,8 +32,8 @@ class GithubRepoInputTest {
 
         assertTrue(resolved.isValidRepo)
         assertEquals("lilixu3/danmu_api", resolved.repo)
-        assertEquals(DEFAULT_CUSTOM_CORE_BRANCH, resolved.branch)
-        assertEquals(DEFAULT_CUSTOM_CORE_BRANCH, resolved.suggestedBranch)
+        assertEquals("", resolved.branch)
+        assertEquals("", resolved.suggestedBranch)
     }
 
     @Test
@@ -57,7 +57,7 @@ class GithubRepoInputTest {
 
         assertEquals("lilixu3/danmu_api", resolved.repo)
         assertEquals("feature/x", resolved.branch)
-        assertEquals(DEFAULT_CUSTOM_CORE_BRANCH, resolved.suggestedBranch)
+        assertEquals("", resolved.suggestedBranch)
     }
 
     @Test
@@ -69,7 +69,7 @@ class GithubRepoInputTest {
 
         assertTrue(resolved.isValidRepo)
         assertEquals("Celestials316/danmu_api", resolved.repo)
-        assertEquals(DEFAULT_CUSTOM_CORE_BRANCH, resolved.branch)
+        assertEquals("", resolved.branch)
     }
 
     @Test

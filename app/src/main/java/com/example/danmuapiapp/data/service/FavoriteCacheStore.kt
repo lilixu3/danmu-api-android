@@ -46,21 +46,24 @@ object FavoriteCacheStore {
     }
 
     /**
-     * Keeps both runtime modes in sync so switching modes cannot strand newer
-     * favorites in the mode that was just left.
+     * The mode being left is the only active writer, so its snapshot is
+     * authoritative. A union would revive entries deleted from the active mode
+     * when the inactive mode still contains an older copy.
      */
     fun synchronizeModes(
         context: Context,
         preferredMode: RunMode,
         otherMode: RunMode
     ): Result<Snapshot> = runCatching {
-        val preferred = read(context, preferredMode).getOrThrow().content
-        val other = read(context, otherMode).getOrThrow().content
-        val merged = snapshotOf(mergeDocuments(preferred, other))
-        write(context, preferredMode, merged.content).getOrThrow()
-        write(context, otherMode, merged.content).getOrThrow()
-        merged
+        val authoritative = authoritativeModeSnapshot(
+            read(context, preferredMode).getOrThrow().content
+        )
+        write(context, preferredMode, authoritative.content).getOrThrow()
+        write(context, otherMode, authoritative.content).getOrThrow()
+        authoritative
     }
+
+    internal fun authoritativeModeSnapshot(raw: String): Snapshot = snapshotOf(raw)
 
     internal fun snapshotOf(raw: String): Snapshot {
         val root = decodeDocument(raw)

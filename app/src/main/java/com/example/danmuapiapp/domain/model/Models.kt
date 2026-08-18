@@ -76,7 +76,13 @@ data class CoreInfo(
     val sourceStatus: CoreSourceStatus = CoreSourceStatus.NotApplicable,
     val desiredSource: String? = null,
     val pullRequestNumbers: List<Int> = emptyList(),
-    val sourceCommitSha: String = ""
+    val sourceCommitSha: String = "",
+    val remoteVersion: String? = null,
+    val remoteBranch: String? = null,
+    val remoteCommit: CoreRemoteCommit? = null,
+    val updateRelation: CoreUpdateRelation = CoreUpdateRelation.Unknown,
+    val updateCheckError: String? = null,
+    val updateCheckedAtEpochMillis: Long? = null
 ) {
     val isReady: Boolean
         get() = isInstalled && !sourceMismatch

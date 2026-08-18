@@ -68,8 +68,10 @@ applyEnvSnapshot(initialEnv);
 let handleRequest = null;
 let coreGlobals = null;
 let favoriteSchedulerStop = () => {};
+let favoriteSchedulerSync = async () => {};
 
 const QUIET_CORE_LOG_PATH_RE = /(^|\/)api\/(?:logs|reqrecords|cache\/animes)(?=(["'\s?#]|$))/i;
+const FAVORITE_MUTATION_PATH_RE = /^\/api\/(?:v2\/)?favorite\/(?:add|remove|refresh|schedule)\/?$/i;
 
 function _normalizeClientIp(rawIp) {
   let value = String(rawIp || '').trim().toLowerCase();
@@ -103,6 +105,16 @@ function _isQuietCoreLogRequest(url, clientIp) {
   try {
     const pathname = _stripLikelyTokenPrefix(new URL(String(url || '')).pathname || '/');
     return QUIET_CORE_LOG_PATH_RE.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function _isFavoriteMutationRequest(url, method) {
+  if (String(method || '').toUpperCase() !== 'POST') return false;
+  try {
+    const pathname = _stripLikelyTokenPrefix(new URL(String(url || '')).pathname || '/');
+    return FAVORITE_MUTATION_PATH_RE.test(pathname);
   } catch {
     return false;
   }
@@ -223,6 +235,7 @@ async function initializeFavoriteScheduler() {
       log: (message, detail) => _sendLog('info', [message, detail].filter(Boolean)),
     });
     favoriteSchedulerStop = result?.stop || (() => {});
+    favoriteSchedulerSync = result?.sync || (async () => {});
   } catch (error) {
     _sendLog('warn', ['[favorite] scheduler initialization skipped:', error?.message || error]);
   }
@@ -259,6 +272,9 @@ async function handleMessage(msg) {
     try {
       res = await handleRequest(req, process.env, 'node', clientIp);
     } finally {
+      if (_isFavoriteMutationRequest(url, method)) {
+        await favoriteSchedulerSync();
+      }
       if (shouldQuietCoreLogs) {
         _removeQuietCoreLogNoise(quietLogStart);
       }
@@ -295,8 +311,8 @@ async function handleMessage(msg) {
 
 async function main() {
   await loadWorker();
+  await initializeFavoriteScheduler();
   parentPort.postMessage({ type: 'ready' });
-  void initializeFavoriteScheduler();
   parentPort.on('message', handleMessage);
   parentPort.on('close', () => {
     try { favoriteSchedulerStop(); } catch {}

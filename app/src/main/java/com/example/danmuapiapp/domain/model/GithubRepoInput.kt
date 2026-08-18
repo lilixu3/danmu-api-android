@@ -2,8 +2,6 @@ package com.example.danmuapiapp.domain.model
 
 import java.net.URI
 
-const val DEFAULT_CUSTOM_CORE_BRANCH = "main"
-
 data class ParsedGithubRepoInput(
     val repo: String = "",
     val branch: String = ""
@@ -87,18 +85,13 @@ fun resolveCustomCoreSource(
     val parsedRepo = parseGithubRepoInput(repoInput)
     val normalizedRepo = normalizeGithubRepo(repoInput)
     val isValidRepo = normalizedRepo.contains('/')
-    val suggestedBranch = if (normalizedRepo.isBlank() || !isValidRepo) {
-        ""
-    } else {
-        normalizeGithubBranch(parsedRepo.branch).ifBlank { DEFAULT_CUSTOM_CORE_BRANCH }
-    }
+    val suggestedBranch = if (normalizedRepo.isBlank() || !isValidRepo) ""
+    else normalizeGithubBranch(parsedRepo.branch)
     val normalizedBranch = if (normalizedRepo.isBlank()) {
         ""
     } else if (!isValidRepo) {
         normalizeGithubBranch(branchInput)
-    } else {
-        normalizeGithubBranch(branchInput).ifBlank { suggestedBranch }
-    }
+    } else normalizeGithubBranch(branchInput).ifBlank { suggestedBranch }
     return ResolvedCustomCoreSource(
         repo = normalizedRepo,
         branch = normalizedBranch,

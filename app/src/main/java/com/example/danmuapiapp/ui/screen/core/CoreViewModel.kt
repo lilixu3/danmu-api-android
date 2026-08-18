@@ -43,6 +43,7 @@ class CoreViewModel @Inject constructor(
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val runtimeState = runtimeRepo.runtimeState
     val coreDisplayNames = settingsRepo.coreDisplayNames
+    val coreBranchSelections = settingsRepo.coreBranchSelections
     val customCoreSource = settingsRepo.customCoreSource
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
@@ -59,6 +60,14 @@ class CoreViewModel @Inject constructor(
         private set
     var showVariantSettingsDialog by mutableStateOf<ApiVariant?>(null)
         private set
+    var branchDialogVariant by mutableStateOf<ApiVariant?>(null)
+        private set
+    var branchCatalog by mutableStateOf<CoreBranchCatalog?>(null)
+        private set
+    var isLoadingBranches by mutableStateOf(false)
+        private set
+    var branchLoadError by mutableStateOf<String?>(null)
+        private set
     var isCheckingUpdate by mutableStateOf(false)
         private set
     var showUpdateDialog by mutableStateOf(false)
@@ -66,6 +75,16 @@ class CoreViewModel @Inject constructor(
     var updateDialogVariant by mutableStateOf<ApiVariant?>(null)
         private set
     var updateDialogInfo by mutableStateOf<CoreInfo?>(null)
+        private set
+    var showUpdateDetails by mutableStateOf(false)
+        private set
+    var updateDetailsVariant by mutableStateOf<ApiVariant?>(null)
+        private set
+    var updateComparison by mutableStateOf<CoreUpdateComparison?>(null)
+        private set
+    var isLoadingUpdateComparison by mutableStateOf(false)
+        private set
+    var updateComparisonError by mutableStateOf<String?>(null)
         private set
     var showGearMenu by mutableStateOf<ApiVariant?>(null)
         private set
@@ -111,12 +130,16 @@ class CoreViewModel @Inject constructor(
         private set
 
     private var pendingProxyAction: PendingProxyAction? = null
+    private var updateComparisonJob: Job? = null
+    private var updateComparisonGeneration = 0L
     private var proxyTestJob: Job? = null
     private var githubAccountJob: Job? = null
     private var githubAccountGeneration = 0L
     private var revisionDetailsJob: Job? = null
     private var revisionDetailsGeneration = 0L
     private var revisionHistoryJob: Job? = null
+    private var branchLoadJob: Job? = null
+    private var branchLoadGeneration = 0L
     private val revisionVersionJobs = mutableMapOf<String, Job>()
     private val revisionVersionLookupSemaphore = Semaphore(REVISION_VERSION_LOOKUP_CONCURRENCY)
     private var revisionHistoryGeneration = 0L
@@ -157,8 +180,10 @@ class CoreViewModel @Inject constructor(
     private sealed interface PendingProxyAction {
         data class Install(val variant: ApiVariant) : PendingProxyAction
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+        data class LoadUpdateDetails(val variant: ApiVariant) : PendingProxyAction
         data class DoUpdate(val variant: ApiVariant) : PendingProxyAction
         data class Reinstall(val variant: ApiVariant) : PendingProxyAction
+        data class SwitchBranch(val variant: ApiVariant, val branch: String) : PendingProxyAction
         data class LoadRollbackHistory(val variant: ApiVariant) : PendingProxyAction
         data class Rollback(val variant: ApiVariant, val revision: CoreRevision) : PendingProxyAction
         data object RepairDependenciesOnline : PendingProxyAction
@@ -294,14 +319,74 @@ class CoreViewModel @Inject constructor(
             try {
                 settingsRepo.setIgnoredUpdateVersion(variant, null)
                 coreRepo.checkAndMarkUpdate(variant)
-                val info = coreInfoList.value.find { it.variant == variant }
-                updateDialogVariant = variant
-                updateDialogInfo = info
-                showUpdateDialog = true
+                openUpdatePrompt(variant)
             } finally {
                 isCheckingUpdate = false
             }
         }
+    }
+
+    fun openUpdatePrompt(variant: ApiVariant) {
+        updateDialogVariant = variant
+        updateDialogInfo = coreInfoList.value.find { it.variant == variant }
+        showUpdateDialog = true
+    }
+
+    fun openUpdateDetails(variant: ApiVariant) {
+        requireProxyAndRun(PendingProxyAction.LoadUpdateDetails(variant))
+    }
+
+    private fun openUpdateDetailsNow(variant: ApiVariant) {
+        showUpdateDialog = false
+        updateDetailsVariant = variant
+        updateComparison = null
+        updateComparisonError = null
+        showUpdateDetails = true
+        loadUpdateComparison(variant)
+    }
+
+    fun retryUpdateComparison() {
+        updateDetailsVariant?.let(::loadUpdateComparison)
+    }
+
+    private fun loadUpdateComparison(variant: ApiVariant) {
+        updateComparisonGeneration += 1
+        val generation = updateComparisonGeneration
+        updateComparisonJob?.cancel()
+        updateComparison = null
+        updateComparisonError = null
+        isLoadingUpdateComparison = true
+        updateComparisonJob = viewModelScope.launch {
+            coreRepo.fetchUpdateComparison(variant).fold(
+                onSuccess = { comparison ->
+                    if (generation == updateComparisonGeneration && showUpdateDetails) {
+                        updateComparison = comparison
+                    }
+                },
+                onFailure = { error ->
+                    if (generation == updateComparisonGeneration && showUpdateDetails) {
+                        updateComparisonError = error.message ?: "无法获取核心变更详情"
+                        promptProxyReselectIfNeeded(PendingProxyAction.LoadUpdateDetails(variant))
+                    }
+                }
+            )
+            if (generation == updateComparisonGeneration && showUpdateDetails) {
+                isLoadingUpdateComparison = false
+                updateComparisonJob = null
+                refreshGithubAccountAfterApiUsage()
+            }
+        }
+    }
+
+    fun dismissUpdateDetails() {
+        updateComparisonGeneration += 1
+        updateComparisonJob?.cancel()
+        updateComparisonJob = null
+        showUpdateDetails = false
+        updateDetailsVariant = null
+        updateComparison = null
+        updateComparisonError = null
+        isLoadingUpdateComparison = false
     }
 
     fun doUpdate(variant: ApiVariant) {
@@ -311,6 +396,7 @@ class CoreViewModel @Inject constructor(
     private fun doUpdateCore(variant: ApiVariant) {
         val label = variantLabel(variant)
         showUpdateDialog = false
+        dismissUpdateDetails()
         viewModelScope.launch {
             performCoreMutation(
                 variant = variant,
@@ -757,6 +843,87 @@ class CoreViewModel @Inject constructor(
         showVariantSettingsDialog = null
     }
 
+    fun openBranchDialog(variant: ApiVariant) {
+        if (isOperating) return
+        if (coreInfoList.value.firstOrNull { it.variant == variant }?.isInstalled != true) {
+            operationMessage = "请先安装${variantLabel(variant)}"
+            return
+        }
+        if (variant == ApiVariant.Custom && settingsRepo.customCoreSource.value.repo.isBlank()) {
+            operationMessage = "请先配置自定义核心仓库"
+            return
+        }
+        branchDialogVariant = variant
+        branchCatalog = null
+        loadBranches(variant)
+    }
+
+    fun retryLoadBranches() {
+        branchDialogVariant?.let(::loadBranches)
+    }
+
+    fun dismissBranchDialog() {
+        branchLoadGeneration += 1
+        branchLoadJob?.cancel()
+        branchLoadJob = null
+        branchDialogVariant = null
+        branchCatalog = null
+        branchLoadError = null
+        isLoadingBranches = false
+    }
+
+    private fun loadBranches(variant: ApiVariant) {
+        branchLoadGeneration += 1
+        val generation = branchLoadGeneration
+        branchLoadJob?.cancel()
+        isLoadingBranches = true
+        branchLoadError = null
+        branchLoadJob = viewModelScope.launch {
+            coreRepo.fetchBranches(variant).fold(
+                onSuccess = { catalog ->
+                    if (generation != branchLoadGeneration) return@fold
+                    branchCatalog = catalog
+                },
+                onFailure = { error ->
+                    if (generation != branchLoadGeneration) return@fold
+                    branchLoadError = error.message ?: "无法读取仓库分支"
+                }
+            )
+            if (generation == branchLoadGeneration) {
+                isLoadingBranches = false
+                branchLoadJob = null
+            }
+        }
+    }
+
+    fun switchBranch(branch: String) {
+        val variant = branchDialogVariant ?: return
+        val normalized = normalizeGithubBranch(branch)
+        if (normalized.isBlank()) return
+        val current = settingsRepo.coreBranchSelections.value.resolve(variant)
+        dismissBranchDialog()
+        if (normalized.equals(current, ignoreCase = true)) {
+            operationMessage = "${variantLabel(variant)}当前已使用 $normalized 分支"
+            return
+        }
+        requireProxyAndRun(PendingProxyAction.SwitchBranch(variant, normalized))
+    }
+
+    private fun doSwitchBranch(variant: ApiVariant, branch: String) {
+        val label = variantLabel(variant)
+        viewModelScope.launch {
+            performCoreMutation(
+                variant = variant,
+                actionMessage = "正在将 $label 切换到 $branch 分支...",
+                successMessage = "$label 已切换到 $branch 分支",
+                stopTimeoutMessage = "$label 切换分支前停止服务超时，请稍后重试",
+                failurePrefix = "切换分支失败",
+                pendingAction = PendingProxyAction.SwitchBranch(variant, branch),
+                applyBlock = { coreRepo.switchCoreBranch(variant, branch) }
+            )
+        }
+    }
+
     fun saveVariantSettings(
         variant: ApiVariant,
         displayName: String,
@@ -772,7 +939,7 @@ class CoreViewModel @Inject constructor(
             coreRepo.refreshCoreInfo()
             val label = resolved.displayName.ifBlank { variant.label }
             val repoText = resolved.repo.ifBlank { "未配置仓库" }
-            val branchText = resolved.branch.ifBlank { "--" }
+            val branchText = resolved.branch.ifBlank { "默认分支" }
             operationMessage = "$label 已保存（$repoText · $branchText）"
         } else {
             settingsRepo.setVariantDisplayName(variant, displayName)
@@ -1030,8 +1197,10 @@ class CoreViewModel @Inject constructor(
         when (action) {
             is PendingProxyAction.Install -> doInstallCore(action.variant)
             is PendingProxyAction.CheckUpdate -> doCheckUpdate(action.variant)
+            is PendingProxyAction.LoadUpdateDetails -> openUpdateDetailsNow(action.variant)
             is PendingProxyAction.DoUpdate -> doUpdateCore(action.variant)
             is PendingProxyAction.Reinstall -> doReinstallCore(action.variant)
+            is PendingProxyAction.SwitchBranch -> doSwitchBranch(action.variant, action.branch)
             is PendingProxyAction.LoadRollbackHistory -> loadRollbackHistory(action.variant)
             is PendingProxyAction.Rollback -> doRollbackTo(action.variant, action.revision)
             PendingProxyAction.RepairDependenciesOnline -> doRepairPendingDependenciesOnline()

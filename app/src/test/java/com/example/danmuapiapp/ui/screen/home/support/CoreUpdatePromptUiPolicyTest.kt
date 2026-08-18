@@ -54,7 +54,6 @@ class CoreUpdatePromptUiPolicyTest {
             isCoreInstalled = true,
             hasVersionUpdate = true,
             sourceMismatch = false,
-            availableVersion = "2.0.0",
             isInstalling = false,
             isUpdating = true
         )
@@ -69,12 +68,25 @@ class CoreUpdatePromptUiPolicyTest {
             isCoreInstalled = true,
             hasVersionUpdate = false,
             sourceMismatch = true,
-            availableVersion = null,
             isInstalling = false,
             isUpdating = false
         )
 
         assertEquals("重新下载", text)
+    }
+
+    @Test
+    fun `存在可用更新时按钮文案应提示先查看而非直接更新`() {
+        val text = resolveCoreActionButtonText(
+            isCoreInfoLoading = false,
+            isCoreInstalled = true,
+            hasVersionUpdate = true,
+            sourceMismatch = false,
+            isInstalling = false,
+            isUpdating = false
+        )
+
+        assertEquals("查看更新", text)
     }
 
     private fun coreInfo(

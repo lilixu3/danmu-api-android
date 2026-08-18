@@ -42,6 +42,22 @@ class FavoriteCacheStoreTest {
     }
 
     @Test
+    fun `模式切换只复制当前模式快照避免旧模式恢复已删除收藏`() {
+        val current = """
+            {
+              "当前收藏": {"timestamp": 200}
+            }
+        """.trimIndent()
+
+        val snapshot = FavoriteCacheStore.authoritativeModeSnapshot(current)
+        val copied = JSONObject(snapshot.content)
+
+        assertEquals(1, copied.length())
+        assertTrue(copied.has("当前收藏"))
+        assertEquals(1, snapshot.count)
+    }
+
+    @Test
     fun `无效收藏条目会拒绝导入`() {
         val result = runCatching {
             FavoriteCacheStore.snapshotOf("""{"错误条目":"not-an-object"}""")

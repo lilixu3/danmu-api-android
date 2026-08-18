@@ -181,11 +181,11 @@ fun CustomCoreSettingsForm(
             value = state.branchText,
             onValueChange = state::updateBranch,
             label = { Text("分支") },
-            placeholder = { Text("留空=默认 main") },
+            placeholder = { Text("留空时自动检测默认分支") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             supportingText = {
-                Text("留空时：优先使用链接里的分支；否则默认 main")
+                Text("留空时优先使用链接里的分支，否则读取仓库默认分支")
             }
         )
         Surface(
@@ -213,7 +213,7 @@ fun CustomCoreSettingsForm(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "分支：${state.normalizedBranchPreview.ifBlank { "--" }}",
+                    text = "分支：${state.normalizedBranchPreview.ifBlank { "自动检测" }}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
