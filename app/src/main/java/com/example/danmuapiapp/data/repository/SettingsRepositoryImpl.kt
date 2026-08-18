@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.SecureStringStore
+import com.example.danmuapiapp.data.service.CoreUpdateCheckPolicy
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
@@ -12,8 +13,8 @@ import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
-import com.example.danmuapiapp.domain.model.DEFAULT_CUSTOM_CORE_BRANCH
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
@@ -36,6 +37,8 @@ class SettingsRepositoryImpl @Inject constructor(
 ) : SettingsRepository {
     companion object {
         private const val DEFAULT_ANNOUNCEMENT_BASE_URL = "http://117.72.165.47:18086"
+        private const val CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY =
+            "core_update_check_interval_minutes"
     }
 
     private val settingsPrefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -90,6 +93,17 @@ class SettingsRepositoryImpl @Inject constructor(
     override val keepAliveHeartbeatIntervalMinutes: StateFlow<Int> =
         _keepAliveHeartbeatIntervalMinutes.asStateFlow()
 
+    private val _coreUpdateCheckIntervalMinutes = MutableStateFlow(
+        CoreUpdateCheckPolicy.normalizeIntervalMinutes(
+            settingsPrefs.getInt(
+                CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY,
+                CoreUpdateCheckPolicy.DEFAULT_INTERVAL_MINUTES
+            )
+        )
+    )
+    override val coreUpdateCheckIntervalMinutes: StateFlow<Int> =
+        _coreUpdateCheckIntervalMinutes.asStateFlow()
+
     private val _normalModeStabilityMode = MutableStateFlow(NormalModeStabilityPrefs.get(context))
     override val normalModeStabilityMode: StateFlow<NormalModeStabilityMode> =
         _normalModeStabilityMode.asStateFlow()
@@ -118,6 +132,10 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _customRepoDisplayName = MutableStateFlow(_coreDisplayNames.value.custom)
     override val customRepoDisplayName: StateFlow<String> = _customRepoDisplayName.asStateFlow()
 
+    private val _coreBranchSelections = MutableStateFlow(resolveCoreBranchSelections())
+    override val coreBranchSelections: StateFlow<CoreBranchSelections> =
+        _coreBranchSelections.asStateFlow()
+
     private val _tokenVisible = MutableStateFlow(settingsPrefs.safeGetBoolean("token_visible", false))
     override val tokenVisible: StateFlow<Boolean> = _tokenVisible.asStateFlow()
 
@@ -144,6 +162,10 @@ class SettingsRepositoryImpl @Inject constructor(
             key == displayNameKeyForVariant(ApiVariant.Stable) ||
                 key == displayNameKeyForVariant(ApiVariant.Dev) -> {
                 applyCoreDisplayNamesState(resolveCoreDisplayNames())
+            }
+            key == branchKeyForVariant(ApiVariant.Stable) ||
+                key == branchKeyForVariant(ApiVariant.Dev) -> {
+                applyCoreBranchSelectionsState(resolveCoreBranchSelections())
             }
         }
     }
@@ -215,6 +237,12 @@ class SettingsRepositoryImpl @Inject constructor(
         _keepAliveHeartbeatIntervalMinutes.value = normalized
     }
 
+    override fun setCoreUpdateCheckIntervalMinutes(minutes: Int) {
+        val normalized = CoreUpdateCheckPolicy.normalizeIntervalMinutes(minutes)
+        settingsPrefs.edit { putInt(CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY, normalized) }
+        _coreUpdateCheckIntervalMinutes.value = normalized
+    }
+
     override fun setNormalModeStabilityMode(mode: NormalModeStabilityMode) {
         NormalModeStabilityPrefs.set(context, mode)
         _normalModeStabilityMode.value = mode
@@ -263,6 +291,19 @@ class SettingsRepositoryImpl @Inject constructor(
         )
     }
 
+    override fun setCoreBranch(variant: ApiVariant, branch: String) {
+        val normalized = normalizeGithubBranch(branch)
+        if (variant == ApiVariant.Custom) {
+            setCustomRepoBranch(normalized)
+            return
+        }
+        settingsPrefs.edit {
+            if (normalized.isBlank()) remove(branchKeyForVariant(variant))
+            else putString(branchKeyForVariant(variant), normalized)
+        }
+        applyCoreBranchSelectionsState(_coreBranchSelections.value.withSelection(variant, normalized))
+    }
+
     override fun saveCustomCoreSource(
         repoInput: String,
         branchInput: String
@@ -282,7 +323,7 @@ class SettingsRepositoryImpl @Inject constructor(
             if (resolved.repo.isBlank()) {
                 remove("custom_repo_branch")
             } else {
-                putString("custom_repo_branch", resolved.branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH })
+                putString("custom_repo_branch", resolved.branch)
             }
         }
         saveLegacyCustomRepo(resolved.repo)
@@ -312,7 +353,7 @@ class SettingsRepositoryImpl @Inject constructor(
             if (resolvedConfig.repo.isBlank()) {
                 remove("custom_repo_branch")
             } else {
-                putString("custom_repo_branch", resolvedConfig.branch.ifBlank { DEFAULT_CUSTOM_CORE_BRANCH })
+                putString("custom_repo_branch", resolvedConfig.branch)
             }
         }
         saveLegacyCustomRepo(resolvedConfig.repo)
@@ -389,6 +430,12 @@ class SettingsRepositoryImpl @Inject constructor(
         _keepAliveHeartbeatEnabled.value = NodeKeepAlivePrefs.isHeartbeatEnabled(context)
         _keepAliveHeartbeatMode.value = NodeKeepAlivePrefs.getHeartbeatMode(context)
         _keepAliveHeartbeatIntervalMinutes.value = NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context)
+        _coreUpdateCheckIntervalMinutes.value = CoreUpdateCheckPolicy.normalizeIntervalMinutes(
+            settingsPrefs.getInt(
+                CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY,
+                CoreUpdateCheckPolicy.DEFAULT_INTERVAL_MINUTES
+            )
+        )
         _normalModeStabilityMode.value = NormalModeStabilityPrefs.get(context)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
         _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)
@@ -400,6 +447,7 @@ class SettingsRepositoryImpl @Inject constructor(
         synchronized(customCoreConfigLock) {
             refreshActiveWorkDirCustomCoreStateLocked(mirrorLegacyValues = true)
         }
+        applyCoreBranchSelectionsState(resolveCoreBranchSelections())
         AppAppearancePrefs.applyNightMode(_nightMode.value)
     }
 
@@ -408,6 +456,14 @@ class SettingsRepositoryImpl @Inject constructor(
             stable = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Stable)).trim(),
             dev = settingsPrefs.safeGetString(displayNameKeyForVariant(ApiVariant.Dev)).trim(),
             custom = resolveStoredCustomCoreConfigLocked(activeWorkDirIdentity).displayName.trim()
+        )
+    }
+
+    private fun resolveCoreBranchSelections(): CoreBranchSelections {
+        return CoreBranchSelections(
+            stable = normalizeGithubBranch(settingsPrefs.safeGetString(branchKeyForVariant(ApiVariant.Stable))),
+            dev = normalizeGithubBranch(settingsPrefs.safeGetString(branchKeyForVariant(ApiVariant.Dev))),
+            custom = _customRepoBranch.value
         )
     }
 
@@ -485,6 +541,11 @@ class SettingsRepositoryImpl @Inject constructor(
         _customCoreSource.value = source
         _customRepo.value = source.repo
         _customRepoBranch.value = source.branch
+        applyCoreBranchSelectionsState(_coreBranchSelections.value.withSelection(ApiVariant.Custom, source.branch))
+    }
+
+    private fun applyCoreBranchSelectionsState(selections: CoreBranchSelections) {
+        _coreBranchSelections.value = selections
     }
 
     private fun saveLegacyCustomRepo(value: String) {
@@ -512,6 +573,14 @@ class SettingsRepositoryImpl @Inject constructor(
             ApiVariant.Stable -> "stable_repo_display_name"
             ApiVariant.Dev -> "dev_repo_display_name"
             ApiVariant.Custom -> "custom_repo_display_name"
+        }
+    }
+
+    private fun branchKeyForVariant(variant: ApiVariant): String {
+        return when (variant) {
+            ApiVariant.Stable -> "stable_repo_branch"
+            ApiVariant.Dev -> "dev_repo_branch"
+            ApiVariant.Custom -> "custom_repo_branch"
         }
     }
 

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -8,11 +9,16 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
+import com.example.danmuapiapp.data.service.CoreUpdateCheckPolicy
 import com.example.danmuapiapp.ui.component.*
 
 @Composable
@@ -21,6 +27,9 @@ fun NetworkSettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val updateCheckIntervalMinutes by
+        viewModel.coreUpdateCheckIntervalMinutes.collectAsStateWithLifecycle()
+    var showUpdateIntervalDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
@@ -45,7 +54,7 @@ fun NetworkSettingsScreen(
         ) {
             SettingsPageHeader(
                 title = "网络设置",
-                subtitle = "GitHub 代理线路管理",
+                subtitle = "GitHub 线路与核心更新检查",
                 onBack = onBack
             )
 
@@ -61,6 +70,16 @@ fun NetworkSettingsScreen(
                     subtitle = "并发测速，选择最快的代理节点",
                     icon = Icons.Rounded.Speed,
                     onClick = viewModel::openProxyPicker
+                )
+            }
+
+            SettingsGroup(title = "更新检查") {
+                SettingsItem(
+                    title = "核心自动检查",
+                    subtitle = "进入前台时判断，距上次自动检查满 $updateCheckIntervalMinutes 分钟才请求",
+                    icon = Icons.Rounded.Schedule,
+                    onClick = { showUpdateIntervalDialog = true },
+                    trailing = { Text("$updateCheckIntervalMinutes 分钟") }
                 )
             }
         }
@@ -79,6 +98,43 @@ fun NetworkSettingsScreen(
             onConfirm = viewModel::confirmProxySelection,
             onDismiss = viewModel::dismissProxyPickerDialog,
             confirmText = "保存线路"
+        )
+    }
+
+    if (showUpdateIntervalDialog) {
+        AppDialog(
+            onDismissRequest = { showUpdateIntervalDialog = false },
+            style = AppDialogStyle.Selection,
+            tone = AppDialogTone.Info,
+            icon = { Icon(Icons.Rounded.Schedule, null) },
+            title = { Text("核心自动检查间隔") },
+            supportingText = { Text("仅在应用进入前台时检查是否已到间隔") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    CoreUpdateCheckPolicy.intervalOptionsMinutes.forEach { minutes ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setCoreUpdateCheckIntervalMinutes(minutes)
+                                    showUpdateIntervalDialog = false
+                                }
+                                .padding(horizontal = 4.dp, vertical = 8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = updateCheckIntervalMinutes == minutes,
+                                onClick = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("$minutes 分钟")
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdateIntervalDialog = false }) { Text("取消") }
+            }
         )
     }
 }

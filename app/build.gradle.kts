@@ -683,6 +683,11 @@ val testDanmakuPrepareCacheTask = tasks.register<Exec>("testDanmakuPrepareCache"
     commandLine("node", "node-tests/danmaku-prepare-cache-regression.js")
 }
 
+val testFavoriteSchedulerHostTask = tasks.register<Exec>("testFavoriteSchedulerHost") {
+    workingDir = rootProject.projectDir
+    commandLine("node", "node-tests/favorite-scheduler-host-regression.js")
+}
+
 tasks.register<Exec>("testBundledBrotliRuntime") {
     dependsOn("verifyBundledNodeModules")
     workingDir = rootProject.projectDir
@@ -711,6 +716,7 @@ val targetNodeExecutable = (findProperty("targetNodeExecutable") as? String)
 tasks.register("verifyEmbeddedNodeCompatibility") {
     val smokeScripts = listOf(
         "node-tests/parse-dotenv-regression.js",
+        "node-tests/favorite-scheduler-host-regression.js",
         "node-tests/brotli-runtime-smoke.mjs",
         "node-tests/bundled-node-lock-closure-smoke.mjs",
         "node-tests/core-runtime-dependencies-smoke.mjs"
@@ -718,6 +724,7 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
     dependsOn("verifyBundledNodeModules")
     inputs.files(smokeScripts.map(rootProject::file))
     inputs.file("src/main/assets/nodejs-project/android-server.js")
+    inputs.file("src/main/assets/nodejs-project/favorite-scheduler-host.js")
     inputs.property("targetNodeExecutable", targetNodeExecutable)
     doLast {
         fun runTargetNode(arguments: List<String>): String {
@@ -1126,6 +1133,7 @@ tasks.named("preBuild").configure {
     dependsOn(testBundledNodeLockClosureTask)
     dependsOn(testBundledCoreRuntimeDependenciesTask)
     dependsOn(testDanmakuPrepareCacheTask)
+    dependsOn(testFavoriteSchedulerHostTask)
 }
 
 tasks.matching {

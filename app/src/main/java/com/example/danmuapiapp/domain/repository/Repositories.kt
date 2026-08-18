@@ -42,10 +42,13 @@ interface CoreRepository {
     fun refreshCoreInfo()
     suspend fun refreshCoreInfoAndAwait()
     suspend fun checkUpdate(variant: ApiVariant): GithubRelease?
+    suspend fun fetchBranches(variant: ApiVariant): Result<CoreBranchCatalog>
     suspend fun checkAndMarkUpdate(variant: ApiVariant)
     suspend fun checkAllUpdates()
+    suspend fun fetchUpdateComparison(variant: ApiVariant): Result<CoreUpdateComparison>
     suspend fun installCore(variant: ApiVariant): Result<Unit>
     suspend fun updateCore(variant: ApiVariant): Result<Unit>
+    suspend fun switchCoreBranch(variant: ApiVariant, branch: String): Result<Unit>
     suspend fun deleteCore(variant: ApiVariant): Result<Unit>
     suspend fun rollbackCore(variant: ApiVariant, release: GithubRelease): Result<Unit>
     suspend fun fetchReleaseHistory(variant: ApiVariant): List<GithubRelease>
@@ -126,11 +129,13 @@ interface SettingsRepository {
     val keepAliveHeartbeatEnabled: StateFlow<Boolean>
     val keepAliveHeartbeatMode: StateFlow<KeepAliveHeartbeatMode>
     val keepAliveHeartbeatIntervalMinutes: StateFlow<Int>
+    val coreUpdateCheckIntervalMinutes: StateFlow<Int>
     val normalModeStabilityMode: StateFlow<NormalModeStabilityMode>
     val nightMode: StateFlow<NightModePreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
     val coreDisplayNames: StateFlow<CoreVariantDisplayNames>
+    val coreBranchSelections: StateFlow<CoreBranchSelections>
     val customCoreSource: StateFlow<ResolvedCustomCoreSource>
     val customRepo: StateFlow<String>
     val customRepoBranch: StateFlow<String>
@@ -147,11 +152,13 @@ interface SettingsRepository {
     fun setKeepAliveHeartbeatEnabled(enabled: Boolean)
     fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode)
     fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int)
+    fun setCoreUpdateCheckIntervalMinutes(minutes: Int)
     fun setNormalModeStabilityMode(mode: NormalModeStabilityMode)
     fun setNightMode(mode: NightModePreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
     fun setVariantDisplayName(variant: ApiVariant, name: String)
+    fun setCoreBranch(variant: ApiVariant, branch: String)
     fun saveCustomCoreSource(repoInput: String, branchInput: String): ResolvedCustomCoreSource
     fun saveCustomCoreConfig(
         displayName: String,
