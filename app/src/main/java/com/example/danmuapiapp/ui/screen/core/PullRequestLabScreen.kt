@@ -63,8 +63,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -125,6 +125,15 @@ fun PullRequestLabScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            PullRequestBuildBar(
+                selectedPullRequests = viewModel.selectedPullRequests,
+                isBuilding = viewModel.isBuilding,
+                isActivating = viewModel.isActivating,
+                isPrivateRepository = viewModel.pageData?.isPrivateRepository == true,
+                onBuild = viewModel::requestBuild
+            )
+        },
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
@@ -132,7 +141,7 @@ fun PullRequestLabScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 18.dp)
+                .padding(horizontal = 16.dp)
         ) {
             PullRequestLabHeader(
                 title = "PR 实验室",
@@ -160,44 +169,24 @@ fun PullRequestLabScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 22.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 14.dp)
             ) {
-                if (installedPrs.isNotEmpty()) {
-                    item(key = "installed-stack") {
-                        InstalledPullRequestStack(numbers = installedPrs)
-                    }
+                item(key = "workspace-summary") {
+                    PullRequestWorkspaceSummary(
+                        installedNumbers = installedPrs,
+                        selectedNumbers = viewModel.selectedPullRequests.map { it.number }
+                    )
                 }
 
                 if (viewModel.selectedPullRequests.isNotEmpty()) {
-                    item(key = "selected-title") {
-                        SectionTitle(
-                            title = "待合并队列",
-                            subtitle = "${viewModel.selectedPullRequests.size} 个 PR · 按当前顺序执行"
-                        )
-                    }
-                    items(
-                        items = viewModel.selectedPullRequests,
-                        key = { "selected-${it.number}" }
-                    ) { pullRequest ->
-                        val index = viewModel.selectedPullRequests.indexOfFirst {
-                            it.number == pullRequest.number
-                        }
-                        SelectedPullRequestRow(
-                            pullRequest = pullRequest,
-                            position = index + 1,
-                            canMoveUp = index > 0,
-                            canMoveDown = index in 0 until viewModel.selectedPullRequests.lastIndex,
+                    item(key = "selected-queue") {
+                        SelectedPullRequestQueue(
+                            pullRequests = viewModel.selectedPullRequests,
                             enabled = !viewModel.isBuilding && !viewModel.isActivating,
-                            onMoveUp = { viewModel.moveSelection(index, -1) },
-                            onMoveDown = { viewModel.moveSelection(index, 1) },
-                            onRemove = { viewModel.toggleSelection(pullRequest) },
-                            onOpenDetails = { viewModel.openPullRequestDetails(pullRequest) }
-                        )
-                    }
-                    item(key = "selected-divider") {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                            onMove = viewModel::moveSelection,
+                            onRemove = viewModel::toggleSelection,
+                            onOpenDetails = viewModel::openPullRequestDetails
                         )
                     }
                 }
@@ -242,7 +231,7 @@ fun PullRequestLabScreen(
                     SectionTitle(
                         title = viewModel.selectedFilter.sectionTitle,
                         subtitle = viewModel.pageData?.let {
-                            val pageLabel = "第 ${it.page} 页 · 每页 15 条"
+                            val pageLabel = "${it.items.size} 条结果 · 第 ${it.page} 页"
                             if (viewModel.appliedSearchQuery.isBlank()) pageLabel
                             else "${viewModel.appliedSearchQuery} · $pageLabel"
                         }
@@ -301,46 +290,12 @@ fun PullRequestLabScreen(
 
                 viewModel.pageData?.let { page ->
                     item(key = "pagination") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { viewModel.loadPage(page.page - 1) },
-                                enabled = page.hasPreviousPage && !viewModel.isLoading,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("上一页")
-                            }
-                            FilledTonalButton(
-                                onClick = { viewModel.loadPage(page.page + 1) },
-                                enabled = page.hasNextPage && !viewModel.isLoading,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("下一页")
-                            }
-                        }
-                    }
-                }
-
-                item(key = "build-action") {
-                    Button(
-                        onClick = viewModel::requestBuild,
-                        enabled = viewModel.selectedPullRequests.isNotEmpty() &&
-                            !viewModel.isBuilding &&
-                            !viewModel.isActivating &&
-                            viewModel.pageData?.isPrivateRepository != true,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.CallMerge, null, Modifier.size(19.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (viewModel.selectedPullRequests.isEmpty()) {
-                                "选择要合并的 PR"
-                            } else {
-                                "合并 ${viewModel.selectedPullRequests.size} 个 PR"
-                            }
+                        PullRequestPagination(
+                            page = page.page,
+                            canGoPrevious = page.hasPreviousPage && !viewModel.isLoading,
+                            canGoNext = page.hasNextPage && !viewModel.isLoading,
+                            onPrevious = { viewModel.loadPage(page.page - 1) },
+                            onNext = { viewModel.loadPage(page.page + 1) }
                         )
                     }
                 }
@@ -400,7 +355,7 @@ private fun PullRequestLabHeader(
     onRefresh: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -412,11 +367,18 @@ private fun PullRequestLabHeader(
             FilledTonalIconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.headlineLarge)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -463,7 +425,7 @@ private fun PullRequestSearchBar(
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
         enabled = enabled,
         singleLine = true,
         leadingIcon = { Icon(Icons.Rounded.Search, null) },
@@ -565,26 +527,130 @@ private val CorePullRequestFilter.searchLoadingMessage: String
     }
 
 @Composable
-private fun InstalledPullRequestStack(numbers: List<Int>) {
+private fun PullRequestWorkspaceSummary(
+    installedNumbers: List<Int>,
+    selectedNumbers: List<Int>
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         Row(
-            modifier = Modifier.padding(13.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("当前已安装 PR 组合", style = MaterialTheme.typography.titleSmall)
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
                 Text(
-                    numbers.joinToString(" + ") { "#$it" },
-                    style = MaterialTheme.typography.bodySmall,
+                    "当前组合",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                    if (installedNumbers.isEmpty()) "未叠加 PR" else installedNumbers.joinToString(" + ") { "#$it" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (installedNumbers.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            VerticalDivider(
+                modifier = Modifier.height(34.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+            Column(
+                modifier = Modifier.width(82.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    "待合并",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    if (selectedNumbers.isEmpty()) "0 个 PR" else "${selectedNumbers.size} 个 PR",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (selectedNumbers.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectedPullRequestQueue(
+    pullRequests: List<CorePullRequest>,
+    enabled: Boolean,
+    onMove: (Int, Int) -> Unit,
+    onRemove: (CorePullRequest) -> Unit,
+    onOpenDetails: (CorePullRequest) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.CallMerge,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text("合并队列", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        pullRequests.joinToString("  ") { "#${it.number}" },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    "${pullRequests.size} 个",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+            pullRequests.forEachIndexed { index, pullRequest ->
+                SelectedPullRequestRow(
+                    pullRequest = pullRequest,
+                    position = index + 1,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < pullRequests.lastIndex,
+                    enabled = enabled,
+                    onMoveUp = { onMove(index, -1) },
+                    onMoveDown = { onMove(index, 1) },
+                    onRemove = { onRemove(pullRequest) },
+                    onOpenDetails = { onOpenDetails(pullRequest) }
+                )
+                if (index < pullRequests.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 48.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    )
+                }
             }
         }
     }
@@ -602,53 +668,161 @@ private fun SelectedPullRequestRow(
     onRemove: () -> Unit,
     onOpenDetails: () -> Unit
 ) {
-    Surface(
+    Row(
+        modifier = Modifier.padding(start = 10.dp, top = 7.dp, bottom = 7.dp, end = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text(
+                position.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        Spacer(Modifier.width(9.dp))
+        Column(
+            modifier = Modifier.weight(1f).clickable(onClick = onOpenDetails),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                "#${pullRequest.number} ${pullRequest.title}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                pullRequest.headSha.take(7),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(
+            onClick = onMoveUp,
+            enabled = enabled && canMoveUp,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Rounded.ArrowUpward, "上移 PR #${pullRequest.number}", Modifier.size(18.dp))
+        }
+        IconButton(
+            onClick = onMoveDown,
+            enabled = enabled && canMoveDown,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Rounded.ArrowDownward, "下移 PR #${pullRequest.number}", Modifier.size(18.dp))
+        }
+        IconButton(
+            onClick = onRemove,
+            enabled = enabled,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Rounded.DeleteOutline, "移除 PR #${pullRequest.number}", Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun PullRequestPagination(
+    page: Int,
+    canGoPrevious: Boolean,
+    canGoNext: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        OutlinedButton(
+            onClick = onPrevious,
+            enabled = canGoPrevious,
+            modifier = Modifier.weight(1f).height(42.dp),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp)
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.NavigateBefore, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(3.dp))
+            Text("上一页")
+        }
+        Text(
+            text = "第 $page 页",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        FilledTonalButton(
+            onClick = onNext,
+            enabled = canGoNext,
+            modifier = Modifier.weight(1f).height(42.dp),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp)
+        ) {
+            Text("下一页")
+            Spacer(Modifier.width(3.dp))
+            Icon(Icons.AutoMirrored.Rounded.NavigateNext, null, Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun PullRequestBuildBar(
+    selectedPullRequests: List<CorePullRequest>,
+    isBuilding: Boolean,
+    isActivating: Boolean,
+    isPrivateRepository: Boolean,
+    onBuild: () -> Unit
+) {
+    val busy = isBuilding || isActivating
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 3.dp
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Text(
-                    position.toString(),
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-            Spacer(Modifier.width(10.dp))
             Column(
-                modifier = Modifier.weight(1f).clickable(onClick = onOpenDetails)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 Text(
-                    "#${pullRequest.number} ${pullRequest.title}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 2,
+                    text = when {
+                        busy -> "PR 组合处理中"
+                        selectedPullRequests.isEmpty() -> "尚未选择 PR"
+                        else -> "${selectedPullRequests.size} 个 PR 已加入队列"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    pullRequest.headSha.take(7),
+                    text = when {
+                        isPrivateRepository -> "私有仓库仅可查看"
+                        selectedPullRequests.isEmpty() -> "当前组合保持不变"
+                        else -> selectedPullRequests.joinToString(" + ") { "#${it.number}" }
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(onClick = onMoveUp, enabled = enabled && canMoveUp) {
-                Icon(Icons.Rounded.ArrowUpward, "上移 PR #${pullRequest.number}", Modifier.size(19.dp))
-            }
-            IconButton(onClick = onMoveDown, enabled = enabled && canMoveDown) {
-                Icon(Icons.Rounded.ArrowDownward, "下移 PR #${pullRequest.number}", Modifier.size(19.dp))
-            }
-            IconButton(onClick = onRemove, enabled = enabled) {
-                Icon(Icons.Rounded.Close, "移除 PR #${pullRequest.number}", Modifier.size(19.dp))
+            Button(
+                onClick = onBuild,
+                enabled = selectedPullRequests.isNotEmpty() && !busy && !isPrivateRepository,
+                modifier = Modifier.height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 15.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.CallMerge, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(7.dp))
+                Text(if (selectedPullRequests.isEmpty()) "合并 PR" else "合并 ${selectedPullRequests.size} 个")
             }
         }
     }
@@ -675,6 +849,19 @@ private fun PullRequestCard(
         pullRequest.currentCoreInclusion == CorePullRequestInclusion.LocalMerge
     val effectiveStatus = pullRequest.effectiveStatus(locallyIncluded)
     val selectable = pullRequest.canApplyToCurrentCore(alreadyIncluded)
+    val statusBadge = when {
+        selectedPosition != null -> "队列 $selectedPosition" to StatusBadgeTone.Open
+        locallyIncluded -> "本地已并入" to StatusBadgeTone.Merged
+        effectiveStatus == CorePullRequestStatus.Merged -> when (pullRequest.currentCoreInclusion) {
+            CorePullRequestInclusion.Included -> "当前版本已包含" to StatusBadgeTone.Merged
+            CorePullRequestInclusion.NotIncluded -> "已合并 · 未包含" to StatusBadgeTone.Warning
+            else -> "已合并 · 待确认" to StatusBadgeTone.Merged
+        }
+        effectiveStatus == CorePullRequestStatus.Closed -> "已关闭" to StatusBadgeTone.Closed
+        pullRequest.draft -> "草稿" to StatusBadgeTone.Warning
+        showOpenState -> "开放" to StatusBadgeTone.Open
+        else -> null
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -692,60 +879,42 @@ private fun PullRequestCard(
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            modifier = Modifier.padding(start = 8.dp, top = 9.dp, end = 8.dp, bottom = 9.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Checkbox(
                 checked = selected,
                 onCheckedChange = { onToggle() },
-                enabled = enabled && selectable
+                enabled = enabled && selectable,
+                modifier = Modifier.size(40.dp)
             )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         "#${pullRequest.number}",
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        when {
-                            locallyIncluded -> StatusBadge("本地已并入", StatusBadgeTone.Merged)
-                            effectiveStatus == CorePullRequestStatus.Merged -> {
-                                when (pullRequest.currentCoreInclusion) {
-                                    CorePullRequestInclusion.Included -> {
-                                        StatusBadge("当前版本已包含", StatusBadgeTone.Merged)
-                                    }
-                                    CorePullRequestInclusion.NotIncluded -> {
-                                        StatusBadge("已合并 · 未包含", StatusBadgeTone.Warning)
-                                    }
-                                    else -> StatusBadge("已合并 · 待确认", StatusBadgeTone.Merged)
-                                }
-                            }
-                            effectiveStatus == CorePullRequestStatus.Closed -> {
-                                StatusBadge("已关闭", StatusBadgeTone.Closed)
-                            }
-                            pullRequest.draft -> StatusBadge("草稿", StatusBadgeTone.Warning)
-                            showOpenState -> StatusBadge("开放", StatusBadgeTone.Open)
-                        }
-                        selectedPosition?.let { StatusBadge("队列 $it", StatusBadgeTone.Open) }
-                        Icon(
-                            Icons.Rounded.ChevronRight,
-                            "查看 PR #${pullRequest.number} 变更详情",
-                            Modifier.size(19.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    statusBadge?.let { (label, tone) -> StatusBadge(label, tone) }
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.Rounded.ChevronRight,
+                        "查看 PR #${pullRequest.number} 变更详情",
+                        Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Text(
                     pullRequest.title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 3,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 pullRequest.firstContribution?.let { firstContribution ->
@@ -756,7 +925,7 @@ private fun PullRequestCard(
                         summary.trim(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }

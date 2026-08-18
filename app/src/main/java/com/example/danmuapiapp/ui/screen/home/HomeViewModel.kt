@@ -136,6 +136,16 @@ class HomeViewModel @Inject constructor(
         private set
     var updatePromptDesiredSource by mutableStateOf<String?>(null)
         private set
+    var showCoreUpdateDetails by mutableStateOf(false)
+        private set
+    var coreUpdateDetailsVariant by mutableStateOf<ApiVariant?>(null)
+        private set
+    var coreUpdateComparison by mutableStateOf<CoreUpdateComparison?>(null)
+        private set
+    var isLoadingCoreUpdateComparison by mutableStateOf(false)
+        private set
+    var coreUpdateComparisonError by mutableStateOf<String?>(null)
+        private set
     var coreUpdateCheckDialogMessage by mutableStateOf<String?>(null)
         private set
     var coreUpdateCheckDialogIsError by mutableStateOf(false)
@@ -222,6 +232,8 @@ class HomeViewModel @Inject constructor(
     private var requestRecordRefreshJob: Job? = null
     private var runtimeCacheRefreshJob: Job? = null
     private var cacheFileRefreshDebounceJob: Job? = null
+    private var coreUpdateComparisonJob: Job? = null
+    private var coreUpdateComparisonGeneration = 0L
     private var cacheFileObserver: FileObserver? = null
     private var cacheObserverRootPath: String? = null
 
@@ -229,6 +241,7 @@ class HomeViewModel @Inject constructor(
         data class Install(val variant: ApiVariant) : PendingProxyAction
         data class Update(val variant: ApiVariant) : PendingProxyAction
         data class CheckUpdate(val variant: ApiVariant) : PendingProxyAction
+        data class LoadUpdateDetails(val variant: ApiVariant) : PendingProxyAction
         data object RepairDependenciesOnline : PendingProxyAction
     }
 
@@ -640,7 +653,11 @@ class HomeViewModel @Inject constructor(
             }
 
             val latestInfo = coreInfoList.value.find { it.variant == variant }
-            if (latestInfo?.needsAttention == true) {
+            if (latestInfo?.updateCheckError != null) {
+                coreUpdateCheckDialogMessage =
+                    "检查更新失败：${latestInfo.updateCheckError}"
+                coreUpdateCheckDialogIsError = true
+            } else if (latestInfo?.needsAttention == true) {
                 showCoreAttentionPrompt(variant, latestInfo)
             } else if (latestInfo?.isInstalled == true) {
                 coreUpdateCheckDialogMessage = "已确认 ${variantLabel(variant)} 当前是最新版本"
@@ -648,6 +665,103 @@ class HomeViewModel @Inject constructor(
             }
             isCheckingCoreUpdate = false
         }
+    }
+
+    fun dismissCurrentUpdatePrompt() {
+        val variant = updatePromptVariant
+        val latest = updatePromptLatestVersion
+        if (
+            variant != null &&
+            updatePromptSourceMismatch.not() &&
+            updatePromptSourceUnknownLegacy.not() &&
+            !latest.isNullOrBlank()
+        ) {
+            suppressedAutoUpdatePromptVersionMap[variant] = latest.trim()
+        }
+        clearCoreAttentionPrompt()
+    }
+
+    fun openUpdateDetailsFromPrompt() {
+        val variant = updatePromptVariant ?: return
+        if (updatePromptSourceMismatch || updatePromptSourceUnknownLegacy) return
+        if (!githubProxyService.hasUserSelectedProxy()) {
+            pendingProxyAction = PendingProxyAction.LoadUpdateDetails(variant)
+            dismissCurrentUpdatePrompt()
+            openProxyPickerDialog()
+            return
+        }
+        openCoreUpdateDetailsNow(variant)
+    }
+
+    private fun openCoreUpdateDetailsNow(variant: ApiVariant) {
+        val latest = coreInfoList.value.firstOrNull { it.variant == variant }
+            ?.availableVersion
+            ?.trim()
+            .orEmpty()
+        if (latest.isNotBlank()) {
+            suppressedAutoUpdatePromptVersionMap[variant] = latest
+        }
+        clearCoreAttentionPrompt()
+        coreUpdateDetailsVariant = variant
+        coreUpdateComparison = null
+        coreUpdateComparisonError = null
+        showCoreUpdateDetails = true
+        loadCoreUpdateComparison(variant)
+    }
+
+    fun retryCoreUpdateComparison() {
+        coreUpdateDetailsVariant?.let(::loadCoreUpdateComparison)
+    }
+
+    private fun loadCoreUpdateComparison(variant: ApiVariant) {
+        coreUpdateComparisonGeneration += 1
+        val generation = coreUpdateComparisonGeneration
+        coreUpdateComparisonJob?.cancel()
+        coreUpdateComparison = null
+        coreUpdateComparisonError = null
+        isLoadingCoreUpdateComparison = true
+        coreUpdateComparisonJob = viewModelScope.launch {
+            coreRepo.fetchUpdateComparison(variant).fold(
+                onSuccess = { comparison ->
+                    if (generation == coreUpdateComparisonGeneration && showCoreUpdateDetails) {
+                        coreUpdateComparison = comparison
+                    }
+                },
+                onFailure = { error ->
+                    if (generation == coreUpdateComparisonGeneration && showCoreUpdateDetails) {
+                        coreUpdateComparisonError = error.message ?: "无法获取核心变更详情"
+                    }
+                }
+            )
+            if (generation == coreUpdateComparisonGeneration && showCoreUpdateDetails) {
+                isLoadingCoreUpdateComparison = false
+                coreUpdateComparisonJob = null
+            }
+        }
+    }
+
+    fun dismissCoreUpdateDetails() {
+        coreUpdateComparisonGeneration += 1
+        coreUpdateComparisonJob?.cancel()
+        coreUpdateComparisonJob = null
+        showCoreUpdateDetails = false
+        coreUpdateDetailsVariant = null
+        coreUpdateComparison = null
+        coreUpdateComparisonError = null
+        isLoadingCoreUpdateComparison = false
+    }
+
+    fun updateFromCoreUpdateDetails() {
+        val variant = coreUpdateDetailsVariant ?: return
+        val latest = coreInfoList.value.firstOrNull { it.variant == variant }
+            ?.availableVersion
+            ?.trim()
+            .orEmpty()
+        if (latest.isNotBlank()) {
+            suppressedAutoUpdatePromptVersionMap[variant] = latest
+        }
+        dismissCoreUpdateDetails()
+        updateCurrentVariant(variant)
     }
 
     fun ignoreCurrentUpdatePrompt() {
@@ -1232,6 +1346,7 @@ class HomeViewModel @Inject constructor(
                     is PendingProxyAction.Install -> doInstallAndStart(action.variant)
                     is PendingProxyAction.Update -> doUpdateCurrentVariant(action.variant)
                     is PendingProxyAction.CheckUpdate -> doQuickCheckCurrentCoreUpdate(action.variant)
+                    is PendingProxyAction.LoadUpdateDetails -> openCoreUpdateDetailsNow(action.variant)
                     PendingProxyAction.RepairDependenciesOnline -> {
                         dependencyRepairController.repairOnlineNow()
                     }
@@ -1380,6 +1495,7 @@ class HomeViewModel @Inject constructor(
     override fun onCleared() {
         stopCacheFileObserver()
         cacheRefreshJob?.cancel()
+        coreUpdateComparisonJob?.cancel()
         proxyPickerController.dismiss()
         super.onCleared()
     }

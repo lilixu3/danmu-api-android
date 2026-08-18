@@ -24,21 +24,23 @@ fun resolveCoreVariantRepo(
 fun resolveCoreVariantBranch(
     variant: ApiVariant,
     customRepo: String,
-    customBranch: String
+    customBranch: String,
+    branchSelections: CoreBranchSelections = CoreBranchSelections()
 ): String? {
     return if (variant == ApiVariant.Custom) {
         resolveCustomCoreSource(customRepo, customBranch)
             .takeIf { it.isValidRepo }
             ?.branch
     } else {
-        null
+        branchSelections.resolve(variant).ifBlank { null }
     }
 }
 
 fun resolveCoreVariantSourceText(
     variant: ApiVariant,
     customRepo: String,
-    customBranch: String
+    customBranch: String,
+    branchSelections: CoreBranchSelections = CoreBranchSelections()
 ): String {
     return if (variant == ApiVariant.Custom) {
         resolveCustomCoreSource(customRepo, customBranch)
@@ -46,6 +48,6 @@ fun resolveCoreVariantSourceText(
             ?.sourceText
             .orEmpty()
     } else {
-        formatCoreSourceText(variant.repo, null)
+        formatCoreSourceText(variant.repo, branchSelections.resolve(variant).ifBlank { null })
     }
 }

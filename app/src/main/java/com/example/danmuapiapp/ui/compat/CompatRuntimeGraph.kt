@@ -13,6 +13,7 @@ import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.GithubPullRequestService
 import com.example.danmuapiapp.data.service.PullRequestMergeService
+import com.example.danmuapiapp.data.service.UpdateChecker
 import com.example.danmuapiapp.domain.model.AdminSessionState
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,12 +78,18 @@ object CompatRuntimeGraph {
             githubProxyService = githubProxyService,
             githubRemoteService = githubRemoteService
         )
+        val updateChecker = UpdateChecker(
+            context = context,
+            coreRepo = coreRepository,
+            settingsRepo = settingsRepository
+        )
         return Holder(
             context = context,
             settingsRepository = settingsRepository,
             runtimeRepository = runtimeRepository,
             coreRepository = coreRepository,
             appUpdateService = appUpdateService,
+            updateChecker = updateChecker,
             githubProxyService = githubProxyService,
             githubProxySpeedTester = githubProxySpeedTester
         )
@@ -94,6 +101,7 @@ object CompatRuntimeGraph {
         val runtimeRepository: RuntimeRepositoryImpl,
         val coreRepository: CoreRepositoryImpl,
         val appUpdateService: AppUpdateService,
+        val updateChecker: UpdateChecker,
         val githubProxyService: GithubProxyService,
         val githubProxySpeedTester: GithubProxySpeedTester
     ) {

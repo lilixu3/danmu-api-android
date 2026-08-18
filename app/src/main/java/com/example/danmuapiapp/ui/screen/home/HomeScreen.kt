@@ -4,6 +4,7 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppModalPanel
+import com.example.danmuapiapp.ui.screen.core.CoreUpdateDetailsPanel
 
 import android.Manifest
 import android.app.Activity
@@ -638,7 +639,6 @@ fun HomeScreen(
                     hasVersionUpdate = hasVersionUpdate,
                     sourceMismatch = sourceMismatch,
                     sourceUnknownLegacy = sourceUnknownLegacy,
-                    availableVersion = availableVersion,
                     coreOperationMessage = runtimeTransition?.message ?: coreOperationStatus(
                         isInstalling = viewModel.isInstallingCore,
                         isSwitching = viewModel.isSwitchingCore,
@@ -868,12 +868,31 @@ fun HomeScreen(
             variantLabel = viewModel.updatePromptVariant?.let { coreDisplayNames.resolve(it) },
             currentVersion = viewModel.updatePromptCurrentVersion,
             latestVersion = viewModel.updatePromptLatestVersion,
+            remoteCommit = viewModel.updatePromptVariant?.let { variant ->
+                coreList.firstOrNull { it.variant == variant }?.remoteCommit
+            },
             sourceMismatch = viewModel.updatePromptSourceMismatch,
             sourceUnknownLegacy = viewModel.updatePromptSourceUnknownLegacy,
             desiredSource = viewModel.updatePromptDesiredSource,
+            onShowDetails = viewModel::openUpdateDetailsFromPrompt,
             onUpdate = viewModel::updateFromPrompt,
-            onIgnore = viewModel::ignoreCurrentUpdatePrompt
+            onDismiss = viewModel::dismissCurrentUpdatePrompt
         )
+    }
+
+    if (viewModel.showCoreUpdateDetails) {
+        viewModel.coreUpdateDetailsVariant?.let { variant ->
+            CoreUpdateDetailsPanel(
+                displayName = coreDisplayNames.resolve(variant),
+                info = coreList.firstOrNull { it.variant == variant },
+                comparison = viewModel.coreUpdateComparison,
+                isLoading = viewModel.isLoadingCoreUpdateComparison,
+                errorMessage = viewModel.coreUpdateComparisonError,
+                onRetry = viewModel::retryCoreUpdateComparison,
+                onDismiss = viewModel::dismissCoreUpdateDetails,
+                onUpdateNow = viewModel::updateFromCoreUpdateDetails
+            )
+        }
     }
 
     if (activeOverlay == HomeOverlay.RunModePicker) {

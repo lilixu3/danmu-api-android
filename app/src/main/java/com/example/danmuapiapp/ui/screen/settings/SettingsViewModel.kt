@@ -104,6 +104,7 @@ class SettingsViewModel @Inject constructor(
     val keepAliveHeartbeatEnabled = settingsRepo.keepAliveHeartbeatEnabled
     val keepAliveHeartbeatMode = settingsRepo.keepAliveHeartbeatMode
     val keepAliveHeartbeatIntervalMinutes = settingsRepo.keepAliveHeartbeatIntervalMinutes
+    val coreUpdateCheckIntervalMinutes = settingsRepo.coreUpdateCheckIntervalMinutes
     val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val nightMode = settingsRepo.nightMode
     val appDpiOverride = settingsRepo.appDpiOverride
@@ -358,6 +359,11 @@ class SettingsViewModel @Inject constructor(
         settingsRepo.setKeepAliveHeartbeatIntervalMinutes(normalized)
         SystemHeartbeatScheduler.refresh(context)
         operationMessage = "心跳间隔已更新为 ${normalized} 分钟"
+    }
+
+    fun setCoreUpdateCheckIntervalMinutes(minutes: Int) {
+        settingsRepo.setCoreUpdateCheckIntervalMinutes(minutes)
+        operationMessage = "核心自动检查间隔已更新为 ${settingsRepo.coreUpdateCheckIntervalMinutes.value} 分钟"
     }
 
     fun setNormalModeStabilityMode(mode: NormalModeStabilityMode) {

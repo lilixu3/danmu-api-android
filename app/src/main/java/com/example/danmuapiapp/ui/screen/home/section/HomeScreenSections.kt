@@ -841,7 +841,6 @@ internal fun ActionDeck(
     hasVersionUpdate: Boolean,
     sourceMismatch: Boolean,
     sourceUnknownLegacy: Boolean,
-    availableVersion: String?,
     coreOperationMessage: String?
 ) {
     val isStopping = status == ServiceStatus.Stopping
@@ -853,7 +852,6 @@ internal fun ActionDeck(
         hasVersionUpdate = hasVersionUpdate,
         sourceMismatch = sourceMismatch,
         sourceUnknownLegacy = sourceUnknownLegacy,
-        availableVersion = availableVersion,
         isInstalling = isInstalling,
         isUpdating = isUpdating
     )
