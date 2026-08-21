@@ -1,61 +1,58 @@
 <resources>
-    <!--
-      Light theme (default)
-      目标：去掉“傻白”，整体更有层次感（柔和的冷暖渐变背景 + 微雾感表面 + 统一的 Material3 配色）。
-    -->
+    <!-- Light fallback palette shared by the startup window and legacy dialogs. -->
 
     <!-- App icon background -->
 
-    <!-- Background (used by bg_main.xml) -->
-    <color name="bg_start">#E3F2FD</color>
-    <color name="bg_end">#E0F7FA</color>
-    <color name="glow_primary">#1A0288D1</color>   <!-- ~10% blue -->
-    <color name="glow_secondary">#1A00ACC1</color> <!-- ~10% cyan  -->
-    <color name="glow_tertiary">#1A00BCD4</color>  <!-- ~10% light cyan -->
+    <!-- Background (bg_main.xml is intentionally a solid fill). -->
+    <color name="bg_start">#F4F5FA</color>
+    <color name="bg_end">#F4F5FA</color>
+    <color name="glow_primary">#00000000</color>
+    <color name="glow_secondary">#00000000</color>
+    <color name="glow_tertiary">#00000000</color>
 
     <!-- Brand / accent -->
-    <color name="brand_accent">#00BCD4</color>
+    <color name="brand_accent">#4E6498</color>
     <color name="on_accent">#FFFFFF</color>
 
     <!-- Text -->
-    <color name="text_primary">#0B1220</color>
-    <color name="text_secondary">#526079</color>
+    <color name="text_primary">#232731</color>
+    <color name="text_secondary">#646C7D</color>
 
     <!--
       Surfaces / outlines (light):
-      Blue-cyan theme surfaces with fresh gradient feel.
+      Neutral surfaces matching the Compose Material3 palette.
     -->
-    <color name="surface_card">#FFFFFF</color>
-    <color name="surface_card_weak">#F5F9FF</color>
+    <color name="surface_card">#F4F5FA</color>
+    <color name="surface_card_weak">#F0F2F8</color>
     <color name="surface_sheet">#FAFBFD</color>
-    <color name="dialog_outline_variant">#D3DAE4</color>
+    <color name="dialog_outline_variant">#C6CBD8</color>
 
     <!-- Accent helpers -->
-    <color name="accent_soft">#E1F5FE</color>
-    <color name="accent_stroke">#B3E5FC</color>
+    <color name="accent_soft">#D2DCF4</color>
+    <color name="accent_stroke">#C6CBD8</color>
 
     <!-- Danger helpers -->
-    <color name="danger_text">#DC2626</color>
+    <color name="danger_text">#BA1A1A</color>
 
-    <color name="stroke_subtle">#D9E0F0</color>
-    <color name="stroke_button">#CCD5EA</color>
+    <color name="stroke_subtle">#C6CBD8</color>
+    <color name="stroke_button">#7B8395</color>
 
-    <color name="icon_tint">#3B4A65</color>
+    <color name="icon_tint">#4E6498</color>
 
 
     <!-- Material3 mapping (让 Switch/Chip/Dialog 等组件也跟随统一配色) -->
     <color name="m3_primary">@color/brand_accent</color>
     <color name="m3_on_primary">@color/on_accent</color>
-    <color name="m3_primary_container">#E0F7FA</color>
-    <color name="m3_on_primary_container">#001A24</color>
+    <color name="m3_primary_container">#D2DCF4</color>
+    <color name="m3_on_primary_container">#26324D</color>
 
-    <color name="m3_secondary">#0097A7</color>
+    <color name="m3_secondary">#5D667C</color>
     <color name="m3_on_secondary">#FFFFFF</color>
 
-    <color name="m3_tertiary">#00BCD4</color>
+    <color name="m3_tertiary">#6A6393</color>
     <color name="m3_on_tertiary">#FFFFFF</color>
-    <color name="m3_tertiary_container">#B2EBF2</color>
-    <color name="m3_on_tertiary_container">#001A24</color>
+    <color name="m3_tertiary_container">#DDD9EE</color>
+    <color name="m3_on_tertiary_container">#322F4B</color>
 
     <color name="m3_error">#DC2626</color>
     <color name="m3_on_error">#FFFFFF</color>
@@ -64,13 +61,13 @@
     <color name="m3_on_background">@color/text_primary</color>
     <color name="m3_surface">@color/surface_card</color>
     <color name="m3_on_surface">@color/text_primary</color>
-    <color name="m3_surface_variant">#E9EEF9</color>
-    <color name="m3_on_surface_variant">#42526A</color>
+    <color name="m3_surface_variant">#DCE2EE</color>
+    <color name="m3_on_surface_variant">#646C7D</color>
     <color name="m3_outline">@color/stroke_button</color>
-    <color name="m3_outline_variant">#D3DBEB</color>
+    <color name="m3_outline_variant">#C6CBD8</color>
     <!-- API Card 渐变色 (Light) -->
-    <color name="api_card_gradient_start">#F5F9FF</color>
-    <color name="api_card_gradient_end">#E1F5FE</color>
+    <color name="api_card_gradient_start">#F0F2F8</color>
+    <color name="api_card_gradient_end">#E5E8F0</color>
 
     <!-- API Icon Container 渐变色 (Light) -->
     

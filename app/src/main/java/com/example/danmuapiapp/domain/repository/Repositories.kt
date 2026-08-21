@@ -132,6 +132,7 @@ interface SettingsRepository {
     val coreUpdateCheckIntervalMinutes: StateFlow<Int>
     val normalModeStabilityMode: StateFlow<NormalModeStabilityMode>
     val nightMode: StateFlow<NightModePreference>
+    val glassMaterial: StateFlow<GlassMaterialPreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
     val coreDisplayNames: StateFlow<CoreVariantDisplayNames>
@@ -155,6 +156,7 @@ interface SettingsRepository {
     fun setCoreUpdateCheckIntervalMinutes(minutes: Int)
     fun setNormalModeStabilityMode(mode: NormalModeStabilityMode)
     fun setNightMode(mode: NightModePreference)
+    fun setGlassMaterial(material: GlassMaterialPreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
     fun setVariantDisplayName(variant: ApiVariant, name: String)

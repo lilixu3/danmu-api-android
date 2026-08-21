@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -32,6 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.ui.theme.glassBorderColor
+import com.example.danmuapiapp.ui.theme.glassSurfaceColor
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -81,12 +84,13 @@ fun GlassCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            containerColor = glassSurfaceColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+            color = glassBorderColor()
         )
     ) {
         Column(modifier = Modifier.padding(20.dp), content = content)
@@ -158,6 +162,12 @@ fun GradientButton(
         MaterialTheme.colorScheme.surfaceContainerHighest
     )
 ) {
+    // Keep text readable for both light dark-theme gradients and custom dark action gradients.
+    val enabledTextColor = if (colors.map(Color::luminance).average() > 0.5) {
+        Color(0xFF10212B)
+    } else {
+        Color.White
+    }
     Button(
         onClick = onClick, modifier = modifier.height(52.dp), enabled = enabled,
         shape = RoundedCornerShape(16.dp),
@@ -176,7 +186,7 @@ fun GradientButton(
                 text,
                 style = MaterialTheme.typography.labelLarge,
                 color = if (enabled) {
-                    Color.White
+                    enabledTextColor
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
                 }
@@ -261,7 +271,12 @@ fun SettingsPageHeader(
 ) {
     if (onBack == null) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 subtitle,
@@ -286,7 +301,12 @@ fun SettingsPageHeader(
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     subtitle,
@@ -333,11 +353,12 @@ fun SettingsGroup(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = glassSurfaceColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             border = BorderStroke(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                color = glassBorderColor()
             )
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp), content = content)
@@ -461,7 +482,7 @@ fun SettingsSwitchItem(
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                     checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    uncheckedTrackColor = glassSurfaceColor(emphasized = true)
                 )
             )
         }
@@ -516,7 +537,8 @@ fun SettingsHintCard(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = glassSurfaceColor(),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp
     ) {
         Row(
@@ -551,7 +573,8 @@ fun SettingsEntryCard(
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = glassSurfaceColor(),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp
     ) {
         Row(

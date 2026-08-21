@@ -8,9 +8,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 System.currentTimeMillis() - splashStartedAt < 1_500L
         }
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         runtimeWarmupCoordinator.startIfNeeded()
 
@@ -89,19 +89,25 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val nightMode by settingsRepository.nightMode.collectAsStateWithLifecycle()
+            val glassMaterial by settingsRepository.glassMaterial.collectAsStateWithLifecycle()
             val startupUiState by runtimeWarmupCoordinator.uiState.collectAsStateWithLifecycle()
             val darkTheme = when (nightMode) {
                 NightModePreference.FollowSystem -> isSystemInDarkTheme()
                 NightModePreference.Light -> false
                 NightModePreference.Dark -> true
             }
-            DanmuApiTheme(darkTheme = darkTheme) {
+            DanmuApiTheme(
+                darkTheme = darkTheme,
+                glassMaterial = glassMaterial
+            ) {
                 val view = LocalView.current
-                val systemBarColor = MaterialTheme.colorScheme.surface.toArgb()
                 SideEffect {
                     val insetsController = WindowCompat.getInsetsController(window, view)
-                    window.statusBarColor = systemBarColor
-                    window.navigationBarColor = systemBarColor
+                    window.statusBarColor = Color.Transparent.toArgb()
+                    window.navigationBarColor = Color.Transparent.toArgb()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        window.isNavigationBarContrastEnforced = false
+                    }
                     insetsController.isAppearanceLightStatusBars = !darkTheme
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         insetsController.isAppearanceLightNavigationBars = !darkTheme

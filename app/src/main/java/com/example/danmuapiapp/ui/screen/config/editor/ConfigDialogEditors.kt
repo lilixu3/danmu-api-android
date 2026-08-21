@@ -349,7 +349,7 @@ private fun StableBooleanValueEditor(
     value: String,
     onValueChange: (String) -> Unit,
 ) {
-    val checked = value.lowercase(Locale.getDefault()).let { it == "true" || it == "1" }
+    val checked = value.lowercase(Locale.ROOT).let { it == "true" || it == "1" }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(

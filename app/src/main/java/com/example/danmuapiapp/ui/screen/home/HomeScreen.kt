@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
@@ -111,7 +113,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -127,7 +128,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -163,6 +163,7 @@ import com.example.danmuapiapp.domain.model.RuntimeTransitionKind
 import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
+import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.StatusIndicator
@@ -439,21 +440,6 @@ fun HomeScreen(
             expandedQueueGroupKeys.intersect(validKeys).ifEmpty { setOf(queueDialogGroups.first().key) }
         }
     }
-    val backgroundGradient = if (isDarkTheme) {
-        listOf(
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        )
-    } else {
-        listOf(
-            MaterialTheme.colorScheme.surface,
-            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
-            MaterialTheme.colorScheme.surface
-        )
-    }
-    val primaryGlowAlpha = if (isDarkTheme) 0.11f else 0.17f
-    val tertiaryGlowAlpha = if (isDarkTheme) 0.08f else 0.13f
     val shouldShowRuntimePermissionHint = state.runMode == RunMode.Normal &&
         (!hasNotificationPermission || !isBatteryWhitelisted)
     val shouldShowLocalNetworkAddressHint =
@@ -523,51 +509,15 @@ fun HomeScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color.Transparent
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        backgroundGradient
-                    )
-                )
                 .padding(padding)
         ) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 28.dp, end = 16.dp)
-                    .align(Alignment.TopEnd)
-                    .size(180.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = primaryGlowAlpha),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-            Box(
-                modifier = Modifier
-                    .padding(start = 24.dp, top = 220.dp)
-                    .align(Alignment.TopStart)
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.tertiary.copy(alpha = tertiaryGlowAlpha),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -761,6 +711,8 @@ fun HomeScreen(
                         }
                     }
                 }
+
+                FloatingBottomBarContentSpacer()
             }
         }
     }

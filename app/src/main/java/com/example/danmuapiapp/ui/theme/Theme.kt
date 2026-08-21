@@ -8,43 +8,43 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 
 /** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
 val LocalAppDarkTheme = staticCompositionLocalOf { false }
 
 private val DarkColorScheme = darkColorScheme(
-    // 暗色主题：保持原风格，仅去掉紫色分支
     primary = Color(0xFF7DCFFF),
     onPrimary = Color(0xFF031A28),
-    primaryContainer = Color(0xFF12324A),
+    primaryContainer = Color(0xFF244554),
     onPrimaryContainer = Color(0xFFBEE8FF),
 
-    secondary = Color(0xFF7EAFFF),
-    onSecondary = Color(0xFF0A2342),
-    secondaryContainer = Color(0xFF2B4168),
-    onSecondaryContainer = Color(0xFFDCE7FF),
+    secondary = Color(0xFFB6C7D9),
+    onSecondary = Color(0xFF202A34),
+    secondaryContainer = Color(0xFF414A54),
+    onSecondaryContainer = Color(0xFFE5EDF5),
 
     tertiary = Color(0xFF73DACA),
     onTertiary = Color(0xFF042620),
-    tertiaryContainer = Color(0xFF123F38),
+    tertiaryContainer = Color(0xFF244B45),
     onTertiaryContainer = Color(0xFFB7F4EA),
 
-    background = Color(0xFF090E19),
-    onBackground = Color(0xFFE6EAFA),
-    surface = Color(0xFF0E1422),
-    onSurface = Color(0xFFE6EAFA),
+    background = Color(0xFF24262B),
+    onBackground = Color(0xFFF5F6F8),
+    surface = Color(0xFF2A2D32),
+    onSurface = Color(0xFFF5F6F8),
 
-    surfaceVariant = Color(0xFF202A42),
-    onSurfaceVariant = Color(0xFF9CA8CA),
+    surfaceVariant = Color(0xFF3A3E45),
+    onSurfaceVariant = Color(0xFFCDD1D7),
 
-    outline = Color(0xFF4F5E86),
-    outlineVariant = Color(0xFF313D60),
+    outline = Color(0xFF8B929B),
+    outlineVariant = Color(0xFF555C65),
 
-    surfaceContainerLowest = Color(0xFF060A13),
-    surfaceContainerLow = Color(0xFF0A1020),
-    surfaceContainer = Color(0xFF111A2E),
-    surfaceContainerHigh = Color(0xFF17233A),
-    surfaceContainerHighest = Color(0xFF1F2D47),
+    surfaceContainerLowest = Color(0xFF202226),
+    surfaceContainerLow = Color(0xFF282B30),
+    surfaceContainer = Color(0xFF2D3036),
+    surfaceContainerHigh = Color(0xFF34383F),
+    surfaceContainerHighest = Color(0xFF3D424A),
 
     error = Color(0xFFFF8BA7),
     onError = Color(0xFF3A0618),
@@ -85,6 +85,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun DanmuApiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
@@ -92,8 +93,13 @@ fun DanmuApiTheme(
     CompositionLocalProvider(LocalAppDarkTheme provides darkTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = AppTypography,
-            content = content
-        )
+            typography = AppTypography
+        ) {
+            ProvideGlassTheme(
+                preference = glassMaterial,
+                darkTheme = darkTheme,
+                content = content
+            )
+        }
     }
 }
