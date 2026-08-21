@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -175,6 +176,8 @@ fun CompatModeScreen(
     proxyPickerState: CompatProxyPickerState,
     showDependencyRequiredPrompt: Boolean,
     showDependencyRepairDialog: Boolean,
+    showLocalNetworkPermissionHint: Boolean,
+    onOpenLocalNetworkPermission: () -> Unit,
     actions: CompatModeActions
 ) {
     var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
@@ -249,7 +252,9 @@ fun CompatModeScreen(
                     } else {
                         CompatHomePage(
                             uiState = uiState,
-                            actions = actions
+                            actions = actions,
+                            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
+                            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
                         )
                     }
                 }
@@ -327,11 +332,17 @@ fun CompatModeScreen(
 @Composable
 private fun CompatHomePage(
     uiState: CompatModeUiState,
-    actions: CompatModeActions
+    actions: CompatModeActions,
+    showLocalNetworkPermissionHint: Boolean,
+    onOpenLocalNetworkPermission: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         ServiceHeroCard(uiState, actions)
-        RuntimeStatusStrip(uiState)
+        RuntimeStatusStrip(
+            uiState = uiState,
+            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
+            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
+        )
         OperationProgressCard(uiState)
         CoreManagementCard(uiState, actions)
         SyncCard(uiState)
@@ -384,6 +395,41 @@ private fun CompatSettingsPage(
             )
         }
     }
+}
+
+@Composable
+internal fun CompatLocalNetworkPermissionDialog(
+    openSettings: Boolean,
+    onGrant: () -> Unit,
+    onContinueLocalOnly: () -> Unit
+) {
+    AppDialog(
+        onDismissRequest = onContinueLocalOnly,
+        style = AppDialogStyle.Confirm,
+        tone = AppDialogTone.Info,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.Wifi,
+                contentDescription = null
+            )
+        },
+        title = { Text("允许局域网访问") },
+        supportingText = { Text("Android 17 首次使用必需权限") },
+        text = {
+            Text("Android 17 默认拦截应用的局域网入站连接。允许后，同一 Wi-Fi 或有线网络中的设备才能访问本机弹幕服务。")
+            Text("暂不允许仍可在本机使用，但其他设备连接时会超时，下次启动还会再次提醒。")
+        },
+        dismissButton = {
+            TextButton(onClick = onContinueLocalOnly) {
+                Text("仅本机使用")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onGrant) {
+                Text(if (openSettings) "前往应用设置" else "允许访问")
+            }
+        }
+    )
 }
 
 @Composable
@@ -677,7 +723,11 @@ private fun ServiceHeroCard(
 }
 
 @Composable
-private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
+private fun RuntimeStatusStrip(
+    uiState: CompatModeUiState,
+    showLocalNetworkPermissionHint: Boolean,
+    onOpenLocalNetworkPermission: () -> Unit
+) {
     val runtime = uiState.runtimeState
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -752,21 +802,36 @@ private fun RuntimeStatusStrip(uiState: CompatModeUiState) {
             }
         }
         AccessAddressPanel(
+            serviceStatus = runtime.status,
             localUrl = runtime.localUrl,
             lanUrl = runtime.lanUrl,
-            lanIpv6Url = runtime.lanIpv6Url
+            lanIpv6Url = runtime.lanIpv6Url,
+            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
+            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
         )
     }
 }
 
 @Composable
 private fun AccessAddressPanel(
+    serviceStatus: ServiceStatus,
     localUrl: String,
     lanUrl: String,
-    lanIpv6Url: String
+    lanIpv6Url: String,
+    showLocalNetworkPermissionHint: Boolean,
+    onOpenLocalNetworkPermission: () -> Unit
 ) {
     val hasLocal = localUrl.isNotBlank()
-    val hasLan = lanUrl.isNotBlank()
+    val hasLanIpv4 = lanUrl.isNotBlank()
+    val hasLanIpv6 = lanIpv6Url.isNotBlank()
+    val hasLan = hasLanIpv4 || hasLanIpv6
+    val addressStatus = CompatAccessAddressStatusPolicy.resolve(
+        serviceStatus = serviceStatus,
+        hasLocalAddress = hasLocal,
+        hasLanIpv4Address = hasLanIpv4,
+        hasLanIpv6Address = hasLanIpv6,
+        localNetworkPermissionMissing = showLocalNetworkPermissionHint
+    )
     Surface(
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
@@ -786,19 +851,61 @@ private fun AccessAddressPanel(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (hasLocal || hasLan) {
-                            "本机和局域网地址都保留完整显示，方便直接输入或扫码。"
-                        } else {
-                            "服务启动后会显示本机与局域网访问地址。"
+                        text = when (addressStatus) {
+                            CompatAccessAddressStatus.Waiting ->
+                                "服务启动后会显示本机与局域网访问地址。"
+                            CompatAccessAddressStatus.LocalOnly ->
+                                "本机地址可正常使用，授权后即可供同一局域网设备访问。"
+                            CompatAccessAddressStatus.Ready ->
+                                "本机和局域网地址都保留完整显示，方便直接输入或扫码。"
+                            CompatAccessAddressStatus.LocalAvailable ->
+                                "本机地址已可用，局域网地址生成后会显示在下方。"
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 StatusPill(
-                    text = if (hasLan) "已就绪" else "等待启动",
-                    color = if (hasLan) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
+                    text = when (addressStatus) {
+                        CompatAccessAddressStatus.Waiting -> "等待启动"
+                        CompatAccessAddressStatus.LocalOnly -> "仅本机"
+                        CompatAccessAddressStatus.Ready -> "已就绪"
+                        CompatAccessAddressStatus.LocalAvailable -> "本机可用"
+                    },
+                    color = if (addressStatus == CompatAccessAddressStatus.Ready) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    }
                 )
+            }
+
+            AnimatedVisibility(visible = showLocalNetworkPermissionHint) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.WifiOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (addressStatus == CompatAccessAddressStatus.LocalOnly) {
+                            "仅本机可访问 · 局域网权限未开启"
+                        } else {
+                            "局域网权限未开启 · 授权后可供同网设备访问"
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onOpenLocalNetworkPermission) {
+                        Text("去授权")
+                    }
+                }
             }
 
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
