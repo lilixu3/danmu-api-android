@@ -68,6 +68,7 @@ import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -123,6 +124,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -1021,6 +1023,8 @@ internal fun AccessGatewayPanel(
     token: String,
     maskedToken: String,
     tokenVisible: Boolean,
+    showLocalNetworkPermissionHint: Boolean,
+    onOpenLocalNetworkPermission: () -> Unit,
     onToggleTokenVisible: () -> Unit,
     onCopyLocal: () -> Unit,
     onCopyLan: () -> Unit,
@@ -1066,6 +1070,11 @@ internal fun AccessGatewayPanel(
                     )
                 }
             }
+            AnimatedVisibility(visible = showLocalNetworkPermissionHint) {
+                LocalNetworkAddressPermissionHint(
+                    onClick = onOpenLocalNetworkPermission
+                )
+            }
             GatewayItem(
                 title = "局域网 IPv4",
                 subtitle = "兼容性最佳，推荐在同一 Wi-Fi 下使用",
@@ -1090,6 +1099,50 @@ internal fun AccessGatewayPanel(
                 emphasize = false
             )
         }
+    }
+}
+
+@Composable
+private fun LocalNetworkAddressPermissionHint(
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.56f))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.WifiOff,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.tertiary
+        )
+        Text(
+            text = "仅本机可访问 · 局域网权限未开启",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "去授权",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.tertiary
+        )
+        Icon(
+            imageVector = Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.tertiary
+        )
     }
 }
 
