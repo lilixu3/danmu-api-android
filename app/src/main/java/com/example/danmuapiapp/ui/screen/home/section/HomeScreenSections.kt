@@ -201,7 +201,8 @@ internal fun HomeTopHeader(
                 Text(
                     text = "弹幕 API",
                     style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "LogVar 弹幕服务",

@@ -20,6 +20,7 @@ import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubProxyOption
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
@@ -63,6 +64,7 @@ data class CompatModeUiState(
     val customRepo: String = "",
     val customRepoBranch: String = "",
     val nightMode: NightModePreference = NightModePreference.FollowSystem,
+    val glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
     val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM,
     val pendingDependencyRepair: CoreDependencyRepairRequest? = null,
     val branchDialogVariant: ApiVariant? = null,
@@ -165,6 +167,7 @@ class CompatModeViewModel(
             customRepo = graph.settingsRepository.customRepo.value,
             customRepoBranch = graph.settingsRepository.customRepoBranch.value,
             nightMode = graph.settingsRepository.nightMode.value,
+            glassMaterial = graph.settingsRepository.glassMaterial.value,
             appDpiOverride = graph.settingsRepository.appDpiOverride.value,
             pendingDependencyRepair = graph.coreRepository.pendingDependencyRepair.value
         )
@@ -904,6 +907,11 @@ class CompatModeViewModel(
         viewModelScope.launch {
             graph.settingsRepository.nightMode.collectLatest { mode ->
                 _uiState.update { it.copy(nightMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            graph.settingsRepository.glassMaterial.collectLatest { material ->
+                _uiState.update { it.copy(glassMaterial = material) }
             }
         }
         viewModelScope.launch {

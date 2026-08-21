@@ -47,11 +47,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +68,7 @@ import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.SectionHeader
+import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -123,7 +126,8 @@ fun ToolsScreen(
             Text(
                 text = "工具",
                 style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground
             )
             AdminModeStatusChip(
                 enabled = adminState.isAdminMode,
@@ -264,6 +268,7 @@ fun ToolsScreen(
             badge = if (adminState.isAdminMode) "已开启" else "未开启",
             onClick = onOpenAdminMode
         )
+        FloatingBottomBarContentSpacer()
     }
 }
 
@@ -477,7 +482,8 @@ private fun LogPreviewCard(
     onViewAll: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    val locale = LocalLocale.current.platformLocale
+    val timeFormat = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
 
     Surface(
         modifier = Modifier

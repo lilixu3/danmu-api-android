@@ -23,13 +23,13 @@ val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.75"
+    ?: "1.0.5.76"
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 161
+    ?: 162
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -267,6 +267,8 @@ android {
 
 kotlin {
     compilerOptions {
+        languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_3)
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_3)
         freeCompilerArgs.add("-Xannotation-default-target=param-property")
     }
 }
@@ -281,6 +283,8 @@ dependencies {
     implementation(libs.compose.material.icons)
     implementation(libs.compose.animation)
     implementation(libs.compose.foundation)
+    implementation(libs.backdrop)
+    implementation(libs.kyant.shapes)
     debugImplementation(libs.compose.ui.tooling)
     implementation(libs.compose.ui.tooling.preview)
 

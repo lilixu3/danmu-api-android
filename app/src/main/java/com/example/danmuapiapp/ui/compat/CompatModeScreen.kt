@@ -83,7 +83,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -183,23 +182,6 @@ fun CompatModeScreen(
     var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
     var showExitDialog by rememberSaveable { mutableStateOf(false) }
     var showExitCompatModeDialog by rememberSaveable { mutableStateOf(false) }
-    val background = if (uiState.nightMode == NightModePreference.Dark) {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.background,
-                MaterialTheme.colorScheme.surface,
-                MaterialTheme.colorScheme.surfaceContainerLow
-            )
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(
-                MaterialTheme.colorScheme.surface,
-                MaterialTheme.colorScheme.background,
-                MaterialTheme.colorScheme.surfaceContainerLow
-            )
-        )
-    }
 
     BackHandler {
         if (currentPage == CompatPage.Settings) {
@@ -212,7 +194,7 @@ fun CompatModeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(background)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         BoxWithConstraints(
             modifier = Modifier

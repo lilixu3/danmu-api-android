@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.startup
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -35,7 +37,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,7 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -445,19 +445,16 @@ private fun StartupPermissionGateScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surfaceContainerLow,
-                        MaterialTheme.colorScheme.background
-                    )
-                )
-            )
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Scaffold(
             containerColor = Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            snackbarHost = {
+                AppSnackbarHost(
+                    hostState = snackbarHostState,
+                    aboveBottomBar = false
+                )
+            },
             contentWindowInsets = WindowInsets(0, 0, 0, 0)
         ) { padding ->
             BoxWithConstraints(

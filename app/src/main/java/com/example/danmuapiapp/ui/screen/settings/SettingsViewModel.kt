@@ -41,6 +41,7 @@ import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
@@ -107,6 +108,7 @@ class SettingsViewModel @Inject constructor(
     val coreUpdateCheckIntervalMinutes = settingsRepo.coreUpdateCheckIntervalMinutes
     val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val nightMode = settingsRepo.nightMode
+    val glassMaterial = settingsRepo.glassMaterial
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
     val fileLogEnabled = settingsRepo.fileLogEnabled
@@ -405,6 +407,14 @@ class SettingsViewModel @Inject constructor(
             NightModePreference.FollowSystem -> "主题已改为跟随系统"
             NightModePreference.Light -> "已切换为浅色主题"
             NightModePreference.Dark -> "已切换为暗色主题"
+        }
+    }
+
+    fun setGlassMaterial(material: GlassMaterialPreference) {
+        settingsRepo.setGlassMaterial(material)
+        operationMessage = when (material) {
+            GlassMaterialPreference.LiquidGlass -> "已启用液态玻璃"
+            GlassMaterialPreference.Off -> "已关闭液态玻璃"
         }
     }
 

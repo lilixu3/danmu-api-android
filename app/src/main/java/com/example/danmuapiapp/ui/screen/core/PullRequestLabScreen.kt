@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,7 +59,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -124,7 +125,7 @@ fun PullRequestLabScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { AppSnackbarHost(snackbar) },
         bottomBar = {
             PullRequestBuildBar(
                 selectedPullRequests = viewModel.selectedPullRequests,

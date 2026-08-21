@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -32,7 +34,6 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +52,7 @@ import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.ui.component.SettingsDivider
+import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
@@ -128,7 +130,7 @@ fun SettingsHubScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -297,7 +299,7 @@ fun SettingsHubScreen(
             SettingsGroup(title = "偏好与信息") {
                 SettingsItem(
                     title = "主题与显示",
-                    subtitle = "主题模式、明暗跟随与界面缩放",
+                    subtitle = "主题模式、液态玻璃与界面缩放",
                     icon = Icons.Rounded.Palette,
                     onClick = onOpenThemeDisplay
                 )
@@ -338,6 +340,7 @@ fun SettingsHubScreen(
                     }
                 )
             }
+            FloatingBottomBarContentSpacer()
         }
     }
 }

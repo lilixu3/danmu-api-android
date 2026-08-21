@@ -1,29 +1,30 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,17 +37,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
-import androidx.compose.ui.graphics.Color
+import com.example.danmuapiapp.ui.component.SettingsSwitchItem
+import com.example.danmuapiapp.ui.theme.isLiquidGlassSupported
 import kotlin.math.roundToInt
 
 @Composable
@@ -58,6 +62,8 @@ fun ThemeDisplayScreen(
     val activity = remember(context) { context.findActivity() }
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
+    val glassMaterial by viewModel.glassMaterial.collectAsStateWithLifecycle()
+    val liquidGlassSupported = remember { isLiquidGlassSupported(Build.VERSION.SDK_INT) }
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
@@ -88,7 +94,7 @@ fun ThemeDisplayScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -102,7 +108,7 @@ fun ThemeDisplayScreen(
         ) {
             SettingsPageHeader(
                 title = "主题与显示",
-                subtitle = "界面主题与应用内显示缩放",
+                subtitle = "界面主题、液态玻璃与显示缩放",
                 onBack = onBack
             )
 
@@ -127,6 +133,30 @@ fun ThemeDisplayScreen(
                         }
                     }
                 }
+            }
+
+            SettingsGroup(title = "液态玻璃") {
+                SettingsSwitchItem(
+                    title = "启用液态玻璃",
+                    subtitle = if (liquidGlassSupported) {
+                        "背景模糊与半透明"
+                    } else {
+                        "需要 Android 13 或更高版本"
+                    },
+                    icon = Icons.Rounded.BlurOn,
+                    checked = liquidGlassSupported &&
+                        glassMaterial == GlassMaterialPreference.LiquidGlass,
+                    enabled = liquidGlassSupported,
+                    disabledOnClick = {
+                        viewModel.postMessage("当前系统不支持完整液态玻璃效果")
+                    },
+                    onCheckedChange = { enabled ->
+                        viewModel.setGlassMaterial(
+                            if (enabled) GlassMaterialPreference.LiquidGlass
+                            else GlassMaterialPreference.Off
+                        )
+                    }
+                )
             }
 
             SettingsGroup(title = "显示缩放（App DPI）") {

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.cache
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
@@ -69,7 +71,7 @@ fun CacheManagementScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->

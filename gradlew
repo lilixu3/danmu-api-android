@@ -210,9 +210,13 @@ elif [ -n "${PREFIX:-}" ] && printf '%s' "$PREFIX" | grep -q 'com.termux'; then
     is_termux_host=true
 fi
 if "$is_termux_host"; then
+    termux_aapt2_path="$(command -v aapt2 2>/dev/null || true)"
+    if [ -z "$termux_aapt2_path" ]; then
+        termux_aapt2_path="../tools/aapt2/aapt2"
+    fi
     case " $* " in
       *" -Pandroid.aapt2FromMavenOverride="*) ;;
-      *) set -- "-Pandroid.aapt2FromMavenOverride=../tools/aapt2/aapt2" "$@" ;;
+      *) set -- "-Pandroid.aapt2FromMavenOverride=$termux_aapt2_path" "$@" ;;
     esac
 fi
 

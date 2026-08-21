@@ -1,30 +1,29 @@
 <resources>
-    <!-- NightSky 亮色配色（当前实际使用） -->
-    <color name="theme_night_bg_start">#E8EAF6</color>
-    <color name="theme_night_bg_end">#C5CAE9</color>
-    <color name="theme_night_primary">#5C6BC0</color>
-    <!-- 浅色容器色微调加深 -->
-    <color name="theme_night_primary_container">#BDC6E7</color>
-    <color name="theme_night_secondary">#3F51B5</color>
-    <color name="theme_night_accent">#7986CB</color>
-    <color name="theme_night_surface">#FFFFFF</color>
-    <color name="theme_night_surface_variant">#E8EAF6</color>
+    <!-- Legacy light theme tokens kept in sync with the Compose palette. -->
+    <color name="theme_night_bg_start">#F4F5FA</color>
+    <color name="theme_night_bg_end">#F4F5FA</color>
+    <color name="theme_night_primary">#4E6498</color>
+    <color name="theme_night_primary_container">#D2DCF4</color>
+    <color name="theme_night_secondary">#5D667C</color>
+    <color name="theme_night_accent">#6A6393</color>
+    <color name="theme_night_surface">#F4F5FA</color>
+    <color name="theme_night_surface_variant">#DCE2EE</color>
     <color name="theme_night_on_primary">#FFFFFF</color>
-    <color name="theme_night_on_primary_container">#1A1A1A</color>
+    <color name="theme_night_on_primary_container">#26324D</color>
     <color name="theme_night_on_secondary">#FFFFFF</color>
-    <color name="theme_night_glow_primary">#1A3F51B5</color>
-    <color name="theme_night_glow_secondary">#1A303F9F</color>
-    <color name="theme_night_glow_tertiary">#1A5C6BC0</color>
-    <color name="theme_night_accent_stroke">#2A5C6BC0</color>
-    <color name="theme_night_api_card_gradient_start">#E1E6FF</color>
-    <color name="theme_night_api_card_gradient_end">#D9E0FF</color>
-    <color name="theme_night_bottom_nav_bg">#FFFFFF</color>
-    <color name="theme_night_bottom_nav_selected">#5C6BC0</color>
-    <color name="theme_night_bottom_nav_unselected">#78909C</color>
-    <color name="theme_night_param_card_bg">#BDC6E7</color>
-    <color name="theme_night_param_card_stroke">#405C6BC0</color>
-    <color name="theme_night_local_address_card_bg">#E8EAF6</color>
-    <color name="theme_night_local_address_card_stroke">#305C6BC0</color>
+    <color name="theme_night_glow_primary">#00000000</color>
+    <color name="theme_night_glow_secondary">#00000000</color>
+    <color name="theme_night_glow_tertiary">#00000000</color>
+    <color name="theme_night_accent_stroke">#C6CBD8</color>
+    <color name="theme_night_api_card_gradient_start">#F0F2F8</color>
+    <color name="theme_night_api_card_gradient_end">#E5E8F0</color>
+    <color name="theme_night_bottom_nav_bg">#E5E8F0</color>
+    <color name="theme_night_bottom_nav_selected">#4E6498</color>
+    <color name="theme_night_bottom_nav_unselected">#646C7D</color>
+    <color name="theme_night_param_card_bg">#ECEEF5</color>
+    <color name="theme_night_param_card_stroke">#C6CBD8</color>
+    <color name="theme_night_local_address_card_bg">#F0F2F8</color>
+    <color name="theme_night_local_address_card_stroke">#C6CBD8</color>
     <color name="theme_night_input_field_bg">#FFFFFF</color>
-    <color name="theme_night_input_field_stroke">#505C6BC0</color>
+    <color name="theme_night_input_field_stroke">#7B8395</color>
 </resources>
