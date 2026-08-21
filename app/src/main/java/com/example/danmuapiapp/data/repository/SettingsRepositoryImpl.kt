@@ -15,6 +15,7 @@ import com.example.danmuapiapp.data.util.safeGetString
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
@@ -110,6 +111,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private val _nightMode = MutableStateFlow(AppAppearancePrefs.readNightMode(uiPrefs))
     override val nightMode: StateFlow<NightModePreference> = _nightMode.asStateFlow()
+
+    private val _glassMaterial = MutableStateFlow(AppAppearancePrefs.readGlassMaterial(uiPrefs))
+    override val glassMaterial: StateFlow<GlassMaterialPreference> = _glassMaterial.asStateFlow()
 
     private val _appDpiOverride = MutableStateFlow(AppAppearancePrefs.readAppDpiOverride(uiScalePrefs))
     override val appDpiOverride: StateFlow<Int> = _appDpiOverride.asStateFlow()
@@ -252,6 +256,11 @@ class SettingsRepositoryImpl @Inject constructor(
         AppAppearancePrefs.writeNightMode(uiPrefs, mode)
         _nightMode.value = mode
         AppAppearancePrefs.applyNightMode(mode)
+    }
+
+    override fun setGlassMaterial(material: GlassMaterialPreference) {
+        AppAppearancePrefs.writeGlassMaterial(uiPrefs, material)
+        _glassMaterial.value = material
     }
 
     override fun setAppDpiOverride(dpi: Int) {
@@ -438,6 +447,7 @@ class SettingsRepositoryImpl @Inject constructor(
         )
         _normalModeStabilityMode.value = NormalModeStabilityPrefs.get(context)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
+        _glassMaterial.value = AppAppearancePrefs.readGlassMaterial(uiPrefs)
         _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)
         _hideFromRecents.value = AppAppearancePrefs.readHideFromRecents(uiPrefs)
         _tokenVisible.value = settingsPrefs.safeGetBoolean("token_visible", false)

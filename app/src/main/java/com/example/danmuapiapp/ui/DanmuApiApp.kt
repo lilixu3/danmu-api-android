@@ -9,12 +9,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -23,6 +21,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
+import com.example.danmuapiapp.ui.component.GlassBottomNavigationBar
+import com.example.danmuapiapp.ui.component.LocalFloatingBottomBarVisible
 import com.example.danmuapiapp.ui.navigation.CoreRoute
 import com.example.danmuapiapp.ui.navigation.Screen
 import com.example.danmuapiapp.ui.navigation.SettingsRoute
@@ -54,6 +54,10 @@ import com.example.danmuapiapp.ui.screen.settings.VideoShellInjectionSettingsScr
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
+import com.example.danmuapiapp.ui.theme.GlassAppBackground
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 private fun NavController.navigateToTopLevelRoute(route: String) {
     navigate(route) {
@@ -152,76 +156,56 @@ private fun DanmuApiMainContent() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
-    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val navItemColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = MaterialTheme.colorScheme.primary,
-        selectedTextColor = MaterialTheme.colorScheme.primary,
-        indicatorColor = MaterialTheme.colorScheme.primary.copy(
-            alpha = if (isDarkTheme) 0.22f else 0.14f
-        ),
-        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
-        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
-        disabledIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-        disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-    )
+    val showBottomBar = currentDestination.isTopLevelDestination()
+    val recordBackdrop = showBottomBar && LocalGlassMaterial.current.enabled
+    val backdrop = rememberLayerBackdrop()
 
-    Scaffold(
-        containerColor = if (isDarkTheme) {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        } else {
-            MaterialTheme.colorScheme.background
-        },
-        bottomBar = {
-            NavigationBar(
-                tonalElevation = NavigationBarDefaults.Elevation,
-                containerColor = if (isDarkTheme) {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                } else {
-                    NavigationBarDefaults.containerColor
-                }
-            ) {
-                Screen.entries.forEach { screen ->
-                    val selected = currentDestination?.hierarchy?.any {
-                        it.route == screen.route
-                    } == true
-
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = screen.icon,
-                                contentDescription = screen.label
-                            )
-                        },
-                        label = { Text(screen.label) },
-                        selected = selected,
-                        onClick = {
-                            navController.navigateToTopLevelRoute(screen.route)
-                        },
-                        colors = navItemColors
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Home.route,
-            modifier = Modifier.padding(innerPadding),
-            enterTransition = {
-                fadeIn(animationSpec = tween(200)) +
-                    slideInHorizontally(animationSpec = tween(200)) { it / 6 }
-            },
-            exitTransition = {
-                fadeOut(animationSpec = tween(200))
-            },
-            popEnterTransition = {
-                fadeIn(animationSpec = tween(200))
-            },
-            popExitTransition = {
-                fadeOut(animationSpec = tween(200)) +
-                    slideOutHorizontally(animationSpec = tween(200)) { it / 6 }
-            }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (recordBackdrop) {
+                        Modifier.layerBackdrop(backdrop)
+                    } else {
+                        Modifier
+                    }
+                )
         ) {
+            GlassAppBackground(modifier = Modifier.matchParentSize())
+            CompositionLocalProvider(
+                LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+                LocalFloatingBottomBarVisible provides showBottomBar
+            ) {
+                NavHost(
+                    navController = navController,
+                    startDestination = Screen.Home.route,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(
+                            WindowInsets.safeDrawing.only(
+                                if (showBottomBar) {
+                                    WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+                                } else {
+                                    WindowInsetsSides.Horizontal + WindowInsetsSides.Vertical
+                                }
+                            )
+                        ),
+                    enterTransition = {
+                        fadeIn(animationSpec = tween(200)) +
+                            slideInHorizontally(animationSpec = tween(200)) { it / 6 }
+                    },
+                    exitTransition = {
+                        fadeOut(animationSpec = tween(200))
+                    },
+                    popEnterTransition = {
+                        fadeIn(animationSpec = tween(200))
+                    },
+                    popExitTransition = {
+                        fadeOut(animationSpec = tween(200)) +
+                            slideOutHorizontally(animationSpec = tween(200)) { it / 6 }
+                    }
+                ) {
             composable(Screen.Home.route) {
                 HomeScreen(
                     onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
@@ -364,6 +348,23 @@ private fun DanmuApiMainContent() {
             composable(ToolRoute.Diagnostics) {
                 DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
+                }
+            }
+        }
+        if (showBottomBar) {
+            GlassBottomNavigationBar(
+                backdrop = backdrop,
+                currentDestination = currentDestination,
+                onNavigate = { screen ->
+                    navController.navigateToTopLevelRoute(screen.route)
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
+}
+
+private fun androidx.navigation.NavDestination?.isTopLevelDestination(): Boolean {
+    val route = this?.route ?: return false
+    return Screen.entries.any { screen -> screen.route == route }
 }

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -58,7 +60,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -104,6 +105,7 @@ import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.CoreBranchPickerDialog
 import com.example.danmuapiapp.ui.component.CoreUpdateAvailableDialog
+import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.shouldOfferCoreUpdateActions
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
@@ -140,7 +142,7 @@ fun CoreScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { AppSnackbarHost(snackbar) },
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
@@ -185,6 +187,7 @@ fun CoreScreen(
                 onRefresh = viewModel::refreshGithubAccount,
                 onFillToken = viewModel::openGithubTokenDialog
             )
+            FloatingBottomBarContentSpacer()
         }
     }
 
@@ -273,7 +276,12 @@ private fun CoreWorkspaceHeader(
         ServiceStatus.Stopped -> "服务未运行"
     }
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text("核心管理", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            "核心管理",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Surface(modifier = Modifier.size(8.dp), shape = CircleShape, color = statusColor) {}
             Text(

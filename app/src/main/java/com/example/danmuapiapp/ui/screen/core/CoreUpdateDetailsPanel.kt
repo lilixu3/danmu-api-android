@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.CoreInfo
 import com.example.danmuapiapp.domain.model.CoreRemoteCommit
 import com.example.danmuapiapp.domain.model.CoreUpdateComparison
@@ -55,7 +57,8 @@ internal fun CoreUpdateDetailsPanel(
     displayNames: CoreVariantDisplayNames
 ) {
     val variant = viewModel.updateDetailsVariant ?: return
-    val info = viewModel.coreInfoList.value.firstOrNull { it.variant == variant }
+    val coreInfoList by viewModel.coreInfoList.collectAsStateWithLifecycle()
+    val info = coreInfoList.firstOrNull { it.variant == variant }
     CoreUpdateDetailsPanel(
         displayName = displayNames.resolve(variant),
         info = info,

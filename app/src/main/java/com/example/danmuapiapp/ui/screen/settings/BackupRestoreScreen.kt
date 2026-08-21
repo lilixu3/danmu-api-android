@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
@@ -228,7 +230,7 @@ fun BackupRestoreScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

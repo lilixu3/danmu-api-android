@@ -3,7 +3,7 @@ package com.example.danmuapiapp.ui.theme;
 /**
  * Semantic color tokens shared by Compose dialogs and dialogs injected into host apps.
  *
- * <p>Surfaces use the app's low-chroma blue-gray foundation while brand color is reserved for
+ * <p>Surfaces use the app's neutral graphite foundation while brand color is reserved for
  * actions, selection and focus. Keeping raw ARGB values here avoids the Compose and Xposed
  * implementations drifting into separate palettes.</p>
  */
@@ -43,23 +43,23 @@ public final class DialogColorTokens {
     public static final int LIGHT_ON_ERROR_CONTAINER = 0xFF7F2831;
 
     // Dark surfaces and text.
-    public static final int DARK_DIALOG = 0xFF1F2D47;
-    public static final int DARK_SURFACE_LOWEST = 0xFF111A2E;
-    public static final int DARK_SURFACE_CONTAINER = 0xFF17243B;
-    public static final int DARK_SURFACE_HIGH = 0xFF253653;
-    public static final int DARK_SURFACE_ACTIVE = 0xFF2C4162;
-    public static final int DARK_TEXT_PRIMARY = 0xFFE6EAFA;
-    public static final int DARK_TEXT_SECONDARY = 0xFFB1BDD4;
-    public static final int DARK_TEXT_MUTED = 0xFF8D9AB2;
-    public static final int DARK_OUTLINE = 0xFF7D8DA9;
-    public static final int DARK_OUTLINE_VARIANT = 0xFF435574;
+    public static final int DARK_DIALOG = 0xFF30343A;
+    public static final int DARK_SURFACE_LOWEST = 0xFF24262B;
+    public static final int DARK_SURFACE_CONTAINER = 0xFF34383F;
+    public static final int DARK_SURFACE_HIGH = 0xFF3A3F46;
+    public static final int DARK_SURFACE_ACTIVE = 0xFF424850;
+    public static final int DARK_TEXT_PRIMARY = 0xFFF5F6F8;
+    public static final int DARK_TEXT_SECONDARY = 0xFFCDD1D7;
+    public static final int DARK_TEXT_MUTED = 0xFFAEB4BC;
+    public static final int DARK_OUTLINE = 0xFF8B929B;
+    public static final int DARK_OUTLINE_VARIANT = 0xFF555C65;
 
     // Dark action and selection.
     public static final int DARK_PRIMARY = 0xFF7DCFFF;
     public static final int DARK_PRIMARY_PRESSED = 0xFF65B8E6;
     public static final int DARK_ON_PRIMARY = 0xFF031A28;
-    public static final int DARK_PRIMARY_CONTAINER = 0xFF294765;
-    public static final int DARK_ON_PRIMARY_CONTAINER = 0xFFC8EBFF;
+    public static final int DARK_PRIMARY_CONTAINER = 0xFF244554;
+    public static final int DARK_ON_PRIMARY_CONTAINER = 0xFFBEE8FF;
     public static final int DARK_FOCUS_RING = 0xFFE1F3FF;
     public static final int DARK_FOCUS_FILL = 0x267DCFFF;
 

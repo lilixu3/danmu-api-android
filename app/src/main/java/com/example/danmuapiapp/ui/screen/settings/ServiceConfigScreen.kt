@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,7 +50,7 @@ fun ServiceConfigScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

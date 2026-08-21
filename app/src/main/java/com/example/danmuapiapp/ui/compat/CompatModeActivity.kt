@@ -82,7 +82,10 @@ class CompatModeActivity : ComponentActivity() {
                 NightModePreference.Dark -> true
             }
 
-            DanmuApiTheme(darkTheme = darkTheme) {
+            DanmuApiTheme(
+                darkTheme = darkTheme,
+                glassMaterial = uiState.glassMaterial
+            ) {
                 val view = LocalView.current
                 val systemBarColor = MaterialTheme.colorScheme.surface.toArgb()
                 SideEffect {

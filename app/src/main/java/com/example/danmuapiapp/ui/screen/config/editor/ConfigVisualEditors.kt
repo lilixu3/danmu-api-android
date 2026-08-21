@@ -1197,10 +1197,10 @@ internal fun ColorListEditor(
     var hue by remember(rememberKey) { mutableStateOf(0f) }
     var lightness by remember(rememberKey) { mutableStateOf(50f) }
 
-    val normalizedKey = remember(envKey) { envKey.trim().uppercase(Locale.getDefault()) }
+    val normalizedKey = remember(envKey) { envKey.trim().uppercase(Locale.ROOT) }
     val isConvertColor = normalizedKey == "CONVERT_COLOR"
     val parsedColors = remember(value) { parseColorList(value) }
-    val rawMode = value.trim().lowercase(Locale.getDefault())
+    val rawMode = value.trim().lowercase(Locale.ROOT)
     val wheelColor = remember(hue, lightness) { hslToDecimal(hue, 100f, lightness) }
     val selectedColor = parseColorToken(colorInput)
     val batchColors = remember(batchInput) { parseColorList(batchInput) }

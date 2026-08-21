@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.appcompat.app.AppCompatDelegate
+import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.NightModePreference
 
 object AppAppearancePrefs {
@@ -12,6 +13,7 @@ object AppAppearancePrefs {
     const val PREFS_UI_SCALE_LEGACY = "danmu_ui_scale_prefs"
 
     const val PREF_KEY_NIGHT_MODE = "night_mode_pref"
+    const val PREF_KEY_GLASS_MATERIAL = "glass_material_pref"
     const val PREF_KEY_DARK_THEME_LEGACY = "dark_theme"
     const val PREF_KEY_HIDE_FROM_RECENTS = "hide_from_recents"
     const val PREF_KEY_APP_DPI_OVERRIDE = "app_dpi_override"
@@ -49,6 +51,21 @@ object AppAppearancePrefs {
             putInt(PREF_KEY_NIGHT_MODE, mode.storageValue)
             putBoolean(PREF_KEY_DARK_THEME_LEGACY, legacyDark)
         }
+    }
+
+    fun readGlassMaterial(prefs: SharedPreferences): GlassMaterialPreference {
+        val raw = prefs.safeGetInt(
+            PREF_KEY_GLASS_MATERIAL,
+            GlassMaterialPreference.Default.storageValue
+        )
+        return GlassMaterialPreference.fromStorageValue(raw)
+    }
+
+    fun writeGlassMaterial(
+        prefs: SharedPreferences,
+        material: GlassMaterialPreference
+    ) {
+        prefs.edit { putInt(PREF_KEY_GLASS_MATERIAL, material.storageValue) }
     }
 
     fun readHideFromRecents(prefs: SharedPreferences): Boolean {
