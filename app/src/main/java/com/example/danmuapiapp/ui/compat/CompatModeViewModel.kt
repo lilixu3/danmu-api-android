@@ -68,8 +68,13 @@ data class CompatModeUiState(
     val branchDialogVariant: ApiVariant? = null,
     val branchCatalog: CoreBranchCatalog? = null,
     val isLoadingBranches: Boolean = false,
-    val branchLoadError: String? = null
+    val branchLoadError: String? = null,
+    val localNetworkGuideDismissedThisLaunch: Boolean = false
 )
+
+internal fun CompatModeUiState.dismissLocalNetworkGuideForThisLaunch(): CompatModeUiState {
+    return copy(localNetworkGuideDismissedThisLaunch = true)
+}
 
 data class CompatKeepAliveUiState(
     val summary: String = "正在读取后台运行状态",
@@ -207,6 +212,10 @@ class CompatModeViewModel(
         graph.appUpdateService.tryResumePendingInstall(activity)
         refreshKeepAliveUi()
         graph.updateChecker.onAppResume()
+    }
+
+    fun dismissLocalNetworkGuideForThisLaunch() {
+        _uiState.update(CompatModeUiState::dismissLocalNetworkGuideForThisLaunch)
     }
 
     fun refreshCoreInfo() {

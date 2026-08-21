@@ -12,6 +12,7 @@ import android.os.Build
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -146,6 +147,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheStats
@@ -167,6 +170,8 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
+import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionAction
+import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionPolicy
 import com.example.danmuapiapp.ui.startup.StartupPermissionGatePrefs
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
@@ -239,11 +244,22 @@ fun HomeScreen(
     var hasNotificationPermission by remember {
         mutableStateOf(NodeKeepAlivePrefs.hasPostNotificationsPermission(context))
     }
+    var localNetworkPermissionState by remember {
+        mutableStateOf(readHomeLocalNetworkPermissionState(context))
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) {
         hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+    }
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        localNetworkPermissionState = readHomeLocalNetworkPermissionState(context)
+        if (granted) {
+            viewModel.postMessage("已允许局域网访问")
+        }
     }
 
     val runtimeTransition = state.transition
@@ -380,6 +396,7 @@ fun HomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshRuntimeState()
                 hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+                localNetworkPermissionState = readHomeLocalNetworkPermissionState(context)
                 if (state.runMode == RunMode.Normal) {
                     isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
                 }
@@ -439,6 +456,8 @@ fun HomeScreen(
     val tertiaryGlowAlpha = if (isDarkTheme) 0.08f else 0.13f
     val shouldShowRuntimePermissionHint = state.runMode == RunMode.Normal &&
         (!hasNotificationPermission || !isBatteryWhitelisted)
+    val shouldShowLocalNetworkAddressHint =
+        LocalNetworkPermissionPolicy.shouldShowAddressHint(localNetworkPermissionState)
 
     fun openNotificationPermissionQuickAction() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
@@ -460,6 +479,38 @@ fun HomeScreen(
 
         if (!openHomeNotificationSettings(context)) {
             viewModel.postMessage("无法打开通知设置，请手动进入应用详情开启通知")
+        }
+    }
+
+    fun openLocalNetworkPermissionQuickAction() {
+        val latestState = readHomeLocalNetworkPermissionState(context)
+        localNetworkPermissionState = latestState
+        val shouldShowRationale = activity?.let {
+            ActivityCompat.shouldShowRequestPermissionRationale(
+                it,
+                LocalNetworkPermissionPolicy.PERMISSION
+            )
+        } == true
+
+        when (
+            LocalNetworkPermissionPolicy.resolveAction(
+                state = latestState,
+                hasActivity = activity != null,
+                shouldShowRationale = shouldShowRationale
+            )
+        ) {
+            LocalNetworkPermissionAction.Request -> {
+                StartupPermissionGatePrefs.markLocalNetworkPermissionRequested(context)
+                localNetworkPermissionLauncher.launch(LocalNetworkPermissionPolicy.PERMISSION)
+            }
+
+            LocalNetworkPermissionAction.Settings -> {
+                if (!openHomeAppDetailsSettings(context)) {
+                    viewModel.postMessage("无法打开应用设置，请手动开启局域网访问权限")
+                }
+            }
+
+            null -> Unit
         }
     }
 
@@ -658,6 +709,8 @@ fun HomeScreen(
                         token = state.token,
                         maskedToken = maskedToken,
                         tokenVisible = tokenVisible,
+                        showLocalNetworkPermissionHint = shouldShowLocalNetworkAddressHint,
+                        onOpenLocalNetworkPermission = ::openLocalNetworkPermissionQuickAction,
                         onToggleTokenVisible = viewModel::toggleTokenVisible,
                         onCopyLocal = {
                             clipboardManager.nativeClipboard.setPrimaryClip(
@@ -1293,6 +1346,32 @@ private fun openHomeNotificationSettings(context: Context): Boolean {
         }.getOrDefault(false)
     }
 }
+
+private fun openHomeAppDetailsSettings(context: Context): Boolean {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = "package:${context.packageName}".toUri()
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return runCatching {
+        if (intent.resolveActivity(context.packageManager) == null) {
+            false
+        } else {
+            context.startActivity(intent)
+            true
+        }
+    }.getOrDefault(false)
+}
+
+private fun readHomeLocalNetworkPermissionState(context: Context) =
+    LocalNetworkPermissionPolicy.stateFor(
+        sdkInt = Build.VERSION.SDK_INT,
+        granted = Build.VERSION.SDK_INT < LocalNetworkPermissionPolicy.ANDROID_17_API_LEVEL ||
+            ContextCompat.checkSelfPermission(
+                context.applicationContext,
+                LocalNetworkPermissionPolicy.PERMISSION
+            ) == PackageManager.PERMISSION_GRANTED,
+        requestAttempted = StartupPermissionGatePrefs.hasRequestedLocalNetworkPermission(context)
+    )
 
 private fun AppAnnouncement.dialogTone(): AppDialogTone {
     return when (severity) {
