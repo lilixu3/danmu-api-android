@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +41,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -48,6 +50,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.danmuapiapp.ui.theme.DialogColorTokens
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.backdrop.Backdrop
@@ -137,46 +140,46 @@ private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
     return when (tone) {
         AppDialogTone.Neutral -> DialogTonePalette(
             foreground = colors.onSurfaceVariant,
-            container = colors.surfaceContainerHighest
+            container = colors.surfaceContainerHighest.copy(alpha = 0.72f)
         )
 
         AppDialogTone.Brand -> DialogTonePalette(
             foreground = colors.primary,
-            container = colors.primaryContainer
+            container = colors.primary.copy(alpha = 0.16f)
         )
 
         AppDialogTone.Success -> if (dark) {
             DialogTonePalette(
                 Color(DialogColorTokens.DARK_SUCCESS),
-                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER)
+                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER).copy(alpha = 0.24f)
             )
         } else {
             DialogTonePalette(
                 Color(DialogColorTokens.LIGHT_SUCCESS),
-                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER)
+                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER).copy(alpha = 0.34f)
             )
         }
 
         AppDialogTone.Warning -> if (dark) {
             DialogTonePalette(
                 Color(DialogColorTokens.DARK_WARNING),
-                Color(DialogColorTokens.DARK_WARNING_CONTAINER)
+                Color(DialogColorTokens.DARK_WARNING_CONTAINER).copy(alpha = 0.28f)
             )
         } else {
             DialogTonePalette(
                 Color(DialogColorTokens.LIGHT_WARNING),
-                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER)
+                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER).copy(alpha = 0.38f)
             )
         }
 
         AppDialogTone.Danger -> DialogTonePalette(
             foreground = colors.error,
-            container = colors.errorContainer
+            container = colors.error.copy(alpha = 0.15f)
         )
 
         AppDialogTone.Info -> DialogTonePalette(
-            foreground = colors.onPrimaryContainer,
-            container = colors.primaryContainer
+            foreground = colors.primary,
+            container = colors.primary.copy(alpha = 0.12f)
         )
     }
 }
@@ -217,12 +220,13 @@ fun AppDialog(
         modifier = modifier
     ) {
         val palette = dialogTonePalette(tone)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 24.dp, top = 22.dp, end = 24.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        CompositionLocalProvider(LocalAppDialogContext provides true) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, top = 22.dp, end = 24.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             if (icon != null || title != null || supportingText != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -303,6 +307,63 @@ fun AppDialog(
                     actions?.invoke()
                 }
             }
+            }
+        }
+    }
+}
+
+/**
+ * Shared selectable row for dialog lists. It keeps the selected state visible
+ * without turning every option into a saturated, opaque card.
+ */
+@Composable
+fun AppDialogOption(
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = RoundedCornerShape(12.dp),
+    content: @Composable RowScope.() -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val glassEnabled = LocalGlassMaterial.current.enabled &&
+        LocalGlassBackgroundBackdrop.current != null
+    val selectedAlpha = if (LocalAppDarkTheme.current) 0.42f else 0.30f
+    val selectedBase = colors.primary.copy(alpha = selectedAlpha)
+    val idleBase = colors.surfaceContainerHigh.copy(alpha = 0.82f)
+    val optionColor = (if (selected) selectedBase else idleBase).let { base ->
+        if (glassEnabled) base else base.copy(alpha = 1f)
+    }
+    val optionContentColor = if (selected) {
+        colors.onPrimaryContainer
+    } else {
+        colors.onSurface
+    }
+    AppGlassSurface(
+        modifier = modifier.fillMaxWidth(),
+        shape = shape,
+        color = optionColor,
+        contentColor = optionContentColor,
+        glassAlpha = if (selected) selectedAlpha else 0.72f,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                colors.primary.copy(alpha = 0.46f)
+            } else {
+                colors.outlineVariant.copy(alpha = 0.28f)
+            }
+        ),
+        onClick = onClick,
+        enabled = enabled
+    ) {
+        CompositionLocalProvider(LocalContentColor provides optionContentColor) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = content
+            )
         }
     }
 }
@@ -326,15 +387,17 @@ fun AppModalPanel(
         onDismissRequest = onDismissRequest,
         maxWidth = maxWidth
     ) {
-        Column(
-            modifier = modifier
-                .fillMaxWidth()
-                .then(if (expanded) Modifier.fillMaxHeight() else Modifier)
-                .padding(contentPadding),
-            verticalArrangement = verticalArrangement,
-            horizontalAlignment = horizontalAlignment,
-            content = content
-        )
+        CompositionLocalProvider(LocalAppDialogContext provides true) {
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .then(if (expanded) Modifier.fillMaxHeight() else Modifier)
+                    .padding(contentPadding),
+                verticalArrangement = verticalArrangement,
+                horizontalAlignment = horizontalAlignment,
+                content = content
+            )
+        }
     }
 }
 
@@ -388,13 +451,13 @@ private fun AppDialogFrame(
                         .fillMaxWidth()
                         .heightIn(max = maxHeight),
                     shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     tonalElevation = 0.dp,
                     shadowElevation = 12.dp,
                     border = BorderStroke(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
                     ),
                     content = content
                 )
@@ -440,11 +503,7 @@ private fun AppLiquidDialogOverlay(
     val parentShapes = MaterialTheme.shapes
     val darkTheme = LocalAppDarkTheme.current
     val dialogColors = dialogColorScheme(parentColors, darkTheme)
-    val dimColor = if (darkTheme) {
-        Color(0xFF121212).copy(alpha = 0.56f)
-    } else {
-        Color(0xFF29293A).copy(alpha = 0.23f)
-    }
+    val dimColor = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.14f)
 
     BackHandler(onBack = entry.onDismissRequest)
 
@@ -472,13 +531,15 @@ private fun AppLiquidDialogOverlay(
                     .heightIn(max = maxHeight)
                     .pointerInput(entry) {
                         detectTapGestures { /* Consume taps inside the modal surface. */ }
-                    },
+                },
                 shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = MaterialTheme.colorScheme.surfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 border = BorderStroke(
                     width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f)
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(
+                        alpha = if (darkTheme) 0.34f else 0.42f
+                    )
                 ),
                 role = AppGlassSurfaceRole.Dialog,
                 backdropOverride = backdrop,

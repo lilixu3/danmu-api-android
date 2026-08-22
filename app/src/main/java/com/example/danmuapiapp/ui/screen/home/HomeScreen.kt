@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppDialogOption
 import com.example.danmuapiapp.ui.component.AppModalPanel
 import com.example.danmuapiapp.ui.screen.core.CoreUpdateDetailsPanel
 
@@ -922,39 +923,33 @@ fun HomeScreen(
                     )
                     availableModes.forEach { mode ->
                         val selected = pendingRunModeTarget == mode
-                        AppGlassSurface(
-                            onClick = { pendingRunModeTarget = mode },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.36f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            }
+                        AppDialogOption(
+                            selected = selected,
+                            onClick = { pendingRunModeTarget = mode }
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(mode.label, style = MaterialTheme.typography.bodyLarge)
-                                    if (mode.requiresRoot) {
-                                        Text(
-                                            "需要 Root 权限",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.CheckCircle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
+                                Text(mode.label, style = MaterialTheme.typography.bodyLarge)
+                                if (mode.requiresRoot) {
+                                    Text(
+                                        "需要 Root 权限",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
                                     )
                                 }
+                            }
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
@@ -1651,7 +1646,7 @@ private fun AnnouncementCenterDialog(
                 secondaryAction?.let { action ->
                     AppGlassButton(
                         onClick = onSecondaryAction,
-                        surfaceColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.24f)
+                        surfaceColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
                     ) {
                         Icon(
                             Icons.AutoMirrored.Rounded.OpenInNew,

@@ -71,7 +71,6 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
-import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -210,9 +209,11 @@ internal fun HomeTopHeader(
                 )
                 Text(
                     text = "LogVar 弹幕服务",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    ),
                     letterSpacing = 1.3.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onBackground
                 )
             }
             Row(
@@ -278,8 +279,10 @@ internal fun HomeTopHeader(
         } else if (isRunning) {
             Text(
                 text = "已连续运行 $uptime",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onBackground
             )
         }
     }
@@ -453,7 +456,7 @@ internal fun MissionControlHero(
                     modifier = Modifier.weight(1f),
                     label = "核心",
                     value = variantLabel,
-                    icon = Icons.Rounded.Memory,
+                    icon = Icons.Rounded.Storage,
                     enabled = !isActionBusy,
                     onClick = onOpenVariantPicker
                 )
@@ -595,7 +598,7 @@ private fun PermissionQuickActionRow(
         if (ready) {
             AppGlassButton(
                 onClick = {},
-                surfaceColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.28f),
+                surfaceColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.46f),
                 contentColor = MaterialTheme.colorScheme.onTertiaryContainer
             ) {
                 Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp))
@@ -933,10 +936,10 @@ internal fun ActionDeck(
                         height = 52.dp,
                         surfaceColor = if (restartEnabled) {
                             MaterialTheme.colorScheme.primaryContainer.copy(
-                                alpha = if (isDarkTheme) 0.28f else 0.42f
+                                alpha = 0.48f
                             )
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.28f)
+                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
                         },
                         contentColor = if (restartEnabled) {
                             if (isDarkTheme) MaterialTheme.colorScheme.primary
@@ -968,7 +971,7 @@ internal fun ActionDeck(
                     onClick = onOpenVariantPicker,
                     enabled = !isTransitioning,
                     modifier = Modifier.weight(1f),
-                    surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.24f),
+                    surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
                     contentColor = if (isTransitioning) {
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                     } else {
@@ -992,11 +995,11 @@ internal fun ActionDeck(
                     enabled = coreActionEnabled,
                     modifier = Modifier.weight(1f),
                     surfaceColor = if (!coreActionEnabled) {
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.28f)
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
                     } else if (dangerousCoreAction) {
-                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.44f)
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.56f)
                     } else {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.36f)
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
                     },
                     contentColor = if (!coreActionEnabled) {
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)

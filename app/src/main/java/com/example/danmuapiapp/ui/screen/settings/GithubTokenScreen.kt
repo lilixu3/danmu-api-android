@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.GithubAccountStatus
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.time.Instant
 import java.time.ZoneId
@@ -164,16 +165,13 @@ fun GithubTokenScreen(
                             }
                             Text(if (tokenText.isBlank()) "使用匿名额度" else "验证并保存")
                         }
-                        AppGlassButton(
+                        AppGlassDangerButton(
                             onClick = {
                                 tokenText = ""
                                 viewModel.clearGithubToken()
                             },
                             enabled = status.tokenConfigured || tokenText.isNotBlank(),
-                            modifier = Modifier.weight(0.6f),
-                            tint = MaterialTheme.colorScheme.error,
-                            surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                            contentColor = MaterialTheme.colorScheme.error
+                            modifier = Modifier.weight(0.6f)
                         ) { Text("清空") }
                     }
                 }

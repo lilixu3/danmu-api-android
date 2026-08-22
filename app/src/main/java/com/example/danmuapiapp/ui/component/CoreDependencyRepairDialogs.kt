@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 
 @Composable
 fun CoreDependencyRepairHost(
@@ -184,12 +185,9 @@ fun CoreDependencyRepairDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                AppGlassButton(
+                AppGlassDangerButton(
                     onClick = onCancelMutation,
-                    modifier = Modifier.fillMaxWidth(),
-                    tint = MaterialTheme.colorScheme.error,
-                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.error
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         when (request.origin) {

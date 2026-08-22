@@ -34,7 +34,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreBranchCatalog
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 @Composable
 fun CoreBranchPickerDialog(
@@ -111,19 +110,13 @@ fun CoreBranchPickerDialog(
                     ) {
                         items(catalog.branches, key = { it }) { branch ->
                             val selected = branch.equals(selectedBranch, ignoreCase = true)
-                            AppGlassSurface(
-                                modifier = Modifier
-                                    .fillMaxWidth(),
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.42f)
-                                },
-                                shape = RoundedCornerShape(6.dp),
-                                onClick = { selectedBranch = branch }
+                            AppDialogOption(
+                                selected = selected,
+                                onClick = { selectedBranch = branch },
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    modifier = Modifier.weight(1f),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     RadioButton(
@@ -143,7 +136,11 @@ fun CoreBranchPickerDialog(
                                             text = "默认",
                                             modifier = Modifier.padding(start = 8.dp, end = 5.dp),
                                             style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.primary
+                                            }
                                         )
                                     }
                                 }

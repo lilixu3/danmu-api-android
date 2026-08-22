@@ -61,6 +61,8 @@ data class GlassMaterialSpec(
 val LocalGlassMaterial = staticCompositionLocalOf { GlassMaterialSpec.Disabled }
 val LocalAppBackground = staticCompositionLocalOf { AppBackgroundPreference() }
 val LocalAppBackgroundForegroundKey = staticCompositionLocalOf { 0L }
+/** True while content is rendered inside the shared dialog surface. */
+val LocalAppDialogContext = staticCompositionLocalOf { false }
 
 internal fun isLiquidGlassSupported(sdkInt: Int = Build.VERSION.SDK_INT): Boolean {
     return sdkInt >= Build.VERSION_CODES.TIRAMISU
@@ -81,7 +83,9 @@ internal fun resolveGlassMaterialSpec(
         refractionAmount = 24.dp,
         bottomBarAlpha = 0.4f,
         contentAlpha = if (darkTheme) 0.48f else 0.56f,
-        dialogAlpha = if (darkTheme) 0.4f else 0.6f
+        // Dialogs keep the backdrop blur and refraction, but need a denser neutral
+        // wash than cards so text and controls remain readable over photographs.
+        dialogAlpha = if (darkTheme) 0.78f else 0.82f
     )
 }
 

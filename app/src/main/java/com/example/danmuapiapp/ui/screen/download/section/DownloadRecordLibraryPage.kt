@@ -61,6 +61,7 @@ import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
@@ -589,11 +590,8 @@ private fun RecordDeleteDialog(
             ) { Text("取消") }
         },
         confirmButton = {
-            AppGlassButton(
+            AppGlassDangerButton(
                 onClick = { onConfirm(deleteLocalFiles) },
-                tint = MaterialTheme.colorScheme.error,
-                surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
-                contentColor = MaterialTheme.colorScheme.error,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text(if (deleteLocalFiles) "删除记录和文件" else "仅清理记录")

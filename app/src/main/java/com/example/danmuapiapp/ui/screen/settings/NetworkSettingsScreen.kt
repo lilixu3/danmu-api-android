@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -115,22 +116,20 @@ fun NetworkSettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     CoreUpdateCheckPolicy.intervalOptionsMinutes.forEach { minutes ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.setCoreUpdateCheckIntervalMinutes(minutes)
-                                    showUpdateIntervalDialog = false
-                                }
-                                .padding(horizontal = 4.dp, vertical = 8.dp),
-                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        AppDialogOption(
+                            selected = updateCheckIntervalMinutes == minutes,
+                            onClick = {
+                                viewModel.setCoreUpdateCheckIntervalMinutes(minutes)
+                                showUpdateIntervalDialog = false
+                            },
+                            shape = RoundedCornerShape(10.dp)
                         ) {
                             RadioButton(
                                 selected = updateCheckIntervalMinutes == minutes,
                                 onClick = null
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("$minutes 分钟")
+                            Text("$minutes 分钟", modifier = Modifier.weight(1f))
                         }
                     }
                 }

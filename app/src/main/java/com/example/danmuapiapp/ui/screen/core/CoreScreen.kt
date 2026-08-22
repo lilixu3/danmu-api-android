@@ -64,7 +64,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -108,7 +107,9 @@ import com.example.danmuapiapp.ui.component.CoreUpdateAvailableDialog
 import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 import com.example.danmuapiapp.ui.component.shouldOfferCoreUpdateActions
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import java.time.Instant
@@ -706,7 +707,7 @@ private fun CoreControlPanel(
                     val hasContextAction = repairing || needsSource || info.sourceMismatch || !isCurrent
                     if (hasContextAction) Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AppGlassButton(
+                        AppGlassPrimaryButton(
                             onClick = {
                                 when {
                                     info.sourceMismatch ||
@@ -718,15 +719,13 @@ private fun CoreControlPanel(
                             },
                             enabled = !busy && !repairing,
                             modifier = Modifier.weight(1f).height(46.dp),
-                            surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
                             if (viewModel.isCheckingUpdate) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
                                     strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
+                                    color = androidx.compose.material3.LocalContentColor.current
                                 )
                             } else {
                                 Icon(
@@ -750,7 +749,7 @@ private fun CoreControlPanel(
                             onClick = { viewModel.openRollbackDialog(info.variant) },
                             enabled = !busy,
                             modifier = Modifier.weight(1f).height(46.dp),
-                            surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.24f),
+                            surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
                             contentColor = if (busy) {
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                             } else {
@@ -814,11 +813,8 @@ private fun CoreControlPanel(
             title = { Text("删除 $label？") },
             text = { Text("将删除当前工作目录中的该核心文件。") },
             confirmButton = {
-                AppGlassButton(
+                AppGlassDangerButton(
                     onClick = { deleteConfirm = false; viewModel.deleteCore(info.variant) },
-                    tint = MaterialTheme.colorScheme.error,
-                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.error
                 ) { Text("删除") }
             },
             dismissButton = { AppGlassButton(onClick = { deleteConfirm = false }) { Text("取消") } }
@@ -930,7 +926,7 @@ private fun CoreContextAction(
             onClick = viewModel::openDependencyRepairDialog,
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            surfaceColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.34f),
+            surfaceColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.52f),
             contentColor = MaterialTheme.colorScheme.onErrorContainer
         ) {
             Icon(Icons.Rounded.Build, null, Modifier.size(18.dp))
@@ -941,19 +937,17 @@ private fun CoreContextAction(
             onClick = { viewModel.openVariantSettingsDialog(info.variant) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f),
+            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f),
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ) {
             Icon(Icons.Rounded.Settings, null, Modifier.size(18.dp))
             Spacer(Modifier.width(7.dp))
             Text("配置核心仓库")
         }
-        !info.isInstalled -> AppGlassButton(
+        !info.isInstalled -> AppGlassPrimaryButton(
             onClick = { viewModel.installCore(info.variant) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-            contentColor = MaterialTheme.colorScheme.onPrimary
         ) {
             Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
             Spacer(Modifier.width(7.dp))
@@ -963,19 +957,17 @@ private fun CoreContextAction(
             onClick = { viewModel.reinstallCore(info.variant) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            surfaceColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.34f),
+            surfaceColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.52f),
             contentColor = MaterialTheme.colorScheme.onErrorContainer
         ) {
             Icon(Icons.Rounded.Sync, null, Modifier.size(18.dp))
             Spacer(Modifier.width(7.dp))
             Text("按当前仓库重新安装")
         }
-        !isCurrent -> AppGlassButton(
+        !isCurrent -> AppGlassPrimaryButton(
             onClick = { viewModel.updateVariant(info.variant) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-            contentColor = MaterialTheme.colorScheme.onPrimary
         ) {
             Icon(Icons.Rounded.SwapHoriz, null, Modifier.size(19.dp))
             Spacer(Modifier.width(7.dp))
@@ -998,7 +990,7 @@ private fun CoreShortcutButton(
         modifier = modifier,
         height = 40.dp,
         shape = RoundedCornerShape(10.dp),
-        surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.18f),
+        surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
         contentColor = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
         contentPadding = PaddingValues(horizontal = 6.dp)
@@ -1120,15 +1112,13 @@ private fun UpdateResultDialog(vm: CoreViewModel, names: CoreVariantDisplayNames
         },
         confirmButton = {
             if (canApply && variant != null) {
-                AppGlassButton(
-                    onClick = { vm.doUpdate(variant) },
-                    surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary
+            AppGlassPrimaryButton(
+                onClick = { vm.doUpdate(variant) },
                 ) { Text("重新下载") }
-            } else TextButton(onClick = vm::dismissUpdateDialog) { Text("完成") }
+            } else AppGlassButton(onClick = vm::dismissUpdateDialog) { Text("完成") }
         },
         dismissButton = if (canApply) {
-            { TextButton(onClick = vm::dismissUpdateDialog) { Text("稍后") } }
+            { AppGlassButton(onClick = vm::dismissUpdateDialog) { Text("稍后") } }
         } else null
     )
 }
@@ -1187,11 +1177,9 @@ private fun GithubTokenDialog(
             status.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         },
         confirmButton = {
-            AppGlassButton(
+            AppGlassPrimaryButton(
                 onClick = { onValidate(token) },
-                enabled = !status.isLoading && (token.isNotBlank() || !tokenConfigured),
-                surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                contentColor = MaterialTheme.colorScheme.onPrimary
+                enabled = !status.isLoading && (token.isNotBlank() || !tokenConfigured)
             ) {
                 if (status.isLoading) {
                     CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
@@ -1248,17 +1236,15 @@ private fun VariantSettingsDialog(
             }
         },
         confirmButton = {
-            AppGlassButton(
+            AppGlassPrimaryButton(
                 onClick = {
                     if (custom) form.toInput().let { onSave(it.displayName, it.repo, it.branch) }
                     else onSave(name.trim(), "", "")
                 },
-                enabled = !custom || form.canSaveConfig,
-                surfaceColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                contentColor = MaterialTheme.colorScheme.onPrimary
+                enabled = !custom || form.canSaveConfig
             ) { Text("保存") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { AppGlassButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 

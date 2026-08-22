@@ -13,8 +13,27 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.shapes.Capsule
+
+@Composable
+private fun defaultControlSurfaceColor(): Color {
+    val glassAvailable = LocalGlassMaterial.current.enabled &&
+        LocalGlassBackgroundBackdrop.current != null
+    val dialogContext = LocalAppDialogContext.current
+    val base = if (dialogContext) {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val alpha = when {
+        !glassAvailable -> 1f
+        dialogContext -> 0.72f
+        else -> 0.42f
+    }
+    return base.copy(alpha = alpha)
+}
 
 @Composable
 fun AppGlassButton(
@@ -22,15 +41,17 @@ fun AppGlassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
-    surfaceColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
+    surfaceColor: Color = defaultControlSurfaceColor(),
     contentColor: Color = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
     },
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
-    height: Dp = 48.dp,
-    shape: Shape = RoundedCornerShape(14.dp),
+    contentPadding: PaddingValues = PaddingValues(
+        horizontal = if (LocalAppDialogContext.current) 14.dp else 16.dp
+    ),
+    height: Dp = if (LocalAppDialogContext.current) 44.dp else 48.dp,
+    shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     AppLiquidButton(
@@ -53,9 +74,11 @@ fun AppGlassPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
-    height: Dp = 48.dp,
-    shape: Shape = RoundedCornerShape(14.dp),
+    contentPadding: PaddingValues = PaddingValues(
+        horizontal = if (LocalAppDialogContext.current) 14.dp else 16.dp
+    ),
+    height: Dp = if (LocalAppDialogContext.current) 44.dp else 48.dp,
+    shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     val glassEnabled = LocalGlassMaterial.current.enabled &&
@@ -65,12 +88,12 @@ fun AppGlassPrimaryButton(
         modifier = modifier,
         enabled = enabled,
         tint = if (glassEnabled) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
         } else {
             Color.Unspecified
         },
         surfaceColor = if (glassEnabled) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
         } else {
             MaterialTheme.colorScheme.primaryContainer
         },
@@ -92,9 +115,11 @@ fun AppGlassDangerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
-    height: Dp = 48.dp,
-    shape: Shape = RoundedCornerShape(14.dp),
+    contentPadding: PaddingValues = PaddingValues(
+        horizontal = if (LocalAppDialogContext.current) 14.dp else 16.dp
+    ),
+    height: Dp = if (LocalAppDialogContext.current) 44.dp else 48.dp,
+    shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     val glassEnabled = LocalGlassMaterial.current.enabled &&
@@ -104,12 +129,12 @@ fun AppGlassDangerButton(
         modifier = modifier,
         enabled = enabled,
         tint = if (glassEnabled) {
-            MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+            MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
         } else {
             Color.Unspecified
         },
         surfaceColor = if (glassEnabled) {
-            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.82f)
         } else {
             MaterialTheme.colorScheme.errorContainer
         },
@@ -131,7 +156,7 @@ fun AppGlassIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     size: Dp = 36.dp,
-    surfaceColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
+    surfaceColor: Color = defaultControlSurfaceColor(),
     contentColor: Color = if (enabled) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else {

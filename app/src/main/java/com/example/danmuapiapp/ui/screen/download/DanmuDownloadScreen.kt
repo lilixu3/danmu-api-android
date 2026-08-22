@@ -77,7 +77,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -102,6 +101,7 @@ import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.theme.appDangerButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
@@ -352,11 +352,8 @@ fun DanmuDownloadScreen(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (viewModel.isDownloading) {
-                                AppGlassButton(
+                                AppGlassDangerButton(
                                     onClick = viewModel::cancelDownload,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
-                                    contentColor = MaterialTheme.colorScheme.error
                                 ) {
                                     Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
@@ -386,7 +383,7 @@ fun DanmuDownloadScreen(
             tone = AppDialogTone.Danger,
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
-            confirmButton = { TextButton(onClick = viewModel::clearError) { Text("知道了") } }
+            confirmButton = { AppGlassButton(onClick = viewModel::clearError) { Text("知道了") } }
         )
     }
 }

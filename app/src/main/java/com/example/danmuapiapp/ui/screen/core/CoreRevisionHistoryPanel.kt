@@ -280,7 +280,7 @@ private fun RevisionList(
             AppGlassButton(
                 onClick = onPreviousPage,
                 enabled = !isLoading && page > 1,
-                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
             ) {
                 Icon(Icons.AutoMirrored.Rounded.NavigateBefore, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
@@ -290,7 +290,7 @@ private fun RevisionList(
             AppGlassButton(
                 onClick = onNextPage,
                 enabled = !isLoading && hasNextPage,
-                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
             ) {
                 Text("下一页")
                 Spacer(Modifier.width(4.dp))
@@ -357,7 +357,7 @@ private fun RevisionRow(
             }
             AppGlassButton(
                 onClick = { onRollback(revision) },
-                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
             ) {
                 Icon(Icons.Rounded.Restore, null, Modifier.size(17.dp))
                 Spacer(Modifier.width(6.dp))

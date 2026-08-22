@@ -39,6 +39,7 @@ import com.example.danmuapiapp.ui.component.CacheClearSelectionList
 import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.theme.appDangerButtonColors
 import java.text.SimpleDateFormat
@@ -184,14 +185,11 @@ fun CacheManagementScreen(
                     )
                 }
                 item(key = "clear-action") {
-                    AppGlassButton(
+                    AppGlassDangerButton(
                         onClick = viewModel::requestClear,
                         enabled = stats.isAvailable && viewModel.selectedItems.isNotEmpty() &&
                             !viewModel.isClearing && !isLoading,
                         modifier = Modifier.fillMaxWidth().height(50.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
-                        contentColor = MaterialTheme.colorScheme.error
                     ) {
                         if (viewModel.isClearing) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -289,11 +287,8 @@ fun CacheManagementScreen(
                 )
             },
             confirmButton = {
-                AppGlassButton(
+                AppGlassDangerButton(
                     onClick = viewModel::clearSelected,
-                    tint = MaterialTheme.colorScheme.error,
-                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
-                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Text("确认清理")
                 }

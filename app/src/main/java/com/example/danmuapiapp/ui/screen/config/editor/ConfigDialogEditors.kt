@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.config
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppDialogOption
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
@@ -1400,50 +1401,38 @@ internal fun PlatformMultiSelectDialog(
                     val hasAll = selected.any { it.equals("all", true) }
                     val canSelect = !hasAll || isAll || isSelected
 
-                    AppGlassSurface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        },
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = canSelect) {
+                    AppDialogOption(
+                        selected = isSelected,
+                        onClick = {
+                            if (canSelect) {
                                 selected = togglePlatformSelection(selected, normalizedOption, options)
                             }
+                        },
+                        enabled = canSelect,
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = isSelected,
-                                onCheckedChange = {
-                                    selected = togglePlatformSelection(selected, normalizedOption, options)
-                                },
-                                enabled = canSelect
-                            )
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = {
+                                selected = togglePlatformSelection(selected, normalizedOption, options)
+                            },
+                            enabled = canSelect
+                        )
+                        Text(
+                            text = if (isAll) "全部" else normalizedOption,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isAll) {
                             Text(
-                                text = if (isAll) "全部" else normalizedOption,
-                                style = MaterialTheme.typography.bodyMedium,
+                                "all",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = if (isSelected) {
                                     MaterialTheme.colorScheme.onPrimaryContainer
                                 } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                modifier = Modifier.weight(1f)
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
-                            if (isAll) {
-                                Text(
-                                    "all",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                     }
                 }

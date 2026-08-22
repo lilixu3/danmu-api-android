@@ -4,6 +4,7 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 
@@ -170,11 +171,8 @@ internal fun QueuePage(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (viewModel.isDownloading) {
-                        AppGlassButton(
+                        AppGlassDangerButton(
                             onClick = viewModel::pauseDownload,
-                            tint = MaterialTheme.colorScheme.error,
-                            surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
-                            contentColor = MaterialTheme.colorScheme.error
                         ) {
                             Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
@@ -333,7 +331,7 @@ internal fun QueueGroupRow(
                             group.detail,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -432,7 +430,7 @@ internal fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
                     task.detail,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }

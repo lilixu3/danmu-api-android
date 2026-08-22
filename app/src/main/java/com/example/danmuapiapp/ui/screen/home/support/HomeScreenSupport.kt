@@ -3,7 +3,7 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
-import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.AppDialogOption
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 import android.app.Activity
@@ -272,31 +272,28 @@ internal fun NoCoreDialog(
                         resolveCoreVariantSourceText(variant, customRepo, customRepoBranch).isNotBlank()
                 }.forEach { variant ->
                     val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-                    AppGlassSurface(
+                    AppDialogOption(
+                        selected = false,
                         onClick = { onInstall(variant) },
-                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Icon(
+                            variantIcon(variant),
+                            null,
+                            tint = variantAccent(variant),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Icon(
-                                variantIcon(variant),
-                                null,
-                                tint = variantAccent(variant),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(coreDisplayNames.resolve(variant), style = MaterialTheme.typography.bodyLarge)
-                                if (sourceText.isNotBlank()) {
-                                    Text(
-                                        sourceText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                            Text(coreDisplayNames.resolve(variant), style = MaterialTheme.typography.bodyLarge)
+                            if (sourceText.isNotBlank()) {
+                                Text(
+                                    sourceText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -385,29 +382,19 @@ internal fun VariantPickerDialog(
                 val isSelected = variant == currentVariant
                 val variantLabel = coreDisplayNames.resolve(variant)
                 val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-                AppGlassSurface(
+                AppDialogOption(
+                    selected = isSelected,
                     onClick = { if (!isBusy) onSelect(variant) },
                     enabled = !isBusy,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    }
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            variantIcon(variant),
-                            null,
-                            tint = variantAccent(variant),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
+                    Icon(
+                        variantIcon(variant),
+                        null,
+                        tint = variantAccent(variant),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
                             Text(variantLabel, style = MaterialTheme.typography.titleMedium)
                             if (info?.version != null) {
                                 val vText = if (info.hasVersionUpdate && info.availableVersion != null) {
@@ -421,7 +408,9 @@ internal fun VariantPickerDialog(
                                 Text(
                                     vText,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (info.hasVersionUpdate) {
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else if (info.hasVersionUpdate) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -432,11 +421,15 @@ internal fun VariantPickerDialog(
                                 Text(
                                     sourceText,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
                         }
-                        Surface(
+                    Surface(
                             shape = RoundedCornerShape(7.dp),
                             color = when {
                                 isCoreInfoLoading -> MaterialTheme.colorScheme.surfaceContainerHighest
@@ -444,7 +437,7 @@ internal fun VariantPickerDialog(
                                 info?.isInstalled == true -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                                 else -> MaterialTheme.colorScheme.errorContainer
                             }
-                        ) {
+                    ) {
                             Text(
                                 text = when {
                                     isCoreInfoLoading -> "加载中"
@@ -464,14 +457,13 @@ internal fun VariantPickerDialog(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
-                        if (isSelected) {
-                            Icon(
-                                Icons.Rounded.CheckCircle,
-                                null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                    if (isSelected) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
