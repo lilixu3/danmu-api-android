@@ -1,6 +1,9 @@
 package com.example.danmuapiapp.ui.component
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,9 +32,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -39,6 +48,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.danmuapiapp.ui.theme.DialogColorTokens
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
+import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /** Layout contract for the structured application dialogs. */
 enum class AppDialogStyle {
@@ -56,6 +70,59 @@ enum class AppDialogTone {
     Warning,
     Danger,
     Info
+}
+
+private class AppDialogEntry(
+    val onDismissRequest: () -> Unit,
+    val maxWidth: () -> Dp,
+    val modifier: () -> Modifier,
+    val content: @Composable () -> Unit
+)
+
+private class AppDialogHostState {
+    val entries = mutableStateListOf<AppDialogEntry>()
+
+    fun attach(entry: AppDialogEntry) {
+        if (entry !in entries) entries += entry
+    }
+
+    fun detach(entry: AppDialogEntry) {
+        entries -= entry
+    }
+}
+
+private val LocalAppDialogHost = staticCompositionLocalOf<AppDialogHostState?> { null }
+
+/** Keeps liquid dialogs in the same render tree as the content they refract. */
+@Composable
+fun AppDialogHost(content: @Composable () -> Unit) {
+    val state = remember { AppDialogHostState() }
+    val spec = LocalGlassMaterial.current
+    val backdrop = rememberLayerBackdrop()
+
+    CompositionLocalProvider(LocalAppDialogHost provides state) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (spec.enabled) {
+                            Modifier.layerBackdrop(backdrop)
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
+                content()
+            }
+
+            if (spec.enabled) {
+                state.entries.lastOrNull()?.let { entry ->
+                    AppLiquidDialogOverlay(entry = entry, backdrop = backdrop)
+                }
+            }
+        }
+    }
 }
 
 private data class DialogTonePalette(
@@ -278,6 +345,18 @@ private fun AppDialogFrame(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    val host = LocalAppDialogHost.current
+    if (LocalGlassMaterial.current.enabled && host != null) {
+        AppDialogPortal(
+            host = host,
+            onDismissRequest = onDismissRequest,
+            maxWidth = maxWidth,
+            modifier = modifier,
+            content = content
+        )
+        return
+    }
+
     val parentColors = MaterialTheme.colorScheme
     val parentTypography = MaterialTheme.typography
     val parentShapes = MaterialTheme.shapes
@@ -319,6 +398,94 @@ private fun AppDialogFrame(
                     ),
                     content = content
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppDialogPortal(
+    host: AppDialogHostState,
+    onDismissRequest: () -> Unit,
+    maxWidth: Dp,
+    modifier: Modifier,
+    content: @Composable () -> Unit
+) {
+    val dismissState = rememberUpdatedState(onDismissRequest)
+    val maxWidthState = rememberUpdatedState(maxWidth)
+    val modifierState = rememberUpdatedState(modifier)
+    val contentState = rememberUpdatedState(content)
+    val entry = remember(host) {
+        AppDialogEntry(
+            onDismissRequest = { dismissState.value.invoke() },
+            maxWidth = { maxWidthState.value },
+            modifier = { modifierState.value },
+            content = { contentState.value.invoke() }
+        )
+    }
+
+    DisposableEffect(host, entry) {
+        host.attach(entry)
+        onDispose { host.detach(entry) }
+    }
+}
+
+@Composable
+private fun AppLiquidDialogOverlay(
+    entry: AppDialogEntry,
+    backdrop: Backdrop
+) {
+    val parentColors = MaterialTheme.colorScheme
+    val parentTypography = MaterialTheme.typography
+    val parentShapes = MaterialTheme.shapes
+    val darkTheme = LocalAppDarkTheme.current
+    val dialogColors = dialogColorScheme(parentColors, darkTheme)
+    val dimColor = if (darkTheme) {
+        Color(0xFF121212).copy(alpha = 0.56f)
+    } else {
+        Color(0xFF29293A).copy(alpha = 0.23f)
+    }
+
+    BackHandler(onBack = entry.onDismissRequest)
+
+    MaterialTheme(
+        colorScheme = dialogColors,
+        typography = parentTypography,
+        shapes = parentShapes
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(dimColor)
+                .pointerInput(entry) {
+                    detectTapGestures { entry.onDismissRequest() }
+                }
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AppGlassSurface(
+                modifier = entry.modifier()
+                    .widthIn(max = entry.maxWidth())
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight)
+                    .pointerInput(entry) {
+                        detectTapGestures { /* Consume taps inside the modal surface. */ }
+                    },
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f)
+                ),
+                role = AppGlassSurfaceRole.Dialog,
+                backdropOverride = backdrop,
+            ) {
+                CompositionLocalProvider(LocalGlassBackgroundBackdrop provides backdrop) {
+                    entry.content()
+                }
             }
         }
     }

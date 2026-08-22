@@ -11,6 +11,7 @@ import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
 import com.example.danmuapiapp.domain.model.CoreBranchCatalog
 import com.example.danmuapiapp.domain.model.CoreBranchSelections
@@ -65,6 +66,7 @@ data class CompatModeUiState(
     val customRepoBranch: String = "",
     val nightMode: NightModePreference = NightModePreference.FollowSystem,
     val glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
+    val appBackground: AppBackgroundPreference = AppBackgroundPreference(),
     val appDpiOverride: Int = AppAppearancePrefs.APP_DPI_SYSTEM,
     val pendingDependencyRepair: CoreDependencyRepairRequest? = null,
     val branchDialogVariant: ApiVariant? = null,
@@ -168,6 +170,7 @@ class CompatModeViewModel(
             customRepoBranch = graph.settingsRepository.customRepoBranch.value,
             nightMode = graph.settingsRepository.nightMode.value,
             glassMaterial = graph.settingsRepository.glassMaterial.value,
+            appBackground = graph.settingsRepository.appBackground.value,
             appDpiOverride = graph.settingsRepository.appDpiOverride.value,
             pendingDependencyRepair = graph.coreRepository.pendingDependencyRepair.value
         )
@@ -912,6 +915,11 @@ class CompatModeViewModel(
         viewModelScope.launch {
             graph.settingsRepository.glassMaterial.collectLatest { material ->
                 _uiState.update { it.copy(glassMaterial = material) }
+            }
+        }
+        viewModelScope.launch {
+            graph.settingsRepository.appBackground.collectLatest { background ->
+                _uiState.update { it.copy(appBackground = background) }
             }
         }
         viewModelScope.launch {

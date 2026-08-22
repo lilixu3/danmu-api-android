@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -100,6 +101,8 @@ import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.theme.appDangerButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryIconButtonColors
@@ -160,12 +163,11 @@ fun DanmuDownloadScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        FilledIconButton(
+                        AppGlassIconButton(
                             onClick = {
                                 if (inEpisodeDetail) viewModel.backToAnimeList() else onBack()
                             },
-                            colors = primaryActionIconButtonColors(),
-                            modifier = Modifier.size(38.dp)
+                            size = 38.dp
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                         }
@@ -191,10 +193,9 @@ fun DanmuDownloadScreen(
                             )
                         }
                     }
-                    FilledIconButton(
+                    AppGlassIconButton(
                         onClick = onOpenDownloadSettings,
-                        colors = primaryActionIconButtonColors(),
-                        modifier = Modifier.size(38.dp)
+                        size = 38.dp
                     ) {
                         Icon(Icons.Rounded.Settings, "下载设置", Modifier.size(18.dp))
                     }
@@ -229,7 +230,7 @@ fun DanmuDownloadScreen(
                     )
                 }
 
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 10.dp),
@@ -317,7 +318,7 @@ fun DanmuDownloadScreen(
                 val selectedCount = viewModel
                     .visibleEpisodes()
                     .count { viewModel.selectedEpisodeIds.contains(it.episodeId) }
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter),
@@ -351,16 +352,21 @@ fun DanmuDownloadScreen(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (viewModel.isDownloading) {
-                                OutlinedButton(onClick = viewModel::cancelDownload) {
+                                AppGlassButton(
+                                    onClick = viewModel::cancelDownload,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ) {
                                     Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("取消")
                                 }
                             }
-                            Button(
+                            AppGlassButton(
                                 onClick = viewModel::startDownloadSelectedEpisodes,
                                 enabled = !viewModel.isDownloading && selectedCount > 0,
-                                colors = primaryActionButtonColors()
+                                tint = MaterialTheme.colorScheme.primary
                             ) {
                                 Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
@@ -395,7 +401,7 @@ private tailrec fun Context.findActivity(): ComponentActivity? {
 
 @Composable
 internal fun ThrottleHintBanner(hint: String) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f),
@@ -452,7 +458,7 @@ internal fun DownloadPanelCard(
     borderColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = color,

@@ -3,6 +3,10 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppLiquidButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.domain.model.RuntimeListenMode
 
 import android.app.Activity
@@ -67,6 +71,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -149,7 +154,6 @@ import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.screen.home.support.resolveCoreActionButtonText
-import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 import java.net.URI
@@ -216,7 +220,7 @@ internal fun HomeTopHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatusIndicator(status = status, modifier = Modifier.size(12.dp))
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
@@ -333,7 +337,7 @@ internal fun MissionControlHero(
         statusIcon(status)
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
         color = if (isDarkTheme) {
@@ -405,7 +409,7 @@ internal fun MissionControlHero(
                                 )
                             )
                     )
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.size(56.dp),
                         shape = CircleShape,
                         color = if (isDarkTheme) {
@@ -449,7 +453,7 @@ internal fun MissionControlHero(
                     modifier = Modifier.weight(1f),
                     label = "核心",
                     value = variantLabel,
-                    icon = Icons.Rounded.SwapHoriz,
+                    icon = Icons.Rounded.Memory,
                     enabled = !isActionBusy,
                     onClick = onOpenVariantPicker
                 )
@@ -477,7 +481,7 @@ internal fun RuntimePermissionHintCard(
     val showNotification = !notificationReady
     val showBattery = batteryRequired && !batteryReady
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
@@ -560,7 +564,7 @@ private fun PermissionQuickActionRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(10.dp),
             color = accent.copy(alpha = 0.14f)
         ) {
@@ -589,23 +593,19 @@ private fun PermissionQuickActionRow(
             )
         }
         if (ready) {
-            FilledTonalButton(
+            AppGlassButton(
                 onClick = {},
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
+                surfaceColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.28f),
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
             ) {
                 Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(readyText)
             }
         } else {
-            FilledTonalButton(
+            AppGlassButton(
                 onClick = { onClick?.invoke() },
-                shape = RoundedCornerShape(10.dp),
-                colors = appTonalButtonColors()
+                tint = MaterialTheme.colorScheme.primary
             ) {
                 Text(pendingText)
             }
@@ -634,7 +634,7 @@ internal fun SnapshotStrip(
     onEditPort: () -> Unit,
     onCheckCoreUpdate: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         color = if (isDarkTheme) {
@@ -733,7 +733,7 @@ internal fun ServiceRuntimeInfoDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(8.dp),
                         color = statusAccentColor(status).copy(alpha = 0.18f)
                     ) {
@@ -744,7 +744,7 @@ internal fun ServiceRuntimeInfoDialog(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     ) {
@@ -776,7 +776,7 @@ internal fun ServiceRuntimeInfoDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("我知道了")
             }
         }
@@ -789,7 +789,7 @@ internal fun RuntimeInfoItem(
     value: String,
     mono: Boolean = false
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
         border = androidx.compose.foundation.BorderStroke(
@@ -872,7 +872,7 @@ internal fun ActionDeck(
     }
     val serviceActionIsStop = isRunning || isStopping || (isStarting && coreOperationMessage.isNullOrBlank())
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -926,25 +926,24 @@ internal fun ActionDeck(
                     enter = expandHorizontally() + fadeIn(),
                     exit = shrinkHorizontally() + fadeOut()
                 ) {
-                    FilledTonalButton(
+                    val restartEnabled = !isTransitioning
+                    AppLiquidButton(
                         onClick = onRestart,
-                        enabled = !isTransitioning,
-                        modifier = Modifier.height(52.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = if (isDarkTheme) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                            } else {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.98f)
-                            },
-                            contentColor = if (isDarkTheme) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            },
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                        )
+                        enabled = restartEnabled,
+                        height = 52.dp,
+                        surfaceColor = if (restartEnabled) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(
+                                alpha = if (isDarkTheme) 0.28f else 0.42f
+                            )
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.28f)
+                        },
+                        contentColor = if (restartEnabled) {
+                            if (isDarkTheme) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                        }
                     ) {
                         Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -965,17 +964,24 @@ internal fun ActionDeck(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
+                AppLiquidButton(
                     onClick = onOpenVariantPicker,
                     enabled = !isTransitioning,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
+                    surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.24f),
+                    contentColor = if (isTransitioning) {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
                 ) {
                     Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("切换核心")
                 }
-                FilledTonalButton(
+                val dangerousCoreAction = !isCoreInfoLoading &&
+                    (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)
+                AppLiquidButton(
                     onClick = {
                         if (!isCoreInstalled) {
                             onOpenCoreDownload()
@@ -985,11 +991,19 @@ internal fun ActionDeck(
                     },
                     enabled = coreActionEnabled,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = if (!isCoreInfoLoading && (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)) {
-                        appDangerTonalButtonColors()
+                    surfaceColor = if (!coreActionEnabled) {
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.28f)
+                    } else if (dangerousCoreAction) {
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.44f)
                     } else {
-                        appTonalButtonColors()
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.36f)
+                    },
+                    contentColor = if (!coreActionEnabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    } else if (dangerousCoreAction) {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
                     }
                 ) {
                     if (isInstalling || isUpdating) {
@@ -1035,7 +1049,7 @@ internal fun AccessGatewayPanel(
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
     val displayLanIpv6 = maskRuntimeUrl(lanIpv6Url, token, maskedToken, tokenVisible)
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1059,9 +1073,9 @@ internal fun AccessGatewayPanel(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                IconButton(
+                AppGlassIconButton(
                     onClick = onToggleTokenVisible,
-                    modifier = Modifier.size(26.dp)
+                    size = 30.dp
                 ) {
                     Icon(
                         imageVector = if (tokenVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
@@ -1155,7 +1169,7 @@ internal fun GatewayItem(
     onCopy: () -> Unit,
     emphasize: Boolean
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = if (emphasize) {
@@ -1217,13 +1231,10 @@ internal fun GatewayItem(
                     )
                 }
             }
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = onCopy,
-                modifier = Modifier.size(34.dp),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                size = 34.dp,
+                contentColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
             }
@@ -1241,7 +1252,7 @@ internal fun TokenMetricTile(
 ) {
     val displayToken = if (tokenVisible) token.ifBlank { "（未设置）" } else maskedToken
 
-    Surface(
+    AppGlassSurface(
         modifier = modifier.clickable(onClick = onEditToken),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)
@@ -1287,7 +1298,7 @@ internal fun MetricTile(
     } else {
         modifier
     }
-    Surface(
+    AppGlassSurface(
         modifier = containerModifier,
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(
@@ -1352,7 +1363,7 @@ internal fun InfoChip(
     } else {
         modifier
     }
-    Surface(
+    AppGlassSurface(
         modifier = containerModifier,
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(

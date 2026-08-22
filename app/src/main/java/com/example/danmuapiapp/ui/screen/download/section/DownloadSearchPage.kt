@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.download
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -97,6 +98,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
@@ -171,7 +176,7 @@ internal fun SearchDownloadPage(
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                IconButton(onClick = viewModel::searchAnime) {
+                                AppGlassIconButton(onClick = viewModel::searchAnime, size = 34.dp) {
                                     Icon(Icons.Rounded.Search, "搜索")
                                 }
                             }
@@ -367,7 +372,7 @@ internal fun CompactConfigSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                 ) {
@@ -395,7 +400,7 @@ internal fun CompactConfigSection(
                     )
                 }
             }
-            IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
+            AppGlassIconButton(onClick = onToggle, size = 32.dp) {
                 Icon(
                     if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     "展开配置",
@@ -424,18 +429,18 @@ internal fun CompactConfigSection(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AssistChip(onClick = onUseLocal, label = { Text("本机地址") })
-                    AssistChip(onClick = onUseLan, label = { Text("局域网地址") })
+                    AppGlassAssistChip(onClick = onUseLocal, label = { Text("本机地址") })
+                    AppGlassAssistChip(onClick = onUseLan, label = { Text("局域网地址") })
                 }
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     DanmuDownloadFormat.entries.forEach { format ->
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = selectedFormat == format,
                             onClick = { onSelectFormat(format) },
-                            colors = primarySelectionFilterChipColors(),
+                            accent = MaterialTheme.colorScheme.primary,
                             label = { Text(format.label) },
                             leadingIcon = if (selectedFormat == format) {
                                 { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
@@ -454,7 +459,7 @@ internal fun CompactConfigSection(
         }
 
         Spacer(Modifier.height(2.dp))
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.52f)
         ) {
@@ -536,10 +541,9 @@ internal fun AnimeInfoHeader(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            FilledIconButton(
+            AppGlassIconButton(
                 onClick = onBackToSearch,
-                colors = primaryActionIconButtonColors(),
-                modifier = Modifier.size(34.dp)
+                size = 34.dp
             ) {
                 Icon(
                     Icons.AutoMirrored.Rounded.ArrowBack,
@@ -555,17 +559,17 @@ internal fun AnimeInfoHeader(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterChip(
+                AppGlassFilterChip(
                     selected = sourceFilter == null,
                     onClick = { onSelectSource(null) },
-                    colors = primarySelectionFilterChipColors(),
+                    accent = MaterialTheme.colorScheme.primary,
                     label = { Text("全部来源") }
                 )
                 sourceOptions.forEach { source ->
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = sourceFilter == source,
                         onClick = { onSelectSource(source) },
-                        colors = primarySelectionFilterChipColors(),
+                        accent = MaterialTheme.colorScheme.primary,
                         label = { Text(source) },
                         leadingIcon = if (sourceFilter == source) {
                             { Icon(Icons.Rounded.FilterAlt, null, Modifier.size(16.dp)) }
@@ -595,32 +599,32 @@ internal fun AnimeInfoHeader(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            AssistChip(
+            AppGlassAssistChip(
                 onClick = onToggleSelectAll,
                 enabled = !isDownloading,
                 label = { Text("全选/反选") },
                 leadingIcon = { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
             )
-            AssistChip(
+            AppGlassAssistChip(
                 onClick = onSelectFailed,
                 enabled = !isDownloading,
                 label = { Text("选失败") },
                 leadingIcon = { Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(16.dp)) }
             )
-            AssistChip(
+            AppGlassAssistChip(
                 onClick = onSelectUnfinished,
                 enabled = !isDownloading,
                 label = { Text("选未完成") },
                 leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp)) }
             )
-            AssistChip(
+            AppGlassAssistChip(
                 onClick = onClearSelection,
                 enabled = !isDownloading,
                 label = { Text("清空") },
                 leadingIcon = { Icon(Icons.Rounded.ClearAll, null, Modifier.size(16.dp)) }
             )
             if (onRetryFailed != null) {
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = onRetryFailed,
                     enabled = !isDownloading,
                     label = { Text("重试失败") },
@@ -639,12 +643,13 @@ internal fun AnimeEntryRow(
     onClick: () -> Unit
 ) {
     val presentation = buildAnimeSearchResultPresentation(anime)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)),
-        onClick = onClick
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
     ) {
         Row(
             modifier = Modifier
@@ -701,7 +706,7 @@ internal fun AnimeEntryRow(
                     strokeWidth = 2.dp
                 )
             } else {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.padding(top = 2.dp),
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -746,8 +751,10 @@ internal fun EpisodeRow(
         operationStatusColor
     }
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onSelect),
         shape = RoundedCornerShape(14.dp),
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
@@ -761,8 +768,7 @@ internal fun EpisodeRow(
             } else {
                 MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
             }
-        ),
-        onClick = { if (enabled) onSelect() }
+        )
     ) {
         Column(
             modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
@@ -797,7 +803,7 @@ internal fun EpisodeRow(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(999.dp),
                         color = statusColor.copy(alpha = 0.14f)
                     ) {

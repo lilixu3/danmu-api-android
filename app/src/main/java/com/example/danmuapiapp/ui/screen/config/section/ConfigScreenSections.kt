@@ -3,6 +3,9 @@ package com.example.danmuapiapp.ui.screen.config
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
@@ -85,7 +88,7 @@ internal fun VisualEditMode(
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchChange("") }) {
+                        AppGlassIconButton(onClick = { onSearchChange("") }, size = 32.dp) {
                             Icon(Icons.Rounded.Clear, "清除")
                         }
                     }
@@ -98,7 +101,7 @@ internal fun VisualEditMode(
 
         if (isCatalogLoading) {
             item {
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     modifier = Modifier.fillMaxWidth()
@@ -122,7 +125,7 @@ internal fun VisualEditMode(
             }
         } else if (catalogEmpty) {
             item {
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.tertiaryContainer,
                     modifier = Modifier.fillMaxWidth()
@@ -217,7 +220,7 @@ internal fun RawEditMode(
             )
         )
 
-        FilledTonalButton(
+        AppGlassButton(
             onClick = {
                 if (editable) {
                     onSave(text).fold(
@@ -236,7 +239,7 @@ internal fun RawEditMode(
             },
             enabled = hasChanges,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp)
+            tint = MaterialTheme.colorScheme.primary
         ) {
             Icon(if (editable) Icons.Rounded.Save else Icons.Rounded.Lock, null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
@@ -262,7 +265,7 @@ internal fun EnvVarCard(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),

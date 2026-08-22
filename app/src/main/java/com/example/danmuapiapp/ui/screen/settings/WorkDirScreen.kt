@@ -70,6 +70,7 @@ import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.SettingsValueItem
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @Composable
 fun WorkDirScreen(
@@ -196,7 +197,7 @@ fun WorkDirScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            FilledTonalButton(
+                            AppGlassButton(
                                 onClick = {
                                     workDirInput = workDirInfo.customBaseDir?.absolutePath
                                         ?: workDirInfo.normalBaseDir.absolutePath
@@ -205,17 +206,16 @@ fun WorkDirScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                                 enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
-                                shape = RoundedCornerShape(14.dp)
+                                tint = MaterialTheme.colorScheme.primary
                             ) {
                                 Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("手动设置")
                             }
-                            OutlinedButton(
+                            AppGlassButton(
                                 onClick = { workDirPickerLauncher.launch(null) },
                                 modifier = Modifier.weight(1f),
-                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
-                                shape = RoundedCornerShape(14.dp)
+                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies
                             ) {
                                 Icon(Icons.Rounded.FolderOpen, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -224,11 +224,13 @@ fun WorkDirScreen(
                         }
                         if (workDirInfo.isCustomEnabled) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
+                            AppGlassButton(
                                 onClick = viewModel::restoreDefaultWorkDir,
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
-                                shape = RoundedCornerShape(14.dp)
+                                tint = MaterialTheme.colorScheme.error,
+                                surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                                contentColor = MaterialTheme.colorScheme.error
                             ) {
                                 Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -253,12 +255,12 @@ fun WorkDirScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.error
                             )
-                            FilledTonalButton(
+                            AppGlassButton(
                                 onClick = viewModel::openDependencyRepairDialog,
                                 enabled = !viewModel.isApplyingWorkDir &&
                                     !viewModel.isRepairingDependencies,
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp)
+                                tint = MaterialTheme.colorScheme.primary
                             ) {
                                 Icon(Icons.Rounded.Build, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -323,7 +325,7 @@ fun WorkDirScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                AppGlassButton(
                     onClick = {
                         showWorkDirDialog = false
                         val targetPath = workDirInput.trim()
@@ -341,7 +343,7 @@ fun WorkDirScreen(
                 ) { Text("确认切换") }
             },
             dismissButton = {
-                TextButton(onClick = { showWorkDirDialog = false }) { Text("取消") }
+                AppGlassButton(onClick = { showWorkDirDialog = false }) { Text("取消") }
             }
         )
     }
@@ -360,7 +362,7 @@ fun WorkDirScreen(
                 Text("Android 11 及以上系统访问此目录需要“所有文件访问权限”，授权后会自动继续切换。")
             },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showAllFilesAccessDialog = false
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
@@ -382,7 +384,7 @@ fun WorkDirScreen(
                 }) { Text("去授权") }
             },
             dismissButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showAllFilesAccessDialog = false
                     pendingWorkDirPathForPermission = null
                     pendingMigrationForPermission = false

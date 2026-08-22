@@ -35,6 +35,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -106,7 +109,7 @@ internal fun AiApiKeyEditor(
         }
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -115,7 +118,7 @@ internal fun AiApiKeyEditor(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = when {
                     value.isBlank() -> MaterialTheme.colorScheme.surfaceVariant
@@ -169,7 +172,7 @@ internal fun AiApiKeyEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+                AppGlassButton(
                     onClick = { verifyNow(value) },
                     enabled = value.isNotBlank() && !verifyLoading
                 ) {
@@ -197,7 +200,7 @@ internal fun AiApiKeyEditor(
                 label = { Text("AI API Key") },
                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(onClick = { showKey = !showKey }) {
+                    AppGlassIconButton(onClick = { showKey = !showKey }) {
                         Icon(
                             if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
                             "显示/隐藏"
@@ -388,7 +391,7 @@ internal fun BilibiliCookieEditor(
         }
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -397,7 +400,7 @@ internal fun BilibiliCookieEditor(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = when {
                     value.isBlank() -> MaterialTheme.colorScheme.surfaceVariant
@@ -450,12 +453,12 @@ internal fun BilibiliCookieEditor(
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { startQrFlow() }) {
+                AppGlassButton(onClick = { startQrFlow() }) {
                     Icon(Icons.Rounded.QrCode2, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("扫码获取")
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = { verifyNow(value) },
                     enabled = value.isNotBlank() && !verifyLoading
                 ) {
@@ -479,7 +482,7 @@ internal fun BilibiliCookieEditor(
                 label = { Text("Bilibili Cookie") },
                 visualTransformation = if (showCookie) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(onClick = { showCookie = !showCookie }) {
+                    AppGlassIconButton(onClick = { showCookie = !showCookie }) {
                         Icon(
                             if (showCookie) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
                             "显示/隐藏"
@@ -538,10 +541,10 @@ internal fun BilibiliCookieEditor(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { startQrFlow() }) { Text("刷新二维码") }
+                AppGlassButton(onClick = { startQrFlow() }) { Text("刷新二维码") }
             },
             dismissButton = {
-                TextButton(onClick = { closeQrDialog() }) { Text("关闭") }
+                AppGlassButton(onClick = { closeQrDialog() }) { Text("关闭") }
             }
         )
     }
@@ -551,4 +554,3 @@ internal data class CookieSnapshot(
     val keys: List<String>,
     val hasRequired: Boolean
 )
-

@@ -6,6 +6,7 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppModalPanel
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.app.Activity
 import android.content.Context
@@ -190,7 +191,7 @@ internal fun DownloadQueueDialog(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = accentColor.copy(alpha = 0.14f)
             ) {
@@ -223,7 +224,7 @@ internal fun DownloadQueueDialog(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(8.dp),
                 color = when {
                     isQueueDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
@@ -242,7 +243,7 @@ internal fun DownloadQueueDialog(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest
             ) {
@@ -271,7 +272,7 @@ internal fun DownloadQueueDialog(
         )
 
         if (showRunningDetail) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -437,7 +438,7 @@ internal fun DownloadQueueGroupCard(
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -504,7 +505,7 @@ internal fun QueueMetricBadge(
     label: String,
     value: Int
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
@@ -557,7 +558,7 @@ internal fun DownloadQueueTaskRow(task: DanmuDownloadTask) {
     val displaySource = task.source.trim().ifBlank { "unknown" }
     val detailText = task.lastDetail.trim()
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
@@ -578,7 +579,7 @@ internal fun DownloadQueueTaskRow(task: DanmuDownloadTask) {
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(999.dp),
                     color = statusColor.copy(alpha = 0.13f)
                 ) {

@@ -19,8 +19,6 @@ import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,6 +46,8 @@ import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import io.github.libxposed.service.XposedService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -308,7 +308,7 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            Button(onClick = { refresh() }, modifier = Modifier.fillMaxWidth()) {
+            AppGlassButton(onClick = { refresh() }, modifier = Modifier.fillMaxWidth()) {
                 Text("重新检查")
             }
         }
@@ -317,7 +317,7 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun StatusChip(text: String) {
-    AssistChip(
+    AppGlassAssistChip(
         onClick = {},
         label = { Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold) }
     )

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CacheClearCapability
 import com.example.danmuapiapp.domain.model.CacheClearItem
 import com.example.danmuapiapp.domain.model.CacheClearSupport
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 internal data class CacheClearItemPresentation(
     val title: String,
@@ -105,8 +107,18 @@ internal fun CacheClearSelectionToolbar(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            TextButton(onClick = onSelectAll, enabled = selectionEnabled) { Text("全选") }
-            TextButton(onClick = onSelectNone, enabled = selectionEnabled) { Text("全不选") }
+            AppGlassButton(
+                onClick = onSelectAll,
+                enabled = selectionEnabled,
+                modifier = Modifier.height(34.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+            ) { Text("全选") }
+            AppGlassButton(
+                onClick = onSelectNone,
+                enabled = selectionEnabled,
+                modifier = Modifier.height(34.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+            ) { Text("全不选") }
         }
     }
 }
@@ -119,7 +131,7 @@ internal fun CacheClearSelectionList(
     modifier: Modifier = Modifier,
     compact: Boolean = false
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -129,7 +141,7 @@ internal fun CacheClearSelectionList(
             CacheClearItem.entries.forEachIndexed { index, item ->
                 val presentation = cacheClearItemPresentation(item)
                 val selected = item in selectedItems
-                Surface(
+                AppGlassSurface(
                     onClick = { onToggle(item) },
                     enabled = selectionEnabled,
                     color = if (selected) {
@@ -148,7 +160,7 @@ internal fun CacheClearSelectionList(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                             shape = RoundedCornerShape(9.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -210,7 +222,7 @@ internal fun CacheClearCapabilityNotice(
         CacheClearSupport.Unknown -> "无法确认当前核心的按项清理能力，将使用兼容全量清理并锁定全选。"
     }
     val attention = capability.support != CacheClearSupport.Selective
-    Surface(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         color = if (attention) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)

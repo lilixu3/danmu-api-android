@@ -22,6 +22,7 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 @Composable
 fun ServiceConfigScreen(
@@ -99,7 +100,7 @@ fun ServiceConfigScreen(
                         label = { Text("Token") },
                         leadingIcon = { Icon(Icons.Rounded.Key, null) },
                         trailingIcon = {
-                            IconButton(onClick = { showTokenField = !showTokenField }) {
+                            AppGlassIconButton(onClick = { showTokenField = !showTokenField }, size = 34.dp) {
                                 Icon(
                                     if (showTokenField) Icons.Rounded.VisibilityOff
                                     else Icons.Rounded.Visibility,
