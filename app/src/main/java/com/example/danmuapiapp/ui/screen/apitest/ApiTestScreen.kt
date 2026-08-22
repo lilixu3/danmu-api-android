@@ -16,6 +16,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,7 +58,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.lerp
@@ -88,7 +88,13 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
+import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
 import com.example.danmuapiapp.ui.screen.download.buildAnimeSearchResultPresentation
@@ -249,7 +255,7 @@ fun ApiTestScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FilledTonalIconButton(onClick = backAction, modifier = Modifier.size(38.dp)) {
+            AppGlassIconButton(onClick = backAction, size = 38.dp) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -268,16 +274,16 @@ fun ApiTestScreen(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            TextButton(
+            AppGlassButton(
                 onClick = { openLogs(0) },
                 modifier = Modifier.height(38.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp)
             ) {
                 Text("日志", style = MaterialTheme.typography.labelLarge)
             }
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = { showSettingsDialog = true },
-                modifier = Modifier.size(38.dp)
+                size = 38.dp
             ) {
                 Icon(Icons.Rounded.Settings, "连接设置", Modifier.size(18.dp))
             }
@@ -285,7 +291,7 @@ fun ApiTestScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             color = apiTestPanelColor(),
@@ -464,7 +470,7 @@ fun ApiTestScreen(
             title = { Text("请求失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissError) {
+                AppGlassButton(onClick = viewModel::dismissError) {
                     Text("知道了")
                 }
             }
@@ -528,7 +534,7 @@ private fun ConnectionSettingsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismissRequest) {
+            AppGlassButton(onClick = onDismissRequest) {
                 Text("关闭")
             }
         }
@@ -541,12 +547,13 @@ private fun SettingsPresetButton(
     value: String,
     onClick: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)),
-        onClick = onClick
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -646,17 +653,17 @@ private fun ApiLogDialog(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = selectedScope == 0,
                             onClick = { selectedScope = 0 },
                             label = { Text("本次 ${currentLogs.size}") }
                         )
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = selectedScope == 1,
                             onClick = { selectedScope = 1 },
                             label = { Text("全部 ${logs.size}") }
                         )
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = selectedScope == 2,
                             onClick = { selectedScope = 2 },
                             label = { Text("错误/警告 ${problemLogs.size}") }
@@ -668,10 +675,10 @@ private fun ApiLogDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(onClick = onRefresh, modifier = Modifier.weight(1f)) {
+                        AppGlassButton(onClick = onRefresh, modifier = Modifier.weight(1f)) {
                             Text("刷新")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = { onCopy(LogExportFormatter.toClipboardText(visibleLogs)) },
                             enabled = visibleLogs.isNotEmpty(),
                             modifier = Modifier.weight(1f)
@@ -683,12 +690,12 @@ private fun ApiLogDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = { onSave(exportText) },
                             enabled = visibleLogs.isNotEmpty(),
                             modifier = Modifier.weight(1f)
                         ) { Text("导出 txt") }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = { onShare(LogExportFormatter.defaultFileName(), exportText) },
                             enabled = visibleLogs.isNotEmpty(),
                             modifier = Modifier.weight(1f)
@@ -718,7 +725,7 @@ private fun ApiLogDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismissRequest) { Text("关闭") }
+            AppGlassButton(onClick = onDismissRequest) { Text("关闭") }
         }
     )
 }
@@ -731,14 +738,16 @@ private fun ApiLogRow(entry: LogEntry) {
         LogLevel.Warn -> Color(0xFFF59E0B)
         LogLevel.Info -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
     ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
         Text(
             text = buildString {
                 append(timeFormat.format(Date(entry.timestamp)))
@@ -762,6 +771,7 @@ private fun ApiLogRow(entry: LogEntry) {
             maxLines = 6,
             overflow = TextOverflow.Ellipsis
         )
+        }
     }
 }
 
@@ -846,7 +856,7 @@ private fun ApiDebugPane(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         param.options.forEach { option ->
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = paramValues[param.name] == option,
                                 onClick = { paramValues[param.name] = option },
                                 label = { Text(option) }
@@ -894,11 +904,11 @@ private fun ApiDebugPane(
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
-            Button(
+            AppGlassButton(
                 onClick = onSend,
                 enabled = !isLoading,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
+                tint = MaterialTheme.colorScheme.primary
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
@@ -951,7 +961,7 @@ private fun RequestPreviewCard(
         title = "请求预览",
         action = {
             if (curlCommand.isNotBlank()) {
-                IconButton(onClick = onCopyCurl, modifier = Modifier.size(32.dp)) {
+                AppGlassIconButton(onClick = onCopyCurl, size = 32.dp) {
                     Icon(Icons.Rounded.ContentCopy, "复制 CURL", Modifier.size(16.dp))
                 }
             }
@@ -977,10 +987,10 @@ private fun ResponseMetaCard(
         title = "响应",
         action = {
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                IconButton(onClick = onCopyResponse, modifier = Modifier.size(32.dp)) {
+                AppGlassIconButton(onClick = onCopyResponse, size = 32.dp) {
                     Icon(Icons.Rounded.ContentCopy, "复制响应", Modifier.size(16.dp))
                 }
-                IconButton(onClick = onClearResponse, modifier = Modifier.size(32.dp)) {
+                AppGlassIconButton(onClick = onClearResponse, size = 32.dp) {
                     Icon(Icons.Rounded.ClearAll, "清空响应", Modifier.size(16.dp))
                 }
             }
@@ -1018,7 +1028,7 @@ private fun ResponsePreviewCard(
         },
         action = if (canExpand) {
             {
-                TextButton(
+                AppGlassButton(
                     onClick = { expanded = !expanded },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                 ) {
@@ -1146,7 +1156,7 @@ private fun DanmuModeSwitcher(
     selectedTab: Int,
     onTabChange: (Int) -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = apiTestPanelColor(),
@@ -1207,11 +1217,12 @@ private fun DanmuModeTab(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = modifier.height(36.dp),
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = containerColor
+        color = containerColor,
+        contentColor = textColor
     ) {
         Row(
             modifier = Modifier.fillMaxSize(),
@@ -1282,13 +1293,13 @@ private fun DanmuAutoPane(
                 modifier = Modifier.padding(start = 4.dp)
             )
             Spacer(modifier = Modifier.height(6.dp))
-            Button(
+            AppGlassButton(
                 onClick = onAutoMatch,
                 enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape = RoundedCornerShape(16.dp)
+                tint = MaterialTheme.colorScheme.primary
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
@@ -1413,7 +1424,7 @@ private fun DanmuManualPane(
                             }
                         },
                         action = {
-                            TextButton(onClick = onBack) {
+                            AppGlassButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("返回搜索")
@@ -1434,15 +1445,15 @@ private fun DanmuManualPane(
                             trailingIcon = {
                                 val canJump = episodeQuery.trim().toIntOrNull() != null
                                 if (canJump) {
-                                    FilledTonalIconButton(
+                                    AppGlassIconButton(
                                         onClick = {
-                                            val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@FilledTonalIconButton
+                                            val targetEpisode = episodeQuery.trim().toIntOrNull() ?: return@AppGlassIconButton
                                             val targetIndex = episodeCandidates.indexOfFirst { it.episodeNumber == targetEpisode }
                                             if (targetIndex >= 0) {
                                                 scope.launch { listState.animateScrollToItem(targetIndex) }
                                             }
                                         },
-                                        modifier = Modifier.size(32.dp)
+                                        size = 32.dp
                                     ) {
                                         Icon(Icons.Rounded.PlayArrow, "跳转", Modifier.size(16.dp))
                                     }
@@ -1472,7 +1483,7 @@ private fun DanmuManualPane(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
+                        AppGlassSurface(
                             shape = RoundedCornerShape(10.dp),
                             color = apiTestSubPanelColor()
                         ) {
@@ -1548,13 +1559,13 @@ private fun DanmuManualPane(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     val isUrlQuery = ApiTestInputResolver.extractHttpUrl(query) != null
-                    Button(
+                    AppGlassButton(
                         onClick = onSearch,
                         enabled = !isSearchingAnime,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
-                        shape = RoundedCornerShape(16.dp)
+                        tint = MaterialTheme.colorScheme.primary
                     ) {
                         if (isSearchingAnime) {
                             CircularProgressIndicator(
@@ -1594,7 +1605,7 @@ private fun DanmuManualPane(
                             title = if (hasDirectUrlResult) "URL 解析结果" else "搜索结果",
                             action = if (stableKeyword != null && favoriteSupportState != FavoriteSupportState.Unsupported) {
                                 {
-                                    FilledTonalButton(
+                                    AppGlassButton(
                                         onClick = {
                                             if (
                                                 favoriteSupportState == FavoriteSupportState.Failed ||
@@ -1607,7 +1618,8 @@ private fun DanmuManualPane(
                                         },
                                         enabled = !favoriteBusy && favoriteSupportState != FavoriteSupportState.Loading,
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                                        modifier = Modifier.height(36.dp)
+                                        modifier = Modifier.height(36.dp),
+                                        tint = MaterialTheme.colorScheme.primary
                                     ) {
                                         if (favoriteBusy || favoriteSupportState == FavoriteSupportState.Loading) {
                                             CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
@@ -1654,7 +1666,7 @@ private fun DanmuManualPane(
                         title = "没有找到匹配动漫",
                         subtitle = "可以换个关键词，或查看本次日志确认各数据源返回情况。",
                         action = {
-                            TextButton(onClick = onOpenLogs) {
+                            AppGlassButton(onClick = onOpenLogs) {
                                 Text("查看本次日志")
                             }
                         }
@@ -1672,11 +1684,12 @@ private fun AnimeCandidateRow(
     onClick: () -> Unit
 ) {
     val presentation = buildAnimeSearchResultPresentation(anime)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
-        color = apiTestSubPanelColor(),
-        onClick = onClick
+        color = apiTestSubPanelColor()
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -1766,11 +1779,12 @@ private fun EpisodeCandidateRow(
     loading: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        color = apiTestSubPanelColor(),
-        onClick = onClick
+        color = apiTestSubPanelColor()
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1869,7 +1883,7 @@ private fun DanmuMetaBar(
     backLabel: String? = null,
     onBack: (() -> Unit)? = null
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = apiTestPanelColor(),
@@ -1923,7 +1937,7 @@ private fun DanmuMetaBar(
                     )
                 }
                 if (backLabel != null && onBack != null) {
-                    TextButton(
+                    AppGlassButton(
                         onClick = onBack,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                     ) {
@@ -2042,7 +2056,7 @@ private fun DanmuMetricsGrid(
                     }
                 }
                 if (backLabel != null && onBack != null) {
-                    TextButton(
+                    AppGlassButton(
                         onClick = onBack,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                     ) {
@@ -2077,13 +2091,14 @@ private fun DanmuMetricsGrid(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    IconButton(
+                    AppGlassIconButton(
                         onClick = {
                             clipboard.nativeClipboard.setPrimaryClip(
                                 ClipData.newPlainText("弹幕来源地址", insight.sourceUrl)
                             )
                             Toast.makeText(context, "来源地址已复制", Toast.LENGTH_SHORT).show()
-                        }
+                        },
+                        size = 34.dp
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.ContentCopy,
@@ -2093,7 +2108,7 @@ private fun DanmuMetricsGrid(
                     }
                     val canOpenSource = insight.sourceUrl.startsWith("http://", ignoreCase = true) ||
                         insight.sourceUrl.startsWith("https://", ignoreCase = true)
-                    IconButton(
+                    AppGlassIconButton(
                         enabled = canOpenSource,
                         onClick = {
                             runCatching {
@@ -2103,7 +2118,8 @@ private fun DanmuMetricsGrid(
                             }.onFailure {
                                 Toast.makeText(context, "无法打开来源地址", Toast.LENGTH_SHORT).show()
                             }
-                        }
+                        },
+                        size = 34.dp
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
@@ -2166,7 +2182,7 @@ private fun CompactMetricItem(
     icon: ImageVector,
     iconTint: Color
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = apiTestSubPanelColor(),
@@ -2209,22 +2225,13 @@ private fun CompactMetricItem(
 
 @Composable
 private fun DanmuPeakMomentCard(moment: DanmuHighMoment) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = Color.Transparent
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
     ) {
         Row(
             modifier = Modifier
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
-                            apiTestPanelColor()
-                        )
-                    ),
-                    shape = RoundedCornerShape(20.dp)
-                )
                 .padding(14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -2392,7 +2399,7 @@ private fun DanmuHeatmapCard(insight: DanmuInsight) {
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             color = apiTestSubPanelColor(),
@@ -2547,10 +2554,9 @@ private fun DanmuCommentListCard(insight: DanmuInsight) {
             }
             if (canLoadMore && loadMoreVisible) {
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
+                AppGlassButton(
                     onClick = { visibleCount += pageSize },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("加载更多 200 条")
                 }
@@ -2637,7 +2643,7 @@ private fun CompactDanmuFilterButton(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = modifier.height(34.dp),
         shape = RoundedCornerShape(12.dp),
         color = containerColor,
@@ -2671,7 +2677,7 @@ private fun CompactDanmuFilterButton(
 @Composable
 private fun DanmuCommentRow(item: DanmuCommentItem) {
     val color = parseComposeColor(item.colorHex)
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = apiTestCommentRowColor(),
@@ -2768,7 +2774,7 @@ private fun CompactContextBar(
     actionLabel: String,
     onAction: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = apiTestPanelColor(),
@@ -2797,7 +2803,7 @@ private fun CompactContextBar(
                     )
                 }
             }
-            TextButton(
+            AppGlassButton(
                 onClick = onAction,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
             ) {
@@ -2814,7 +2820,7 @@ internal fun WorkbenchCard(
     action: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = apiTestPanelColor(),
@@ -2884,7 +2890,7 @@ internal fun InfoHintCard(
     subtitle: String,
     action: (@Composable RowScope.() -> Unit)? = null
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = apiTestSubPanelColor(),
@@ -2925,7 +2931,7 @@ internal fun LoadingHintCard(
     title: String,
     subtitle: String
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = apiTestSubPanelColor(),
@@ -3008,6 +3014,9 @@ internal fun apiTestSubPanelColor(): Color {
 
 @Composable
 private fun apiTestFieldColor(): Color {
+    if (LocalGlassMaterial.current.enabled && LocalGlassBackgroundBackdrop.current != null) {
+        return Color.Transparent
+    }
     val c = MaterialTheme.colorScheme
     return if (c.background.luminance() < 0.5f) {
         lerp(c.surfaceContainerLow, c.surfaceContainer, 0.68f)

@@ -78,6 +78,11 @@ import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import java.net.URI
 
@@ -138,11 +143,11 @@ fun PushDanmuScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = {
                     if (inEpisodeDetail) viewModel.backToAnimeList() else onBack()
                 },
-                modifier = Modifier.size(38.dp)
+                size = 38.dp
             ) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
             }
@@ -164,7 +169,7 @@ fun PushDanmuScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(onClick = { showSettingsDialog = true }, modifier = Modifier.size(38.dp)) {
+            AppGlassIconButton(onClick = { showSettingsDialog = true }, size = 38.dp) {
                 Icon(Icons.Rounded.Settings, "目标与设置", Modifier.size(20.dp))
             }
         }
@@ -359,7 +364,7 @@ fun PushDanmuScreen(
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
-                TextButton(onClick = { viewModel.clearError() }) {
+                AppGlassButton(onClick = { viewModel.clearError() }) {
                     Text("知道了")
                 }
             }
@@ -382,7 +387,7 @@ private fun SearchControlCard(
     onSearch: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -405,7 +410,7 @@ private fun SearchControlCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = {},
                     label = { Text("仅支持 OK影视") },
                     leadingIcon = { Icon(Icons.Rounded.Verified, null, modifier = Modifier.size(16.dp)) }
@@ -449,7 +454,7 @@ private fun SearchControlCard(
                 )
             }
 
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -479,16 +484,17 @@ private fun SearchControlCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    OutlinedButton(onClick = onOpenSettings) {
+                    AppGlassButton(onClick = onOpenSettings) {
                         Text("更改")
                     }
                 }
             }
 
-            Button(
+            AppGlassButton(
                 onClick = onSearch,
                 enabled = !isSearching,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                tint = MaterialTheme.colorScheme.primary
             ) {
                 if (isSearching) {
                     CircularProgressIndicator(
@@ -528,7 +534,7 @@ private fun DetailControlCard(
     onBackToResults: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -578,7 +584,7 @@ private fun DetailControlCard(
                 )
             }
 
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -609,10 +615,10 @@ private fun DetailControlCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TextButton(onClick = onBackToResults, modifier = Modifier.weight(1f)) {
+                AppGlassButton(onClick = onBackToResults, modifier = Modifier.weight(1f)) {
                     Text("返回搜索结果")
                 }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) {
+                AppGlassButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) {
                     Text("目标与设置")
                 }
             }
@@ -666,7 +672,7 @@ private fun AnimeResultRow(
     loading: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = !loading, onClick = onClick),
@@ -722,7 +728,7 @@ private fun EpisodePushRow(
     pushing: Boolean,
     onPush: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -735,7 +741,7 @@ private fun EpisodePushRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
@@ -762,7 +768,7 @@ private fun EpisodePushRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            FilledTonalButton(onClick = onPush, enabled = !pushing) {
+            AppGlassButton(onClick = onPush, enabled = !pushing, tint = MaterialTheme.colorScheme.primary) {
                 if (pushing) {
                     CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -811,7 +817,7 @@ private fun PushSettingsDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer
@@ -850,12 +856,12 @@ private fun PushSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilledTonalButton(onClick = onFillDefaultTarget, modifier = Modifier.weight(1f)) {
+                        AppGlassButton(onClick = onFillDefaultTarget, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Rounded.Link, null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("默认模板")
                         }
-                        OutlinedButton(onClick = onCopyLocalIp, modifier = Modifier.weight(1f)) {
+                        AppGlassButton(onClick = onCopyLocalIp, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Rounded.Wifi, null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(if (localLanIp.isBlank()) "本机 IP" else localLanIp)
@@ -868,7 +874,7 @@ private fun PushSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = onScan,
                             enabled = !isScanning,
                             modifier = Modifier.weight(1f)
@@ -883,7 +889,7 @@ private fun PushSettingsDialog(
                                 Text("扫描设备")
                             }
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = onClearScan,
                             enabled = !isScanning,
                             modifier = Modifier.weight(1f)
@@ -923,12 +929,12 @@ private fun PushSettingsDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = sourceBase == localBase,
                             onClick = onUseLocal,
                             label = { Text("本机") }
                         )
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = sourceBase == lanBase,
                             onClick = onUseLan,
                             label = { Text("局域网") }
@@ -938,7 +944,7 @@ private fun PushSettingsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("完成")
             }
         }
@@ -950,7 +956,7 @@ private fun DialogSection(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -977,7 +983,7 @@ private fun DeviceChoiceRow(
     onUseDevice: () -> Unit,
     onCopyDevice: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = if (isSelected) {
@@ -1019,7 +1025,7 @@ private fun DeviceChoiceRow(
                     )
                 }
                 if (isSelected) {
-                    AssistChip(onClick = {}, label = { Text("当前目标") })
+                    AppGlassAssistChip(onClick = {}, label = { Text("当前目标") })
                 }
             }
             FlowRow(
@@ -1027,12 +1033,12 @@ private fun DeviceChoiceRow(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (device.isSelf) {
-                    AssistChip(onClick = {}, label = { Text("本机") })
+                    AppGlassAssistChip(onClick = {}, label = { Text("本机") })
                 }
                 if (device.latencyMs != null) {
-                    AssistChip(onClick = {}, label = { Text("${device.latencyMs}ms") })
+                    AppGlassAssistChip(onClick = {}, label = { Text("${device.latencyMs}ms") })
                 }
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = {},
                     label = { Text(device.supportLabel) },
                     leadingIcon = {
@@ -1048,14 +1054,15 @@ private fun DeviceChoiceRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
+                AppGlassButton(
                     onClick = onUseDevice,
                     enabled = device.port9978Open,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    tint = MaterialTheme.colorScheme.primary
                 ) {
                     Text(if (isSelected) "已选中" else "选为目标")
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onCopyDevice,
                     enabled = device.port9978Open,
                     modifier = Modifier.weight(1f)
@@ -1074,7 +1081,7 @@ private fun LoadingCard(
     title: String,
     subtitle: String
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1100,7 +1107,7 @@ private fun EmptyStateCard(
     title: String,
     subtitle: String
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1137,7 +1144,7 @@ private fun ResultCard(
     onCopy: () -> Unit,
     onClear: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1158,10 +1165,10 @@ private fun ResultCard(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = onCopy, modifier = Modifier.size(30.dp)) {
+                    AppGlassIconButton(onClick = onCopy, size = 30.dp) {
                         Icon(Icons.Rounded.ContentCopy, "复制", Modifier.size(16.dp))
                     }
-                    IconButton(onClick = onClear, modifier = Modifier.size(30.dp)) {
+                    AppGlassIconButton(onClick = onClear, size = 30.dp) {
                         Icon(Icons.Rounded.RestartAlt, "清空", Modifier.size(16.dp))
                     }
                 }

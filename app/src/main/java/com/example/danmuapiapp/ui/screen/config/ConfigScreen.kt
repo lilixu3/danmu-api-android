@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.config
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
@@ -44,6 +45,8 @@ import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
 import com.example.danmuapiapp.ui.component.AdminModeRequiredPrompt
 import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.domain.model.EnvType
 import com.example.danmuapiapp.domain.model.EnvVarDef
 import com.google.zxing.BarcodeFormat
@@ -183,9 +186,9 @@ fun ConfigScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = onBack,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                 }
@@ -199,9 +202,9 @@ fun ConfigScreen(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = { viewModel.toggleRawMode() },
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(
                         if (isRawMode) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.Code,
@@ -209,9 +212,9 @@ fun ConfigScreen(
                         Modifier.size(18.dp)
                     )
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = { viewModel.reload() },
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.Rounded.Refresh, "刷新", Modifier.size(18.dp))
                 }
@@ -221,7 +224,7 @@ fun ConfigScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         if (!adminState.isAdminMode) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -252,7 +255,7 @@ fun ConfigScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    TextButton(onClick = onOpenAdminMode) {
+                    AppGlassButton(onClick = onOpenAdminMode) {
                         Text("去开启")
                     }
                 }

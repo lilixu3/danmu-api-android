@@ -35,6 +35,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -81,12 +86,15 @@ internal fun EnvVarEditDialog(
             title = { Text("确认删除") },
             text = { Text("确定要从 .env 中删除 ${def.key} 吗？") },
             confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) {
+                AppGlassButton(
+                    onClick = { showDeleteConfirm = false; onDelete() },
+                    tint = MaterialTheme.colorScheme.error
+                ) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+                AppGlassButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
             }
         )
         return
@@ -330,12 +338,12 @@ internal fun EnvVarEditDialog(
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (currentValue.isNotEmpty()) {
-                    TextButton(onClick = { showDeleteConfirm = true }) {
+                    AppGlassButton(onClick = { showDeleteConfirm = true }) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
                 }
-                TextButton(onClick = onDismiss) { Text("取消") }
-                FilledTonalButton(
+                AppGlassButton(onClick = onDismiss) { Text("取消") }
+                AppGlassButton(
                     onClick = { onSave(value) },
                     enabled = autoMatchValidation.valid
                 ) { Text("保存") }
@@ -352,7 +360,7 @@ private fun StableBooleanValueEditor(
     val checked = value.lowercase(Locale.ROOT).let { it == "true" || it == "1" }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -390,7 +398,7 @@ private fun StableNumberValueEditor(
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("值 (${minValue}-${maxValue})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -401,7 +409,7 @@ private fun StableNumberValueEditor(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilledTonalIconButton(onClick = { setNumber(safeValue - 1) }, enabled = safeValue > minValue) {
+                AppGlassIconButton(onClick = { setNumber(safeValue - 1) }, enabled = safeValue > minValue) {
                     Icon(Icons.Rounded.KeyboardArrowDown, "减少")
                 }
                 Text(
@@ -410,7 +418,7 @@ private fun StableNumberValueEditor(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
-                FilledTonalIconButton(onClick = { setNumber(safeValue + 1) }, enabled = safeValue < maxValue) {
+                AppGlassIconButton(onClick = { setNumber(safeValue + 1) }, enabled = safeValue < maxValue) {
                     Icon(Icons.Rounded.KeyboardArrowUp, "增加")
                 }
             }
@@ -447,7 +455,7 @@ private fun StableSelectValueEditor(
         if (def.options.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 def.options.forEach { option ->
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = value == option,
                         onClick = { onValueChange(option) },
                         label = { Text(option) }
@@ -480,7 +488,7 @@ private fun StableMultiSelectValueEditor(
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("已选择（按顺序保存）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -500,7 +508,7 @@ private fun StableMultiSelectValueEditor(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     selected.forEach { token ->
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = true,
                             onClick = { onValueChange(selected.filterNot { it == token }.joinToString(",")) },
                             label = { Text("$token ×") }
@@ -514,7 +522,7 @@ private fun StableMultiSelectValueEditor(
             Text("可选项（点击添加）", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 available.forEach { option ->
-                    AssistChip(
+                    AppGlassAssistChip(
                         onClick = { onValueChange((selected + option).joinToString(",")) },
                         label = { Text(option) }
                     )
@@ -578,7 +586,7 @@ private fun StableMapValueEditor(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("映射配置", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         rows.forEachIndexed { index, row ->
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -587,7 +595,7 @@ private fun StableMapValueEditor(
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("映射 ${index + 1}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                        IconButton(onClick = {
+                        AppGlassIconButton(onClick = {
                             val next = rows.filterIndexed { i, _ -> i != index }
                             syncRows(if (next.isEmpty()) listOf(StableMapRow()) else next)
                         }) { Icon(Icons.Rounded.DeleteOutline, "删除") }
@@ -611,7 +619,7 @@ private fun StableMapValueEditor(
                 }
             }
         }
-        FilledTonalButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
+        AppGlassButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -640,7 +648,7 @@ private fun StableTextValueEditor(
         visualTransformation = if (def.sensitive && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
         trailingIcon = if (def.sensitive) {
             {
-                IconButton(onClick = onTogglePassword) {
+                AppGlassIconButton(onClick = onTogglePassword) {
                     Icon(if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "切换可见")
                 }
             }
@@ -672,7 +680,7 @@ internal fun OrderedTokenEditor(
     }
     var customInput by remember { mutableStateOf("") }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -696,7 +704,7 @@ internal fun OrderedTokenEditor(
                 )
             } else {
                 selected.forEachIndexed { index, item ->
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -707,7 +715,7 @@ internal fun OrderedTokenEditor(
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
+                            AppGlassSurface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primaryContainer
                             ) {
@@ -733,7 +741,7 @@ internal fun OrderedTokenEditor(
                                     .padding(start = 8.dp)
                             )
 
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index > 0) {
                                         onValueChange(
@@ -745,7 +753,7 @@ internal fun OrderedTokenEditor(
                             ) {
                                 Icon(Icons.Rounded.KeyboardArrowUp, "上移")
                             }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index < selected.lastIndex) {
                                         onValueChange(
@@ -757,7 +765,7 @@ internal fun OrderedTokenEditor(
                             ) {
                                 Icon(Icons.Rounded.KeyboardArrowDown, "下移")
                             }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     onValueChange(selected.filterIndexed { i, _ -> i != index }.joinToString(","))
                                 }
@@ -780,7 +788,7 @@ internal fun OrderedTokenEditor(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     available.forEach { option ->
-                        AssistChip(
+                        AppGlassAssistChip(
                             onClick = { onValueChange((selected + option).joinToString(",")) },
                             label = { Text(option) }
                         )
@@ -800,7 +808,7 @@ internal fun OrderedTokenEditor(
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
-                FilledTonalButton(
+                AppGlassButton(
                     onClick = {
                         val token = customInput.trim()
                         if (token.isNotBlank() && !selected.contains(token)) {
@@ -830,7 +838,7 @@ internal fun MergeSourcePairsEditor(
     }
     var staging by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -854,7 +862,7 @@ internal fun MergeSourcePairsEditor(
                 )
             } else {
                 groups.forEachIndexed { index, group ->
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -879,7 +887,7 @@ internal fun MergeSourcePairsEditor(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index > 0) {
                                         onValueChange(groups.move(index, index - 1).joinToString(","))
@@ -889,7 +897,7 @@ internal fun MergeSourcePairsEditor(
                             ) {
                                 Icon(Icons.Rounded.KeyboardArrowUp, "上移")
                             }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index < groups.lastIndex) {
                                         onValueChange(groups.move(index, index + 1).joinToString(","))
@@ -899,7 +907,7 @@ internal fun MergeSourcePairsEditor(
                             ) {
                                 Icon(Icons.Rounded.KeyboardArrowDown, "下移")
                             }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     onValueChange(groups.filterIndexed { i, _ -> i != index }.joinToString(","))
                                 }
@@ -923,7 +931,7 @@ internal fun MergeSourcePairsEditor(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     staging.forEach { token ->
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = true,
                             onClick = { staging = staging.filterNot { it == token } },
                             label = { Text("$token ×") }
@@ -933,7 +941,7 @@ internal fun MergeSourcePairsEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(
+                AppGlassButton(
                     onClick = {
                         if (staging.isNotEmpty()) {
                             val group = staging.joinToString("&")
@@ -947,7 +955,7 @@ internal fun MergeSourcePairsEditor(
                 ) {
                     Text("添加分组")
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = { staging = emptyList() },
                     enabled = staging.isNotEmpty()
                 ) {
@@ -966,7 +974,7 @@ internal fun MergeSourcePairsEditor(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     allOptions.forEach { option ->
-                        AssistChip(
+                        AppGlassAssistChip(
                             onClick = {
                                 if (!staging.contains(option)) {
                                     staging = staging + option
@@ -1027,7 +1035,7 @@ internal fun TitleMappingTableEditor(
         onValueChange(serializeTitleMappingRows(next))
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -1044,7 +1052,7 @@ internal fun TitleMappingTableEditor(
             )
 
             rows.forEachIndexed { index, row ->
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -1060,19 +1068,19 @@ internal fun TitleMappingTableEditor(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index > 0) syncRows(rows.move(index, index - 1))
                                 },
                                 enabled = index > 0
                             ) { Icon(Icons.Rounded.KeyboardArrowUp, "上移") }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index < rows.lastIndex) syncRows(rows.move(index, index + 1))
                                 },
                                 enabled = index < rows.lastIndex
                             ) { Icon(Icons.Rounded.KeyboardArrowDown, "下移") }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     val next = rows.filterIndexed { i, _ -> i != index }
                                     syncRows(if (next.isEmpty()) listOf(TitleMappingRow()) else next)
@@ -1103,8 +1111,8 @@ internal fun TitleMappingTableEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { syncRows(rows + TitleMappingRow()) }) { Text("新增映射") }
-                OutlinedButton(
+                AppGlassButton(onClick = { syncRows(rows + TitleMappingRow()) }) { Text("新增映射") }
+                AppGlassButton(
                     onClick = {
                         val parsed = parseTitleMappingRows(value)
                         rows = if (parsed.isEmpty()) listOf(TitleMappingRow()) else parsed
@@ -1154,7 +1162,7 @@ internal fun TitlePlatformOffsetTableEditor(
         onValueChange(serializeTitleOffsetRows(next))
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -1172,7 +1180,7 @@ internal fun TitlePlatformOffsetTableEditor(
 
             rows.forEachIndexed { index, row ->
                 val selectedPlatforms = parsePlatformTokens(row.platformsRaw)
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -1188,19 +1196,19 @@ internal fun TitlePlatformOffsetTableEditor(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index > 0) syncRows(rows.move(index, index - 1))
                                 },
                                 enabled = index > 0
                             ) { Icon(Icons.Rounded.KeyboardArrowUp, "上移") }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     if (index < rows.lastIndex) syncRows(rows.move(index, index + 1))
                                 },
                                 enabled = index < rows.lastIndex
                             ) { Icon(Icons.Rounded.KeyboardArrowDown, "下移") }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     val next = rows.filterIndexed { i, _ -> i != index }
                                     syncRows(if (next.isEmpty()) listOf(TitleOffsetRow()) else next)
@@ -1236,7 +1244,7 @@ internal fun TitlePlatformOffsetTableEditor(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
-                            Surface(
+                            AppGlassSurface(
                                 shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1257,7 +1265,7 @@ internal fun TitlePlatformOffsetTableEditor(
                                             verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             selectedPlatforms.forEach { platform ->
-                                                AssistChip(
+                                                AppGlassAssistChip(
                                                     onClick = {},
                                                     label = {
                                                         Text(if (platform.equals("all", true)) "全部" else platform)
@@ -1273,7 +1281,7 @@ internal fun TitlePlatformOffsetTableEditor(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FilledTonalButton(
+                                AppGlassButton(
                                     onClick = {
                                         platformPicker = PlatformPickerState(
                                             rowIndex = index,
@@ -1283,7 +1291,7 @@ internal fun TitlePlatformOffsetTableEditor(
                                 ) {
                                     Text("选择平台")
                                 }
-                                OutlinedButton(
+                                AppGlassButton(
                                     onClick = {
                                         syncRows(rows.replace(index, row.copy(platformsRaw = "")))
                                     },
@@ -1314,8 +1322,8 @@ internal fun TitlePlatformOffsetTableEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { syncRows(rows + TitleOffsetRow()) }) { Text("新增规则") }
-                OutlinedButton(
+                AppGlassButton(onClick = { syncRows(rows + TitleOffsetRow()) }) { Text("新增规则") }
+                AppGlassButton(
                     onClick = {
                         val parsed = parseTitleOffsetRows(value)
                         rows = if (parsed.isEmpty()) listOf(TitleOffsetRow()) else parsed
@@ -1392,7 +1400,7 @@ internal fun PlatformMultiSelectDialog(
                     val hasAll = selected.any { it.equals("all", true) }
                     val canSelect = !hasAll || isAll || isSelected
 
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(10.dp),
                         color = if (isSelected) {
                             MaterialTheme.colorScheme.primaryContainer
@@ -1448,12 +1456,12 @@ internal fun PlatformMultiSelectDialog(
             }
         },
         confirmButton = {
-            FilledTonalButton(onClick = { onConfirm(selected) }) {
+            AppGlassButton(onClick = { onConfirm(selected) }) {
                 Text("确认")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("取消")
             }
         }

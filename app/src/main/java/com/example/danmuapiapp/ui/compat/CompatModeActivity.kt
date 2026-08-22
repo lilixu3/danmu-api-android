@@ -84,7 +84,8 @@ class CompatModeActivity : ComponentActivity() {
 
             DanmuApiTheme(
                 darkTheme = darkTheme,
-                glassMaterial = uiState.glassMaterial
+                glassMaterial = uiState.glassMaterial,
+                appBackground = uiState.appBackground
             ) {
                 val view = LocalView.current
                 val systemBarColor = MaterialTheme.colorScheme.surface.toArgb()

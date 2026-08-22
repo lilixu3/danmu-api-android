@@ -73,6 +73,8 @@ import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @Composable
 fun RuntimeAndDirScreen(
@@ -272,7 +274,7 @@ fun RuntimeAndDirScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 heartbeatPresetMinutes.forEach { preset ->
-                                    AssistChip(
+                                    AppGlassAssistChip(
                                         onClick = {
                                             heartbeatInput = preset.toString()
                                             viewModel.setKeepAliveHeartbeatIntervalMinutes(preset)
@@ -296,7 +298,7 @@ fun RuntimeAndDirScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                TextButton(
+                                AppGlassButton(
                                     onClick = {
                                         val parsed = heartbeatInput.toIntOrNull()
                                         if (parsed == null) {
@@ -420,13 +422,13 @@ fun RuntimeAndDirScreen(
                 Text("将安装 Magisk/KernelSU 模块，开机后以 Root 触发一次启动，不轮询保活，更省电。")
             },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showEnableRootAutoStartDialog = false
                     viewModel.enableRootBootAutoStart()
                 }) { Text("安装并开启") }
             },
             dismissButton = {
-                TextButton(onClick = { showEnableRootAutoStartDialog = false }) { Text("取消") }
+                AppGlassButton(onClick = { showEnableRootAutoStartDialog = false }) { Text("取消") }
             }
         )
     }
@@ -440,7 +442,7 @@ fun RuntimeAndDirScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("你可以仅关闭自启（保留模块），或直接卸载模块。")
-                    TextButton(onClick = {
+                    AppGlassButton(onClick = {
                         showDisableRootAutoStartDialog = false
                         viewModel.disableRootBootAutoStart(uninstallModule = true)
                     }) {
@@ -451,13 +453,13 @@ fun RuntimeAndDirScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showDisableRootAutoStartDialog = false
                     viewModel.disableRootBootAutoStart(uninstallModule = false)
                 }) { Text("仅关闭") }
             },
             dismissButton = {
-                TextButton(onClick = { showDisableRootAutoStartDialog = false }) { Text("取消") }
+                AppGlassButton(onClick = { showDisableRootAutoStartDialog = false }) { Text("取消") }
             }
         )
     }
@@ -469,20 +471,13 @@ fun RuntimeAndDirScreen(
             tone = AppDialogTone.Info,
             title = { Text("保活建议") },
             text = {
-                val guideButtonColors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
-                )
-                val guideButtonBorder = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-                )
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "当前厂商：$keepAliveManufacturer",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = {
                             val opened = NormalModeKeepAliveGuideNavigator.requestIgnoreBatteryOptimization(context) ||
                                 NormalModeKeepAliveGuideNavigator.openAppBatterySettings(context)
@@ -493,52 +488,42 @@ fun RuntimeAndDirScreen(
                                     NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = guideButtonColors,
-                        border = guideButtonBorder
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("电池不受限制")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = { viewModel.postMessage(recentsLockHint) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = guideButtonColors,
-                        border = guideButtonBorder
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("最近任务上锁（可选）")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = {
                             val opened = NormalModeKeepAliveGuideNavigator.openAutoStartSettings(context)
                             if (!opened) {
                                 viewModel.postMessage("未找到自启动管理页，请在系统设置中手动允许本应用自启动")
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = guideButtonColors,
-                        border = guideButtonBorder
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("自启动权限（可选）")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = {
                             val opened = NormalModeKeepAliveGuideNavigator.openVendorGuide(context)
                             if (!opened) {
                                 viewModel.postMessage("无法打开浏览器，请手动访问 dontkillmyapp.com 查看厂商教程")
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = guideButtonColors,
-                        border = guideButtonBorder
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("查看厂商后台教程")
                     }
                     if (HarmonyCompatDetector.isLikelyHarmonyCompat()) {
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = onOpenHarmonyGuide,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = guideButtonColors,
-                            border = guideButtonBorder
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("鸿蒙后台权限引导")
                         }
@@ -551,7 +536,7 @@ fun RuntimeAndDirScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showKeepAliveGuideDialog = false }) { Text("完成") }
+                AppGlassButton(onClick = { showKeepAliveGuideDialog = false }) { Text("完成") }
             }
         )
     }

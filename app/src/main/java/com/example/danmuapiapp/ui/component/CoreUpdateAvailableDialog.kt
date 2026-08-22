@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreRemoteCommit
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 internal fun shouldOfferCoreUpdateActions(
     hasVersionUpdate: Boolean,
@@ -61,7 +63,7 @@ internal fun CoreUpdateAvailableDialog(
         title = { Text("发现核心更新") },
         supportingText = { Text(variantLabel) },
         text = {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f),
@@ -96,7 +98,7 @@ internal fun CoreUpdateAvailableDialog(
             }
 
             remoteCommit?.let { commit ->
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -138,19 +140,19 @@ internal fun CoreUpdateAvailableDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("取消")
             }
         },
         confirmButton = {
-            OutlinedButton(onClick = onShowDetails, shape = RoundedCornerShape(8.dp)) {
+            AppGlassButton(onClick = onShowDetails) {
                 Icon(Icons.Rounded.Visibility, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("更新详情")
             }
         },
         actions = {
-            Button(onClick = onUpdateNow, shape = RoundedCornerShape(8.dp)) {
+            AppGlassButton(onClick = onUpdateNow, tint = MaterialTheme.colorScheme.primary) {
                 Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("立即更新")

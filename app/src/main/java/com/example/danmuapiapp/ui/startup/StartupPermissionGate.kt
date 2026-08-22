@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.startup
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 import android.Manifest
 import android.app.Activity
@@ -85,6 +87,7 @@ import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SettingsHintCard
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
+import com.example.danmuapiapp.ui.theme.GlassBackdropScene
 import com.example.danmuapiapp.ui.screen.home.NormalModeKeepAliveGuideNavigator
 import kotlinx.coroutines.launch
 
@@ -266,48 +269,50 @@ fun StartupPermissionGateHost(
     }
 
     if (dismissedThisLaunch.not() && pendingSteps.isNotEmpty()) {
-        StartupPermissionGateScreen(
-            runtimeState = runtimeState,
-            coreInfoList = coreInfoList,
-            isCoreInfoLoading = isCoreInfoLoading,
-            downloadProgress = downloadProgress,
-            pendingDependencyRepair = pendingDependencyRepair,
-            permissionState = permissionState,
-            pendingSteps = pendingSteps,
-            currentStep = activeStep ?: pendingSteps.first(),
-            selectedRunMode = selectedRunMode,
-            onSelectRunMode = { selectedRunModeKey = it.key },
-            onConfirmRunMode = {
-                if (selectedRunMode == runtimeState.runMode) {
-                    modeAcknowledged = true
-                    StartupPermissionGatePrefs.setModeAcknowledged(context, true)
-                } else {
-                    requestedRunModeKey = selectedRunMode.key
-                    viewModel.switchRunMode(selectedRunMode)
-                }
-            },
-            isRunModeSwitching = viewModel.isRunModeSwitching,
-            selectedVariant = selectedVariant,
-            coreDisplayNames = coreDisplayNames,
-            customRepo = customRepo,
-            customRepoBranch = customRepoBranch,
-            customRepoConfigured = customCoreSource.isValidRepo,
-            onSelectVariant = { selectedVariantKey = it.key },
-            onUseSelectedVariant = { viewModel.chooseVariant(selectedVariant) },
-            onInstallSelectedVariant = { viewModel.installCore(selectedVariant) },
-            onSaveCustomSettings = viewModel::saveCustomCoreSettings,
-            onSkipCoreForNow = {
-                coreDeferredThisLaunch = true
-                dismissedThisLaunch = true
-            },
-            onRefreshPermissionState = {
-                permissionState = readPermissionState(context, runtimeState.runMode)
-            },
-            onContinueHome = {
-                dismissedThisLaunch = true
-            },
-            viewModel = viewModel
-        )
+        GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
+            StartupPermissionGateScreen(
+                runtimeState = runtimeState,
+                coreInfoList = coreInfoList,
+                isCoreInfoLoading = isCoreInfoLoading,
+                downloadProgress = downloadProgress,
+                pendingDependencyRepair = pendingDependencyRepair,
+                permissionState = permissionState,
+                pendingSteps = pendingSteps,
+                currentStep = activeStep ?: pendingSteps.first(),
+                selectedRunMode = selectedRunMode,
+                onSelectRunMode = { selectedRunModeKey = it.key },
+                onConfirmRunMode = {
+                    if (selectedRunMode == runtimeState.runMode) {
+                        modeAcknowledged = true
+                        StartupPermissionGatePrefs.setModeAcknowledged(context, true)
+                    } else {
+                        requestedRunModeKey = selectedRunMode.key
+                        viewModel.switchRunMode(selectedRunMode)
+                    }
+                },
+                isRunModeSwitching = viewModel.isRunModeSwitching,
+                selectedVariant = selectedVariant,
+                coreDisplayNames = coreDisplayNames,
+                customRepo = customRepo,
+                customRepoBranch = customRepoBranch,
+                customRepoConfigured = customCoreSource.isValidRepo,
+                onSelectVariant = { selectedVariantKey = it.key },
+                onUseSelectedVariant = { viewModel.chooseVariant(selectedVariant) },
+                onInstallSelectedVariant = { viewModel.installCore(selectedVariant) },
+                onSaveCustomSettings = viewModel::saveCustomCoreSettings,
+                onSkipCoreForNow = {
+                    coreDeferredThisLaunch = true
+                    dismissedThisLaunch = true
+                },
+                onRefreshPermissionState = {
+                    permissionState = readPermissionState(context, runtimeState.runMode)
+                },
+                onContinueHome = {
+                    dismissedThisLaunch = true
+                },
+                viewModel = viewModel
+            )
+        }
     } else {
         content()
     }
@@ -445,7 +450,6 @@ private fun StartupPermissionGateScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
     ) {
         Scaffold(
             containerColor = Color.Transparent,
@@ -592,7 +596,7 @@ private fun StepProgressCard(
     progress: Float,
     compact: Boolean
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -817,7 +821,7 @@ private fun CoreStepContent(
             }
 
             if (selectedVariant == ApiVariant.Custom) {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(22.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -840,7 +844,7 @@ private fun CoreStepContent(
                             displayNamePlaceholder = customLabel
                         )
                         if (customSettingsDirty) {
-                            TextButton(
+                            AppGlassButton(
                                 onClick = {
                                     val input = customFormState.toInput()
                                     onSaveCustomSettings(
@@ -915,7 +919,7 @@ private fun CoreStepContent(
             )
         )
 
-        TextButton(
+        AppGlassButton(
             onClick = onSkipForNow,
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
@@ -930,7 +934,7 @@ private fun DownloadProgressCard(
     compact: Boolean
 ) {
     val percentText = progress.progress?.let { "${(it * 100f).toInt().coerceIn(0, 100)}%" } ?: "处理中"
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -997,7 +1001,7 @@ private fun DependencyStepContent(
             compact = compact
         )
 
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1051,7 +1055,7 @@ private fun DependencyStepContent(
             )
         )
 
-        TextButton(
+        AppGlassButton(
             onClick = onSkipForNow,
             enabled = !isRepairing,
             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -1213,7 +1217,7 @@ private fun SetupChoiceCard(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
@@ -1287,7 +1291,7 @@ private fun SetupNoticeCard(
     summary: String,
     compact: Boolean
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1332,7 +1336,7 @@ private fun PermissionStepCard(
     helper: String,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,

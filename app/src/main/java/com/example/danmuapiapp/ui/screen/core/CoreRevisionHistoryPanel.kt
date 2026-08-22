@@ -64,6 +64,10 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppModalPanel
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -137,10 +141,12 @@ internal fun CoreRevisionHistoryPanel(
                 Text("将用提交 ${revision.shortSha} 替换当前核心。运行中的对应核心会先安全停止，完成后自动重启。")
             },
             confirmButton = {
-                Button(onClick = viewModel::confirmRollback) { Text("确认回退") }
+                AppGlassPrimaryButton(onClick = viewModel::confirmRollback) {
+                    Text("确认回退")
+                }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::cancelRollbackRequest) { Text("取消") }
+                AppGlassButton(onClick = viewModel::cancelRollbackRequest) { Text("取消") }
             }
         )
     }
@@ -160,11 +166,11 @@ private fun RevisionHeader(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (onBack != null) {
-            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+            AppGlassIconButton(onClick = onBack, size = 40.dp) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回提交列表")
             }
         } else {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.size(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.primaryContainer
@@ -186,7 +192,7 @@ private fun RevisionHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+        AppGlassIconButton(onClick = onClose, size = 40.dp) {
             Icon(Icons.Rounded.Close, "关闭")
         }
     }
@@ -224,7 +230,7 @@ private fun RevisionList(
             singleLine = true,
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = {
-                IconButton(onClick = onSearch, enabled = !isLoading) {
+                AppGlassIconButton(onClick = onSearch, enabled = !isLoading, size = 34.dp) {
                     Icon(Icons.Rounded.Search, "执行 GitHub 提交搜索")
                 }
             },
@@ -271,20 +277,20 @@ private fun RevisionList(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            OutlinedButton(
+            AppGlassButton(
                 onClick = onPreviousPage,
                 enabled = !isLoading && page > 1,
-                shape = RoundedCornerShape(8.dp)
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
             ) {
                 Icon(Icons.AutoMirrored.Rounded.NavigateBefore, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("上一页")
             }
             Text("第 $page 页", style = MaterialTheme.typography.labelLarge)
-            OutlinedButton(
+            AppGlassButton(
                 onClick = onNextPage,
                 enabled = !isLoading && hasNextPage,
-                shape = RoundedCornerShape(8.dp)
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
             ) {
                 Text("下一页")
                 Spacer(Modifier.width(4.dp))
@@ -312,7 +318,7 @@ private fun RevisionRow(
     LaunchedEffect(revision.commitSha) {
         onVisible()
     }
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onOpen(revision) },
@@ -325,7 +331,7 @@ private fun RevisionRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(6.dp),
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
@@ -349,7 +355,10 @@ private fun RevisionRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            OutlinedButton(onClick = { onRollback(revision) }, shape = RoundedCornerShape(8.dp)) {
+            AppGlassButton(
+                onClick = { onRollback(revision) },
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
+            ) {
                 Icon(Icons.Rounded.Restore, null, Modifier.size(17.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("回退")
@@ -370,6 +379,13 @@ private fun RevisionDetails(
     val expandedFiles = remember(revision.commitSha) {
         mutableStateMapOf<String, Boolean>()
     }
+    val commitBody = remember(revision.message) {
+        revision.message
+            .lineSequence()
+            .drop(1)
+            .joinToString("\n")
+            .trim()
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         when {
             isLoading -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -388,6 +404,11 @@ private fun RevisionDetails(
                         revision = revision,
                         isVersionLoading = isVersionLoading
                     )
+                }
+                if (commitBody.isNotBlank()) {
+                    item(key = "commit-description", contentType = "revision-description") {
+                        RevisionCommitDescription(commitBody)
+                    }
                 }
                 item(key = "commit-metrics", contentType = "revision-metrics") {
                     RevisionDiffMetrics(details = details)
@@ -408,6 +429,7 @@ private fun RevisionDetails(
                     CoreFileDiff(
                         file = file,
                         expanded = expandedFiles[file.path] == true,
+                        backgroundAlpha = 0.84f,
                         onExpandedChange = { expanded ->
                             if (expanded) {
                                 expandedFiles[file.path] = true
@@ -425,7 +447,10 @@ private fun RevisionDetails(
             modifier = Modifier.fillMaxWidth().padding(14.dp),
             horizontalArrangement = Arrangement.End
         ) {
-            Button(onClick = onRollback, enabled = !isLoading) {
+            AppGlassPrimaryButton(
+                onClick = onRollback,
+                enabled = !isLoading
+            ) {
                 Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(7.dp))
                 Text("回退到此版本")
@@ -439,54 +464,70 @@ private fun RevisionCommitSummary(
     revision: CoreRevision,
     isVersionLoading: Boolean
 ) {
-    val body = revision.message
-        .lineSequence()
-        .drop(1)
-        .joinToString("\n")
-        .trim()
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                formatRevisionVersion(revision, isVersionLoading),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(revision.shortSha, style = MaterialTheme.typography.labelSmall)
-        }
-        Text(revision.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text(
-            "${revision.author} · ${formatCommitTime(revision.committedAt)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (body.isNotBlank()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Text(
-                        "提交说明",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(body, style = MaterialTheme.typography.bodyMedium)
-                }
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    formatRevisionVersion(revision, isVersionLoading),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(revision.shortSha, style = MaterialTheme.typography.labelSmall)
             }
+            Text(revision.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${revision.author} · ${formatCommitTime(revision.committedAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RevisionCommitDescription(body: String) {
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        glassAlpha = 0.78f
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                "提交说明",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(body, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
 private fun RevisionDiffMetrics(details: CoreRevisionDetails) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        DiffMetric(Icons.Rounded.Code, "${details.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
-        DiffMetric(Icons.Rounded.Add, "+${details.additions}", diffAddedColor())
-        DiffMetric(Icons.Rounded.DeleteOutline, "-${details.deletions}", MaterialTheme.colorScheme.error)
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DiffMetric(Icons.Rounded.Code, "${details.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
+            DiffMetric(Icons.Rounded.Add, "+${details.additions}", diffAddedColor())
+            DiffMetric(Icons.Rounded.DeleteOutline, "-${details.deletions}", MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -502,13 +543,15 @@ internal fun DiffMetric(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 internal fun CoreFileDiff(
     file: CoreRevisionFileChange,
     expanded: Boolean,
+    backgroundAlpha: Float? = null,
     onExpandedChange: (Boolean) -> Unit
 ) {
     val addedColor = diffAddedColor()
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        glassAlpha = backgroundAlpha ?: if (expanded) 0.78f else null,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column {

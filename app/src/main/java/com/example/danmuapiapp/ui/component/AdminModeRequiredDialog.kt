@@ -5,8 +5,8 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 internal sealed interface AdminModeRequiredTarget {
     data class ConfigItem(val key: String) : AdminModeRequiredTarget
@@ -66,17 +66,18 @@ internal fun AdminModeRequiredDialog(
             )
         },
         confirmButton = {
-            TextButton(
+            AppGlassButton(
                 onClick = {
                     onDismiss()
                     onOpenAdminMode()
-                }
+                },
+                tint = MaterialTheme.colorScheme.primary
             ) {
                 Text(prompt.confirmText)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("取消")
             }
         }

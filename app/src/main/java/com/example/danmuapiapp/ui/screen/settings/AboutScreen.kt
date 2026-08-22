@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 @Composable
 fun AboutScreen(
@@ -136,23 +138,23 @@ fun AboutScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                         ) {
-                            OutlinedButton(
+                            AppGlassButton(
                                 onClick = { activity?.let { viewModel.openAppUpdateReleasePage(it) } }
                             ) {
                                 Text("查看详情")
                             }
                             if (viewModel.isDownloadingAppUpdate) {
-                                Button(onClick = {}, enabled = false) {
+                                AppGlassButton(onClick = {}, enabled = false) {
                                     Text("下载中 ${viewModel.appUpdateDownloadPercent}%")
                                 }
                             } else if (viewModel.downloadedAppUpdate != null) {
-                                Button(
+                                AppGlassButton(
                                     onClick = { activity?.let { viewModel.installDownloadedAppUpdate(it) } }
                                 ) {
                                     Text("安装更新")
                                 }
                             } else {
-                                Button(onClick = { viewModel.startInAppUpdateDownload() }) {
+                                AppGlassButton(onClick = { viewModel.startInAppUpdateDownload() }, tint = MaterialTheme.colorScheme.primary) {
                                     Text("下载更新")
                                 }
                             }
@@ -311,7 +313,7 @@ private fun GuideSection(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.size(40.dp),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),

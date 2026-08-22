@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -141,12 +142,13 @@ internal fun ApiTestExportCard(
         }
 
         Spacer(Modifier.height(8.dp))
-        Button(
+        AppGlassButton(
             onClick = { onExport(insight, selectedFormat) },
             enabled = !exporting,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
+                .height(50.dp),
+            tint = MaterialTheme.colorScheme.primary
         ) {
             if (exporting) {
                 CircularProgressIndicator(

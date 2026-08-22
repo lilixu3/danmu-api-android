@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -69,6 +71,8 @@ import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsValueItem
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import kotlinx.coroutines.launch
 
@@ -171,21 +175,19 @@ fun DownloadSettingsScreen(
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
+                    AppGlassButton(
                         onClick = { picker.launch(null) },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = primaryActionButtonColors(),
-                        shape = RoundedCornerShape(14.dp)
+                        tint = MaterialTheme.colorScheme.primary
                     ) {
                         Icon(Icons.Rounded.FolderOpen, null, Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("选择下载目录")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::syncExistingFiles,
                         enabled = settings.saveTreeUri.isNotBlank() && !viewModel.isSyncingDirectory,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         if (viewModel.isSyncingDirectory) {
                             CircularProgressIndicator(
@@ -198,11 +200,13 @@ fun DownloadSettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (viewModel.isSyncingDirectory) "正在扫描已有弹幕" else "扫描已有弹幕")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::clearSaveTree,
                         enabled = settings.saveTreeUri.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
+                        tint = MaterialTheme.colorScheme.error,
+                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                        contentColor = MaterialTheme.colorScheme.error
                     ) {
                         Icon(Icons.Rounded.ClearAll, null, Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -224,10 +228,9 @@ fun DownloadSettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DanmuDownloadFormat.entries.forEach { format ->
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = settings.format() == format,
                                 onClick = { viewModel.setDefaultFormat(format) },
-                                colors = primarySelectionFilterChipColors(),
                                 label = { Text(format.label) },
                                 leadingIcon = if (settings.format() == format) {
                                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
@@ -242,10 +245,9 @@ fun DownloadSettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DownloadConflictPolicy.entries.forEach { policy ->
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = settings.policy() == policy,
                                 onClick = { viewModel.setConflictPolicy(policy) },
-                                colors = primarySelectionFilterChipColors(),
                                 label = { Text(policy.label) },
                                 leadingIcon = if (settings.policy() == policy) {
                                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
@@ -269,10 +271,9 @@ fun DownloadSettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DownloadThrottlePreset.entries.forEach { preset ->
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = throttlePreset == preset,
                                 onClick = { viewModel.setThrottlePreset(preset) },
-                                colors = primarySelectionFilterChipColors(),
                                 label = { Text(preset.label) },
                                 leadingIcon = if (throttlePreset == preset) {
                                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
@@ -280,7 +281,7 @@ fun DownloadSettingsScreen(
                             )
                         }
                     }
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -312,7 +313,7 @@ fun DownloadSettingsScreen(
                         }
                     }
                     if (throttlePreset == DownloadThrottlePreset.Custom) {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -336,10 +337,9 @@ fun DownloadSettingsScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                OutlinedButton(
+                                AppGlassButton(
                                     onClick = { showCustomEditor = true },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(14.dp)
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text("编辑自定义参数")
                                 }
@@ -365,10 +365,9 @@ fun DownloadSettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         DANMU_FILE_NAME_TEMPLATE_PRESETS.forEach { preset ->
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = templateInput.trim() == preset.template,
                                 onClick = { templateInput = preset.template },
-                                colors = primarySelectionFilterChipColors(),
                                 label = { Text(preset.name) },
                                 leadingIcon = if (templateInput.trim() == preset.template) {
                                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
@@ -394,30 +393,28 @@ fun DownloadSettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
+                        AppGlassButton(
                             onClick = { viewModel.setFileNameTemplate(templateInput) },
                             modifier = Modifier.weight(1f),
-                            colors = primaryActionButtonColors(),
-                            shape = RoundedCornerShape(14.dp)
+                            tint = MaterialTheme.colorScheme.primary
                         ) {
                             Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("保存模板")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = {
                                 templateInput = DanmuDownloadSettings().fileNameTemplate
                                 viewModel.setFileNameTemplate(templateInput)
                             },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp)
+                            modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("恢复默认")
                         }
                     }
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -636,10 +633,9 @@ private fun CustomThrottleEditorDialog(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onResetDefault,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
@@ -648,16 +644,16 @@ private fun CustomThrottleEditorDialog(
             }
         },
         dismissButton = {
-            OutlinedButton(
+            AppGlassButton(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(12.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) { Text("取消") }
         },
         confirmButton = {
-            Button(
+            AppGlassButton(
                 onClick = onSave,
-                colors = primaryActionButtonColors(),
-                shape = RoundedCornerShape(12.dp)
+                tint = MaterialTheme.colorScheme.primary,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -666,13 +662,3 @@ private fun CustomThrottleEditorDialog(
         }
     )
 }
-
-@Composable
-private fun primaryActionButtonColors() = appPrimaryButtonColors()
-
-@Composable
-private fun primarySelectionFilterChipColors() = FilterChipDefaults.filterChipColors(
-    selectedContainerColor = MaterialTheme.colorScheme.primary,
-    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
-)

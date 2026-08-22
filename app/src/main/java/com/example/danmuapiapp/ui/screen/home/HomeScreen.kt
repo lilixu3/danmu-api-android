@@ -167,6 +167,9 @@ import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.StatusIndicator
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
@@ -688,7 +691,7 @@ fun HomeScreen(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(18.dp),
                         color = MaterialTheme.colorScheme.errorContainer
@@ -919,21 +922,14 @@ fun HomeScreen(
                     )
                     availableModes.forEach { mode ->
                         val selected = pendingRunModeTarget == mode
-                        OutlinedCard(
+                        AppGlassSurface(
                             onClick = { pendingRunModeTarget = mode },
                             modifier = Modifier.fillMaxWidth(),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant
-                            ),
-                            colors = CardDefaults.outlinedCardColors(
-                                containerColor = if (selected) {
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.36f)
-                                } else {
-                                    MaterialTheme.colorScheme.surface
-                                }
-                            )
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.36f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -965,10 +961,10 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                AppGlassButton(
                     enabled = !isHeroChipBusy && pendingRunModeTarget != null,
                     onClick = {
-                        val target = pendingRunModeTarget ?: return@TextButton
+                        val target = pendingRunModeTarget ?: return@AppGlassButton
                         activeOverlay = null
                         pendingRunModeTarget = null
                         viewModel.switchRunModeQuick(target)
@@ -978,7 +974,7 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     activeOverlay = null
                     pendingRunModeTarget = null
                 }) {
@@ -1010,12 +1006,12 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = viewModel::openForegroundAppUpdateMethodDialog) {
+                AppGlassButton(onClick = viewModel::openForegroundAppUpdateMethodDialog, tint = MaterialTheme.colorScheme.primary) {
                     Text("现在更新")
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissForegroundAppUpdatePrompt) {
+                AppGlassButton(onClick = viewModel::dismissForegroundAppUpdatePrompt) {
                     Text("今日不提醒")
                 }
             }
@@ -1082,25 +1078,24 @@ fun HomeScreen(
             title = { Text("选择更新方式") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilledTonalButton(
+                    AppGlassButton(
                         onClick = viewModel::startInAppUpdateDownload,
                         enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
+                        tint = MaterialTheme.colorScheme.primary
                     ) {
                         Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("应用内下载")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = {
                             val alive = activity
                             if (alive != null) {
                                 viewModel.openBrowserDownload(alive)
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1121,7 +1116,7 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissForegroundAppUpdateMethodDialog) {
+                AppGlassButton(onClick = viewModel::dismissForegroundAppUpdateMethodDialog) {
                     Text("取消")
                 }
             }
@@ -1173,7 +1168,7 @@ fun HomeScreen(
                         "大小：${formatBytes(apk.sizeBytes)}",
                         style = MaterialTheme.typography.bodySmall
                     )
-                    TextButton(onClick = {
+                    AppGlassButton(onClick = {
                         val alive = activity
                         if (alive != null) {
                             viewModel.openDownloadsApp(alive)
@@ -1186,7 +1181,7 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     val alive = activity
                     if (alive != null) {
                         viewModel.installDownloadedAppUpdate(alive)
@@ -1196,7 +1191,7 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissInstallAppUpdateDialog) { Text("稍后") }
+                AppGlassButton(onClick = viewModel::dismissInstallAppUpdateDialog) { Text("稍后") }
             }
         )
     }
@@ -1264,7 +1259,7 @@ fun HomeScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissCacheAdminRequiredDialog) {
+                AppGlassButton(onClick = viewModel::dismissCacheAdminRequiredDialog) {
                     Text("知道了")
                 }
             }
@@ -1517,12 +1512,11 @@ private fun AnnouncementCenterDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (showSnoozeAction) {
-                    FilledTonalIconButton(
+                    AppGlassIconButton(
                         onClick = onSnooze,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
-                            contentColor = tonePalette.accent
-                        )
+                        size = 38.dp,
+                        surfaceColor = tonePalette.statusTint.copy(alpha = 0.3f),
+                        contentColor = tonePalette.accent
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.NotificationsOff,
@@ -1530,12 +1524,11 @@ private fun AnnouncementCenterDialog(
                         )
                     }
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = onMarkRead,
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = tonePalette.statusTint.copy(alpha = 0.6f),
-                        contentColor = tonePalette.accent
-                    )
+                    size = 38.dp,
+                    surfaceColor = tonePalette.statusTint.copy(alpha = 0.3f),
+                    contentColor = tonePalette.accent
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.CheckCircle,
@@ -1543,7 +1536,7 @@ private fun AnnouncementCenterDialog(
                     )
                 }
                 if (!announcement.forcePopup) {
-                    IconButton(onClick = onClose) {
+                    AppGlassIconButton(onClick = onClose, size = 38.dp) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
                             contentDescription = "关闭"
@@ -1626,7 +1619,7 @@ private fun AnnouncementCenterDialog(
 
             // Preview text card
             if (dialogBodyText.isNotBlank()) {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     color = tonePalette.statusTint.copy(alpha = 0.36f),
@@ -1656,9 +1649,9 @@ private fun AnnouncementCenterDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 secondaryAction?.let { action ->
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = onSecondaryAction,
-                        shape = RoundedCornerShape(12.dp)
+                        surfaceColor = colorScheme.surfaceContainerHighest.copy(alpha = 0.24f)
                     ) {
                         Icon(
                             Icons.AutoMirrored.Rounded.OpenInNew,
@@ -1671,10 +1664,9 @@ private fun AnnouncementCenterDialog(
                 }
 
                 primaryAction?.let { action ->
-                    Button(
+                    AppGlassButton(
                         onClick = onPrimaryAction,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = appPrimaryButtonColors()
+                        tint = tonePalette.accent
                     ) {
                         Icon(
                             Icons.AutoMirrored.Rounded.OpenInNew,
@@ -1711,21 +1703,15 @@ private fun UnreadAnnouncementListDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 announcements.forEachIndexed { index, announcement ->
-                    OutlinedCard(
-                        onClick = { onOpenAnnouncement(announcement) },
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(
-                            1.dp,
-                            if (index == 0) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)
-                            else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        colors = CardDefaults.outlinedCardColors(
-                            containerColor = if (index == 0) {
-                                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
-                            } else {
-                                MaterialTheme.colorScheme.surface
-                            }
-                        )
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (index == 0) {
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.34f)
+                        },
+                        onClick = { onOpenAnnouncement(announcement) }
                     ) {
                         Column(
                             modifier = Modifier
@@ -1784,7 +1770,7 @@ private fun UnreadAnnouncementListDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onAcknowledgeAll) {
+            AppGlassButton(onClick = onAcknowledgeAll) {
                 Icon(
                     imageVector = Icons.Rounded.DoneAll,
                     contentDescription = null,
@@ -1795,7 +1781,7 @@ private fun UnreadAnnouncementListDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismissRequest) {
+            AppGlassButton(onClick = onDismissRequest) {
                 Text("稍后查看")
             }
         }

@@ -23,6 +23,7 @@ import androidx.navigation.navArgument
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.ui.component.GlassBottomNavigationBar
 import com.example.danmuapiapp.ui.component.LocalFloatingBottomBarVisible
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.navigation.CoreRoute
 import com.example.danmuapiapp.ui.navigation.Screen
 import com.example.danmuapiapp.ui.navigation.SettingsRoute
@@ -54,7 +55,7 @@ import com.example.danmuapiapp.ui.screen.settings.VideoShellInjectionSettingsScr
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
-import com.example.danmuapiapp.ui.theme.GlassAppBackground
+import com.example.danmuapiapp.ui.theme.GlassBackdropScene
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -92,17 +93,14 @@ fun DanmuApiApp(
 
 @Composable
 private fun StartupWarmupOverlay(title: String, detail: String) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             contentAlignment = Alignment.Center
         ) {
-            Surface(
+            AppGlassSurface(
                 shape = MaterialTheme.shapes.large,
                 tonalElevation = 6.dp,
                 shadowElevation = 8.dp,
@@ -158,7 +156,7 @@ private fun DanmuApiMainContent() {
     val currentDestination = navBackStackEntry?.destination
     val showBottomBar = currentDestination.isTopLevelDestination()
     val recordBackdrop = showBottomBar && LocalGlassMaterial.current.enabled
-    val backdrop = rememberLayerBackdrop()
+    val pageBackdrop = rememberLayerBackdrop()
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -166,18 +164,18 @@ private fun DanmuApiMainContent() {
                 .fillMaxSize()
                 .then(
                     if (recordBackdrop) {
-                        Modifier.layerBackdrop(backdrop)
+                        Modifier.layerBackdrop(pageBackdrop)
                     } else {
                         Modifier
                     }
                 )
         ) {
-            GlassAppBackground(modifier = Modifier.matchParentSize())
-            CompositionLocalProvider(
-                LocalContentColor provides MaterialTheme.colorScheme.onBackground,
-                LocalFloatingBottomBarVisible provides showBottomBar
-            ) {
-                NavHost(
+            GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
+                CompositionLocalProvider(
+                    LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+                    LocalFloatingBottomBarVisible provides showBottomBar
+                ) {
+                    NavHost(
                     navController = navController,
                     startDestination = Screen.Home.route,
                     modifier = Modifier
@@ -348,12 +346,13 @@ private fun DanmuApiMainContent() {
             composable(ToolRoute.Diagnostics) {
                 DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
+                    }
                 }
             }
         }
         if (showBottomBar) {
             GlassBottomNavigationBar(
-                backdrop = backdrop,
+                backdrop = pageBackdrop,
                 currentDestination = currentDestination,
                 onNavigate = { screen ->
                     navController.navigateToTopLevelRoute(screen.route)

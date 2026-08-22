@@ -5,6 +5,10 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -190,7 +194,7 @@ fun DeviceAccessScreen(
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissError) { Text("知道了") }
+                AppGlassButton(onClick = viewModel::dismissError) { Text("知道了") }
             }
         )
     }
@@ -212,9 +216,9 @@ private fun HeaderBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = onBack,
-                modifier = Modifier.size(36.dp)
+                size = 36.dp
             ) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
             }
@@ -228,10 +232,10 @@ private fun HeaderBar(
             }
         }
 
-        FilledTonalIconButton(
+        AppGlassIconButton(
             onClick = onRefresh,
             enabled = !refreshing && !busy,
-            modifier = Modifier.size(36.dp)
+            size = 36.dp
         ) {
             if (refreshing) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -247,7 +251,7 @@ private fun GuideCard(
     adminEnabled: Boolean,
     onOpenAdminMode: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -265,9 +269,10 @@ private fun GuideCard(
             )
             if (!adminEnabled) {
                 Spacer(modifier = Modifier.height(2.dp))
-                FilledTonalButton(
+                AppGlassButton(
                     onClick = onOpenAdminMode,
-                    shape = RoundedCornerShape(10.dp)
+                    tint = MaterialTheme.colorScheme.primary,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
                 ) {
                     Icon(Icons.Rounded.AdminPanelSettings, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -287,7 +292,7 @@ private fun BlacklistSwitchCard(
     onCheckedChange: (Boolean) -> Unit
 ) {
     val enabled = snapshot.config.mode == DeviceAccessMode.Blacklist
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -328,9 +333,9 @@ private fun BlacklistSwitchCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(onClick = {}, label = { Text("访问设备 ${snapshot.trackedDevices}") })
-                AssistChip(onClick = {}, label = { Text("黑名单 ${snapshot.blacklistCount}") })
-                AssistChip(onClick = {}, label = { Text("累计拦截 ${snapshot.totalBlockedRequests}") })
+                AppGlassAssistChip(onClick = {}, label = { Text("访问设备 ${snapshot.trackedDevices}") })
+                AppGlassAssistChip(onClick = {}, label = { Text("黑名单 ${snapshot.blacklistCount}") })
+                AppGlassAssistChip(onClick = {}, label = { Text("累计拦截 ${snapshot.totalBlockedRequests}") })
             }
         }
     }
@@ -346,7 +351,7 @@ private fun ActionCard(
     onScanLan: () -> Unit,
     onHideLan: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -360,44 +365,32 @@ private fun ActionCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
+                AppGlassButton(
                     onClick = onScanLan,
                     enabled = !refreshing && !busy,
-                    colors = primaryActionButtonColors(),
-                    shape = RoundedCornerShape(10.dp),
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("检测局域网设备")
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onHideLan,
                     enabled = showLanNeighbors && !refreshing && !busy,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (showLanNeighbors) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            Color.Transparent
-                        },
-                        contentColor = if (showLanNeighbors) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    ),
-                    border = BorderStroke(
-                        1.dp,
-                        if (showLanNeighbors) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.64f)
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                        }
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f)
+                    tint = if (showLanNeighbors) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                    surfaceColor = if (showLanNeighbors) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.22f)
+                    },
+                    contentColor = if (showLanNeighbors) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
                 ) {
                     Text("仅看访问设备")
                 }
@@ -426,7 +419,7 @@ private fun ActionCard(
 
 @Composable
 private fun DisabledHintCard() {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -453,7 +446,7 @@ private fun DisabledHintCard() {
 
 @Composable
 private fun EmptyStateCard(showLanNeighbors: Boolean) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -490,7 +483,7 @@ private fun DeviceCard(
     busy: Boolean,
     onToggleBlock: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -532,7 +525,7 @@ private fun DeviceCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = {},
                     label = {
                         Text(
@@ -553,12 +546,12 @@ private fun DeviceCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = {},
                     label = { Text(sourceText(device.source)) }
                 )
                 if (device.inBlacklist) {
-                    AssistChip(
+                    AppGlassAssistChip(
                         onClick = {},
                         label = { Text("黑名单") },
                         leadingIcon = { Icon(Icons.Rounded.Block, null, Modifier.size(16.dp)) }
@@ -582,23 +575,23 @@ private fun DeviceCard(
 
             val actionLabel = if (device.inBlacklist) "解除拉黑" else "拉黑设备"
             if (adminEnabled) {
-                Button(
+                AppGlassButton(
                     onClick = onToggleBlock,
                     enabled = !busy,
-                    colors = primaryActionButtonColors(),
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
                 ) {
                     Icon(Icons.Rounded.Block, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(actionLabel)
                 }
             } else {
-                OutlinedButton(
+                AppGlassButton(
                     onClick = {},
                     enabled = false,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
                 ) {
                     Text("需管理员模式才能修改")
                 }
@@ -614,7 +607,7 @@ private fun AdminActionsCard(
     onClearBlacklist: () -> Unit,
     onClearStats: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -633,18 +626,29 @@ private fun AdminActionsCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(
+                AppGlassButton(
                     onClick = onClearBlacklist,
                     enabled = !busy,
-                    label = { Text("清空黑名单") },
-                    leadingIcon = { Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(16.dp)) }
-                )
-                AssistChip(
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("清空黑名单")
+                }
+                AppGlassButton(
                     onClick = onClearStats,
                     enabled = !busy,
-                    label = { Text("清空统计") },
-                    leadingIcon = { Icon(Icons.Rounded.WarningAmber, null, Modifier.size(16.dp)) }
-                )
+                    modifier = Modifier.height(36.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                    contentColor = MaterialTheme.colorScheme.error,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(Icons.Rounded.WarningAmber, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("清空统计")
+                }
             }
         }
     }

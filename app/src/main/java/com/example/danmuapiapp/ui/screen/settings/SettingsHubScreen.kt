@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.app.Activity
 import android.content.Context
@@ -360,7 +361,7 @@ private fun SettingsOverviewCard(
     proxyLabel: String,
     adminEnabled: Boolean
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -434,7 +435,7 @@ private fun SettingsOverviewMetric(
     value: String,
     accent: Color
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f)

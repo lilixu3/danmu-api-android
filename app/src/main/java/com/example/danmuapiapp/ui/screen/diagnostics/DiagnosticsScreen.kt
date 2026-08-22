@@ -48,6 +48,9 @@ import androidx.core.content.FileProvider
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.BuildConfig
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.io.File
 
 @Composable
@@ -91,7 +94,7 @@ fun DiagnosticsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                FilledTonalIconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                AppGlassIconButton(onClick = onBack, size = 36.dp) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -102,10 +105,10 @@ fun DiagnosticsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::runDiagnostics,
                     enabled = !state.isRunning,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     if (state.isRunning) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -116,7 +119,7 @@ fun DiagnosticsScreen(
             }
 
             if (state.isRunning && state.checks.isEmpty()) {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -141,7 +144,7 @@ fun DiagnosticsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = { saveLauncher.launch(viewModel.defaultFileName()) },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -149,7 +152,7 @@ fun DiagnosticsScreen(
                         Spacer(Modifier.width(6.dp))
                         Text("保存")
                     }
-                    Button(
+                    AppGlassButton(
                         onClick = {
                             shareDiagnosticReport(context, viewModel.defaultFileName(), state.report)
                         },
@@ -174,7 +177,7 @@ private fun DiagnosticCheckRow(check: DiagnosticCheck) {
         DiagnosticLevel.Warning -> Icons.Rounded.Warning to Color(0xFFB26A00)
         DiagnosticLevel.Error -> Icons.Rounded.Error to MaterialTheme.colorScheme.error
     }
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,

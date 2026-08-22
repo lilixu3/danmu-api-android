@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @Composable
 fun CoreDependencyRepairHost(
@@ -115,13 +116,13 @@ fun CoreDependencyRequiredDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onRepair) {
+            AppGlassButton(onClick = onRepair, tint = MaterialTheme.colorScheme.primary) {
                 Icon(Icons.Rounded.Build, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("修复依赖")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("稍后") } }
+        dismissButton = { AppGlassButton(onClick = onDismiss) { Text("稍后") } }
     )
 }
 
@@ -152,10 +153,11 @@ fun CoreDependencyRepairDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(
+                AppGlassButton(
                     onClick = onOnlineRepair,
                     enabled = request.onlineRepairSupported,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    tint = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Rounded.CloudDownload, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
@@ -168,7 +170,7 @@ fun CoreDependencyRepairDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onImportArchive,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -182,12 +184,12 @@ fun CoreDependencyRepairDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(
+                AppGlassButton(
                     onClick = onCancelMutation,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    tint = MaterialTheme.colorScheme.error,
+                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Text(
                         when (request.origin) {
@@ -199,6 +201,6 @@ fun CoreDependencyRepairDialog(
                 }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("稍后") } }
+        dismissButton = { AppGlassButton(onClick = onDismiss) { Text("稍后") } }
     )
 }

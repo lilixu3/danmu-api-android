@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -56,6 +57,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 @Composable
 fun AdminModeScreen(
@@ -136,7 +139,7 @@ fun AdminModeScreen(
                             label = { Text("ADMIN_TOKEN") },
                             leadingIcon = { Icon(Icons.Rounded.Security, null) },
                             trailingIcon = {
-                                IconButton(onClick = viewModel::toggleTokenVisible) {
+                                AppGlassIconButton(onClick = viewModel::toggleTokenVisible, size = 34.dp) {
                                     Icon(
                                         if (viewModel.showToken) {
                                             Icons.Rounded.VisibilityOff
@@ -158,11 +161,11 @@ fun AdminModeScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(10.dp))
-                        Button(
+                        AppGlassButton(
                             onClick = viewModel::submit,
                             enabled = !viewModel.isOperating && viewModel.tokenInput.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp)
+                            tint = MaterialTheme.colorScheme.primary
                         ) {
                             Icon(Icons.Rounded.LockOpen, null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -191,7 +194,7 @@ fun AdminModeScreen(
                 }
             }
 
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth()
@@ -214,7 +217,7 @@ fun AdminModeScreen(
             title = { Text("操作失败") },
             text = { Text(viewModel.errorMessage.orEmpty()) },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissError) {
+                AppGlassButton(onClick = viewModel::dismissError) {
                     Text("知道了")
                 }
             }

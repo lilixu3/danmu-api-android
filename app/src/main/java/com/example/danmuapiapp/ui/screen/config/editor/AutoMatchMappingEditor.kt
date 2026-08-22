@@ -42,6 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 @Composable
 internal fun AutoMatchMappingTableEditor(
@@ -81,7 +84,7 @@ internal fun AutoMatchMappingTableEditor(
             key(index) {
                 val rowValidation = validateAutoMatchDraft(row, platforms)
                 val ranged = row.sourceEndEpisode.isNotBlank() || row.targetEndEpisode.isNotBlank()
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -121,7 +124,7 @@ internal fun AutoMatchMappingTableEditor(
                                     }
                                 }
                             )
-                            IconButton(onClick = {
+                            AppGlassIconButton(onClick = {
                                 val next = rows.filterIndexed { rowIndex, _ -> rowIndex != index }
                                 syncRows(if (next.isEmpty()) listOf(AutoMatchMappingDraft()) else next)
                             }) {
@@ -180,19 +183,19 @@ internal fun AutoMatchMappingTableEditor(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { syncRows(rows + AutoMatchMappingDraft()) }) {
+            AppGlassButton(onClick = { syncRows(rows + AutoMatchMappingDraft()) }) {
                 Icon(Icons.Rounded.Add, null, Modifier.size(17.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("新增映射")
             }
-            TextButton(onClick = {
+            AppGlassButton(onClick = {
                 rows = parseAutoMatchMappingDrafts(value).ifEmpty { listOf(AutoMatchMappingDraft()) }
             }) {
                 Text("重新解析")
             }
         }
 
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -317,7 +320,7 @@ private fun AutoMatchPlatformSelector(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("目标平台", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
         Box {
-            OutlinedButton(onClick = { expanded = true }) {
+            AppGlassButton(onClick = { expanded = true }) {
                 Text(value.ifBlank { "自动" }, maxLines = 1)
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Rounded.ExpandMore, null, Modifier.size(17.dp))

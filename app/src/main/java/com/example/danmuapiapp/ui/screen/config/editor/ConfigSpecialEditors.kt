@@ -60,6 +60,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
@@ -114,7 +119,7 @@ internal fun CustomMergeRulesEditor(
         syncRows(nextRows)
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -131,7 +136,7 @@ internal fun CustomMergeRulesEditor(
             )
 
             rows.forEachIndexed { index, row ->
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -147,7 +152,7 @@ internal fun CustomMergeRulesEditor(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = row.action != "block",
                                 onClick = {
                                     updateRow(index) { it.copy(action = "merge") }
@@ -155,7 +160,7 @@ internal fun CustomMergeRulesEditor(
                                 label = { Text("强制合并") }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = row.action == "block",
                                 onClick = {
                                     updateRow(index) { it.copy(action = "block") }
@@ -163,7 +168,7 @@ internal fun CustomMergeRulesEditor(
                                 label = { Text("阻断合并") }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(onClick = {
+                            AppGlassIconButton(onClick = {
                                 val next = rows.filterIndexed { i, _ -> i != index }
                                 syncRows(if (next.isEmpty()) listOf(CustomMergeRuleRow()) else next)
                             }) {
@@ -230,8 +235,8 @@ internal fun CustomMergeRulesEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { syncRows(rows + CustomMergeRuleRow()) }) { Text("新增规则") }
-                OutlinedButton(onClick = {
+                AppGlassButton(onClick = { syncRows(rows + CustomMergeRuleRow()) }) { Text("新增规则") }
+                AppGlassButton(onClick = {
                     val parsed = parseCustomMergeRules(value)
                     rows = if (parsed.isEmpty()) listOf(CustomMergeRuleRow()) else parsed
                 }) {
@@ -296,7 +301,7 @@ internal fun DanmuOffsetEditor(
         syncRows(nextRows)
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -314,7 +319,7 @@ internal fun DanmuOffsetEditor(
 
             rows.forEachIndexed { index, row ->
                 val selectedSources = canonicalizePlatformSelection(row.selectedSources, sourceOptions)
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -330,19 +335,19 @@ internal fun DanmuOffsetEditor(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = !row.usePercent,
                                 onClick = { updateRow(index) { it.copy(usePercent = false) } },
                                 label = { Text("秒偏移") }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = row.usePercent,
                                 onClick = { updateRow(index) { it.copy(usePercent = true) } },
                                 label = { Text("百分比") }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(onClick = {
+                            AppGlassIconButton(onClick = {
                                 val next = rows.filterIndexed { i, _ -> i != index }
                                 syncRows(if (next.isEmpty()) listOf(TimelineOffsetRuleRow()) else next)
                             }) {
@@ -395,7 +400,7 @@ internal fun DanmuOffsetEditor(
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             sourceOptions.forEach { option ->
                                 val isSelected = selectedSources.any { it.equals(option, true) }
-                                FilterChip(
+                                AppGlassFilterChip(
                                     selected = isSelected,
                                     onClick = {
                                         val next = togglePlatformSelection(selectedSources, option, sourceOptions)
@@ -410,8 +415,8 @@ internal fun DanmuOffsetEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { syncRows(rows + TimelineOffsetRuleRow()) }) { Text("新增规则") }
-                OutlinedButton(onClick = {
+                AppGlassButton(onClick = { syncRows(rows + TimelineOffsetRuleRow()) }) { Text("新增规则") }
+                AppGlassButton(onClick = {
                     val parsed = parseTimelineOffsetRules(value)
                     rows = if (parsed.isEmpty()) listOf(TimelineOffsetRuleRow()) else parsed
                 }) {
@@ -464,7 +469,7 @@ internal fun MatchPlatformRulesEditor(
         syncRows(rows.replace(index, block(rows[index])))
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -482,7 +487,7 @@ internal fun MatchPlatformRulesEditor(
 
             rows.forEachIndexed { index, row ->
                 val selectedPlatforms = parseCsvTokens(row.platformsRaw)
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -498,7 +503,7 @@ internal fun MatchPlatformRulesEditor(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(onClick = {
+                            AppGlassIconButton(onClick = {
                                 val next = rows.filterIndexed { i, _ -> i != index }
                                 syncRows(if (next.isEmpty()) listOf(MatchPlatformRuleRow()) else next)
                             }) {
@@ -544,7 +549,7 @@ internal fun MatchPlatformRulesEditor(
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 platformOptions.forEach { option ->
                                     val isSelected = selectedPlatforms.any { it.equals(option, true) }
-                                    FilterChip(
+                                    AppGlassFilterChip(
                                         selected = isSelected,
                                         onClick = {
                                             val next = if (isSelected) {
@@ -564,8 +569,8 @@ internal fun MatchPlatformRulesEditor(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { syncRows(rows + MatchPlatformRuleRow()) }) { Text("新增规则") }
-                OutlinedButton(onClick = {
+                AppGlassButton(onClick = { syncRows(rows + MatchPlatformRuleRow()) }) { Text("新增规则") }
+                AppGlassButton(onClick = {
                     val parsed = parseMatchPlatformRules(value)
                     rows = if (parsed.isEmpty()) listOf(MatchPlatformRuleRow()) else parsed
                 }) {
@@ -599,7 +604,7 @@ private fun EntityEditorCard(
     onSourceChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -640,7 +645,7 @@ private fun EntityEditorCard(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     sourceOptions.forEach { option ->
                         val isSelected = source.equals(option, true)
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = isSelected,
                             onClick = { onSourceChange(option) },
                             label = { Text(option) }
@@ -695,7 +700,7 @@ internal fun RecentAnimeCachePanel(
     }
 
     if (compact && !expanded) {
-        OutlinedButton(
+        AppGlassButton(
             onClick = {
                 expanded = true
                 load(force = true)
@@ -708,7 +713,7 @@ internal fun RecentAnimeCachePanel(
         return
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -728,7 +733,7 @@ internal fun RecentAnimeCachePanel(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
-                OutlinedButton(
+                AppGlassButton(
                     onClick = {
                         expanded = !expanded
                         if (expanded) load(force = true)
@@ -738,7 +743,7 @@ internal fun RecentAnimeCachePanel(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(if (expanded) "收起" else "查看最近数据")
                 }
-                FilledTonalIconButton(onClick = { load(force = true) }, enabled = expanded && !loading) {
+                AppGlassIconButton(onClick = { load(force = true) }, enabled = expanded && !loading) {
                     Icon(Icons.Rounded.Refresh, null)
                 }
             }
@@ -818,7 +823,7 @@ private fun AnimeCacheCard(
     val titleStyle = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall
     val subtitleStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(14.dp),
         color = if (compact) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -877,7 +882,7 @@ private fun AnimeCacheCard(
             if (buttons.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     buttons.forEach { (label, action) ->
-                        AssistChip(onClick = { action() }, label = { Text(label) })
+                        AppGlassAssistChip(onClick = { action() }, label = { Text(label) })
                     }
                 }
             }

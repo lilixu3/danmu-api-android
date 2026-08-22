@@ -57,6 +57,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 import java.util.Locale
 import kotlin.random.Random
@@ -104,7 +109,7 @@ private fun SimpleQuickAppendEditor(
             modifier = Modifier.fillMaxWidth()
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalButton(onClick = { showQuick = true }) {
+            AppGlassButton(onClick = { showQuick = true }) {
                 Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.size(6.dp))
                 Text(addButtonText)
@@ -120,7 +125,7 @@ private fun SimpleQuickAppendEditor(
         }
 
         if (showQuick) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -134,7 +139,7 @@ private fun SimpleQuickAppendEditor(
                         Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.size(8.dp))
                         Text(quickTitle, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { showQuick = false }) {
+                        AppGlassIconButton(onClick = { showQuick = false }) {
                             Icon(Icons.Rounded.Close, "关闭")
                         }
                     }
@@ -178,7 +183,7 @@ private fun OptionAssistChips(
     if (cleanOptions.isEmpty()) return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         cleanOptions.forEach { option ->
-            AssistChip(onClick = { onPick(option) }, label = { Text(option) })
+            AppGlassAssistChip(onClick = { onPick(option) }, label = { Text(option) })
         }
     }
 }
@@ -190,8 +195,8 @@ private fun QuickActionRow(
     onCancel: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        FilledTonalButton(onClick = onAppend) { Text(appendLabel) }
-        TextButton(onClick = onCancel) { Text("取消") }
+        AppGlassButton(onClick = onAppend) { Text(appendLabel) }
+        AppGlassButton(onClick = onCancel) { Text("取消") }
     }
 }
 
@@ -424,7 +429,7 @@ internal fun CompactCustomMergeRulesEditor(
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { showBuilder = !showBuilder }) {
+            AppGlassButton(onClick = { showBuilder = !showBuilder }) {
                 Text(if (showBuilder) "收起" else "展开")
             }
             RecentDataToggle(
@@ -437,7 +442,7 @@ internal fun CompactCustomMergeRulesEditor(
         }
 
         if (showBuilder) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -458,7 +463,7 @@ internal fun CompactCustomMergeRulesEditor(
                         )
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("关系", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            FilterChip(
+                            AppGlassFilterChip(
                                 selected = action == "merge",
                                 onClick = { action = if (action == "merge") "block" else "merge" },
                                 label = { Text(if (action == "merge") "->" else "×") }
@@ -499,7 +504,7 @@ internal fun CompactCustomMergeRulesEditor(
                     if (sourceOptions.isNotEmpty()) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             sourceOptions.forEach { option ->
-                                AssistChip(
+                                AppGlassAssistChip(
                                     onClick = {
                                         if (focusedEntity == "primary") {
                                             primaryEntity = appendSourceToMergeEntity(primaryEntity, option)
@@ -513,7 +518,7 @@ internal fun CompactCustomMergeRulesEditor(
                         }
                     }
 
-                    Surface(
+                    AppGlassSurface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.fillMaxWidth()
@@ -527,8 +532,8 @@ internal fun CompactCustomMergeRulesEditor(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { showBuilder = false }, modifier = Modifier.weight(1f)) { Text("取消") }
-                        FilledTonalButton(
+                        AppGlassButton(onClick = { showBuilder = false }, modifier = Modifier.weight(1f)) { Text("取消") }
+                        AppGlassButton(
                             onClick = { appendRule(preview) },
                             enabled = preview.isNotBlank(),
                             modifier = Modifier.weight(1f)
@@ -761,7 +766,7 @@ internal fun CompactMergeSourcePairsEditor(
         )
 
         Text("已添加合并组", style = MaterialTheme.typography.labelLarge)
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -781,7 +786,7 @@ internal fun CompactMergeSourcePairsEditor(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     groups.forEach { group ->
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = true,
                             onClick = { setGroups(groups.filterNot { it == group }) },
                             label = { Text("$group ×") }
@@ -792,7 +797,7 @@ internal fun CompactMergeSourcePairsEditor(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(
+            AppGlassFilterChip(
                 selected = mergeMode,
                 onClick = {
                     mergeMode = !mergeMode
@@ -809,7 +814,7 @@ internal fun CompactMergeSourcePairsEditor(
         }
 
         if (mergeMode) {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
@@ -830,7 +835,7 @@ internal fun CompactMergeSourcePairsEditor(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
                         )
-                        FilledTonalIconButton(
+                        AppGlassIconButton(
                             onClick = ::confirmStaging,
                             enabled = staging.size >= 2,
                             modifier = Modifier.size(36.dp)
@@ -850,7 +855,7 @@ internal fun CompactMergeSourcePairsEditor(
                         ) {
                             staging.forEachIndexed { index, source ->
                                 if (index > 0) Text("&", color = MaterialTheme.colorScheme.primary, maxLines = 1)
-                                FilterChip(
+                                AppGlassFilterChip(
                                     selected = true,
                                     onClick = { staging = staging.filterNot { it == source } },
                                     label = {
@@ -875,7 +880,7 @@ internal fun CompactMergeSourcePairsEditor(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 cleanOptions.forEach { option ->
                     val staged = staging.any { it.equals(option, ignoreCase = true) }
-                    AssistChip(
+                    AppGlassAssistChip(
                         onClick = { addOption(option) },
                         enabled = mergeMode && !staged,
                         label = { Text(option) }
@@ -885,8 +890,8 @@ internal fun CompactMergeSourcePairsEditor(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { showCustom = !showCustom }) { Text(if (showCustom) "收起自定义" else "自定义来源") }
-            if (staging.isNotEmpty()) TextButton(onClick = { staging = emptyList() }) { Text("清空暂存") }
+            AppGlassButton(onClick = { showCustom = !showCustom }) { Text(if (showCustom) "收起自定义" else "自定义来源") }
+            if (staging.isNotEmpty()) AppGlassButton(onClick = { staging = emptyList() }) { Text("清空暂存") }
         }
 
         if (showCustom) {
@@ -900,7 +905,7 @@ internal fun CompactMergeSourcePairsEditor(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 )
-                FilledTonalButton(
+                AppGlassButton(
                     onClick = { addOption(customSource); customSource = "" },
                     enabled = mergeMode
                 ) { Text("添加") }
@@ -1018,9 +1023,9 @@ internal fun IpBlacklistEditor(
         var valueText by remember(rememberKey) { mutableStateOf("") }
         var flags by remember(rememberKey) { mutableStateOf("") }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = kind == "exact", onClick = { kind = "exact" }, label = { Text("IP") })
-            FilterChip(selected = kind == "cidr", onClick = { kind = "cidr" }, label = { Text("CIDR") })
-            FilterChip(selected = kind == "regex", onClick = { kind = "regex" }, label = { Text("正则") })
+            AppGlassFilterChip(selected = kind == "exact", onClick = { kind = "exact" }, label = { Text("IP") })
+            AppGlassFilterChip(selected = kind == "cidr", onClick = { kind = "cidr" }, label = { Text("CIDR") })
+            AppGlassFilterChip(selected = kind == "regex", onClick = { kind = "regex" }, label = { Text("正则") })
         }
         SimpleField(valueText, { valueText = it }, if (kind == "regex") "正则内容" else "IP / 网段", if (kind == "cidr") "10.0.0.0" else "1.2.3.4")
         if (kind == "cidr") SimpleField(flags, { flags = it }, "掩码位", "24")
@@ -1112,14 +1117,14 @@ private fun ColorPreviewChips(colors: List<Int>, maxCount: Int = 32) {
     if (colors.isEmpty()) return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         colors.take(maxCount).forEach { color ->
-            AssistChip(
+            AppGlassAssistChip(
                 onClick = {},
                 leadingIcon = { ColorDot(color) },
                 label = { Text(colorHex(color)) }
             )
         }
         if (colors.size > maxCount) {
-            AssistChip(onClick = {}, label = { Text("+${colors.size - maxCount}") })
+            AppGlassAssistChip(onClick = {}, label = { Text("+${colors.size - maxCount}") })
         }
     }
 }
@@ -1231,9 +1236,9 @@ internal fun ColorListEditor(
 
         if (isConvertColor) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = rawMode.isBlank() || rawMode == "default", onClick = { onValueChange("default"); panel = "none" }, label = { Text("default") })
-                FilterChip(selected = rawMode == "white", onClick = { onValueChange("white"); panel = "none" }, label = { Text("white") })
-                FilterChip(selected = rawMode == "color", onClick = { onValueChange("color"); panel = "none" }, label = { Text("color") })
+                AppGlassFilterChip(selected = rawMode.isBlank() || rawMode == "default", onClick = { onValueChange("default"); panel = "none" }, label = { Text("default") })
+                AppGlassFilterChip(selected = rawMode == "white", onClick = { onValueChange("white"); panel = "none" }, label = { Text("white") })
+                AppGlassFilterChip(selected = rawMode == "color", onClick = { onValueChange("color"); panel = "none" }, label = { Text("color") })
             }
         }
 
@@ -1256,18 +1261,18 @@ internal fun ColorListEditor(
         }
 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilledTonalButton(onClick = { panel = if (panel == "color") "none" else "color" }) {
+            AppGlassButton(onClick = { panel = if (panel == "color") "none" else "color" }) {
                 Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.size(6.dp))
                 Text(if (panel == "color") "收起颜色盘" else "颜色盘")
             }
-            OutlinedButton(onClick = { appendColors(listOf(Random.nextInt(0x1000000))) }) { Text("随机添加") }
-            OutlinedButton(onClick = { panel = if (panel == "batch") "none" else "batch" }) { Text("批量添加") }
-            TextButton(onClick = { onValueChange(if (isConvertColor) "default" else "") }) { Text("恢复默认") }
+            AppGlassButton(onClick = { appendColors(listOf(Random.nextInt(0x1000000))) }) { Text("随机添加") }
+            AppGlassButton(onClick = { panel = if (panel == "batch") "none" else "batch" }) { Text("批量添加") }
+            AppGlassButton(onClick = { onValueChange(if (isConvertColor) "default" else "") }) { Text("恢复默认") }
         }
 
         if (panel == "color") {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1284,14 +1289,14 @@ internal fun ColorListEditor(
                             }
                             Text("亮度", style = MaterialTheme.typography.labelMedium)
                             Slider(value = lightness, onValueChange = { lightness = it }, valueRange = 10f..90f)
-                            FilledTonalButton(onClick = { appendColors(listOf(wheelColor)); colorInput = colorHex(wheelColor) }) { Text("添加当前颜色") }
+                            AppGlassButton(onClick = { appendColors(listOf(wheelColor)); colorInput = colorHex(wheelColor) }) { Text("添加当前颜色") }
                         }
                     }
 
                     Text("常用色", style = MaterialTheme.typography.labelLarge)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         QuickColorPalette.forEach { preset ->
-                            AssistChip(
+                            AppGlassAssistChip(
                                 onClick = { colorInput = colorHex(preset); appendColors(listOf(preset)) },
                                 leadingIcon = { ColorDot(preset) },
                                 label = { Text(colorHex(preset)) }
@@ -1312,15 +1317,15 @@ internal fun ColorListEditor(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalButton(onClick = { selectedColor?.let { appendColors(listOf(it)) } }, enabled = selectedColor != null) { Text("添加输入颜色") }
-                        TextButton(onClick = { panel = "none" }) { Text("完成") }
+                        AppGlassButton(onClick = { selectedColor?.let { appendColors(listOf(it)) } }, enabled = selectedColor != null) { Text("添加输入颜色") }
+                        AppGlassButton(onClick = { panel = "none" }) { Text("完成") }
                     }
                 }
             }
         }
 
         if (panel == "batch") {
-            Surface(
+            AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1344,7 +1349,7 @@ internal fun ColorListEditor(
                         ColorPreviewChips(batchColors, maxCount = 20)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = {
                                 appendColors(batchColors)
                                 batchInput = ""
@@ -1352,7 +1357,7 @@ internal fun ColorListEditor(
                             },
                             enabled = batchColors.isNotEmpty()
                         ) { Text("确认添加") }
-                        TextButton(onClick = { panel = "none" }) { Text("取消") }
+                        AppGlassButton(onClick = { panel = "none" }) { Text("取消") }
                     }
                 }
             }

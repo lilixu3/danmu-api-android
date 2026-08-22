@@ -47,6 +47,10 @@ import com.example.danmuapiapp.domain.model.CoreUpdateRelation
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.ui.component.AppModalPanel
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -99,7 +103,7 @@ internal fun CoreUpdateDetailsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.size(40.dp),
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -125,7 +129,7 @@ internal fun CoreUpdateDetailsPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                AppGlassIconButton(onClick = onDismiss, size = 40.dp) {
                     Icon(Icons.Rounded.Close, "关闭更新详情")
                 }
             }
@@ -151,7 +155,7 @@ internal fun CoreUpdateDetailsPanel(
                         color = MaterialTheme.colorScheme.error
                     )
                     Spacer(Modifier.size(12.dp))
-                    OutlinedButton(onClick = onRetry) { Text("重新加载") }
+                    AppGlassButton(onClick = onRetry) { Text("重新加载") }
                 }
                 comparison != null -> UpdateComparisonContent(comparison)
             }
@@ -161,12 +165,12 @@ internal fun CoreUpdateDetailsPanel(
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                OutlinedButton(onClick = onDismiss) {
+                AppGlassButton(onClick = onDismiss) {
                     Text(if (canApply) "稍后" else "关闭")
                 }
                 if (canApply) {
                     Spacer(Modifier.width(10.dp))
-                    Button(onClick = onUpdateNow) {
+                    AppGlassPrimaryButton(onClick = onUpdateNow) {
                         Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(7.dp))
                         Text("立即更新")
@@ -190,32 +194,41 @@ private fun androidx.compose.foundation.layout.ColumnScope.UpdateComparisonConte
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item(key = "summary") {
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Text("变更总结", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(comparison.summary.headline, style = MaterialTheme.typography.bodyLarge)
-                if (comparison.summary.affectedAreas.isNotEmpty()) {
-                    Text(
-                        comparison.summary.affectedAreas.joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        DiffMetric(Icons.Rounded.History, "${comparison.totalCommits} 个提交", MaterialTheme.colorScheme.primary)
-                        DiffMetric(Icons.Rounded.Code, "${comparison.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
+            AppGlassSurface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text("变更总结", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(comparison.summary.headline, style = MaterialTheme.typography.bodyLarge)
+                    if (comparison.summary.affectedAreas.isNotEmpty()) {
+                        Text(
+                            comparison.summary.affectedAreas.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        DiffMetric(Icons.Rounded.Add, "+${comparison.additions}", diffAddedColor())
-                        DiffMetric(Icons.Rounded.DeleteOutline, "-${comparison.deletions}", MaterialTheme.colorScheme.error)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            DiffMetric(Icons.Rounded.History, "${comparison.totalCommits} 个提交", MaterialTheme.colorScheme.primary)
+                            DiffMetric(Icons.Rounded.Code, "${comparison.changedFiles} 个文件", MaterialTheme.colorScheme.primary)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            DiffMetric(Icons.Rounded.Add, "+${comparison.additions}", diffAddedColor())
+                            DiffMetric(Icons.Rounded.DeleteOutline, "-${comparison.deletions}", MaterialTheme.colorScheme.error)
+                        }
                     }
-                }
-                if (comparison.isTruncated) {
-                    Text(
-                        "变更数量较多，GitHub 仅返回了本次可展示的部分详情。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
+                    if (comparison.isTruncated) {
+                        Text(
+                            "变更数量较多，GitHub 仅返回了本次可展示的部分详情。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
                 }
             }
         }
@@ -283,7 +296,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.UpdateComparisonConte
 
 @Composable
 private fun RemoteCommitSummary(commit: CoreRemoteCommit) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainer
@@ -304,23 +317,29 @@ private fun RemoteCommitSummary(commit: CoreRemoteCommit) {
 
 @Composable
 private fun CommitRow(commit: CoreRemoteCommit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
-        Text(
-            commit.shortSha,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(commit.title, style = MaterialTheme.typography.bodyMedium)
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
             Text(
-                "${commit.author} · ${formatUpdateCommitTime(commit.committedAt)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                commit.shortSha,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
             )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(commit.title, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "${commit.author} · ${formatUpdateCommitTime(commit.committedAt)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

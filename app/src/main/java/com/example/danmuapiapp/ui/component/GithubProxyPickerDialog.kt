@@ -13,12 +13,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.GithubProxyOption
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 
 @Composable
 fun GithubProxyPickerDialog(
@@ -98,14 +99,14 @@ fun GithubProxyPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            AppGlassPrimaryButton(onClick = onConfirm) {
                 Text(confirmText)
             }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRetest) { Text("重新测速") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                AppGlassButton(onClick = onRetest) { Text("重新测速") }
+                AppGlassButton(onClick = onDismiss) { Text("取消") }
             }
         }
     )

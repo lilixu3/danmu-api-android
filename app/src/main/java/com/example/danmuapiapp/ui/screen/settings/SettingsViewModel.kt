@@ -39,9 +39,12 @@ import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.ApiVariant
+import com.example.danmuapiapp.domain.model.AppBackgroundMode
+import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.isValidBackgroundImageUrl
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
@@ -109,6 +112,7 @@ class SettingsViewModel @Inject constructor(
     val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val nightMode = settingsRepo.nightMode
     val glassMaterial = settingsRepo.glassMaterial
+    val appBackground = settingsRepo.appBackground
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
     val fileLogEnabled = settingsRepo.fileLogEnabled
@@ -415,6 +419,97 @@ class SettingsViewModel @Inject constructor(
         operationMessage = when (material) {
             GlassMaterialPreference.LiquidGlass -> "已启用液态玻璃"
             GlassMaterialPreference.Off -> "已关闭液态玻璃"
+        }
+    }
+
+    fun setAppBackgroundMode(mode: AppBackgroundMode) {
+        val current = appBackground.value
+        if (current.mode == mode) return
+        settingsRepo.setAppBackground(current.copy(mode = mode))
+        operationMessage = when (mode) {
+            AppBackgroundMode.Solid -> "已使用纯色背景"
+            AppBackgroundMode.LocalImage -> "已使用本地图片背景"
+            AppBackgroundMode.OnlineImage -> "已切换到在线图片背景"
+            AppBackgroundMode.RandomOnlineImage -> "已启用前台随机图片背景"
+        }
+    }
+
+    fun setLocalAppBackground(uri: String) {
+        settingsRepo.setAppBackground(
+            appBackground.value.copy(
+                mode = AppBackgroundMode.LocalImage,
+                localImageUri = uri
+            )
+        )
+        operationMessage = "已应用本地图片背景"
+    }
+
+    fun setOnlineAppBackground(url: String, random: Boolean) {
+        val normalized = url.trim()
+        if (!isValidBackgroundImageUrl(normalized)) {
+            operationMessage = "请输入有效的 HTTP 或 HTTPS 图片链接"
+            return
+        }
+        val current = appBackground.value
+        settingsRepo.setAppBackground(
+            if (random) {
+                current.copy(
+                    mode = AppBackgroundMode.RandomOnlineImage,
+                    randomImageUrl = normalized
+                )
+            } else {
+                current.copy(
+                    mode = AppBackgroundMode.OnlineImage,
+                    onlineImageUrl = normalized
+                )
+            }
+        )
+        operationMessage = if (random) {
+            "已应用前台随机图片接口"
+        } else {
+            "已应用在线图片背景"
+        }
+    }
+
+    fun setRandomBackgroundRefreshPolicy(policy: AppBackgroundRefreshPolicy) {
+        val current = appBackground.value
+        if (policy == AppBackgroundRefreshPolicy.Custom &&
+            current.customRandomRefreshSeconds <= 0L
+        ) {
+            operationMessage = "请先输入并应用自定义刷新秒数"
+            return
+        }
+        if (current.randomRefreshPolicy == policy) return
+        settingsRepo.setAppBackground(current.copy(randomRefreshPolicy = policy))
+        operationMessage = "随机背景前台刷新条件已设为 ${randomRefreshPolicyLabel(policy)}"
+    }
+
+    fun setCustomRandomBackgroundRefreshInterval(input: String): Boolean {
+        val seconds = input.trim().toLongOrNull()
+        if (seconds == null || seconds <= 0L || seconds > Long.MAX_VALUE / 1_000L) {
+            operationMessage = "请输入大于 0 的有效秒数"
+            return false
+        }
+        val current = appBackground.value
+        settingsRepo.setAppBackground(
+            current.copy(
+                randomRefreshPolicy = AppBackgroundRefreshPolicy.Custom,
+                customRandomRefreshSeconds = seconds
+            )
+        )
+        operationMessage = "随机背景前台刷新条件已设为 ${seconds} 秒"
+        return true
+    }
+
+    private fun randomRefreshPolicyLabel(policy: AppBackgroundRefreshPolicy): String {
+        return when (policy) {
+            AppBackgroundRefreshPolicy.OnForeground -> "每次进入前台"
+            AppBackgroundRefreshPolicy.Seconds30 -> "30 秒"
+            AppBackgroundRefreshPolicy.Minute1 -> "1 分钟"
+            AppBackgroundRefreshPolicy.Minutes3 -> "3 分钟"
+            AppBackgroundRefreshPolicy.Minutes5 -> "5 分钟"
+            AppBackgroundRefreshPolicy.Minutes10 -> "10 分钟"
+            AppBackgroundRefreshPolicy.Custom -> "自定义"
         }
     }
 

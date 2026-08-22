@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -37,6 +38,8 @@ import com.example.danmuapiapp.ui.component.CacheClearCapabilityNotice
 import com.example.danmuapiapp.ui.component.CacheClearSelectionList
 import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.theme.appDangerButtonColors
 import java.text.SimpleDateFormat
 import java.util.*
@@ -90,9 +93,9 @@ fun CacheManagementScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    FilledTonalIconButton(
+                    AppGlassIconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(36.dp)
+                        size = 36.dp
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                     }
@@ -108,10 +111,10 @@ fun CacheManagementScreen(
                         )
                     }
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::refresh,
                     enabled = !isLoading,
-                    modifier = Modifier.size(38.dp)
+                    size = 38.dp
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
@@ -128,7 +131,7 @@ fun CacheManagementScreen(
             ) {
                 if (!stats.isAvailable && !isLoading) {
                     item(key = "offline") {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -181,13 +184,14 @@ fun CacheManagementScreen(
                     )
                 }
                 item(key = "clear-action") {
-                    Button(
+                    AppGlassButton(
                         onClick = viewModel::requestClear,
                         enabled = stats.isAvailable && viewModel.selectedItems.isNotEmpty() &&
                             !viewModel.isClearing && !isLoading,
                         modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = appDangerButtonColors()
+                        tint = MaterialTheme.colorScheme.error,
+                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
+                        contentColor = MaterialTheme.colorScheme.error
                     ) {
                         if (viewModel.isClearing) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -230,7 +234,7 @@ fun CacheManagementScreen(
                     }
                 } else if (stats.isAvailable && !isLoading) {
                     item(key = "records-empty") {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -285,12 +289,17 @@ fun CacheManagementScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = viewModel::clearSelected, colors = appDangerButtonColors()) {
+                AppGlassButton(
+                    onClick = viewModel::clearSelected,
+                    tint = MaterialTheme.colorScheme.error,
+                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
+                    contentColor = MaterialTheme.colorScheme.error
+                ) {
                     Text("确认清理")
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissClearConfirm) { Text("取消") }
+                AppGlassButton(onClick = viewModel::dismissClearConfirm) { Text("取消") }
             }
         )
     }
@@ -300,7 +309,7 @@ fun CacheManagementScreen(
 private fun CacheStatsRow(stats: CacheStats) {
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -375,7 +384,7 @@ private fun CacheEntryCard(entry: CacheEntry) {
         else -> ""
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,

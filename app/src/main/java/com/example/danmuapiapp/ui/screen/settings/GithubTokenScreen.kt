@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +60,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.GithubAccountStatus
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -108,7 +111,7 @@ fun GithubTokenScreen(
 
             GithubStatusPanel(status = status, onRefresh = viewModel::refreshGithubAccount)
 
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -135,7 +138,7 @@ fun GithubTokenScreen(
                         },
                         leadingIcon = { Icon(Icons.Rounded.Key, null) },
                         trailingIcon = {
-                            IconButton(onClick = { showToken = !showToken }) {
+                            AppGlassIconButton(onClick = { showToken = !showToken }, size = 34.dp) {
                                 Icon(
                                     if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
                                     "切换 Token 可见状态"
@@ -149,11 +152,10 @@ fun GithubTokenScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
+                        AppGlassButton(
                             onClick = { viewModel.saveGithubToken(tokenText) },
                             enabled = !status.isLoading &&
                                 (tokenText.isNotBlank() || !status.tokenConfigured),
-                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             if (status.isLoading) {
@@ -162,13 +164,16 @@ fun GithubTokenScreen(
                             }
                             Text(if (tokenText.isBlank()) "使用匿名额度" else "验证并保存")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = {
                                 tokenText = ""
                                 viewModel.clearGithubToken()
                             },
                             enabled = status.tokenConfigured || tokenText.isNotBlank(),
-                            shape = RoundedCornerShape(8.dp)
+                            modifier = Modifier.weight(0.6f),
+                            tint = MaterialTheme.colorScheme.error,
+                            surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                            contentColor = MaterialTheme.colorScheme.error
                         ) { Text("清空") }
                     }
                 }
@@ -194,7 +199,7 @@ private fun GithubStatusPanel(status: GithubAccountStatus, onRefresh: () -> Unit
         status.tokenValid == false -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.primary
     }
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -229,7 +234,7 @@ private fun GithubStatusPanel(status: GithubAccountStatus, onRefresh: () -> Unit
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onRefresh, enabled = !status.isLoading) {
+                AppGlassIconButton(onClick = onRefresh, enabled = !status.isLoading, size = 36.dp) {
                     if (status.isLoading) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
                     else Icon(Icons.Rounded.Refresh, "刷新")
                 }
