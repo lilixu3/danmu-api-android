@@ -227,10 +227,7 @@ fun WorkDirScreen(
                             AppGlassButton(
                                 onClick = viewModel::restoreDefaultWorkDir,
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies,
-                                tint = MaterialTheme.colorScheme.error,
-                                surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                                contentColor = MaterialTheme.colorScheme.error
+                                enabled = !viewModel.isApplyingWorkDir && !viewModel.isRepairingDependencies
                             ) {
                                 Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))

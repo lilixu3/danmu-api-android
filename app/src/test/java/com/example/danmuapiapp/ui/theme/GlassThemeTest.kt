@@ -26,7 +26,7 @@ class GlassThemeTest {
         assertEquals(24.dp, spec.refractionAmount)
         assertEquals(0.4f, spec.bottomBarAlpha)
         assertEquals(0.56f, spec.contentAlpha)
-        assertEquals(0.6f, spec.dialogAlpha)
+        assertEquals(0.82f, spec.dialogAlpha)
     }
 
     @Test
@@ -38,7 +38,7 @@ class GlassThemeTest {
 
         assertTrue(spec.enabled)
         assertEquals(0.48f, spec.contentAlpha)
-        assertEquals(0.4f, spec.dialogAlpha)
+        assertEquals(0.78f, spec.dialogAlpha)
     }
 
     @Test

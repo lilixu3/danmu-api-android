@@ -652,16 +652,14 @@ private fun BackupSectionSelectionDialog(
         title = { Text(title) },
         text = {
             AppBackupSection.entries.filter { it in available }.forEach { section ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onSelectionChange(
-                                if (section in selected) selected - section else selected + section
-                            )
-                        }
-                        .padding(vertical = 7.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                AppDialogOption(
+                    selected = section in selected,
+                    onClick = {
+                        onSelectionChange(
+                            if (section in selected) selected - section else selected + section
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Checkbox(
                         checked = section in selected,
@@ -675,7 +673,11 @@ private fun BackupSectionSelectionDialog(
                         Text(
                             section.backupDescription(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (section in selected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                 }

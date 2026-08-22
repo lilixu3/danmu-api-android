@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.backdrop.Backdrop
@@ -52,11 +53,23 @@ fun AppGlassSurface(
     val backdrop = backdropOverride ?: LocalGlassBackgroundBackdrop.current
     val darkTheme = LocalAppDarkTheme.current
     val glassEnabled = spec.enabled && backdrop != null
+    val dialogContent = LocalAppDialogContext.current && role == AppGlassSurfaceRole.Card
+    val dialogContentAlpha = if (darkTheme) 0.62f else 0.68f
     val surfaceAlpha = glassAlpha?.coerceIn(0f, 1f) ?: when (role) {
         AppGlassSurfaceRole.Card -> spec.contentAlpha
         AppGlassSurfaceRole.Dialog -> spec.dialogAlpha
     }
-    val tint = color.copy(alpha = minOf(color.alpha, surfaceAlpha))
+    val tintAlpha = if (dialogContent && glassAlpha == null && color.alpha >= 0.34f) {
+        maxOf(minOf(color.alpha, surfaceAlpha), dialogContentAlpha)
+    } else {
+        minOf(color.alpha, surfaceAlpha)
+    }
+    val tint = color.copy(alpha = tintAlpha)
+    val fallbackColor = if (dialogContent && !glassEnabled && color.alpha >= 0.34f) {
+        color.copy(alpha = 1f)
+    } else {
+        color
+    }
     val glassModifier = if (glassEnabled) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
@@ -70,12 +83,14 @@ fun AppGlassSurface(
                     }
 
                     AppGlassSurfaceRole.Dialog -> {
+                        // Keep the dialog neutral. Strong saturation makes a photo
+                        // background bleed blue/green into the whole modal.
                         colorControls(
-                            brightness = if (darkTheme) 0f else 0.2f,
-                            saturation = 1.5f
+                            brightness = if (darkTheme) 0.04f else 0.08f,
+                            saturation = 1.08f
                         )
-                        blur(if (darkTheme) 8.dp.toPx() else 16.dp.toPx())
-                        lens(24.dp.toPx(), 48.dp.toPx(), depthEffect = true)
+                        blur(if (darkTheme) 12.dp.toPx() else 18.dp.toPx())
+                        lens(20.dp.toPx(), 40.dp.toPx(), depthEffect = true)
                     }
                 }
             },
@@ -97,7 +112,7 @@ fun AppGlassSurface(
     Surface(
         modifier = modifier.then(glassModifier).then(clickModifier),
         shape = shape,
-        color = if (glassEnabled) Color.Transparent else color,
+        color = if (glassEnabled) Color.Transparent else fallbackColor,
         contentColor = contentColor,
         tonalElevation = if (glassEnabled) 0.dp else tonalElevation,
         shadowElevation = if (glassEnabled) 0.dp else shadowElevation,

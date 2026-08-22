@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtMost
 import androidx.compose.ui.util.lerp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -59,13 +60,24 @@ fun AppLiquidButton(
     val spec = LocalGlassMaterial.current
     val backdrop = LocalGlassBackgroundBackdrop.current
     val glassEnabled = spec.enabled && backdrop != null
+    val dialogContext = LocalAppDialogContext.current
+    val resolvedTint = if (dialogContext && tint.isSpecified) {
+        tint.copy(alpha = if (tint.alpha >= 0.99f) 0.16f else tint.alpha.coerceAtMost(0.22f))
+    } else {
+        tint
+    }
+    val resolvedSurfaceColor = if (dialogContext && surfaceColor.isSpecified) {
+        surfaceColor.copy(alpha = maxOf(surfaceColor.alpha, if (glassEnabled) 0.72f else 1f))
+    } else {
+        surfaceColor
+    }
     val animationScope = rememberCoroutineScope()
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope)
     }
     val fallbackColor = when {
-        surfaceColor.isSpecified -> surfaceColor
-        tint.isSpecified -> tint
+        resolvedSurfaceColor.isSpecified -> resolvedSurfaceColor
+        resolvedTint.isSpecified -> resolvedTint
         else -> Color.Transparent
     }
 
@@ -103,12 +115,12 @@ fun AppLiquidButton(
                             null
                         },
                         onDrawSurface = {
-                            if (tint.isSpecified) {
-                                drawRect(tint, blendMode = BlendMode.Hue)
-                                drawRect(tint.copy(alpha = tint.alpha * 0.75f))
+                            if (resolvedTint.isSpecified) {
+                                drawRect(resolvedTint, blendMode = BlendMode.Hue)
+                                drawRect(resolvedTint.copy(alpha = resolvedTint.alpha * 0.75f))
                             }
-                            if (surfaceColor.isSpecified) {
-                                drawRect(surfaceColor)
+                            if (resolvedSurfaceColor.isSpecified) {
+                                drawRect(resolvedSurfaceColor)
                             }
                         }
                     )

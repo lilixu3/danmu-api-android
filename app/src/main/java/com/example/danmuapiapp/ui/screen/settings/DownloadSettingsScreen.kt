@@ -72,6 +72,7 @@ import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsValueItem
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import kotlinx.coroutines.launch
@@ -200,13 +201,10 @@ fun DownloadSettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (viewModel.isSyncingDirectory) "正在扫描已有弹幕" else "扫描已有弹幕")
                     }
-                    AppGlassButton(
+                    AppGlassDangerButton(
                         onClick = viewModel::clearSaveTree,
                         enabled = settings.saveTreeUri.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                        tint = MaterialTheme.colorScheme.error,
-                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                        contentColor = MaterialTheme.colorScheme.error
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Rounded.ClearAll, null, Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
