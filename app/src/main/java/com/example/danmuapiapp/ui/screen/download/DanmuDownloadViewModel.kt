@@ -149,6 +149,7 @@ class DanmuDownloadViewModel @Inject constructor(
         sourceBase = RuntimeUrlParser.extractBase(runtimeState.value.lanUrl)
         val recovered = downloadRepository.markRunningTasksAsPending()
         if (recovered > 0) {
+            requireQueuePreparationBeforeRun = true
             operationMessage = "检测到上次未完成任务，已恢复到队列（$recovered）"
         }
         viewModelScope.launch {
@@ -495,6 +496,7 @@ class DanmuDownloadViewModel @Inject constructor(
         }
         val reset = downloadRepository.resetQueueTasks(failedTaskIds, detail = "等待重试")
         if (reset > 0) {
+            requireQueuePreparationBeforeRun = true
             operationMessage = "已重试入队 $reset 项"
             processPendingQueue()
         } else {
@@ -612,6 +614,7 @@ class DanmuDownloadViewModel @Inject constructor(
         if (failedTaskIds.isNotEmpty()) {
             val reset = downloadRepository.resetQueueTasks(failedTaskIds, detail = "等待重试")
             if (reset > 0) {
+                requireQueuePreparationBeforeRun = true
                 operationMessage = "已重试入队 $reset 项"
                 processPendingQueue()
             } else {
@@ -645,6 +648,7 @@ class DanmuDownloadViewModel @Inject constructor(
         }
         val added = downloadRepository.enqueueTasks(inputs)
         if (added > 0) {
+            requireQueuePreparationBeforeRun = true
             operationMessage = "已重试入队 $added 项"
             processPendingQueue()
         } else {
@@ -919,6 +923,8 @@ class DanmuDownloadViewModel @Inject constructor(
                     detail = "准备下载"
                 )
                 var downloadInput = task.toInput()
+                var activeEpisodeId = task.episodeId
+                var taskSourceKey = sourceKey(task.source)
                 if (prepareChainForThisRun) {
                     val prepareDetail = "准备下载中：优先尝试原链路，失效后自动重建"
                     updateActiveTask(detail = prepareDetail, progress = 0f)
@@ -928,14 +934,41 @@ class DanmuDownloadViewModel @Inject constructor(
                         detail = prepareDetail
                     )
                     updateEpisodeState(
-                        episodeId = task.episodeId,
+                        episodeId = activeEpisodeId,
                         state = EpisodeDownloadState.Running,
                         progress = 0f,
                         detail = prepareDetail
                     )
                 }
-                val sourceKey = sourceKey(task.source)
-                val sourceWait = (sourceCooldownUntil[sourceKey] ?: 0L) - System.currentTimeMillis()
+                val persistedRetryWait = task.retryNotBeforeAt - System.currentTimeMillis()
+                if (persistedRetryWait > 0L && !cancelRequested) {
+                    val waitSeconds = (persistedRetryWait / 1000L).coerceAtLeast(1L)
+                    val waitDetail = "上次失败退避等待 ${waitSeconds}s"
+                    updateActiveTask(detail = waitDetail, progress = 0f)
+                    downloadRepository.setQueueTaskStatus(
+                        taskId = task.taskId,
+                        status = DownloadQueueStatus.Running,
+                        detail = waitDetail
+                    )
+                    updateEpisodeState(
+                        episodeId = activeEpisodeId,
+                        state = EpisodeDownloadState.Running,
+                        progress = 0f,
+                        detail = waitDetail
+                    )
+                    progressSummary = "等待上次失败退避结束（${waitSeconds}s）"
+                    throttleHint = "来源退避中：等待 ${waitSeconds}s 后重试"
+                    interruptibleDelay(persistedRetryWait)
+                    throttleHint = null
+                }
+                if (cancelRequested) {
+                    revertTaskToPending(task, activeEpisodeId)
+                    break
+                }
+                if (task.retryNotBeforeAt > 0L) {
+                    downloadRepository.setQueueTaskRetryNotBefore(task.taskId, 0L)
+                }
+                val sourceWait = (sourceCooldownUntil[taskSourceKey] ?: 0L) - System.currentTimeMillis()
                 if (sourceWait > 0L && !cancelRequested) {
                     val waitDetail = "来源限流等待 ${sourceWait / 1000}s"
                     updateActiveTask(detail = waitDetail, progress = 0f)
@@ -945,7 +978,7 @@ class DanmuDownloadViewModel @Inject constructor(
                         detail = waitDetail
                     )
                     updateEpisodeState(
-                        episodeId = task.episodeId,
+                        episodeId = activeEpisodeId,
                         state = EpisodeDownloadState.Running,
                         progress = 0f,
                         detail = waitDetail
@@ -956,7 +989,7 @@ class DanmuDownloadViewModel @Inject constructor(
                     throttleHint = null
                 }
                 if (cancelRequested) {
-                    revertTaskToPending(task)
+                    revertTaskToPending(task, activeEpisodeId)
                     break
                 }
                 if (processed > 0 && !cancelRequested) {
@@ -970,7 +1003,7 @@ class DanmuDownloadViewModel @Inject constructor(
                             detail = waitDetail
                         )
                         updateEpisodeState(
-                            episodeId = task.episodeId,
+                            episodeId = activeEpisodeId,
                             state = EpisodeDownloadState.Running,
                             progress = 0f,
                             detail = waitDetail
@@ -980,7 +1013,7 @@ class DanmuDownloadViewModel @Inject constructor(
                     }
                 }
                 if (cancelRequested) {
-                    revertTaskToPending(task)
+                    revertTaskToPending(task, activeEpisodeId)
                     break
                 }
                 // 单任务自动重试：首次失败后最多重试两次。
@@ -988,6 +1021,7 @@ class DanmuDownloadViewModel @Inject constructor(
                 var retryCount = 0
                 var finalResult: Result<DanmuDownloadResult>? = null
                 var staleRebuildDone = false
+                // The source key may change if stale-chain recovery resolves a new source.
 
                 while (!cancelRequested) {
                     val attemptNo = retryCount + 1
@@ -1008,7 +1042,7 @@ class DanmuDownloadViewModel @Inject constructor(
                         progress = 0f
                     )
                     updateEpisodeState(
-                        episodeId = task.episodeId,
+                        episodeId = activeEpisodeId,
                         state = EpisodeDownloadState.Running,
                         progress = 0f,
                         detail = startDetail
@@ -1022,7 +1056,7 @@ class DanmuDownloadViewModel @Inject constructor(
                                     progress = progress.coerceIn(0f, 1f)
                                 )
                                 updateEpisodeState(
-                                    episodeId = task.episodeId,
+                                    episodeId = activeEpisodeId,
                                     state = EpisodeDownloadState.Running,
                                     progress = progress.coerceIn(0f, 1f),
                                     detail = detail
@@ -1031,19 +1065,6 @@ class DanmuDownloadViewModel @Inject constructor(
                         }
                     }
                     finalResult = attemptResult
-
-                    val canRetry = retryCount < maxAutoRetry
-                    val shouldRetry = attemptResult.fold(
-                        onSuccess = { output ->
-                            output.status == DownloadRecordStatus.Failed && canRetry
-                        },
-                        onFailure = {
-                            canRetry
-                        }
-                    )
-                    if (!shouldRetry) {
-                        break
-                    }
 
                     val rawDetail = attemptResult.fold(
                         onSuccess = { output ->
@@ -1057,10 +1078,17 @@ class DanmuDownloadViewModel @Inject constructor(
                         onSuccess = { output -> output.httpCode ?: extractHttpCodeFromDetail(rawDetail) },
                         onFailure = { extractHttpCodeFromDetail(rawDetail) }
                     )
+                    val failedResult = attemptResult.fold(
+                        onSuccess = { output -> output.status == DownloadRecordStatus.Failed },
+                        onFailure = { true }
+                    )
+                    val canRetry = retryCount < maxAutoRetry
                     if (
                         prepareChainForThisRun &&
+                        failedResult &&
+                        canRetry &&
                         !staleRebuildDone &&
-                        shouldRebuildChainForStaleFailure(failureHttpCode, rawDetail)
+                        DownloadRetryPolicy.shouldRebuildChainForStaleFailure(failureHttpCode, rawDetail)
                     ) {
                         val rebuildingDetail = "检测到旧链路可能失效，正在重建弹幕链路"
                         updateActiveTask(detail = rebuildingDetail, progress = 0f)
@@ -1070,7 +1098,7 @@ class DanmuDownloadViewModel @Inject constructor(
                             detail = rebuildingDetail
                         )
                         updateEpisodeState(
-                            episodeId = task.episodeId,
+                            episodeId = activeEpisodeId,
                             state = EpisodeDownloadState.Running,
                             progress = 0f,
                             detail = rebuildingDetail
@@ -1079,21 +1107,47 @@ class DanmuDownloadViewModel @Inject constructor(
                         if (rebuiltResult.isSuccess) {
                             val rebuiltInput = rebuiltResult.getOrThrow()
                             val oldEpisodeId = downloadInput.episodeId
-                            downloadInput = rebuiltInput
-                            staleRebuildDone = true
-                            val rebuiltDetail = if (downloadInput.episodeId != oldEpisodeId) {
-                                "链路重建完成：已刷新弹幕ID（$oldEpisodeId→${downloadInput.episodeId}）"
+                            val rebuiltDetail = if (rebuiltInput.episodeId != oldEpisodeId) {
+                                "链路重建完成：已刷新弹幕ID（$oldEpisodeId→${rebuiltInput.episodeId}）"
                             } else {
                                 "链路重建完成：已刷新映射"
                             }
-                            updateActiveTask(detail = rebuiltDetail, progress = 0f)
+                            if (!downloadRepository.updateQueueTaskInput(task.taskId, rebuiltInput, rebuiltDetail)) {
+                                val persistFailDetail = "链路重建失败：无法保存新的弹幕链路"
+                                finalResult = Result.failure(IllegalStateException(persistFailDetail))
+                                updateActiveTask(detail = persistFailDetail, progress = 0f)
+                                downloadRepository.setQueueTaskStatus(
+                                    taskId = task.taskId,
+                                    status = DownloadQueueStatus.Running,
+                                    detail = persistFailDetail
+                                )
+                                updateEpisodeState(
+                                    episodeId = activeEpisodeId,
+                                    state = EpisodeDownloadState.Running,
+                                    progress = 0f,
+                                    detail = persistFailDetail
+                                )
+                                break
+                            }
+                            downloadInput = rebuiltInput
+                            activeEpisodeId = rebuiltInput.episodeId
+                            taskSourceKey = sourceKey(rebuiltInput.source)
+                            staleRebuildDone = true
+                            setActiveTask(
+                                taskId = task.taskId,
+                                animeTitle = rebuiltInput.animeTitle,
+                                episodeNo = rebuiltInput.episodeNo,
+                                source = rebuiltInput.source,
+                                detail = rebuiltDetail,
+                                progress = 0f
+                            )
                             downloadRepository.setQueueTaskStatus(
                                 taskId = task.taskId,
                                 status = DownloadQueueStatus.Running,
                                 detail = rebuiltDetail
                             )
                             updateEpisodeState(
-                                episodeId = task.episodeId,
+                                episodeId = activeEpisodeId,
                                 state = EpisodeDownloadState.Running,
                                 progress = 0f,
                                 detail = rebuiltDetail
@@ -1109,20 +1163,27 @@ class DanmuDownloadViewModel @Inject constructor(
                                 detail = rebuildFailDetail
                             )
                             updateEpisodeState(
-                                episodeId = task.episodeId,
+                                episodeId = activeEpisodeId,
                                 state = EpisodeDownloadState.Running,
                                 progress = 0f,
                                 detail = rebuildFailDetail
                             )
+                            finalResult = Result.failure(
+                                IllegalStateException(rebuildFailDetail)
+                            )
+                            break
                         }
                     }
-                    val shouldBackoffRetry = attemptResult.fold(
-                        onSuccess = { output ->
-                            shouldTriggerBackoff(output.httpCode, rawDetail)
-                        },
-                        onFailure = {
-                            true
-                        }
+                    val shouldRetry = failedResult &&
+                        canRetry &&
+                        DownloadRetryPolicy.shouldRetryFailure(failureHttpCode, rawDetail)
+                    if (!shouldRetry) {
+                        break
+                    }
+
+                    val shouldBackoffRetry = DownloadRetryPolicy.shouldTriggerBackoff(
+                        failureHttpCode,
+                        rawDetail
                     )
                     val nextAttemptNo = attemptNo + 1
                     val nextDetailPrefix = "下载失败，准备重试（$nextAttemptNo/$totalAttempts）"
@@ -1134,10 +1195,10 @@ class DanmuDownloadViewModel @Inject constructor(
 
                     var backoffMs = 0L
                     if (shouldBackoffRetry) {
-                        val level = (sourceBackoffLevel[sourceKey] ?: 0) + 1
-                        sourceBackoffLevel[sourceKey] = level
+                        val level = (sourceBackoffLevel[taskSourceKey] ?: 0) + 1
+                        sourceBackoffLevel[taskSourceKey] = level
                         backoffMs = backoffDelayMs(throttle, level)
-                        sourceCooldownUntil[sourceKey] = System.currentTimeMillis() + backoffMs
+                        sourceCooldownUntil[taskSourceKey] = System.currentTimeMillis() + backoffMs
                     }
                     val retryDetailWithBackoff = if (backoffMs > 0L) {
                         "$retryDetail（退避${backoffMs / 1000}s）"
@@ -1154,7 +1215,7 @@ class DanmuDownloadViewModel @Inject constructor(
                         detail = retryDetailWithBackoff
                     )
                     updateEpisodeState(
-                        episodeId = task.episodeId,
+                        episodeId = activeEpisodeId,
                         state = EpisodeDownloadState.Running,
                         progress = 0f,
                         detail = retryDetailWithBackoff
@@ -1169,7 +1230,7 @@ class DanmuDownloadViewModel @Inject constructor(
                 }
 
                 if (cancelRequested) {
-                    revertTaskToPending(task)
+                    revertTaskToPending(task, activeEpisodeId)
                     break
                 }
 
@@ -1187,15 +1248,16 @@ class DanmuDownloadViewModel @Inject constructor(
                                     detail = detail,
                                     progress = 1f
                                 )
-                                sourceBackoffLevel[sourceKey] = 0
-                                sourceCooldownUntil.remove(sourceKey)
+                                sourceBackoffLevel[taskSourceKey] = 0
+                                sourceCooldownUntil.remove(taskSourceKey)
                                 downloadRepository.setQueueTaskStatus(
                                     taskId = task.taskId,
                                     status = DownloadQueueStatus.Success,
                                     detail = detail
                                 )
+                                downloadRepository.setQueueTaskRetryNotBefore(task.taskId, 0L)
                                 updateEpisodeState(
-                                    episodeId = task.episodeId,
+                                    episodeId = activeEpisodeId,
                                     state = EpisodeDownloadState.Success,
                                     progress = 1f,
                                     detail = detail
@@ -1209,15 +1271,16 @@ class DanmuDownloadViewModel @Inject constructor(
                                     detail = detail,
                                     progress = 1f
                                 )
-                                sourceBackoffLevel[sourceKey] = 0
-                                sourceCooldownUntil.remove(sourceKey)
+                                sourceBackoffLevel[taskSourceKey] = 0
+                                sourceCooldownUntil.remove(taskSourceKey)
                                 downloadRepository.setQueueTaskStatus(
                                     taskId = task.taskId,
                                     status = DownloadQueueStatus.Skipped,
                                     detail = detail
                                 )
+                                downloadRepository.setQueueTaskRetryNotBefore(task.taskId, 0L)
                                 updateEpisodeState(
-                                    episodeId = task.episodeId,
+                                    episodeId = activeEpisodeId,
                                     state = EpisodeDownloadState.Skipped,
                                     progress = 1f,
                                     detail = detail
@@ -1227,13 +1290,22 @@ class DanmuDownloadViewModel @Inject constructor(
                             DownloadRecordStatus.Failed -> {
                                 failed++
                                 val rawDetail = output.errorMessage ?: "下载失败"
-                                val shouldBackoff = shouldTriggerBackoff(output.httpCode, rawDetail)
-                                val failPrefix = "重试${maxAutoRetry}次后仍失败："
+                                val shouldBackoff = DownloadRetryPolicy.shouldTriggerBackoff(
+                                    output.httpCode,
+                                    rawDetail
+                                )
+                                val failPrefix = if (retryCount > 0) {
+                                    "重试${retryCount}次后仍失败："
+                                } else {
+                                    "下载失败："
+                                }
+                                var retryNotBeforeAt = 0L
                                 val detail = if (shouldBackoff) {
-                                    val level = (sourceBackoffLevel[sourceKey] ?: 0) + 1
-                                    sourceBackoffLevel[sourceKey] = level
+                                    val level = (sourceBackoffLevel[taskSourceKey] ?: 0) + 1
+                                    sourceBackoffLevel[taskSourceKey] = level
                                     val backoffMs = backoffDelayMs(throttle, level)
-                                    sourceCooldownUntil[sourceKey] = System.currentTimeMillis() + backoffMs
+                                    retryNotBeforeAt = System.currentTimeMillis() + backoffMs
+                                    sourceCooldownUntil[taskSourceKey] = retryNotBeforeAt
                                     "$failPrefix$rawDetail（退避${backoffMs / 1000}s）"
                                 } else {
                                     "$failPrefix$rawDetail"
@@ -1247,8 +1319,12 @@ class DanmuDownloadViewModel @Inject constructor(
                                     status = DownloadQueueStatus.Failed,
                                     detail = detail
                                 )
+                                downloadRepository.setQueueTaskRetryNotBefore(
+                                    task.taskId,
+                                    retryNotBeforeAt
+                                )
                                 updateEpisodeState(
-                                    episodeId = task.episodeId,
+                                    episodeId = activeEpisodeId,
                                     state = EpisodeDownloadState.Failed,
                                     progress = 1f,
                                     detail = detail
@@ -1259,12 +1335,27 @@ class DanmuDownloadViewModel @Inject constructor(
                     onFailure = { throwable ->
                         failed++
                         val rawDetail = throwable.message ?: "下载失败"
-                        val failPrefix = "重试${maxAutoRetry}次后仍失败："
-                        val level = (sourceBackoffLevel[sourceKey] ?: 0) + 1
-                        sourceBackoffLevel[sourceKey] = level
-                        val backoffMs = backoffDelayMs(throttle, level)
-                        sourceCooldownUntil[sourceKey] = System.currentTimeMillis() + backoffMs
-                        val detail = "$failPrefix$rawDetail（退避${backoffMs / 1000}s）"
+                        val failPrefix = if (retryCount > 0) {
+                            "重试${retryCount}次后仍失败："
+                        } else {
+                            "下载失败："
+                        }
+                        val failureHttpCode = extractHttpCodeFromDetail(rawDetail)
+                        val shouldBackoff = DownloadRetryPolicy.shouldTriggerBackoff(
+                            failureHttpCode,
+                            rawDetail
+                        )
+                        var retryNotBeforeAt = 0L
+                        val detail = if (shouldBackoff) {
+                            val level = (sourceBackoffLevel[taskSourceKey] ?: 0) + 1
+                            sourceBackoffLevel[taskSourceKey] = level
+                            val backoffMs = backoffDelayMs(throttle, level)
+                            retryNotBeforeAt = System.currentTimeMillis() + backoffMs
+                            sourceCooldownUntil[taskSourceKey] = retryNotBeforeAt
+                            "$failPrefix$rawDetail（退避${backoffMs / 1000}s）"
+                        } else {
+                            "$failPrefix$rawDetail"
+                        }
                         updateActiveTask(
                             detail = detail,
                             progress = 1f
@@ -1274,8 +1365,12 @@ class DanmuDownloadViewModel @Inject constructor(
                             status = DownloadQueueStatus.Failed,
                             detail = detail
                         )
+                        downloadRepository.setQueueTaskRetryNotBefore(
+                            task.taskId,
+                            retryNotBeforeAt
+                        )
                         updateEpisodeState(
-                            episodeId = task.episodeId,
+                            episodeId = activeEpisodeId,
                             state = EpisodeDownloadState.Failed,
                             progress = 1f,
                             detail = detail
@@ -1344,14 +1439,17 @@ class DanmuDownloadViewModel @Inject constructor(
         }
     }
 
-    private fun revertTaskToPending(task: com.example.danmuapiapp.domain.model.DanmuDownloadTask) {
+    private fun revertTaskToPending(
+        task: com.example.danmuapiapp.domain.model.DanmuDownloadTask,
+        episodeId: Long = task.episodeId
+    ) {
         downloadRepository.setQueueTaskStatus(
             taskId = task.taskId,
             status = DownloadQueueStatus.Pending,
             detail = "等待恢复"
         )
         updateEpisodeState(
-            episodeId = task.episodeId,
+            episodeId = episodeId,
             state = EpisodeDownloadState.Queued,
             progress = 0f,
             detail = "等待恢复"
@@ -1493,45 +1591,9 @@ class DanmuDownloadViewModel @Inject constructor(
         return delayMs.coerceAtLeast(1000L)
     }
 
-    private fun shouldTriggerBackoff(httpCode: Int?, detail: String): Boolean {
-        if (httpCode == 429 || httpCode == 403 || httpCode == 408) return true
-        if (httpCode != null && httpCode in 500..599) return true
-
-        val text = detail.lowercase()
-        return text.contains("timeout") ||
-            text.contains("timed out") ||
-            text.contains("连接超时") ||
-            text.contains("请求超时") ||
-            text.contains("unable to resolve host") ||
-            text.contains("connection reset") ||
-            text.contains("429")
-    }
-
     private fun extractHttpCodeFromDetail(detail: String): Int? {
         val matched = Regex("http\\s*([0-9]{3})", RegexOption.IGNORE_CASE).find(detail)
         return matched?.groupValues?.getOrNull(1)?.toIntOrNull()
-    }
-
-    private fun shouldRebuildChainForStaleFailure(httpCode: Int?, detail: String): Boolean {
-        if (httpCode == 400 || httpCode == 404 || httpCode == 410 || httpCode == 422) {
-            return true
-        }
-        val text = detail.lowercase()
-        if (httpCode == 500 && (
-                text.contains("invalid") ||
-                    text.contains("无效") ||
-                    text.contains("不存在") ||
-                    text.contains("not found") ||
-                    text.contains("episode")
-                )
-        ) {
-            return true
-        }
-        return text.contains("missing or invalid") ||
-            text.contains("参数错误") ||
-            text.contains("episodeid") ||
-            text.contains("弹幕数据为空") ||
-            text.contains("资源不存在")
     }
 
     private fun setActiveTask(

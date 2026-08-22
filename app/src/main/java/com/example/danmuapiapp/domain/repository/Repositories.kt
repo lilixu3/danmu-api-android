@@ -233,6 +233,16 @@ interface DanmuDownloadRepository {
         detail: String = "",
         incrementAttempt: Boolean = false
     )
+    /**
+     * Replaces the resolved download chain while preserving task identity,
+     * status, and attempt history.
+     */
+    fun updateQueueTaskInput(
+        taskId: Long,
+        input: DanmuDownloadInput,
+        detail: String = ""
+    ): Boolean
+    fun setQueueTaskRetryNotBefore(taskId: Long, timestampMs: Long)
     fun resetQueueTasks(taskIds: Set<Long>, detail: String = "等待重试"): Int
     fun markRunningTasksAsPending(detail: String = "等待恢复"): Int
     fun clearQueueTasks()

@@ -217,6 +217,53 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun updateQueueTaskInput(
+        taskId: Long,
+        input: DanmuDownloadInput,
+        detail: String
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        var changed = false
+        val next = _queueTasks.value.map { task ->
+            if (task.taskId != taskId) return@map task
+            changed = true
+            task.copy(
+                updatedAt = now,
+                apiBaseUrl = input.apiBaseUrl.trim(),
+                animeTitle = input.animeTitle,
+                episodeTitle = input.episodeTitle,
+                episodeId = input.episodeId,
+                episodeNo = input.episodeNo,
+                source = input.source,
+                format = input.format.value,
+                fileNameTemplate = input.fileNameTemplate,
+                conflictPolicy = input.conflictPolicy.key,
+                animeId = input.animeId,
+                lastDetail = detail.ifBlank { task.lastDetail }
+            )
+        }
+        if (changed) {
+            persistQueueTasks(next)
+        }
+        return changed
+    }
+
+    override fun setQueueTaskRetryNotBefore(taskId: Long, timestampMs: Long) {
+        val now = System.currentTimeMillis()
+        var changed = false
+        val next = _queueTasks.value.map { task ->
+            if (task.taskId != taskId) return@map task
+            changed = true
+            task.copy(
+                updatedAt = now,
+                retryNotBeforeAt = timestampMs.coerceAtLeast(0L)
+            )
+        }
+        if (changed) {
+            persistQueueTasks(next)
+        }
+    }
+
     override fun resetQueueTasks(taskIds: Set<Long>, detail: String): Int {
         if (taskIds.isEmpty()) return 0
         val now = System.currentTimeMillis()
