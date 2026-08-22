@@ -7,6 +7,7 @@ import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
@@ -636,13 +637,10 @@ private fun AdminActionsCard(
                     Spacer(Modifier.width(6.dp))
                     Text("清空黑名单")
                 }
-                AppGlassButton(
+                AppGlassDangerButton(
                     onClick = onClearStats,
                     enabled = !busy,
                     modifier = Modifier.height(36.dp),
-                    tint = MaterialTheme.colorScheme.error,
-                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.error,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
                 ) {
                     Icon(Icons.Rounded.WarningAmber, null, Modifier.size(16.dp))

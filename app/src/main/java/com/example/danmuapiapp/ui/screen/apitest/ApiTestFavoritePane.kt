@@ -70,6 +70,7 @@ import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
@@ -607,11 +608,8 @@ private fun FavoriteScheduleDialog(
         },
         actions = {
             if (existing != null) {
-                AppGlassButton(
+                AppGlassDangerButton(
                     onClick = onDisable,
-                    tint = MaterialTheme.colorScheme.error,
-                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Text("关闭定时")
                 }

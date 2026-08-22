@@ -1,6 +1,5 @@
 package com.example.danmuapiapp.ui.component
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -52,6 +50,7 @@ fun GithubProxyPickerDialog(
                 )
                 options.forEach { option ->
                     val latency = resultMap[option.id]
+                    val optionSelected = selectedId == option.id
                     val latencyText = when {
                         option.id in testingIds -> "测速中..."
                         latency == null -> "未测速"
@@ -59,24 +58,17 @@ fun GithubProxyPickerDialog(
                         else -> "超时"
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = selectedId == option.id,
-                                onClick = { onSelect(option.id) }
-                            )
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    AppDialogOption(
+                        selected = optionSelected,
+                        onClick = { onSelect(option.id) }
                     ) {
                         RadioButton(
-                            selected = selectedId == option.id,
+                            selected = optionSelected,
                             onClick = { onSelect(option.id) }
                         )
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { onSelect(option.id) }
                                 .padding(start = 4.dp)
                         ) {
                             Text(
@@ -87,6 +79,7 @@ fun GithubProxyPickerDialog(
                                 text = latencyText,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
+                                    optionSelected -> MaterialTheme.colorScheme.onPrimaryContainer
                                     option.id in testingIds -> MaterialTheme.colorScheme.primary
                                     latency == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                     latency >= 0 -> MaterialTheme.colorScheme.primary
