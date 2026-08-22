@@ -391,6 +391,7 @@ data class DanmuDownloadTask(
     val status: String = DownloadQueueStatus.Pending.key,
     val attempts: Int = 0,
     val lastDetail: String = "",
+    val retryNotBeforeAt: Long = 0L,
     val animeId: Long = 0L
 ) {
     fun statusEnum(): DownloadQueueStatus = DownloadQueueStatus.fromKey(status)
