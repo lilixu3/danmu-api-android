@@ -35,6 +35,10 @@ import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.theme.glassBorderColor
 import com.example.danmuapiapp.ui.theme.glassSurfaceColor
+import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.component.liquid.AppLiquidButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -80,14 +84,11 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = glassSurfaceColor(),
-            contentColor = MaterialTheme.colorScheme.onSurface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        color = glassSurfaceColor(),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(
             width = 1.dp,
             color = glassBorderColor()
@@ -168,6 +169,33 @@ fun GradientButton(
     } else {
         Color.White
     }
+    val glassEnabled = LocalGlassMaterial.current.enabled &&
+        LocalGlassBackgroundBackdrop.current != null
+    if (glassEnabled) {
+        AppLiquidButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            height = 52.dp,
+            shape = RoundedCornerShape(16.dp),
+            tint = if (enabled) colors.firstOrNull() ?: Color.Unspecified else Color.Unspecified,
+            surfaceColor = if (enabled) {
+                Color.Unspecified
+            } else {
+                disabledColors.firstOrNull()?.copy(alpha = 0.32f)
+                    ?: MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.32f)
+            },
+            contentColor = if (enabled) {
+                enabledTextColor
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
+            }
+        ) {
+            Text(text, style = MaterialTheme.typography.labelLarge)
+        }
+        return
+    }
+
     Button(
         onClick = onClick, modifier = modifier.height(52.dp), enabled = enabled,
         shape = RoundedCornerShape(16.dp),
@@ -290,10 +318,7 @@ fun SettingsPageHeader(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FilledTonalIconButton(
-                onClick = onBack,
-                modifier = Modifier.size(36.dp)
-            ) {
+            AppGlassIconButton(onClick = onBack, size = 36.dp) {
                 Icon(
                     Icons.AutoMirrored.Rounded.ArrowBack,
                     contentDescription = "返回",
@@ -350,7 +375,7 @@ fun SettingsGroup(
                 )
             }
         }
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
             color = glassSurfaceColor(),
@@ -389,7 +414,7 @@ fun SettingsItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier
                     .size(40.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -534,7 +559,7 @@ fun SettingsHintCard(
     text: String,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = glassSurfaceColor(),
@@ -570,7 +595,7 @@ fun SettingsEntryCard(
     icon: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         color = glassSurfaceColor(),

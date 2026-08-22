@@ -33,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.CoreBranchCatalog
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 @Composable
 fun CoreBranchPickerDialog(
@@ -93,7 +95,7 @@ fun CoreBranchPickerDialog(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        TextButton(onClick = onRetry) {
+                        AppGlassButton(onClick = onRetry) {
                             Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
                             Text("重新读取", modifier = Modifier.padding(start = 6.dp))
                         }
@@ -109,40 +111,41 @@ fun CoreBranchPickerDialog(
                     ) {
                         items(catalog.branches, key = { it }) { branch ->
                             val selected = branch.equals(selectedBranch, ignoreCase = true)
-                            Row(
+                            AppGlassSurface(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        color = if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceContainerLow
-                                        },
-                                        shape = RoundedCornerShape(6.dp)
-                                    )
-                                    .clickable { selectedBranch = branch }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .fillMaxWidth(),
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.42f)
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                onClick = { selectedBranch = branch }
                             ) {
-                                RadioButton(
-                                    selected = selected,
-                                    onClick = { selectedBranch = branch }
-                                )
-                                Text(
-                                    text = branch,
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (branch.equals(catalog.defaultBranch, ignoreCase = true)) {
-                                    Text(
-                                        text = "默认",
-                                        modifier = Modifier.padding(start = 8.dp, end = 5.dp),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = selected,
+                                        onClick = { selectedBranch = branch }
                                     )
+                                    Text(
+                                        text = branch,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (branch.equals(catalog.defaultBranch, ignoreCase = true)) {
+                                        Text(
+                                            text = "默认",
+                                            modifier = Modifier.padding(start = 8.dp, end = 5.dp),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -151,7 +154,7 @@ fun CoreBranchPickerDialog(
             }
         },
         confirmButton = {
-            Button(
+            AppGlassButton(
                 onClick = { onConfirm(selectedBranch) },
                 enabled = !isLoading && errorMessage == null && selectedBranch.isNotBlank()
             ) {
@@ -159,7 +162,7 @@ fun CoreBranchPickerDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }

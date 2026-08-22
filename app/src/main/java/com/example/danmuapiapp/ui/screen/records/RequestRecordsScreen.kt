@@ -23,6 +23,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.RequestRecord
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -87,9 +91,9 @@ fun RequestRecordsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = onBack,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
                 }
@@ -105,10 +109,10 @@ fun RequestRecordsScreen(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::refresh,
                     enabled = !viewModel.isRefreshing,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     if (viewModel.isRefreshing) {
                         CircularProgressIndicator(
@@ -119,10 +123,11 @@ fun RequestRecordsScreen(
                         Icon(Icons.Rounded.Refresh, "刷新", Modifier.size(18.dp))
                     }
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::clearAll,
                     enabled = records.isNotEmpty(),
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp,
+                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Icon(Icons.Rounded.ClearAll, "清空", Modifier.size(18.dp))
                 }
@@ -130,7 +135,7 @@ fun RequestRecordsScreen(
         }
 
         if (!adminState.isAdminMode) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -172,7 +177,7 @@ fun RequestRecordsScreen(
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = if (query.isNotBlank()) {
                 {
-                    IconButton(onClick = { query = "" }) {
+                    AppGlassIconButton(onClick = { query = "" }, size = 32.dp) {
                         Icon(Icons.Rounded.Close, "清空搜索")
                     }
                 }
@@ -187,7 +192,7 @@ fun RequestRecordsScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterSuccess == null,
                 onClick = { filterSuccess = null },
                 label = { Text("全部") },
@@ -195,24 +200,20 @@ fun RequestRecordsScreen(
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterSuccess == true,
                 onClick = { filterSuccess = if (filterSuccess == true) null else true },
                 label = { Text("成功") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = (if (isSystemInDarkTheme()) Color(0xFF4ADE80) else Color(0xFF4CAF50)).copy(alpha = 0.15f)
-                ),
+                accent = if (isSystemInDarkTheme()) Color(0xFF4ADE80) else Color(0xFF4CAF50),
                 leadingIcon = if (filterSuccess == true) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterSuccess == false,
                 onClick = { filterSuccess = if (filterSuccess == false) null else false },
                 label = { Text("失败") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = (if (isSystemInDarkTheme()) Color(0xFFF87171) else Color(0xFFE53935)).copy(alpha = 0.15f)
-                ),
+                accent = if (isSystemInDarkTheme()) Color(0xFFF87171) else Color(0xFFE53935),
                 leadingIcon = if (filterSuccess == false) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
@@ -221,7 +222,7 @@ fun RequestRecordsScreen(
                 expanded = methodMenuExpanded,
                 onExpandedChange = { methodMenuExpanded = it }
             ) {
-                FilterChip(
+                AppGlassFilterChip(
                     selected = methodFilter != null,
                     onClick = { methodMenuExpanded = true },
                     label = { Text(methodFilter ?: "方法") },
@@ -250,7 +251,7 @@ fun RequestRecordsScreen(
                     }
                 }
             }
-            FilterChip(
+            AppGlassFilterChip(
                 selected = timeRange == RequestTimeRange.LastHour,
                 onClick = {
                     timeRange = if (timeRange == RequestTimeRange.LastHour) RequestTimeRange.All
@@ -258,7 +259,7 @@ fun RequestRecordsScreen(
                 },
                 label = { Text("近 1 小时") }
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = timeRange == RequestTimeRange.Today,
                 onClick = {
                     timeRange = if (timeRange == RequestTimeRange.Today) RequestTimeRange.All
@@ -269,7 +270,7 @@ fun RequestRecordsScreen(
         }
 
         // Stats card
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -299,7 +300,7 @@ fun RequestRecordsScreen(
         }
 
         if (insights.topFailureEndpoint != null || insights.slowCount > 0) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
@@ -416,7 +417,7 @@ private fun RecordCard(
         if (dark) Color(0xFFF87171) else Color(0xFFE53935)
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -524,7 +525,7 @@ private fun RecordCard(
 
                 // Response snippet
                 if (!record.responseSnippet.isNullOrBlank()) {
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -547,7 +548,7 @@ private fun RecordCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(
+                    AppGlassButton(
                         onClick = onCopyUrl,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                     ) {

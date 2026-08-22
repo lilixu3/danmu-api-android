@@ -59,6 +59,10 @@ import com.example.danmuapiapp.domain.model.DownloadRecordStatus
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -130,10 +134,10 @@ internal fun RecordsPage(
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = onSync,
                                 enabled = controlsEnabled,
-                                modifier = Modifier.size(36.dp)
+                                size = 36.dp
                             ) {
                                 if (isSyncing) {
                                     CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
@@ -141,7 +145,7 @@ internal fun RecordsPage(
                                     Icon(Icons.Rounded.Refresh, "扫描已有弹幕", Modifier.size(19.dp))
                                 }
                             }
-                            IconButton(
+                            AppGlassIconButton(
                                 onClick = {
                                     deleteRequest = records.toDeleteRequest(
                                         key = "all",
@@ -150,7 +154,7 @@ internal fun RecordsPage(
                                     )
                                 },
                                 enabled = controlsEnabled && records.isNotEmpty(),
-                                modifier = Modifier.size(36.dp)
+                                size = 36.dp
                             ) {
                                 if (isDeleting) {
                                     CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
@@ -204,9 +208,9 @@ internal fun RecordsPage(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
+                        AppGlassIconButton(
                             onClick = { selectedAnimeKey = null },
-                            modifier = Modifier.size(36.dp)
+                            size = 36.dp
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回剧列表", Modifier.size(19.dp))
                         }
@@ -223,7 +227,7 @@ internal fun RecordsPage(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        IconButton(
+                        AppGlassIconButton(
                             onClick = {
                                 deleteRequest = selectedGroup.records.toDeleteRequest(
                                     key = "anime-${selectedGroup.key}",
@@ -232,7 +236,7 @@ internal fun RecordsPage(
                                 )
                             },
                             enabled = controlsEnabled,
-                            modifier = Modifier.size(36.dp)
+                            size = 36.dp
                         ) {
                             if (isDeleting) {
                                 CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
@@ -298,10 +302,9 @@ private fun RecordFilterChip(
     label: String,
     onSelect: (RecordFilter) -> Unit
 ) {
-    FilterChip(
+    AppGlassFilterChip(
         selected = selectedFilter == filter,
         onClick = { onSelect(filter) },
-        colors = primarySelectionFilterChipColors(),
         label = { Text(label) }
     )
 }
@@ -314,12 +317,13 @@ private fun AnimeRecordGroupRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    AppGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)),
-        onClick = onOpen
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
     ) {
         Row(
             modifier = Modifier.padding(start = 12.dp, top = 12.dp, end = 6.dp, bottom = 12.dp),
@@ -358,7 +362,7 @@ private fun AnimeRecordGroupRow(
                     if (group.skippedCount > 0) RecordInlineStat("跳过", group.skippedCount, Color(0xFFF57C00))
                 }
             }
-            IconButton(onClick = onDelete, enabled = enabled, modifier = Modifier.size(34.dp)) {
+            AppGlassIconButton(onClick = onDelete, enabled = enabled, size = 34.dp) {
                 Icon(
                     Icons.Rounded.DeleteOutline,
                     "删除这部剧",
@@ -397,7 +401,7 @@ private fun EpisodeRecordGroupRow(
     }
     val record = episode.representative
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
@@ -451,7 +455,7 @@ private fun EpisodeRecordGroupRow(
             }
             Row(modifier = Modifier.width(72.dp), horizontalArrangement = Arrangement.End) {
                 if (onPreview != null) {
-                    IconButton(onClick = onPreview, enabled = enabled && !loadingPreview, modifier = Modifier.size(34.dp)) {
+                    AppGlassIconButton(onClick = onPreview, enabled = enabled && !loadingPreview, size = 34.dp) {
                         if (loadingPreview) {
                             CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
                         } else {
@@ -459,7 +463,7 @@ private fun EpisodeRecordGroupRow(
                         }
                     }
                 }
-                IconButton(onClick = onDelete, enabled = enabled, modifier = Modifier.size(34.dp)) {
+                AppGlassIconButton(onClick = onDelete, enabled = enabled, size = 34.dp) {
                     Icon(
                         Icons.Rounded.DeleteOutline,
                         "删除这一集",
@@ -483,7 +487,7 @@ private fun RecordInlineStat(label: String, count: Int, color: Color) {
 
 @Composable
 private fun RecordLibraryEmptyState(text: String) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -579,12 +583,18 @@ private fun RecordDeleteDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(
+                onClick = onDismiss,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) { Text("取消") }
         },
         confirmButton = {
-            TextButton(
+            AppGlassButton(
                 onClick = { onConfirm(deleteLocalFiles) },
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                tint = MaterialTheme.colorScheme.error,
+                surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
+                contentColor = MaterialTheme.colorScheme.error,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text(if (deleteLocalFiles) "删除记录和文件" else "仅清理记录")
             }

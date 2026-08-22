@@ -5,6 +5,9 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 
 import android.app.Activity
 import android.content.Context
@@ -179,17 +182,15 @@ internal fun DialogActionButton(
 ) {
     val actualEnabled = enabled && !loading
     if (primary) {
-        Button(
+        AppGlassPrimaryButton(
             onClick = onClick,
-            enabled = actualEnabled,
-            shape = RoundedCornerShape(12.dp),
-            colors = appPrimaryButtonColors()
+            enabled = actualEnabled
         ) {
             if (loading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    color = androidx.compose.material3.LocalContentColor.current
                 )
             } else {
                 Icon(icon, null, modifier = Modifier.size(16.dp))
@@ -198,10 +199,9 @@ internal fun DialogActionButton(
             Text(text)
         }
     } else {
-        OutlinedButton(
+        AppGlassButton(
             onClick = onClick,
-            enabled = actualEnabled,
-            shape = RoundedCornerShape(12.dp)
+            enabled = actualEnabled
         ) {
             if (loading) {
                 CircularProgressIndicator(
@@ -287,7 +287,7 @@ internal fun CacheQuickDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Surface(
+                    AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -347,7 +347,7 @@ internal fun CacheStatBadge(
     label: String,
     value: String
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
@@ -409,7 +409,7 @@ internal fun QuickPortDialog(
         title = "快速修改端口",
         subtitle = subtitle,
         content = {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
@@ -441,7 +441,7 @@ internal fun QuickPortDialog(
                         text = target,
                         icon = Icons.Rounded.Tune,
                         onClick = { onPortTextChange(target) },
-                        enabled = !isBusy && quickPortText != target,
+                        enabled = !isBusy,
                         primary = quickPortText == target
                     )
                 }
@@ -537,7 +537,7 @@ internal fun QuickTokenDialog(
         title = "快速修改 Token",
         subtitle = subtitle,
         content = {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f),
@@ -641,7 +641,7 @@ internal fun CoreUpdateConfirmDialog(
         title = "检查核心更新",
         subtitle = "检查当前核心分支是否有可用更新",
         content = {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f),
@@ -672,7 +672,7 @@ internal fun CoreUpdateConfirmDialog(
                 }
             }
 
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.64f),
@@ -734,7 +734,7 @@ internal fun CoreUpdateConfirmDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else if (!resultMessage.isNullOrBlank()) {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
                             color = resultContainer

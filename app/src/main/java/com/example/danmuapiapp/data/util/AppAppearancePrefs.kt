@@ -5,6 +5,9 @@ import android.content.res.Configuration
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.appcompat.app.AppCompatDelegate
+import com.example.danmuapiapp.domain.model.AppBackgroundMode
+import com.example.danmuapiapp.domain.model.AppBackgroundPreference
+import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.NightModePreference
 
@@ -14,6 +17,13 @@ object AppAppearancePrefs {
 
     const val PREF_KEY_NIGHT_MODE = "night_mode_pref"
     const val PREF_KEY_GLASS_MATERIAL = "glass_material_pref"
+    const val PREF_KEY_BACKGROUND_MODE = "background_mode"
+    const val PREF_KEY_BACKGROUND_LOCAL_URI = "background_local_uri"
+    const val PREF_KEY_BACKGROUND_ONLINE_URL = "background_online_url"
+    const val PREF_KEY_BACKGROUND_RANDOM_URL = "background_random_url"
+    const val PREF_KEY_BACKGROUND_RANDOM_REFRESH_POLICY = "background_random_refresh_policy"
+    const val PREF_KEY_BACKGROUND_CUSTOM_REFRESH_SECONDS = "background_custom_refresh_seconds"
+    const val PREF_KEY_BACKGROUND_RANDOM_URL_MIGRATED = "background_random_url_migrated"
     const val PREF_KEY_DARK_THEME_LEGACY = "dark_theme"
     const val PREF_KEY_HIDE_FROM_RECENTS = "hide_from_recents"
     const val PREF_KEY_APP_DPI_OVERRIDE = "app_dpi_override"
@@ -66,6 +76,59 @@ object AppAppearancePrefs {
         material: GlassMaterialPreference
     ) {
         prefs.edit { putInt(PREF_KEY_GLASS_MATERIAL, material.storageValue) }
+    }
+
+    fun readAppBackground(prefs: SharedPreferences): AppBackgroundPreference {
+        val storedRandomImageUrl = prefs.safeGetString(
+            PREF_KEY_BACKGROUND_RANDOM_URL,
+            AppBackgroundPreference.DEFAULT_RANDOM_IMAGE_URL
+        ).ifBlank { AppBackgroundPreference.DEFAULT_RANDOM_IMAGE_URL }
+        val randomImageUrl = if (
+            storedRandomImageUrl == AppBackgroundPreference.PICSUM_BACKUP_IMAGE_URL &&
+            !prefs.safeGetBoolean(PREF_KEY_BACKGROUND_RANDOM_URL_MIGRATED, false)
+        ) {
+            AppBackgroundPreference.DEFAULT_RANDOM_IMAGE_URL
+        } else {
+            storedRandomImageUrl
+        }
+        return AppBackgroundPreference(
+            mode = AppBackgroundMode.fromStorageValue(
+                prefs.safeGetInt(PREF_KEY_BACKGROUND_MODE, AppBackgroundMode.Solid.storageValue)
+            ),
+            localImageUri = prefs.safeGetString(PREF_KEY_BACKGROUND_LOCAL_URI),
+            onlineImageUrl = prefs.safeGetString(PREF_KEY_BACKGROUND_ONLINE_URL),
+            randomImageUrl = randomImageUrl,
+            randomRefreshPolicy = AppBackgroundRefreshPolicy.fromStorageValue(
+                prefs.safeGetInt(
+                    PREF_KEY_BACKGROUND_RANDOM_REFRESH_POLICY,
+                    AppBackgroundRefreshPolicy.OnForeground.storageValue
+                )
+            ),
+            customRandomRefreshSeconds = prefs.safeGetString(
+                PREF_KEY_BACKGROUND_CUSTOM_REFRESH_SECONDS
+            ).toLongOrNull()?.coerceAtLeast(0L) ?: 0L
+        )
+    }
+
+    fun writeAppBackground(
+        prefs: SharedPreferences,
+        background: AppBackgroundPreference
+    ) {
+        prefs.edit {
+            putInt(PREF_KEY_BACKGROUND_MODE, background.mode.storageValue)
+            putString(PREF_KEY_BACKGROUND_LOCAL_URI, background.localImageUri)
+            putString(PREF_KEY_BACKGROUND_ONLINE_URL, background.onlineImageUrl)
+            putString(PREF_KEY_BACKGROUND_RANDOM_URL, background.randomImageUrl)
+            putBoolean(PREF_KEY_BACKGROUND_RANDOM_URL_MIGRATED, true)
+            putInt(
+                PREF_KEY_BACKGROUND_RANDOM_REFRESH_POLICY,
+                background.randomRefreshPolicy.storageValue
+            )
+            putString(
+                PREF_KEY_BACKGROUND_CUSTOM_REFRESH_SECONDS,
+                background.customRandomRefreshSeconds.toString()
+            )
+        }
     }
 
     fun readHideFromRecents(prefs: SharedPreferences): Boolean {

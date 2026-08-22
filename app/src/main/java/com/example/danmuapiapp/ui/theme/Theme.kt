@@ -1,14 +1,29 @@
 package com.example.danmuapiapp.ui.theme
 
+import android.os.SystemClock
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.danmuapiapp.domain.model.AppBackgroundPreference
+import com.example.danmuapiapp.domain.model.AppBackgroundMode
+import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.ui.component.AppDialogHost
 
 /** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
 val LocalAppDarkTheme = staticCompositionLocalOf { false }
@@ -86,20 +101,101 @@ private val LightColorScheme = lightColorScheme(
 fun DanmuApiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
+    appBackground: AppBackgroundPreference = AppBackgroundPreference(),
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val foregroundKey = rememberBackgroundRefreshKey(
+        glassMaterial = glassMaterial,
+        appBackground = appBackground
+    )
 
-    CompositionLocalProvider(LocalAppDarkTheme provides darkTheme) {
+    CompositionLocalProvider(
+        LocalAppDarkTheme provides darkTheme,
+        LocalAppBackground provides appBackground,
+        LocalAppBackgroundForegroundKey provides foregroundKey
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = AppTypography
         ) {
             ProvideGlassTheme(
                 preference = glassMaterial,
-                darkTheme = darkTheme,
-                content = content
-            )
+                darkTheme = darkTheme
+            ) {
+                AppDialogHost(content = content)
+            }
         }
     }
+}
+
+@Composable
+private fun rememberBackgroundRefreshKey(
+    glassMaterial: GlassMaterialPreference,
+    appBackground: AppBackgroundPreference
+): Long {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var refreshKey by remember { mutableLongStateOf(System.nanoTime()) }
+    var lastRefreshAtMs by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    val refreshEnabled = isLiquidGlassSupported() &&
+        glassMaterial == GlassMaterialPreference.LiquidGlass &&
+        appBackground.mode == AppBackgroundMode.RandomOnlineImage
+    val currentRefreshEnabled by rememberUpdatedState(refreshEnabled)
+    val currentRefreshPolicy by rememberUpdatedState(appBackground.randomRefreshPolicy)
+    val currentCustomRefreshSeconds by rememberUpdatedState(
+        appBackground.customRandomRefreshSeconds
+    )
+
+    LaunchedEffect(
+        appBackground.mode,
+        appBackground.randomImageUrl,
+        appBackground.randomRefreshPolicy,
+        appBackground.customRandomRefreshSeconds
+    ) {
+        lastRefreshAtMs = SystemClock.elapsedRealtime()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        var suppressInitialResume =
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED).not()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (suppressInitialResume) {
+                    suppressInitialResume = false
+                } else {
+                    val now = SystemClock.elapsedRealtime()
+                    if (
+                        shouldRefreshRandomBackground(
+                            nowElapsedMillis = now,
+                            lastRefreshElapsedMillis = lastRefreshAtMs,
+                            refreshEnabled = currentRefreshEnabled,
+                            policy = currentRefreshPolicy,
+                            customRefreshSeconds = currentCustomRefreshSeconds
+                        )
+                    ) {
+                        lastRefreshAtMs = now
+                        refreshKey = System.nanoTime()
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    return refreshKey
+}
+
+internal fun shouldRefreshRandomBackground(
+    nowElapsedMillis: Long,
+    lastRefreshElapsedMillis: Long,
+    refreshEnabled: Boolean,
+    policy: AppBackgroundRefreshPolicy,
+    customRefreshSeconds: Long = 0L
+): Boolean {
+    if (!refreshEnabled) return false
+    if (policy == AppBackgroundRefreshPolicy.OnForeground) return true
+    val intervalMillis = policy.resolveIntervalMillis(customRefreshSeconds) ?: return false
+    if (lastRefreshElapsedMillis <= 0L || nowElapsedMillis < lastRefreshElapsedMillis) return true
+    return nowElapsedMillis - lastRefreshElapsedMillis >= intervalMillis
 }

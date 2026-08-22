@@ -70,6 +70,8 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.SectionHeader
 import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.StatusIndicator
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -277,7 +279,7 @@ private fun AdminModeStatusChip(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(999.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -339,7 +341,7 @@ private fun ToolsOverviewCard(
         else -> "$logCount 条"
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -354,8 +356,8 @@ private fun ToolsOverviewCard(
                     Brush.linearGradient(
                         listOf(
                             accent.copy(alpha = 0.1f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                            MaterialTheme.colorScheme.surfaceContainerHigh
+                            Color.Transparent,
+                            Color.Transparent
                         )
                     )
                 )
@@ -393,12 +395,9 @@ private fun ToolsOverviewCard(
                         )
                     }
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = onOpenConsole,
-                    modifier = Modifier.size(34.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f)
-                    )
+                    size = 34.dp
                 ) {
                     Icon(
                         Icons.Rounded.Terminal,
@@ -448,7 +447,7 @@ private fun OverviewStatChip(
     value: String,
     accent: Color
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f)
@@ -485,7 +484,7 @@ private fun LogPreviewCard(
     val locale = LocalLocale.current.platformLocale
     val timeFormat = remember(locale) { SimpleDateFormat("HH:mm:ss", locale) }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onViewAll),
@@ -528,12 +527,9 @@ private fun LogPreviewCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    FilledTonalIconButton(
+                    AppGlassIconButton(
                         onClick = onRefresh,
-                        modifier = Modifier.size(30.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
-                        )
+                        size = 30.dp
                     ) {
                         Icon(
                             Icons.Rounded.Refresh,
@@ -584,7 +580,7 @@ private fun LogPreviewCard(
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
             } else {
-                Surface(
+                AppGlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -638,7 +634,7 @@ private fun LogSummaryPill(
     value: String,
     accent: Color = MaterialTheme.colorScheme.onSurface
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(999.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f)
     ) {
@@ -683,7 +679,7 @@ private fun ToolEntryCard(
         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
@@ -698,7 +694,7 @@ private fun ToolEntryCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.size(42.dp),
                 shape = RoundedCornerShape(14.dp),
                 color = accent.copy(alpha = if (highlight) 0.18f else 0.12f),
@@ -727,7 +723,7 @@ private fun ToolEntryCard(
                         fontWeight = FontWeight.SemiBold
                     )
                     if (!badge.isNullOrBlank()) {
-                        Surface(
+                        AppGlassSurface(
                             shape = RoundedCornerShape(999.dp),
                             color = accent.copy(alpha = 0.14f)
                         ) {

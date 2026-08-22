@@ -68,6 +68,10 @@ import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -110,10 +114,10 @@ internal fun ApiTestFavoritePane(
                 null
             },
             action = {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = onReload,
                     enabled = supportState != FavoriteSupportState.Loading,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     if (supportState == FavoriteSupportState.Loading) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -150,7 +154,7 @@ internal fun ApiTestFavoritePane(
                 title = "收藏加载失败",
                 subtitle = loadError.orEmpty().ifBlank { "请检查连接后重试" },
                 action = {
-                    TextButton(onClick = onReload) { Text("重试") }
+                    AppGlassButton(onClick = onReload) { Text("重试") }
                 }
             )
 
@@ -193,13 +197,16 @@ internal fun ApiTestFavoritePane(
             title = { Text("刷新收藏") },
             text = { Text("将绕过现有搜索缓存，重新获取「${item.animeTitle}」的整组搜索结果。") },
             dismissButton = {
-                TextButton(onClick = { refreshCandidate = null }) { Text("取消") }
+                AppGlassButton(onClick = { refreshCandidate = null }) { Text("取消") }
             },
             confirmButton = {
-                Button(onClick = {
+                AppGlassButton(
+                    onClick = {
                     refreshCandidate = null
                     onRefresh(item)
-                }) { Text("刷新") }
+                    },
+                    tint = MaterialTheme.colorScheme.primary
+                ) { Text("刷新") }
             }
         )
     }
@@ -212,13 +219,17 @@ internal fun ApiTestFavoritePane(
             title = { Text("删除收藏") },
             text = { Text("确定删除「${item.animeTitle}」及其永久搜索缓存吗？") },
             dismissButton = {
-                TextButton(onClick = { removeCandidate = null }) { Text("取消") }
+                AppGlassButton(onClick = { removeCandidate = null }) { Text("取消") }
             },
             confirmButton = {
-                Button(onClick = {
+                AppGlassButton(
+                    onClick = {
                     removeCandidate = null
                     onRemove(item)
-                }) { Text("删除") }
+                    },
+                    surfaceColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ) { Text("删除") }
             }
         )
     }
@@ -250,7 +261,7 @@ private fun FavoriteItemCard(
     onSchedule: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = apiTestPanelColor(),
@@ -302,10 +313,15 @@ private fun FavoriteItemCard(
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
                     Box {
-                        IconButton(onClick = { showMenu = true }) {
+                        AppGlassIconButton(onClick = { showMenu = true }, size = 34.dp) {
                             Icon(Icons.Rounded.MoreVert, "更多操作")
                         }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+                            tonalElevation = 0.dp
+                        ) {
                             DropdownMenuItem(
                                 text = { Text("删除") },
                                 leadingIcon = { Icon(Icons.Rounded.Delete, null) },
@@ -328,7 +344,7 @@ private fun FavoriteItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (item.refreshSchedule != null) {
-                    FilledTonalButton(
+                    AppGlassButton(
                         onClick = onSchedule,
                         enabled = !busy && scheduledRefreshSupported,
                         modifier = Modifier.weight(1f),
@@ -337,7 +353,7 @@ private fun FavoriteItemCard(
                         FavoriteScheduleButtonContent(formatFavoriteScheduleLabel(item.refreshSchedule))
                     }
                 } else {
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = onSchedule,
                         enabled = !busy && scheduledRefreshSupported,
                         modifier = Modifier.weight(1f),
@@ -348,12 +364,12 @@ private fun FavoriteItemCard(
                         )
                     }
                 }
-                TextButton(onClick = onOpen, enabled = !busy) {
+                AppGlassButton(onClick = onOpen, enabled = !busy) {
                     Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("打开")
                 }
-                IconButton(onClick = onRefresh, enabled = !busy) {
+                AppGlassIconButton(onClick = onRefresh, enabled = !busy, size = 34.dp) {
                     Icon(Icons.Rounded.Refresh, "刷新收藏", Modifier.size(19.dp))
                 }
             }
@@ -534,7 +550,7 @@ private fun FavoriteScheduleDialog(
                     verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     weekdayNames.forEachIndexed { index, label ->
-                        FilterChip(
+                        AppGlassFilterChip(
                             selected = weekday == index + 1,
                             onClick = { weekday = index + 1 },
                             label = { Text(label) }
@@ -548,7 +564,7 @@ private fun FavoriteScheduleDialog(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            OutlinedButton(
+            AppGlassButton(
                 onClick = {
                     TimePickerDialog(
                         context,
@@ -591,19 +607,22 @@ private fun FavoriteScheduleDialog(
         },
         actions = {
             if (existing != null) {
-                TextButton(
+                AppGlassButton(
                     onClick = onDisable,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    tint = MaterialTheme.colorScheme.error,
+                    surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                    contentColor = MaterialTheme.colorScheme.error
                 ) {
                     Text("关闭定时")
                 }
             }
-            TextButton(onClick = onDismiss) { Text("取消") }
-            Button(onClick = {
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(
+                onClick = {
                 onSave(FavoriteScheduleDraft(frequency, normalizedTime, weekday))
-            }) { Text("保存") }
+                },
+                tint = MaterialTheme.colorScheme.primary
+            ) { Text("保存") }
         }
     )
 }

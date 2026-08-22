@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.core
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -95,6 +97,8 @@ import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.AppModalPanel
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.component.rememberSimpleMarkdownState
 import java.time.Instant
 import java.time.ZoneId
@@ -365,7 +369,7 @@ private fun PullRequestLabHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            FilledTonalIconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+            AppGlassIconButton(onClick = onBack, size = 36.dp) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
             }
             Column(
@@ -387,10 +391,10 @@ private fun PullRequestLabHeader(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = onSearchToggle,
                 enabled = canRefresh,
-                modifier = Modifier.size(36.dp)
+                size = 36.dp
             ) {
                 Icon(
                     if (searchActive) Icons.Rounded.Close else Icons.Rounded.Search,
@@ -398,10 +402,10 @@ private fun PullRequestLabHeader(
                     Modifier.size(18.dp)
                 )
             }
-            FilledTonalIconButton(
+            AppGlassIconButton(
                 onClick = onRefresh,
                 enabled = canRefresh && !isLoading,
-                modifier = Modifier.size(36.dp)
+                size = 36.dp
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -433,11 +437,19 @@ private fun PullRequestSearchBar(
         trailingIcon = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (query.isNotBlank()) {
-                    IconButton(onClick = onClear, enabled = !isLoading) {
+                    AppGlassIconButton(
+                        onClick = onClear,
+                        enabled = !isLoading,
+                        size = 32.dp
+                    ) {
                         Icon(Icons.Rounded.Close, "清空搜索")
                     }
                 }
-                IconButton(onClick = onSearch, enabled = !isLoading && query.isNotBlank()) {
+                AppGlassIconButton(
+                    onClick = onSearch,
+                    enabled = !isLoading && query.isNotBlank(),
+                    size = 32.dp
+                ) {
                     Icon(Icons.Rounded.Search, "执行 GitHub PR 搜索")
                 }
             }
@@ -532,7 +544,7 @@ private fun PullRequestWorkspaceSummary(
     installedNumbers: List<Int>,
     selectedNumbers: List<Int>
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -599,7 +611,7 @@ private fun SelectedPullRequestQueue(
     onRemove: (CorePullRequest) -> Unit,
     onOpenDetails: (CorePullRequest) -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -673,7 +685,7 @@ private fun SelectedPullRequestRow(
         modifier = Modifier.padding(start = 10.dp, top = 7.dp, bottom = 7.dp, end = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(6.dp),
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
@@ -703,24 +715,25 @@ private fun SelectedPullRequestRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(
+        AppGlassIconButton(
             onClick = onMoveUp,
             enabled = enabled && canMoveUp,
-            modifier = Modifier.size(36.dp)
+            size = 32.dp
         ) {
             Icon(Icons.Rounded.ArrowUpward, "上移 PR #${pullRequest.number}", Modifier.size(18.dp))
         }
-        IconButton(
+        AppGlassIconButton(
             onClick = onMoveDown,
             enabled = enabled && canMoveDown,
-            modifier = Modifier.size(36.dp)
+            size = 32.dp
         ) {
             Icon(Icons.Rounded.ArrowDownward, "下移 PR #${pullRequest.number}", Modifier.size(18.dp))
         }
-        IconButton(
+        AppGlassIconButton(
             onClick = onRemove,
             enabled = enabled,
-            modifier = Modifier.size(36.dp)
+            size = 32.dp,
+            contentColor = MaterialTheme.colorScheme.error
         ) {
             Icon(Icons.Rounded.DeleteOutline, "移除 PR #${pullRequest.number}", Modifier.size(18.dp))
         }
@@ -740,11 +753,10 @@ private fun PullRequestPagination(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        OutlinedButton(
+        AppGlassButton(
             onClick = onPrevious,
             enabled = canGoPrevious,
             modifier = Modifier.weight(1f).height(42.dp),
-            shape = RoundedCornerShape(8.dp),
             contentPadding = PaddingValues(horizontal = 10.dp)
         ) {
             Icon(Icons.AutoMirrored.Rounded.NavigateBefore, null, Modifier.size(18.dp))
@@ -756,11 +768,10 @@ private fun PullRequestPagination(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        FilledTonalButton(
+        AppGlassButton(
             onClick = onNext,
             enabled = canGoNext,
             modifier = Modifier.weight(1f).height(42.dp),
-            shape = RoundedCornerShape(8.dp),
             contentPadding = PaddingValues(horizontal = 10.dp)
         ) {
             Text("下一页")
@@ -779,7 +790,7 @@ private fun PullRequestBuildBar(
     onBuild: () -> Unit
 ) {
     val busy = isBuilding || isActivating
-    Surface(
+    AppGlassSurface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 3.dp
     ) {
@@ -814,11 +825,11 @@ private fun PullRequestBuildBar(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Button(
+            AppGlassButton(
                 onClick = onBuild,
                 enabled = selectedPullRequests.isNotEmpty() && !busy && !isPrivateRepository,
                 modifier = Modifier.height(44.dp),
-                shape = RoundedCornerShape(8.dp),
+                tint = MaterialTheme.colorScheme.primary,
                 contentPadding = PaddingValues(horizontal = 15.dp)
             ) {
                 Icon(Icons.AutoMirrored.Rounded.CallMerge, null, Modifier.size(18.dp))
@@ -863,7 +874,7 @@ private fun PullRequestCard(
         showOpenState -> "开放" to StatusBadgeTone.Open
         else -> null
     }
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onOpenDetails),
@@ -944,7 +955,7 @@ private fun PullRequestCard(
 
 @Composable
 private fun FirstContributorBadge(firstContribution: PullRequestFirstContribution) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(6.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer,
         border = BorderStroke(
@@ -1000,7 +1011,7 @@ private fun StatusBadge(text: String, tone: StatusBadgeTone) {
         StatusBadgeTone.Closed -> MaterialTheme.colorScheme.onErrorContainer
         StatusBadgeTone.Warning -> MaterialTheme.colorScheme.onSecondaryContainer
     }
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(6.dp),
         color = backgroundColor
     ) {
@@ -1020,7 +1031,7 @@ private fun PullRequestBuildProgress(
     onCancel: () -> Unit,
     canCancel: Boolean
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1045,7 +1056,7 @@ private fun PullRequestBuildProgress(
                     )
                 }
                 if (canCancel) {
-                    TextButton(onClick = onCancel) { Text("取消") }
+                    AppGlassButton(onClick = onCancel) { Text("取消") }
                 }
             }
             progress.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
@@ -1060,7 +1071,7 @@ private fun PullRequestErrorPanel(
     conflictFiles: List<String>,
     onDismiss: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
@@ -1090,7 +1101,7 @@ private fun PullRequestErrorPanel(
                     )
                 }
             }
-            IconButton(onClick = onDismiss) {
+            AppGlassIconButton(onClick = onDismiss, size = 34.dp) {
                 Icon(Icons.Rounded.Close, "关闭错误提示", Modifier.size(18.dp))
             }
         }
@@ -1099,7 +1110,7 @@ private fun PullRequestErrorPanel(
 
 @Composable
 private fun PrivateRepositoryNotice() {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f)
@@ -1124,7 +1135,7 @@ private fun PrivateRepositoryNotice() {
 
 @Composable
 private fun LoadingPanel(text: String) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -1142,7 +1153,7 @@ private fun LoadingPanel(text: String) {
 
 @Composable
 private fun EmptyPullRequestPanel(filter: CorePullRequestFilter, isSearching: Boolean) {
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1192,7 +1203,7 @@ private fun PullRequestDetailsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                AppGlassIconButton(onClick = onClose, size = 40.dp) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回 PR 列表")
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -1209,7 +1220,7 @@ private fun PullRequestDetailsPanel(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                AppGlassIconButton(onClick = onClose, size = 40.dp) {
                     Icon(Icons.Rounded.Close, "关闭")
                 }
             }
@@ -1228,10 +1239,11 @@ private fun PullRequestDetailsPanel(
                 }
                 if (pullRequest.body.isNotBlank()) {
                     item(key = "pr-description", contentType = "pr-description") {
-                        Surface(
+                        AppGlassSurface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            glassAlpha = 0.78f
                         ) {
                             Column(
                                 modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
@@ -1322,7 +1334,7 @@ private fun PullRequestDetailsPanel(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedButton(
+                            AppGlassButton(
                                 onClick = onPreviousPage,
                                 enabled = page.hasPreviousPage && !isLoading,
                                 modifier = Modifier.weight(1f)
@@ -1331,7 +1343,7 @@ private fun PullRequestDetailsPanel(
                                 Spacer(Modifier.width(4.dp))
                                 Text("上一页")
                             }
-                            FilledTonalButton(
+                            AppGlassButton(
                                 onClick = onNextPage,
                                 enabled = page.hasNextPage && !isLoading,
                                 modifier = Modifier.weight(1f)
@@ -1377,31 +1389,40 @@ private fun PullRequestDetailsSummary(
         CorePullRequestStatus.Merged -> MaterialTheme.colorScheme.tertiary
         CorePullRequestStatus.Closed -> MaterialTheme.colorScheme.error
     }
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    statusLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = statusColor
+                )
+                Text(
+                    pullRequest.headSha.take(7),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
             Text(
-                statusLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = statusColor
+                pullRequest.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
             )
             Text(
-                pullRequest.headSha.take(7),
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace
+                "${pullRequest.author} · ${formatPullRequestTime(pullRequest.updatedAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-        Text(
-            pullRequest.title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            "${pullRequest.author} · ${formatPullRequestTime(pullRequest.updatedAt)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        pullRequest.firstContribution?.let { firstContribution ->
-            FirstContributorBadge(firstContribution)
+            pullRequest.firstContribution?.let { firstContribution ->
+                FirstContributorBadge(firstContribution)
+            }
         }
     }
 }
@@ -1417,14 +1438,23 @@ private fun PullRequestDiffMetrics(
     val hasRepositoryTotals = pullRequest.changedFiles != null &&
         pullRequest.additions != null &&
         pullRequest.deletions != null
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        DiffMetric(
-            Icons.Rounded.Code,
-            if (hasRepositoryTotals) "$visibleFiles 个文件" else "本页 $visibleFiles 个文件",
-            MaterialTheme.colorScheme.primary
-        )
-        DiffMetric(Icons.Rounded.Add, "+$visibleAdditions", diffAddedColor())
-        DiffMetric(Icons.Rounded.DeleteOutline, "-$visibleDeletions", MaterialTheme.colorScheme.error)
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DiffMetric(
+                Icons.Rounded.Code,
+                if (hasRepositoryTotals) "$visibleFiles 个文件" else "本页 $visibleFiles 个文件",
+                MaterialTheme.colorScheme.primary
+            )
+            DiffMetric(Icons.Rounded.Add, "+$visibleAdditions", diffAddedColor())
+            DiffMetric(Icons.Rounded.DeleteOutline, "-$visibleDeletions", MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -1481,7 +1511,7 @@ private fun BuildPullRequestStackDialog(
                         }
                     }
                 }
-                Surface(
+                AppGlassSurface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
@@ -1517,10 +1547,10 @@ private fun BuildPullRequestStackDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("开始构建") }
+            AppGlassPrimaryButton(onClick = onConfirm) { Text("开始构建") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }

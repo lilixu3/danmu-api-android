@@ -114,6 +114,10 @@ import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.CoreBranchPickerDialog
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.theme.GlassBackdropScene
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -191,11 +195,7 @@ fun CompatModeScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -402,12 +402,12 @@ internal fun CompatLocalNetworkPermissionDialog(
             Text("暂不允许仍可在本机使用，但其他设备连接时会超时，下次启动还会再次提醒。")
         },
         dismissButton = {
-            TextButton(onClick = onContinueLocalOnly) {
+            AppGlassButton(onClick = onContinueLocalOnly) {
                 Text("仅本机使用")
             }
         },
         confirmButton = {
-            TextButton(onClick = onGrant) {
+            AppGlassButton(onClick = onGrant, tint = MaterialTheme.colorScheme.primary) {
                 Text(if (openSettings) "前往应用设置" else "允许访问")
             }
         }
@@ -436,12 +436,12 @@ private fun ExitConfirmDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onStopAndExit) {
+            AppGlassButton(onClick = onStopAndExit, tint = MaterialTheme.colorScheme.error) {
                 Text("关闭退出")
             }
         },
         dismissButton = {
-            TextButton(onClick = onBackground) {
+            AppGlassButton(onClick = onBackground) {
                 Text("后台运行")
             }
         }
@@ -470,12 +470,12 @@ private fun ExitCompatModeDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            AppGlassButton(onClick = onConfirm, tint = MaterialTheme.colorScheme.error) {
                 Text("仍要退出")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("继续使用兼容模式")
             }
         }
@@ -486,7 +486,7 @@ private fun ExitCompatModeDialog(
 private fun CompatModeExitCard(
     onRequestExitCompatMode: () -> Unit
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.34f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.42f)),
@@ -544,7 +544,7 @@ private fun CompatHeader(
 ) {
     val runtime = uiState.runtimeState
     val statusColor = statusColor(runtime.status)
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
@@ -618,10 +618,9 @@ private fun ServiceHeroCard(
         ServiceStatus.Stopped -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
 
-    ElevatedCard(
+    AppGlassSurface(
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = cardTone),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+        color = cardTone,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -814,7 +813,7 @@ private fun AccessAddressPanel(
         hasLanIpv6Address = hasLanIpv6,
         localNetworkPermissionMissing = showLocalNetworkPermissionHint
     )
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
@@ -884,9 +883,10 @@ private fun AccessAddressPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = onOpenLocalNetworkPermission) {
-                        Text("去授权")
-                    }
+                    AppGlassAssistChip(
+                        onClick = onOpenLocalNetworkPermission,
+                        label = { Text("去授权") }
+                    )
                 }
             }
 
@@ -1003,7 +1003,7 @@ private fun OperationProgressCard(uiState: CompatModeUiState) {
     val progress = uiState.downloadProgress
     val visible = progress.inProgress || uiState.isOperating
     AnimatedVisibility(visible = visible) {
-        Surface(
+        AppGlassSurface(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1060,7 +1060,7 @@ private fun KeepAliveCard(
     actions: CompatModeActions
 ) {
     val state = uiState.keepAlive
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1126,7 +1126,7 @@ private fun GithubProxyCard(
     proxyPickerState: CompatProxyPickerState,
     actions: CompatModeActions
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1206,7 +1206,7 @@ private fun AppUpdateCard(
             restorePrimaryActionFocus = false
         }
     }
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1369,7 +1369,7 @@ private fun CompatAppDisplayCard(
         mutableStateOf((if (uiState.appDpiOverride > 0) uiState.appDpiOverride else systemDpi).toString())
     }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1417,7 +1417,7 @@ private fun CompatAppDisplayCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 presetDpi.forEach { dpi ->
-                    AssistChip(
+                    AppGlassAssistChip(
                         onClick = {
                             dpiInput = dpi.toString()
                             actions.onSetAppDpiOverride(dpi)
@@ -1425,7 +1425,7 @@ private fun CompatAppDisplayCard(
                         label = { Text("$dpi") }
                     )
                 }
-                AssistChip(
+                AppGlassAssistChip(
                     onClick = {
                         dpiInput = AppAppearancePrefs.APP_DPI_SYSTEM.toString()
                         actions.onSetAppDpiOverride(AppAppearancePrefs.APP_DPI_SYSTEM)
@@ -1450,7 +1450,7 @@ private fun CompatAppDisplayCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(
+                AppGlassButton(
                     onClick = {
                         val parsed = dpiInput.toIntOrNull()
                         if (parsed == null) {
@@ -1476,7 +1476,7 @@ private fun CoreManagementCard(
     uiState: CompatModeUiState,
     actions: CompatModeActions
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
@@ -1596,7 +1596,7 @@ private fun CoreVariantCard(
     }
     var isCustomEditing by rememberSaveable(info.variant.name) { mutableStateOf(false) }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(20.dp),
         color = surfaceColor,
         border = BorderStroke(
@@ -1648,24 +1648,26 @@ private fun CoreVariantCard(
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                TextButton(
+                                AppGlassAssistChip(
                                     onClick = { actions.onOpenBranchPicker(info.variant) },
                                     enabled = !uiState.isOperating && !hasPendingDependencyRepair,
                                     modifier = Modifier.widthIn(max = 220.dp),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = sourceBranch ?: "默认分支",
-                                        modifier = Modifier.widthIn(max = 175.dp),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Rounded.ArrowDropDown,
-                                        contentDescription = "展开分支列表",
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                                    label = {
+                                        Text(
+                                            text = sourceBranch ?: "默认分支",
+                                            modifier = Modifier.widthIn(max = 175.dp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ArrowDropDown,
+                                            contentDescription = "展开分支列表",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                )
                             }
                         } else {
                             Text(
@@ -1979,7 +1981,7 @@ private fun SyncCard(uiState: CompatModeUiState) {
     }
     var focused by remember { mutableStateOf(false) }
 
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
         border = BorderStroke(
@@ -2151,7 +2153,7 @@ private fun MetricTile(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    AppGlassSurface(
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),

@@ -45,6 +45,10 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -223,7 +227,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSettings = false }) {
+                AppGlassButton(onClick = { showSettings = false }) {
                     Text("完成")
                 }
             }
@@ -263,20 +267,20 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = { showSearch = !showSearch },
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.Rounded.Search, "搜索日志", Modifier.size(18.dp))
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::refreshLogs,
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.Rounded.Refresh, "刷新日志", Modifier.size(18.dp))
                 }
                 // Copy visible logs after current filters/search.
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = {
                         val text = LogExportFormatter.toClipboardText(filteredLogs)
                         clipboardManager.nativeClipboard.setPrimaryClip(
@@ -284,27 +288,29 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                         )
                     },
                     enabled = filteredLogs.isNotEmpty(),
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.Rounded.ContentCopy, "复制当前筛选日志", Modifier.size(18.dp))
                 }
-                FilledTonalIconButton(
+                AppGlassIconButton(
                     onClick = viewModel::clearLogs,
                     enabled = logs.isNotEmpty(),
-                    modifier = Modifier.size(36.dp)
+                    size = 36.dp
                 ) {
                     Icon(Icons.Rounded.ClearAll, "清除日志", Modifier.size(18.dp))
                 }
                 Box {
-                    FilledTonalIconButton(
+                    AppGlassIconButton(
                         onClick = { moreMenuExpanded = true },
-                        modifier = Modifier.size(36.dp)
+                        size = 36.dp
                     ) {
                         Icon(Icons.Rounded.MoreVert, "更多日志操作", Modifier.size(18.dp))
                     }
                     DropdownMenu(
                         expanded = moreMenuExpanded,
-                        onDismissRequest = { moreMenuExpanded = false }
+                        onDismissRequest = { moreMenuExpanded = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+                        tonalElevation = 0.dp
                     ) {
                         DropdownMenuItem(
                             text = { Text("日志设置") },
@@ -358,7 +364,10 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 leadingIcon = { Icon(Icons.Rounded.Search, null, Modifier.size(18.dp)) },
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                        AppGlassIconButton(
+                            onClick = { viewModel.setSearchQuery("") },
+                            size = 32.dp
+                        ) {
                             Icon(Icons.Rounded.Close, "清除搜索", Modifier.size(18.dp))
                         }
                     }
@@ -376,7 +385,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterLevel == null,
                 onClick = { filterLevel = null },
                 label = { Text("全部") },
@@ -384,33 +393,29 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterLevel == LogLevel.Error,
                 onClick = {
                     filterLevel = if (filterLevel == LogLevel.Error) null else LogLevel.Error
                 },
                 label = { Text("错误") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = chipErrorColor.copy(alpha = 0.15f)
-                ),
+                accent = chipErrorColor,
                 leadingIcon = if (filterLevel == LogLevel.Error) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterLevel == LogLevel.Warn,
                 onClick = {
                     filterLevel = if (filterLevel == LogLevel.Warn) null else LogLevel.Warn
                 },
                 label = { Text("警告") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = chipWarnColor.copy(alpha = 0.15f)
-                ),
+                accent = chipWarnColor,
                 leadingIcon = if (filterLevel == LogLevel.Warn) {
                     { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
                 } else null
             )
-            FilterChip(
+            AppGlassFilterChip(
                 selected = filterLevel == LogLevel.Info,
                 onClick = {
                     filterLevel = if (filterLevel == LogLevel.Info) null else LogLevel.Info
@@ -430,7 +435,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     .padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterChip(
+                AppGlassFilterChip(
                     selected = filterSource == null,
                     onClick = { filterSource = null },
                     label = { Text("全部来源") },
@@ -439,7 +444,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     } else null
                 )
                 availableSources.forEach { source ->
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = filterSource == source,
                         onClick = { filterSource = if (filterSource == source) null else source },
                         label = {
@@ -455,7 +460,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
 
         // Log list or disabled state
         if (!logEnabled) {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -491,7 +496,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                 }
             }
         } else {
-            Surface(
+            AppGlassSurface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,

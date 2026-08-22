@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -21,19 +22,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.glassBorderColor
 import com.example.danmuapiapp.ui.theme.glassSurfaceColor
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 private val BottomBarClearance = 80.dp
 
@@ -75,9 +76,8 @@ fun AppSnackbarHost(
 private fun AppSnackbar(data: SnackbarData) {
     val hasTrailingAction = data.visuals.actionLabel != null || data.visuals.withDismissAction
     val containerColor = glassSurfaceColor()
-        .compositeOver(MaterialTheme.colorScheme.background)
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier
             .widthIn(max = 520.dp)
             .defaultMinSize(minHeight = 56.dp),
@@ -112,12 +112,16 @@ private fun AppSnackbar(data: SnackbarData) {
                 overflow = TextOverflow.Ellipsis
             )
             data.visuals.actionLabel?.let { label ->
-                TextButton(onClick = data::performAction) {
+                AppGlassButton(
+                    onClick = data::performAction,
+                    modifier = Modifier.height(34.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                ) {
                     Text(label)
                 }
             }
             if (data.visuals.withDismissAction) {
-                IconButton(onClick = data::dismiss) {
+                AppGlassIconButton(onClick = data::dismiss, size = 34.dp) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "关闭提示"

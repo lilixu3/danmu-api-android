@@ -1,6 +1,10 @@
 package com.example.danmuapiapp.ui.screen.download
 
 import com.example.danmuapiapp.ui.component.AppModalPanel
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -122,10 +126,10 @@ private fun LegacyRecordsPage(
                         )
                     }
                     Row {
-                        IconButton(
+                        AppGlassIconButton(
                             onClick = onSync,
                             enabled = !isSyncing,
-                            modifier = Modifier.size(32.dp)
+                            size = 32.dp
                         ) {
                             if (isSyncing) {
                                 CircularProgressIndicator(
@@ -136,10 +140,10 @@ private fun LegacyRecordsPage(
                                 Icon(Icons.Rounded.Refresh, "扫描已有弹幕", Modifier.size(18.dp))
                             }
                         }
-                        IconButton(
+                        AppGlassIconButton(
                             onClick = onClear,
                             enabled = records.isNotEmpty(),
-                            modifier = Modifier.size(32.dp)
+                            size = 32.dp
                         ) {
                             Icon(Icons.Rounded.ClearAll, "清空记录", Modifier.size(18.dp))
                         }
@@ -150,28 +154,26 @@ private fun LegacyRecordsPage(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = filter == RecordFilter.All,
                         onClick = { filter = RecordFilter.All },
-                        colors = primarySelectionFilterChipColors(),
                         label = { Text("全部 ${records.size}") }
                     )
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = filter == RecordFilter.Success,
                         onClick = { filter = RecordFilter.Success },
-                        colors = primarySelectionFilterChipColors(),
                         label = { Text("成功 $successCount") }
                     )
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = filter == RecordFilter.Failed,
                         onClick = { filter = RecordFilter.Failed },
-                        colors = primarySelectionFilterChipColors(),
+                        accent = MaterialTheme.colorScheme.error,
                         label = { Text("失败 $failedCount") }
                     )
-                    FilterChip(
+                    AppGlassFilterChip(
                         selected = filter == RecordFilter.Skipped,
                         onClick = { filter = RecordFilter.Skipped },
-                        colors = primarySelectionFilterChipColors(),
+                        accent = MaterialTheme.colorScheme.tertiary,
                         label = { Text("跳过 $skippedCount") }
                     )
                 }
@@ -244,7 +246,7 @@ private fun RecordItem(
         DownloadRecordStatus.Skipped -> Icons.Rounded.DownloadDone
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
@@ -335,7 +337,7 @@ private fun RecordItem(
                             modifier = Modifier.weight(1f)
                         )
                         if (canPreview) {
-                            OutlinedButton(
+                            AppGlassButton(
                                 onClick = onPreview,
                                 enabled = !loadingPreview,
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
@@ -381,7 +383,10 @@ internal fun DanmuPreviewDialog(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            AppGlassButton(
+                onClick = onDismiss,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) { Text("关闭") }
         }
         Spacer(Modifier.height(8.dp))
         when {
@@ -501,7 +506,7 @@ private fun DanmuPreviewContent(preview: DanmuFilePreview) {
             counts = filterCounts,
             onSelect = { selectedFilter = it }
         )
-        Surface(
+        AppGlassSurface(
             modifier = Modifier.fillMaxWidth().weight(1f),
             shape = RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
@@ -532,10 +537,10 @@ private fun DanmuPreviewContent(preview: DanmuFilePreview) {
                     }
                     if (canLoadMore && loadMoreVisible) {
                         Spacer(Modifier.height(6.dp))
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = { visibleCount += pageSize },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                            shape = RoundedCornerShape(14.dp)
+                            contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
                             Text("加载更多 500 条")
                         }
@@ -580,26 +585,22 @@ private fun CompactPreviewFilterButton(
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.26f)
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
-    }
     val contentColor = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Surface(
+    AppGlassButton(
+        onClick = onClick,
         modifier = modifier.height(32.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor),
-        onClick = onClick
+        tint = if (selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
+        surfaceColor = containerColor,
+        contentColor = contentColor,
+        contentPadding = PaddingValues(horizontal = 4.dp)
     ) {
         BoxWithConstraints(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+            modifier = Modifier.weight(1f).fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             val fontSize = when {
@@ -631,7 +632,7 @@ private fun DanmuPreviewRow(item: DanmuPreviewItem) {
     }
     val danmuColor = parsePreviewColor(item.color)
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLowest,

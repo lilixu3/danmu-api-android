@@ -3,6 +3,8 @@ package com.example.danmuapiapp.ui.screen.home
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 import android.app.Activity
 import android.content.Context
@@ -216,12 +218,12 @@ internal fun UpdatePromptDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onUpdate) {
+            AppGlassButton(onClick = onUpdate, tint = MaterialTheme.colorScheme.primary) {
                 Text(if (sourceMismatch || sourceUnknownLegacy) "重新下载" else "更新")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            AppGlassButton(onClick = onDismiss) {
                 Text("稍后")
             }
         }
@@ -253,7 +255,7 @@ internal fun NoCoreDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onOpenCoreManagement,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -270,7 +272,7 @@ internal fun NoCoreDialog(
                         resolveCoreVariantSourceText(variant, customRepo, customRepoBranch).isNotBlank()
                 }.forEach { variant ->
                     val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-                    OutlinedCard(
+                    AppGlassSurface(
                         onClick = { onInstall(variant) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
@@ -302,7 +304,7 @@ internal fun NoCoreDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }
@@ -332,7 +334,7 @@ internal fun UnavailableVariantDialog(
                         "当前版本没有可用核心文件，因此没有执行切换。可以现在安装，完成后会自动切换并启动。"
                     }
                 )
-                OutlinedButton(
+                AppGlassButton(
                     onClick = onOpenCoreManagement,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -344,13 +346,13 @@ internal fun UnavailableVariantDialog(
         },
         confirmButton = if (needsCustomRepo) null else {
             {
-                TextButton(onClick = onInstall) {
+                AppGlassButton(onClick = onInstall, tint = MaterialTheme.colorScheme.primary) {
                     Text("安装并切换")
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }
@@ -383,18 +385,16 @@ internal fun VariantPickerDialog(
                 val isSelected = variant == currentVariant
                 val variantLabel = coreDisplayNames.resolve(variant)
                 val sourceText = resolveCoreVariantSourceText(variant, customRepo, customRepoBranch)
-                Card(
+                AppGlassSurface(
                     onClick = { if (!isBusy) onSelect(variant) },
                     enabled = !isBusy,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        }
-                    )
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -477,7 +477,7 @@ internal fun VariantPickerDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppGlassButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }

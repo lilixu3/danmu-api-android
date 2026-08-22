@@ -3,6 +3,9 @@ package com.example.danmuapiapp.ui.screen.download
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -167,40 +170,43 @@ internal fun QueuePage(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (viewModel.isDownloading) {
-                        Button(
+                        AppGlassButton(
                             onClick = viewModel::pauseDownload,
-                            colors = appDangerButtonColors()
+                            tint = MaterialTheme.colorScheme.error,
+                            surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.18f),
+                            contentColor = MaterialTheme.colorScheme.error
                         ) {
                             Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("暂停")
                         }
                     } else {
-                        Button(
+                        AppGlassButton(
                             onClick = viewModel::resumePendingQueue,
                             enabled = summary.pending > 0,
-                            colors = primaryActionButtonColors()
+                            tint = MaterialTheme.colorScheme.primary
                         ) {
                             Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("恢复队列")
                         }
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::retryFailedQueueTasks,
-                        enabled = !viewModel.isDownloading && summary.failed > 0
+                        enabled = !viewModel.isDownloading && summary.failed > 0,
+                        tint = MaterialTheme.colorScheme.tertiary
                     ) {
                         Icon(Icons.Rounded.RestartAlt, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("重试失败项")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::clearCompletedQueueTasks,
                         enabled = !viewModel.isDownloading
                     ) {
                         Text("清理已完成")
                     }
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::clearQueueTasks,
                         enabled = !viewModel.isDownloading
                     ) {
@@ -276,7 +282,7 @@ internal fun QueueGroupRow(
         else -> Color(0xFF2E7D32)
     }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
@@ -333,17 +339,17 @@ internal fun QueueGroupRow(
                     }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = onToggleExpand, modifier = Modifier.size(32.dp)) {
+                    AppGlassIconButton(onClick = onToggleExpand, size = 32.dp) {
                         Icon(
                             if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                             if (expanded) "收起" else "展开",
                             Modifier.size(20.dp)
                         )
                     }
-                    IconButton(onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(32.dp)) {
+                    AppGlassIconButton(onClick = onMoveUp, enabled = !isFirst, size = 32.dp) {
                         Icon(Icons.Rounded.KeyboardArrowUp, "上移", Modifier.size(20.dp))
                     }
-                    IconButton(onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(32.dp)) {
+                    AppGlassIconButton(onClick = onMoveDown, enabled = !isLast, size = 32.dp) {
                         Icon(Icons.Rounded.KeyboardArrowDown, "下移", Modifier.size(20.dp))
                     }
                 }
@@ -382,7 +388,7 @@ internal fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
     val sourceText = task.source.ifBlank { "unknown" }
     val titleText = task.episodeTitle.ifBlank { "未命名剧集" }
 
-    Surface(
+    AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
@@ -433,4 +439,3 @@ internal fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
         }
     }
 }
-

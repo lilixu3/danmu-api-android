@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.AppBackupPreview
 import com.example.danmuapiapp.data.service.AppBackupCodec
@@ -276,21 +278,19 @@ fun BackupRestoreScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = {
                                 selectedBackupSections = AppBackupSection.entries.toSet()
                                 showFullBackupExportDialog = true
                             },
                             modifier = Modifier.weight(1f),
                             enabled = !viewModel.isFullBackupOperating,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.Inventory2, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("整包导出")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = {
                                 fullBackupImportLauncher.launch(
                                     arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
@@ -298,7 +298,6 @@ fun BackupRestoreScreen(
                             },
                             modifier = Modifier.weight(1f),
                             enabled = !viewModel.isFullBackupOperating,
-                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -324,7 +323,7 @@ fun BackupRestoreScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = {
                                 scope.launch {
                                     viewModel.exportEnvContent().fold(
@@ -337,19 +336,16 @@ fun BackupRestoreScreen(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("导出 .env")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = {
                                 importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Icon(Icons.Rounded.Download, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -369,7 +365,7 @@ fun BackupRestoreScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = {
                                 scope.launch {
                                     viewModel.exportFavoriteContent().fold(
@@ -384,21 +380,18 @@ fun BackupRestoreScreen(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.Bookmark, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("导出收藏")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = {
                                 favoriteImportLauncher.launch(
                                     arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
                                 )
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Icon(Icons.Rounded.Restore, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -416,15 +409,13 @@ fun BackupRestoreScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(10.dp))
-                    FilledTonalButton(
+                    AppGlassButton(
                         onClick = {
                             isDecodingTvSync = false
                             tvSyncLauncher.launch(null)
                         },
                         enabled = !viewModel.isTvSyncOperating && !isDecodingTvSync,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = appTonalButtonColors()
                     ) {
                         Icon(Icons.Rounded.CloudSync, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -455,22 +446,19 @@ fun BackupRestoreScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        FilledTonalButton(
+                        AppGlassButton(
                             onClick = viewModel::backupToWebDav,
                             modifier = Modifier.weight(1f),
                             enabled = !viewModel.isWebDavOperating,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = appTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.CloudUpload, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("云端备份")
                         }
-                        OutlinedButton(
+                        AppGlassButton(
                             onClick = { showWebDavRestoreConfirmDialog = true },
                             modifier = Modifier.weight(1f),
                             enabled = !viewModel.isWebDavOperating,
-                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Icon(Icons.Rounded.CloudDownload, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
@@ -478,10 +466,9 @@ fun BackupRestoreScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
+                    AppGlassButton(
                         onClick = viewModel::openWebDavConfigDialog,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.Rounded.Settings, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -563,7 +550,7 @@ fun BackupRestoreScreen(
             title = { Text("确认导入 .env") },
             text = { Text("导入将覆盖当前配置，是否继续？") },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     val content = pendingImportContent
                     showImportConfirmDialog = false
                     pendingImportContent = null
@@ -575,7 +562,7 @@ fun BackupRestoreScreen(
                 }) { Text("确认导入") }
             },
             dismissButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showImportConfirmDialog = false
                     pendingImportContent = null
                 }) { Text("取消") }
@@ -591,7 +578,7 @@ fun BackupRestoreScreen(
             title = { Text("确认导入收藏") },
             text = { Text("导入将覆盖当前模式的收藏与定时计划，是否继续？") },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     val content = pendingFavoriteImportContent
                     showFavoriteImportConfirmDialog = false
                     pendingFavoriteImportContent = null
@@ -603,7 +590,7 @@ fun BackupRestoreScreen(
                 }) { Text("确认导入") }
             },
             dismissButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showFavoriteImportConfirmDialog = false
                     pendingFavoriteImportContent = null
                 }) { Text("取消") }
@@ -620,13 +607,13 @@ fun BackupRestoreScreen(
             title = { Text("确认云端恢复") },
             text = { Text("优先恢复 WebDAV 完整备份；若云端只有旧格式，则兼容恢复 .env 与收藏。") },
             confirmButton = {
-                TextButton(onClick = {
+                AppGlassButton(onClick = {
                     showWebDavRestoreConfirmDialog = false
                     viewModel.restoreFromWebDav()
                 }) { Text("确认恢复") }
             },
             dismissButton = {
-                TextButton(onClick = { showWebDavRestoreConfirmDialog = false }) { Text("取消") }
+                AppGlassButton(onClick = { showWebDavRestoreConfirmDialog = false }) { Text("取消") }
             }
         )
     }
@@ -695,9 +682,9 @@ private fun BackupSectionSelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = selected.isNotEmpty()) { Text(confirmLabel) }
+            AppGlassButton(onClick = onConfirm, enabled = selected.isNotEmpty()) { Text(confirmLabel) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { AppGlassButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 
@@ -755,7 +742,10 @@ private fun WebDavConfigDialog(
                     value = password, onValueChange = onPasswordChange,
                     label = { Text("密码 / 应用专用密码") },
                     trailingIcon = {
-                        IconButton(onClick = { showPassword = !showPassword }) {
+                        AppGlassIconButton(
+                            onClick = { showPassword = !showPassword },
+                            size = 32.dp
+                        ) {
                             Icon(
                                 if (showPassword) Icons.Rounded.VisibilityOff
                                 else Icons.Rounded.Visibility, null
@@ -781,7 +771,7 @@ private fun WebDavConfigDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onSave) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        confirmButton = { AppGlassButton(onClick = onSave) { Text("保存") } },
+        dismissButton = { AppGlassButton(onClick = onDismiss) { Text("取消") } }
     )
 }

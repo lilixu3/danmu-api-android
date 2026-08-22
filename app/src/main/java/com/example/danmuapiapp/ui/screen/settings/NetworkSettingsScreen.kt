@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.data.service.CoreUpdateCheckPolicy
 import com.example.danmuapiapp.ui.component.*
+import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @Composable
 fun NetworkSettingsScreen(
@@ -135,7 +136,7 @@ fun NetworkSettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showUpdateIntervalDialog = false }) { Text("取消") }
+                AppGlassButton(onClick = { showUpdateIntervalDialog = false }) { Text("取消") }
             }
         )
     }
