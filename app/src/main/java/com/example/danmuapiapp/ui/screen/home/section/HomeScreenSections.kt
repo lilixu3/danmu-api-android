@@ -154,7 +154,9 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.screen.home.support.resolveCoreActionButtonText
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
+import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -213,7 +215,7 @@ internal fun HomeTopHeader(
                         fontWeight = FontWeight.SemiBold
                     ),
                     letterSpacing = 1.3.sp,
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Row(
@@ -282,7 +284,7 @@ internal fun HomeTopHeader(
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -849,6 +851,7 @@ internal fun ActionDeck(
     sourceUnknownLegacy: Boolean,
     coreOperationMessage: String?
 ) {
+    val glassEnabled = LocalGlassMaterial.current.enabled
     val isStopping = status == ServiceStatus.Stopping
     val coreActionEnabled = !isTransitioning && !isCoreInfoLoading &&
         (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)
@@ -930,27 +933,51 @@ internal fun ActionDeck(
                     exit = shrinkHorizontally() + fadeOut()
                 ) {
                     val restartEnabled = !isTransitioning
-                    AppLiquidButton(
-                        onClick = onRestart,
-                        enabled = restartEnabled,
-                        height = 52.dp,
-                        surfaceColor = if (restartEnabled) {
-                            MaterialTheme.colorScheme.primaryContainer.copy(
-                                alpha = 0.48f
-                            )
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
-                        },
-                        contentColor = if (restartEnabled) {
-                            if (isDarkTheme) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                        }
-                    ) {
+                    val restartContent: @Composable RowScope.() -> Unit = {
                         Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("重启")
+                    }
+                    if (glassEnabled) {
+                        AppLiquidButton(
+                            onClick = onRestart,
+                            enabled = restartEnabled,
+                            height = 52.dp,
+                            surfaceColor = if (restartEnabled) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
+                            },
+                            contentColor = if (restartEnabled) {
+                                if (isDarkTheme) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                            },
+                            content = restartContent
+                        )
+                    } else {
+                        FilledTonalButton(
+                            onClick = onRestart,
+                            enabled = restartEnabled,
+                            modifier = Modifier.height(52.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (isDarkTheme) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.98f)
+                                },
+                                contentColor = if (isDarkTheme) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                },
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                            ),
+                            content = restartContent
+                        )
                     }
                 }
             }
@@ -967,48 +994,37 @@ internal fun ActionDeck(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AppLiquidButton(
-                    onClick = onOpenVariantPicker,
-                    enabled = !isTransitioning,
-                    modifier = Modifier.weight(1f),
-                    surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
-                    contentColor = if (isTransitioning) {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                ) {
+                val variantPickerContent: @Composable RowScope.() -> Unit = {
                     Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("切换核心")
                 }
                 val dangerousCoreAction = !isCoreInfoLoading &&
                     (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)
-                AppLiquidButton(
-                    onClick = {
-                        if (!isCoreInstalled) {
-                            onOpenCoreDownload()
+                if (glassEnabled) {
+                    AppLiquidButton(
+                        onClick = onOpenVariantPicker,
+                        enabled = !isTransitioning,
+                        modifier = Modifier.weight(1f),
+                        surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
+                        contentColor = if (isTransitioning) {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                         } else {
-                            onOpenUpdatePrompt()
-                        }
-                    },
-                    enabled = coreActionEnabled,
-                    modifier = Modifier.weight(1f),
-                    surfaceColor = if (!coreActionEnabled) {
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
-                    } else if (dangerousCoreAction) {
-                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.56f)
-                    } else {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
-                    },
-                    contentColor = if (!coreActionEnabled) {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                    } else if (dangerousCoreAction) {
-                        MaterialTheme.colorScheme.onErrorContainer
-                    } else {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    }
-                ) {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        content = variantPickerContent
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenVariantPicker,
+                        enabled = !isTransitioning,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        content = variantPickerContent
+                    )
+                }
+
+                val coreActionContent: @Composable RowScope.() -> Unit = {
                     if (isInstalling || isUpdating) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
@@ -1027,6 +1043,53 @@ internal fun ActionDeck(
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(coreActionText)
+                }
+                if (glassEnabled) {
+                    AppLiquidButton(
+                        onClick = {
+                            if (!isCoreInstalled) {
+                                onOpenCoreDownload()
+                            } else {
+                                onOpenUpdatePrompt()
+                            }
+                        },
+                        enabled = coreActionEnabled,
+                        modifier = Modifier.weight(1f),
+                        surfaceColor = if (!coreActionEnabled) {
+                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f)
+                        } else if (dangerousCoreAction) {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.56f)
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
+                        },
+                        contentColor = if (!coreActionEnabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                        } else if (dangerousCoreAction) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
+                        content = coreActionContent
+                    )
+                } else {
+                    FilledTonalButton(
+                        onClick = {
+                            if (!isCoreInstalled) {
+                                onOpenCoreDownload()
+                            } else {
+                                onOpenUpdatePrompt()
+                            }
+                        },
+                        enabled = coreActionEnabled,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = if (dangerousCoreAction) {
+                            appDangerTonalButtonColors()
+                        } else {
+                            appTonalButtonColors()
+                        },
+                        content = coreActionContent
+                    )
                 }
             }
         }

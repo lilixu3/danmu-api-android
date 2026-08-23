@@ -31,6 +31,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -137,49 +139,62 @@ private data class DialogTonePalette(
 private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
     val colors = MaterialTheme.colorScheme
     val dark = LocalAppDarkTheme.current
+    val glassEnabled = LocalGlassMaterial.current.enabled
     return when (tone) {
         AppDialogTone.Neutral -> DialogTonePalette(
             foreground = colors.onSurfaceVariant,
-            container = colors.surfaceContainerHighest.copy(alpha = 0.72f)
+            container = if (glassEnabled) {
+                colors.surfaceContainerHighest.copy(alpha = 0.72f)
+            } else {
+                colors.surfaceContainerHighest
+            }
         )
 
         AppDialogTone.Brand -> DialogTonePalette(
             foreground = colors.primary,
-            container = colors.primary.copy(alpha = 0.16f)
+            container = if (glassEnabled) colors.primary.copy(alpha = 0.16f) else colors.primaryContainer
         )
 
         AppDialogTone.Success -> if (dark) {
             DialogTonePalette(
                 Color(DialogColorTokens.DARK_SUCCESS),
-                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER).copy(alpha = 0.24f)
+                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.24f) else it
+                }
             )
         } else {
             DialogTonePalette(
                 Color(DialogColorTokens.LIGHT_SUCCESS),
-                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER).copy(alpha = 0.34f)
+                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.34f) else it
+                }
             )
         }
 
         AppDialogTone.Warning -> if (dark) {
             DialogTonePalette(
                 Color(DialogColorTokens.DARK_WARNING),
-                Color(DialogColorTokens.DARK_WARNING_CONTAINER).copy(alpha = 0.28f)
+                Color(DialogColorTokens.DARK_WARNING_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.28f) else it
+                }
             )
         } else {
             DialogTonePalette(
                 Color(DialogColorTokens.LIGHT_WARNING),
-                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER).copy(alpha = 0.38f)
+                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.38f) else it
+                }
             )
         }
 
         AppDialogTone.Danger -> DialogTonePalette(
             foreground = colors.error,
-            container = colors.error.copy(alpha = 0.15f)
+            container = if (glassEnabled) colors.error.copy(alpha = 0.15f) else colors.errorContainer
         )
 
         AppDialogTone.Info -> DialogTonePalette(
-            foreground = colors.primary,
-            container = colors.primary.copy(alpha = 0.12f)
+            foreground = if (glassEnabled) colors.primary else colors.onPrimaryContainer,
+            container = if (glassEnabled) colors.primary.copy(alpha = 0.12f) else colors.primaryContainer
         )
     }
 }
@@ -326,6 +341,38 @@ fun AppDialogOption(
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    if (!LocalGlassMaterial.current.enabled) {
+        OutlinedCard(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.fillMaxWidth(),
+            shape = shape,
+            border = BorderStroke(
+                width = 1.dp,
+                color = if (selected) colors.primary else colors.outlineVariant
+            ),
+            colors = CardDefaults.outlinedCardColors(
+                containerColor = if (selected) {
+                    colors.primaryContainer.copy(alpha = 0.36f)
+                } else {
+                    colors.surface
+                },
+                contentColor = colors.onSurface
+            )
+        ) {
+            CompositionLocalProvider(LocalContentColor provides colors.onSurface) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = content
+                )
+            }
+        }
+        return
+    }
+
     val glassEnabled = LocalGlassMaterial.current.enabled &&
         LocalGlassBackgroundBackdrop.current != null
     val selectedAlpha = if (LocalAppDarkTheme.current) 0.42f else 0.30f
@@ -450,27 +497,40 @@ private fun AppDialogFrame(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
+                val legacyDialog = !LocalGlassMaterial.current.enabled
                 Surface(
                     modifier = modifier
                         .widthIn(max = maxWidth)
                         .fillMaxWidth()
                         .heightIn(max = maxHeight),
                     shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    color = if (legacyDialog) {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainer
+                    },
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     tonalElevation = 0.dp,
                     shadowElevation = 12.dp,
                     border = BorderStroke(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
+                        color = if (legacyDialog) {
+                            MaterialTheme.colorScheme.outlineVariant
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
+                        }
                     ),
                     // A platform Dialog has a separate window, so a backdrop
                     // owned by the liquid host must not leak into its content.
-                    content = {
-                        CompositionLocalProvider(
-                            LocalGlassBackgroundBackdrop provides null,
-                            content = content
-                        )
+                    content = if (LocalGlassMaterial.current.enabled) {
+                        {
+                            CompositionLocalProvider(
+                                LocalGlassBackgroundBackdrop provides null,
+                                content = content
+                            )
+                        }
+                    } else {
+                        content
                     }
                 )
             }

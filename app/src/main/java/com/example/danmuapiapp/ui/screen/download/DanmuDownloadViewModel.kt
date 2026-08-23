@@ -1243,7 +1243,9 @@ class DanmuDownloadViewModel @Inject constructor(
                         when (output.status) {
                             DownloadRecordStatus.Success -> {
                                 success++
-                                val detail = "已保存：${output.relativePath}"
+                                val detail = output.errorMessage?.takeIf { it.isNotBlank() }?.let {
+                                    "已保存：${output.relativePath}（$it）"
+                                } ?: "已保存：${output.relativePath}"
                                 updateActiveTask(
                                     detail = detail,
                                     progress = 1f

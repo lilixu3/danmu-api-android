@@ -128,7 +128,10 @@ fun glassBorderColor(): Color {
 }
 
 @Composable
-fun GlassAppBackground(modifier: Modifier = Modifier) {
+fun GlassAppBackground(
+    modifier: Modifier = Modifier,
+    solidBackgroundColor: Color? = null
+) {
     val context = LocalContext.current
     val darkTheme = LocalAppDarkTheme.current
     val background = LocalAppBackground.current
@@ -225,7 +228,7 @@ fun GlassAppBackground(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(solidBackgroundColor ?: MaterialTheme.colorScheme.background)
     ) {
         if (displayedRequest != null && displayedData != null) {
             AsyncImage(
@@ -308,6 +311,7 @@ val LocalGlassBackgroundBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 @Composable
 fun GlassBackdropScene(
     modifier: Modifier = Modifier,
+    solidBackgroundColor: Color? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val enabled = LocalGlassMaterial.current.enabled
@@ -323,7 +327,8 @@ fun GlassBackdropScene(
                     } else {
                         Modifier
                     }
-                )
+                ),
+            solidBackgroundColor = solidBackgroundColor
         )
         CompositionLocalProvider(
             LocalGlassBackgroundBackdrop provides backgroundBackdrop

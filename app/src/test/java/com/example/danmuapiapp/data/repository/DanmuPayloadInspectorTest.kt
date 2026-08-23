@@ -78,6 +78,31 @@ class DanmuPayloadInspectorTest {
     }
 
     @Test
+    fun `malformed xml is downloadable with a warning`() {
+        val result = DanmuPayloadInspector.inspect(
+            payload = "<?xml version=\"1.0\"?><i><d p=\"1,1,25,1\">坏 & 内容</d></i>".toByteArray(),
+            format = DanmuDownloadFormat.Xml,
+            contentType = "application/xml"
+        )
+
+        assertTrue(result.valid)
+        assertTrue(result.warning.orEmpty().contains("XML 解析失败"))
+        assertTrue(result.error.isBlank())
+    }
+
+    @Test
+    fun `non xml response remains a hard failure`() {
+        val result = DanmuPayloadInspector.inspect(
+            payload = "<html>403 Forbidden</html>".toByteArray(),
+            format = DanmuDownloadFormat.Xml,
+            contentType = "text/html"
+        )
+
+        assertFalse(result.valid)
+        assertTrue(result.error.contains("不是 XML"))
+    }
+
+    @Test
     fun `protobuf accepts binary but rejects core json fallback`() {
         val binary = DanmuPayloadInspector.inspect(
             payload = byteArrayOf(0x0A, 0x00),

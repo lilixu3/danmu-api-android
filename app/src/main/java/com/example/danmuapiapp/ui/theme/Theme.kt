@@ -28,7 +28,8 @@ import com.example.danmuapiapp.ui.component.AppDialogHost
 /** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
 val LocalAppDarkTheme = staticCompositionLocalOf { false }
 
-private val DarkColorScheme = darkColorScheme(
+/** Palette introduced with the liquid-glass redesign. */
+private val GlassDarkColorScheme = darkColorScheme(
     primary = Color(0xFF7DCFFF),
     onPrimary = Color(0xFF031A28),
     primaryContainer = Color(0xFF244554),
@@ -67,20 +68,52 @@ private val DarkColorScheme = darkColorScheme(
     onErrorContainer = Color(0xFFFFD9E3),
 )
 
-private val Blue40 = Color(0xFF4E6498)
-private val BlueGrey40 = Color(0xFF5D667C)
-private val Indigo40 = Color(0xFF6A6393)
+private val GlassBlue40 = Color(0xFF4E6498)
+private val GlassBlueGrey40 = Color(0xFF5D667C)
+private val GlassIndigo40 = Color(0xFF6A6393)
 
-private val LightColorScheme = lightColorScheme(
-    primary = Blue40,
+/** The pre-liquid-glass Material palette used when the feature is off. */
+private val LegacyDarkColorScheme = darkColorScheme(
+    primary = Color(0xFF7DCFFF),
+    onPrimary = Color(0xFF031A28),
+    primaryContainer = Color(0xFF12324A),
+    onPrimaryContainer = Color(0xFFBEE8FF),
+    secondary = Color(0xFF7EAFFF),
+    onSecondary = Color(0xFF0A2342),
+    secondaryContainer = Color(0xFF2B4168),
+    onSecondaryContainer = Color(0xFFDCE7FF),
+    tertiary = Color(0xFF73DACA),
+    onTertiary = Color(0xFF042620),
+    tertiaryContainer = Color(0xFF123F38),
+    onTertiaryContainer = Color(0xFFB7F4EA),
+    background = Color(0xFF090E19),
+    onBackground = Color(0xFFE6EAFA),
+    surface = Color(0xFF0E1422),
+    onSurface = Color(0xFFE6EAFA),
+    surfaceVariant = Color(0xFF202A42),
+    onSurfaceVariant = Color(0xFF9CA8CA),
+    outline = Color(0xFF4F5E86),
+    outlineVariant = Color(0xFF313D60),
+    surfaceContainerLowest = Color(0xFF060A13),
+    surfaceContainerLow = Color(0xFF0A1020),
+    surfaceContainer = Color(0xFF111A2E),
+    surfaceContainerHigh = Color(0xFF17233A),
+    surfaceContainerHighest = Color(0xFF1F2D47),
+    error = Color(0xFFFF8BA7),
+    onError = Color(0xFF3A0618),
+    errorContainer = Color(0xFF5A1A32),
+    onErrorContainer = Color(0xFFFFD9E3),
+)
+
+private val LegacyLightColorScheme = lightColorScheme(
+    primary = GlassBlue40,
     onPrimary = Color(0xFFFFFFFF),
-    // 浅色主容器仅加深一点，保持同色系观感
     primaryContainer = Color(0xFFD2DCF4),
     onPrimaryContainer = Color(0xFF26324D),
-    secondary = BlueGrey40,
+    secondary = GlassBlueGrey40,
     secondaryContainer = Color(0xFFDCE2EE),
     onSecondaryContainer = Color(0xFF2C3344),
-    tertiary = Indigo40,
+    tertiary = GlassIndigo40,
     tertiaryContainer = Color(0xFFDDD9EE),
     onTertiaryContainer = Color(0xFF322F4B),
     background = Color(0xFFF4F5FA),
@@ -97,6 +130,8 @@ private val LightColorScheme = lightColorScheme(
     outlineVariant = Color(0xFFC6CBD8),
 )
 
+private val GlassLightColorScheme = LegacyLightColorScheme
+
 @Composable
 fun DanmuApiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -104,7 +139,13 @@ fun DanmuApiTheme(
     appBackground: AppBackgroundPreference = AppBackgroundPreference(),
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val useGlassPalette = usesLiquidGlassPalette(glassMaterial)
+    val colorScheme = when {
+        useGlassPalette && darkTheme -> GlassDarkColorScheme
+        useGlassPalette -> GlassLightColorScheme
+        darkTheme -> LegacyDarkColorScheme
+        else -> LegacyLightColorScheme
+    }
     val foregroundKey = rememberBackgroundRefreshKey(
         glassMaterial = glassMaterial,
         appBackground = appBackground
@@ -127,6 +168,13 @@ fun DanmuApiTheme(
             }
         }
     }
+}
+
+internal fun usesLiquidGlassPalette(
+    preference: GlassMaterialPreference,
+    sdkInt: Int = android.os.Build.VERSION.SDK_INT
+): Boolean {
+    return preference == GlassMaterialPreference.LiquidGlass && isLiquidGlassSupported(sdkInt)
 }
 
 @Composable

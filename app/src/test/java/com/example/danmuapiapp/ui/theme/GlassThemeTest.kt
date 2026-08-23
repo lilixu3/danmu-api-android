@@ -58,6 +58,13 @@ class GlassThemeTest {
     }
 
     @Test
+    fun legacyPalette_isSelectedWhenGlassIsOffOrUnsupported() {
+        assertFalse(usesLiquidGlassPalette(GlassMaterialPreference.Off, sdkInt = 35))
+        assertFalse(usesLiquidGlassPalette(GlassMaterialPreference.LiquidGlass, sdkInt = 32))
+        assertTrue(usesLiquidGlassPalette(GlassMaterialPreference.LiquidGlass, sdkInt = 33))
+    }
+
+    @Test
     fun liquidGlass_requiresAndroid13ForFullReferenceEffect() {
         assertFalse(isLiquidGlassSupported(32))
         assertTrue(isLiquidGlassSupported(33))

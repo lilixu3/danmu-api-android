@@ -3,13 +3,26 @@ package com.example.danmuapiapp.ui.component.liquid
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
@@ -41,7 +54,7 @@ fun AppGlassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
-    surfaceColor: Color = defaultControlSurfaceColor(),
+    surfaceColor: Color = Color.Unspecified,
     contentColor: Color = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
@@ -54,12 +67,64 @@ fun AppGlassButton(
     shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
+    val glassRequested = LocalGlassMaterial.current.enabled
+    if (!glassRequested) {
+        when {
+            surfaceColor.isSpecified -> OutlinedButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                shape = shape,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    // Liquid callers pass translucent fills for the glass path.
+                    // The legacy outlined control is intentionally transparent.
+                    containerColor = Color.Transparent,
+                    contentColor = contentColor,
+                    disabledContainerColor = Color.Transparent,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                ),
+                contentPadding = contentPadding,
+                content = content
+            )
+
+            tint.isSpecified -> Button(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                shape = shape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = tint,
+                    contentColor = contentColor,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                ),
+                contentPadding = contentPadding,
+                content = content
+            )
+
+            else -> TextButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                shape = shape,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = contentColor,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                ),
+                contentPadding = contentPadding,
+                content = content
+            )
+        }
+        return
+    }
+
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         tint = tint,
-        surfaceColor = surfaceColor,
+        surfaceColor = if (surfaceColor.isSpecified) surfaceColor else defaultControlSurfaceColor(),
         contentColor = contentColor,
         contentPadding = contentPadding,
         height = height,
@@ -81,8 +146,26 @@ fun AppGlassPrimaryButton(
     shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
-    val glassEnabled = LocalGlassMaterial.current.enabled &&
+    val glassRequested = LocalGlassMaterial.current.enabled
+    val glassEnabled = glassRequested &&
         LocalGlassBackgroundBackdrop.current != null
+    if (!glassRequested) {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            ),
+            content = content
+        )
+        return
+    }
     AppGlassButton(
         onClick = onClick,
         modifier = modifier,
@@ -122,8 +205,26 @@ fun AppGlassDangerButton(
     shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
     content: @Composable RowScope.() -> Unit
 ) {
-    val glassEnabled = LocalGlassMaterial.current.enabled &&
+    val glassRequested = LocalGlassMaterial.current.enabled
+    val glassEnabled = glassRequested &&
         LocalGlassBackgroundBackdrop.current != null
+    if (!glassRequested) {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            ),
+            content = content
+        )
+        return
+    }
     AppGlassButton(
         onClick = onClick,
         modifier = modifier,
@@ -156,7 +257,7 @@ fun AppGlassIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     size: Dp = 36.dp,
-    surfaceColor: Color = defaultControlSurfaceColor(),
+    surfaceColor: Color = Color.Unspecified,
     contentColor: Color = if (enabled) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else {
@@ -164,13 +265,49 @@ fun AppGlassIconButton(
     },
     content: @Composable () -> Unit
 ) {
+    val glassRequested = LocalGlassMaterial.current.enabled
+    if (!glassRequested) {
+        if (LocalAppDialogContext.current) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                LocalContentColor provides contentColor
+            ) {
+                IconButton(
+                    onClick = onClick,
+                    modifier = modifier.size(size),
+                    enabled = enabled,
+                    content = content
+                )
+            }
+        } else {
+            FilledTonalIconButton(
+                onClick = onClick,
+                modifier = modifier.size(size),
+                enabled = enabled,
+                colors = if (surfaceColor.isSpecified) {
+                    IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = surfaceColor,
+                        contentColor = contentColor,
+                        disabledContainerColor = surfaceColor.copy(alpha = 0.6f),
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                } else {
+                    IconButtonDefaults.filledTonalIconButtonColors(
+                        contentColor = contentColor,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                },
+                content = content
+            )
+        }
+        return
+    }
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier.size(size),
         enabled = enabled,
         height = size,
         shape = CircleShape,
-        surfaceColor = surfaceColor,
+        surfaceColor = if (surfaceColor.isSpecified) surfaceColor else defaultControlSurfaceColor(),
         contentColor = contentColor,
         contentPadding = PaddingValues(0.dp)
     ) {
@@ -190,6 +327,25 @@ fun AppGlassFilterChip(
     leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
+    if (!LocalGlassMaterial.current.enabled) {
+        FilterChip(
+            selected = selected,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            label = label,
+            leadingIcon = leadingIcon,
+            trailingIcon = trailingIcon,
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = accent.copy(alpha = 0.16f),
+                selectedLabelColor = accent,
+                selectedLeadingIconColor = accent,
+                selectedTrailingIconColor = accent
+            )
+        )
+        return
+    }
+
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier,
@@ -220,6 +376,18 @@ fun AppGlassAssistChip(
     leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
+    if (!LocalGlassMaterial.current.enabled) {
+        AssistChip(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            label = label,
+            leadingIcon = leadingIcon,
+            trailingIcon = trailingIcon
+        )
+        return
+    }
+
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier,

@@ -367,6 +367,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             if (!inspection.valid) error(inspection.error)
             val danmuCount = responsePayload.danmuCount ?: inspection.count
             val httpCode = responsePayload.code
+            val validationWarning = inspection.warning
 
             onProgress(0.50f, "正在准备输出目录")
             val animeDirName = sanitizeFileComponent(input.animeTitle).ifBlank { "未命名剧集" }
@@ -386,7 +387,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                     bytes = 0L,
                     durationMs = elapsed,
                     httpCode = httpCode,
-                    errorMessage = "文件已存在，按策略跳过"
+                    errorMessage = listOfNotNull(
+                        "文件已存在，按策略跳过",
+                        validationWarning
+                    ).joinToString("；")
                 )
                 appendRecord(buildRecord(input, skipped))
                 return@runCatching skipped
@@ -407,7 +411,8 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 bytes = normalizedPayload.size.toLong(),
                 durationMs = elapsed,
                 danmuCount = danmuCount,
-                httpCode = httpCode
+                httpCode = httpCode,
+                errorMessage = validationWarning
             )
             appendRecord(buildRecord(input, success))
             success

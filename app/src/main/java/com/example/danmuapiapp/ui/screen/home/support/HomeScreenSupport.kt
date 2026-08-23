@@ -5,6 +5,7 @@ import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppDialogOption
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 
 import android.app.Activity
 import android.content.Context
@@ -218,8 +219,14 @@ internal fun UpdatePromptDialog(
             }
         },
         confirmButton = {
-            AppGlassButton(onClick = onUpdate, tint = MaterialTheme.colorScheme.primary) {
-                Text(if (sourceMismatch || sourceUnknownLegacy) "重新下载" else "更新")
+            if (LocalGlassMaterial.current.enabled) {
+                AppGlassButton(onClick = onUpdate, tint = MaterialTheme.colorScheme.primary) {
+                    Text(if (sourceMismatch || sourceUnknownLegacy) "重新下载" else "更新")
+                }
+            } else {
+                TextButton(onClick = onUpdate) {
+                    Text(if (sourceMismatch || sourceUnknownLegacy) "重新下载" else "更新")
+                }
             }
         },
         dismissButton = {
@@ -255,17 +262,32 @@ internal fun NoCoreDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                AppGlassButton(
-                    onClick = onOpenCoreManagement,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (currentVariant == ApiVariant.Custom && customRepo.isBlank()) {
-                        "设置自定义仓库"
-                    } else {
-                        "打开核心管理"
-                    })
+                if (LocalGlassMaterial.current.enabled) {
+                    AppGlassButton(
+                        onClick = onOpenCoreManagement,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (currentVariant == ApiVariant.Custom && customRepo.isBlank()) {
+                            "设置自定义仓库"
+                        } else {
+                            "打开核心管理"
+                        })
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenCoreManagement,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (currentVariant == ApiVariant.Custom && customRepo.isBlank()) {
+                            "设置自定义仓库"
+                        } else {
+                            "打开核心管理"
+                        })
+                    }
                 }
                 ApiVariant.entries.filter { variant ->
                     variant != ApiVariant.Custom ||
@@ -331,20 +353,37 @@ internal fun UnavailableVariantDialog(
                         "当前版本没有可用核心文件，因此没有执行切换。可以现在安装，完成后会自动切换并启动。"
                     }
                 )
-                AppGlassButton(
-                    onClick = onOpenCoreManagement,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (needsCustomRepo) "设置自定义仓库" else "打开核心管理")
+                if (LocalGlassMaterial.current.enabled) {
+                    AppGlassButton(
+                        onClick = onOpenCoreManagement,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (needsCustomRepo) "设置自定义仓库" else "打开核心管理")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenCoreManagement,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (needsCustomRepo) "设置自定义仓库" else "打开核心管理")
+                    }
                 }
             }
         },
         confirmButton = if (needsCustomRepo) null else {
             {
-                AppGlassButton(onClick = onInstall, tint = MaterialTheme.colorScheme.primary) {
-                    Text("安装并切换")
+                if (LocalGlassMaterial.current.enabled) {
+                    AppGlassButton(onClick = onInstall, tint = MaterialTheme.colorScheme.primary) {
+                        Text("安装并切换")
+                    }
+                } else {
+                    TextButton(onClick = onInstall) {
+                        Text("安装并切换")
+                    }
                 }
             }
         },
