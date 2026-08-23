@@ -8,7 +8,8 @@ import org.json.JSONTokener
 internal data class DanmuPayloadInspection(
     val valid: Boolean,
     val count: Int? = null,
-    val error: String = ""
+    val error: String = "",
+    val warning: String? = null
 )
 
 internal object DanmuPayloadInspector {
@@ -53,10 +54,13 @@ internal object DanmuPayloadInspector {
                 )
             }
         }.getOrElse { throwable ->
-            return invalid(format, "XML 解析失败：${throwable.message ?: "未知错误"}")
+            return warning(
+                format,
+                "XML 解析失败：${throwable.message ?: "未知错误"}"
+            )
         }
         if (preview.parseError != null) {
-            return invalid(format, preview.parseError)
+            return warning(format, preview.parseError)
         }
         return DanmuPayloadInspection(valid = true, count = preview.count)
     }
@@ -169,6 +173,13 @@ internal object DanmuPayloadInspector {
         return DanmuPayloadInspection(
             valid = false,
             error = "${format.label} 格式校验失败：$detail"
+        )
+    }
+
+    private fun warning(format: DanmuDownloadFormat, detail: String): DanmuPayloadInspection {
+        return DanmuPayloadInspection(
+            valid = true,
+            warning = "${format.label} 格式检查警告：$detail"
         )
     }
 

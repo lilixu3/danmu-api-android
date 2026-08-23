@@ -175,6 +175,7 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appDangerTonalButtonColors
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionAction
 import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionPolicy
 import com.example.danmuapiapp.ui.startup.StartupPermissionGatePrefs
@@ -1001,8 +1002,17 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                AppGlassButton(onClick = viewModel::openForegroundAppUpdateMethodDialog, tint = MaterialTheme.colorScheme.primary) {
-                    Text("现在更新")
+                if (LocalGlassMaterial.current.enabled) {
+                    AppGlassButton(
+                        onClick = viewModel::openForegroundAppUpdateMethodDialog,
+                        tint = MaterialTheme.colorScheme.primary
+                    ) {
+                        Text("现在更新")
+                    }
+                } else {
+                    TextButton(onClick = viewModel::openForegroundAppUpdateMethodDialog) {
+                        Text("现在更新")
+                    }
                 }
             },
             dismissButton = {
@@ -1073,28 +1083,58 @@ fun HomeScreen(
             title = { Text("选择更新方式") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AppGlassButton(
-                        onClick = viewModel::startInAppUpdateDownload,
-                        enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
-                        modifier = Modifier.fillMaxWidth(),
-                        tint = MaterialTheme.colorScheme.primary
-                    ) {
-                        Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("应用内下载")
+                    if (LocalGlassMaterial.current.enabled) {
+                        AppGlassButton(
+                            onClick = viewModel::startInAppUpdateDownload,
+                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
+                            modifier = Modifier.fillMaxWidth(),
+                            tint = MaterialTheme.colorScheme.primary
+                        ) {
+                            Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("应用内下载")
+                        }
+                    } else {
+                        FilledTonalButton(
+                            onClick = viewModel::startInAppUpdateDownload,
+                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("应用内下载")
+                        }
                     }
-                    AppGlassButton(
-                        onClick = {
-                            val alive = activity
-                            if (alive != null) {
-                                viewModel.openBrowserDownload(alive)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("浏览器下载")
+                    if (LocalGlassMaterial.current.enabled) {
+                        AppGlassButton(
+                            onClick = {
+                                val alive = activity
+                                if (alive != null) {
+                                    viewModel.openBrowserDownload(alive)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("浏览器下载")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                val alive = activity
+                                if (alive != null) {
+                                    viewModel.openBrowserDownload(alive)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("浏览器下载")
+                        }
                     }
                     if (!hasInAppDownload) {
                         Text(

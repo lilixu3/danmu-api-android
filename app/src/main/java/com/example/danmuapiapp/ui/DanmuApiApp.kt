@@ -56,6 +56,7 @@ import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
 import com.example.danmuapiapp.ui.theme.GlassBackdropScene
+import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -154,8 +155,16 @@ private fun DanmuApiMainContent() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    val glassEnabled = LocalGlassMaterial.current.enabled
+    val legacyShellBackground = if (!glassEnabled && LocalAppDarkTheme.current) {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    } else {
+        null
+    }
+    // Both material modes use the same floating bar geometry. The preference
+    // only changes whether that bar refracts the backdrop.
     val showBottomBar = currentDestination.isTopLevelDestination()
-    val recordBackdrop = showBottomBar && LocalGlassMaterial.current.enabled
+    val recordBackdrop = showBottomBar && glassEnabled
     val pageBackdrop = rememberLayerBackdrop()
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -170,7 +179,10 @@ private fun DanmuApiMainContent() {
                     }
                 )
         ) {
-            GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
+            GlassBackdropScene(
+                modifier = Modifier.fillMaxSize(),
+                solidBackgroundColor = legacyShellBackground
+            ) {
                 CompositionLocalProvider(
                     LocalContentColor provides MaterialTheme.colorScheme.onBackground,
                     LocalFloatingBottomBarVisible provides showBottomBar

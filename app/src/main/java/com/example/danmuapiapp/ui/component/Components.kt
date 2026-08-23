@@ -214,7 +214,7 @@ fun GradientButton(
                 text,
                 style = MaterialTheme.typography.labelLarge,
                 color = if (enabled) {
-                    enabledTextColor
+                    if (glassEnabled) enabledTextColor else Color.White
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
                 }
@@ -562,7 +562,11 @@ fun SettingsHintCard(
     AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = glassSurfaceColor(),
+        color = if (LocalGlassMaterial.current.enabled) {
+            glassSurfaceColor()
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp
     ) {

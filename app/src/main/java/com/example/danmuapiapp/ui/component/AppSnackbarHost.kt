@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.glassBorderColor
 import com.example.danmuapiapp.ui.theme.glassSurfaceColor
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 
@@ -74,6 +76,14 @@ fun AppSnackbarHost(
 
 @Composable
 private fun AppSnackbar(data: SnackbarData) {
+    if (!LocalGlassMaterial.current.enabled) {
+        Snackbar(
+            snackbarData = data,
+            actionOnNewLine = false
+        )
+        return
+    }
+
     val hasTrailingAction = data.visuals.actionLabel != null || data.visuals.withDismissAction
     val containerColor = glassSurfaceColor()
 

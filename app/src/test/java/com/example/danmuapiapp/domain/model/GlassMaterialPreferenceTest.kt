@@ -6,6 +6,11 @@ import org.junit.Test
 class GlassMaterialPreferenceTest {
 
     @Test
+    fun defaultMaterial_isOff() {
+        assertEquals(GlassMaterialPreference.Off, GlassMaterialPreference.Default)
+    }
+
+    @Test
     fun storageValues_roundTripForEveryMaterial() {
         GlassMaterialPreference.entries.forEach { material ->
             assertEquals(

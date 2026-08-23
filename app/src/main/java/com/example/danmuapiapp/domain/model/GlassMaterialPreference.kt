@@ -5,7 +5,9 @@ enum class GlassMaterialPreference(val storageValue: Int) {
     Off(4);
 
     companion object {
-        val Default = LiquidGlass
+        // Keep the legacy appearance as the first-run experience. Existing
+        // saved LiquidGlass values are still respected by fromStorageValue.
+        val Default = Off
 
         fun fromStorageValue(value: Int): GlassMaterialPreference {
             // Values 0..3 were the former enabled material choices. Preserve them

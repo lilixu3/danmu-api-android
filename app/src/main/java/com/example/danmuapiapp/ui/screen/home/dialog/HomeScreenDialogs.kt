@@ -141,6 +141,7 @@ import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.component.CacheClearCapabilityNotice
 import com.example.danmuapiapp.ui.component.CacheClearSelectionList
 import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
@@ -191,6 +192,25 @@ internal fun DialogActionButton(
                     modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
                     color = androidx.compose.material3.LocalContentColor.current
+                )
+            } else {
+                Icon(icon, null, modifier = Modifier.size(16.dp))
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(text)
+        }
+    } else if (!LocalGlassMaterial.current.enabled) {
+        // These actions were outlined buttons before the liquid-glass layer.
+        // Keep that contract when the material effect is disabled.
+        OutlinedButton(
+            onClick = onClick,
+            enabled = actualEnabled,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp
                 )
             } else {
                 Icon(icon, null, modifier = Modifier.size(16.dp))
