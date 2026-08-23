@@ -409,7 +409,12 @@ private fun AppDialogFrame(
     content: @Composable () -> Unit
 ) {
     val host = LocalAppDialogHost.current
-    if (LocalGlassMaterial.current.enabled && host != null) {
+    // A portal entry is rendered in place of the original dialog content. If
+    // that content opens another AppDialog, rendering the new entry would
+    // dispose the parent composition and immediately detach the child entry.
+    // Keep nested dialogs in their own window so their state remains mounted.
+    val nestedDialog = LocalAppDialogContext.current
+    if (LocalGlassMaterial.current.enabled && host != null && !nestedDialog) {
         AppDialogPortal(
             host = host,
             onDismissRequest = onDismissRequest,
@@ -459,7 +464,14 @@ private fun AppDialogFrame(
                         width = 1.dp,
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
                     ),
-                    content = content
+                    // A platform Dialog has a separate window, so a backdrop
+                    // owned by the liquid host must not leak into its content.
+                    content = {
+                        CompositionLocalProvider(
+                            LocalGlassBackgroundBackdrop provides null,
+                            content = content
+                        )
+                    }
                 )
             }
         }

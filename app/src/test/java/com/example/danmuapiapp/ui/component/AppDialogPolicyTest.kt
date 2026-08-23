@@ -37,6 +37,14 @@ class AppDialogPolicyTest {
     }
 
     @Test
+    fun `液态玻璃模式下嵌套弹窗应绕过宿主 portal`() {
+        val source = readSource("app/src/main/java/com/example/danmuapiapp/ui/component/AppDialog.kt")
+
+        assertTrue(source.contains("val nestedDialog = LocalAppDialogContext.current"))
+        assertTrue(source.contains("host != null && !nestedDialog"))
+    }
+
+    @Test
     fun `主代码不应残留旧弹窗实现与展示偏好`() {
         val mainDir = resolveRepoRoot().resolve("app/src/main/java")
         val source = Files.walk(mainDir).use { paths ->
