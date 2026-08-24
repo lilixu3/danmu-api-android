@@ -81,6 +81,7 @@ private class AppDialogEntry(
     val onDismissRequest: () -> Unit,
     val maxWidth: () -> Dp,
     val modifier: () -> Modifier,
+    val backdrop: () -> Backdrop?,
     val content: @Composable () -> Unit
 )
 
@@ -123,7 +124,7 @@ fun AppDialogHost(content: @Composable () -> Unit) {
 
             if (spec.enabled) {
                 state.entries.lastOrNull()?.let { entry ->
-                    AppLiquidDialogOverlay(entry = entry, backdrop = backdrop)
+                    AppLiquidDialogOverlay(entry = entry, fallbackBackdrop = backdrop)
                 }
             }
         }
@@ -328,8 +329,8 @@ fun AppDialog(
 }
 
 /**
- * Shared selectable row for dialog lists. It keeps the selected state visible
- * without turning every option into a saturated, opaque card.
+ * Shared selectable row for dialog lists. Liquid dialogs use a dense frosted
+ * surface so selection remains legible without losing the glass treatment.
  */
 @Composable
 fun AppDialogOption(
@@ -456,6 +457,7 @@ private fun AppDialogFrame(
     content: @Composable () -> Unit
 ) {
     val host = LocalAppDialogHost.current
+    val backgroundBackdrop = LocalGlassBackgroundBackdrop.current
     // A portal entry is rendered in place of the original dialog content. If
     // that content opens another AppDialog, rendering the new entry would
     // dispose the parent composition and immediately detach the child entry.
@@ -467,6 +469,7 @@ private fun AppDialogFrame(
             onDismissRequest = onDismissRequest,
             maxWidth = maxWidth,
             modifier = modifier,
+            backdrop = backgroundBackdrop,
             content = content
         )
         return
@@ -544,17 +547,20 @@ private fun AppDialogPortal(
     onDismissRequest: () -> Unit,
     maxWidth: Dp,
     modifier: Modifier,
+    backdrop: Backdrop?,
     content: @Composable () -> Unit
 ) {
     val dismissState = rememberUpdatedState(onDismissRequest)
     val maxWidthState = rememberUpdatedState(maxWidth)
     val modifierState = rememberUpdatedState(modifier)
+    val backdropState = rememberUpdatedState(backdrop)
     val contentState = rememberUpdatedState(content)
     val entry = remember(host) {
         AppDialogEntry(
             onDismissRequest = { dismissState.value.invoke() },
             maxWidth = { maxWidthState.value },
             modifier = { modifierState.value },
+            backdrop = { backdropState.value },
             content = { contentState.value.invoke() }
         )
     }
@@ -568,7 +574,7 @@ private fun AppDialogPortal(
 @Composable
 private fun AppLiquidDialogOverlay(
     entry: AppDialogEntry,
-    backdrop: Backdrop
+    fallbackBackdrop: Backdrop
 ) {
     val parentColors = MaterialTheme.colorScheme
     val parentTypography = MaterialTheme.typography
@@ -576,6 +582,10 @@ private fun AppLiquidDialogOverlay(
     val darkTheme = LocalAppDarkTheme.current
     val dialogColors = dialogColorScheme(parentColors, darkTheme)
     val dimColor = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.14f)
+    // Prefer the scene's background-only layer. Sampling the host fallback
+    // records page cards and headers, which creates hard color bands inside a
+    // single dialog when those elements sit behind different vertical areas.
+    val backdrop = entry.backdrop() ?: fallbackBackdrop
 
     BackHandler(onBack = entry.onDismissRequest)
 

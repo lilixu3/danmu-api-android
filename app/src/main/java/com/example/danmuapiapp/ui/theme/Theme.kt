@@ -72,38 +72,8 @@ private val GlassBlue40 = Color(0xFF4E6498)
 private val GlassBlueGrey40 = Color(0xFF5D667C)
 private val GlassIndigo40 = Color(0xFF6A6393)
 
-/** The pre-liquid-glass Material palette used when the feature is off. */
-private val LegacyDarkColorScheme = darkColorScheme(
-    primary = Color(0xFF7DCFFF),
-    onPrimary = Color(0xFF031A28),
-    primaryContainer = Color(0xFF12324A),
-    onPrimaryContainer = Color(0xFFBEE8FF),
-    secondary = Color(0xFF7EAFFF),
-    onSecondary = Color(0xFF0A2342),
-    secondaryContainer = Color(0xFF2B4168),
-    onSecondaryContainer = Color(0xFFDCE7FF),
-    tertiary = Color(0xFF73DACA),
-    onTertiary = Color(0xFF042620),
-    tertiaryContainer = Color(0xFF123F38),
-    onTertiaryContainer = Color(0xFFB7F4EA),
-    background = Color(0xFF090E19),
-    onBackground = Color(0xFFE6EAFA),
-    surface = Color(0xFF0E1422),
-    onSurface = Color(0xFFE6EAFA),
-    surfaceVariant = Color(0xFF202A42),
-    onSurfaceVariant = Color(0xFF9CA8CA),
-    outline = Color(0xFF4F5E86),
-    outlineVariant = Color(0xFF313D60),
-    surfaceContainerLowest = Color(0xFF060A13),
-    surfaceContainerLow = Color(0xFF0A1020),
-    surfaceContainer = Color(0xFF111A2E),
-    surfaceContainerHigh = Color(0xFF17233A),
-    surfaceContainerHighest = Color(0xFF1F2D47),
-    error = Color(0xFFFF8BA7),
-    onError = Color(0xFF3A0618),
-    errorContainer = Color(0xFF5A1A32),
-    onErrorContainer = Color(0xFFFFD9E3),
-)
+/** Keep the off-state dark theme on the black/gray palette from the glass redesign. */
+private val LegacyDarkColorScheme = GlassDarkColorScheme
 
 private val LegacyLightColorScheme = lightColorScheme(
     primary = GlassBlue40,

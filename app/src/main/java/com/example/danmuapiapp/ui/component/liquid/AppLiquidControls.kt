@@ -26,19 +26,33 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.kyant.shapes.Capsule
 
 @Composable
-private fun defaultControlSurfaceColor(): Color {
+private fun defaultControlSurfaceColor(dialogAccent: Color = Color.Unspecified): Color {
     val glassAvailable = LocalGlassMaterial.current.enabled &&
         LocalGlassBackgroundBackdrop.current != null
     val dialogContext = LocalAppDialogContext.current
+    val colors = MaterialTheme.colorScheme
+    if (dialogContext && glassAvailable) {
+        val darkTheme = LocalAppDarkTheme.current
+        val alpha = if (dialogAccent.isSpecified) {
+            if (darkTheme) 0.30f else 0.26f
+        } else {
+            // Match the selection wash used by the cache list. The border below
+            // supplies the small amount of edge definition a flat dialog control needs.
+            if (darkTheme) 0.16f else 0.13f
+        }
+        return (if (dialogAccent.isSpecified) dialogAccent else colors.primary)
+            .copy(alpha = alpha)
+    }
     val base = if (dialogContext) {
-        MaterialTheme.colorScheme.surfaceContainerHigh
+        colors.surfaceContainerHigh
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
+        colors.surfaceContainerHighest
     }
     val alpha = when {
         !glassAvailable -> 1f
@@ -55,6 +69,7 @@ fun AppGlassButton(
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
+    borderColor: Color = Color.Unspecified,
     contentColor: Color = if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
@@ -68,6 +83,8 @@ fun AppGlassButton(
     content: @Composable RowScope.() -> Unit
 ) {
     val glassRequested = LocalGlassMaterial.current.enabled
+    val dialogContext = LocalAppDialogContext.current
+    val dialogDarkTheme = LocalAppDarkTheme.current
     if (!glassRequested) {
         when {
             surfaceColor.isSpecified -> OutlinedButton(
@@ -119,12 +136,36 @@ fun AppGlassButton(
         return
     }
 
+    val resolvedBorderColor = when {
+        !dialogContext -> Color.Unspecified
+        borderColor.isSpecified -> borderColor
+        tint.isSpecified -> tint.copy(alpha = if (dialogDarkTheme) 0.34f else 0.28f)
+        surfaceColor.isSpecified -> surfaceColor.copy(alpha = if (dialogDarkTheme) 0.30f else 0.24f)
+        else -> MaterialTheme.colorScheme.primary.copy(
+            alpha = if (dialogDarkTheme) 0.28f else 0.22f
+        )
+    }
+
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         tint = tint,
-        surfaceColor = if (surfaceColor.isSpecified) surfaceColor else defaultControlSurfaceColor(),
+        surfaceColor = if (surfaceColor.isSpecified) {
+            surfaceColor
+        } else {
+            defaultControlSurfaceColor(dialogAccent = tint)
+        },
+        border = if (resolvedBorderColor.isSpecified) {
+            BorderStroke(
+                width = 0.75.dp,
+                color = resolvedBorderColor.copy(
+                    alpha = if (enabled) resolvedBorderColor.alpha else resolvedBorderColor.alpha * 0.45f
+                )
+            )
+        } else {
+            null
+        },
         contentColor = contentColor,
         contentPadding = contentPadding,
         height = height,
@@ -149,6 +190,8 @@ fun AppGlassPrimaryButton(
     val glassRequested = LocalGlassMaterial.current.enabled
     val glassEnabled = glassRequested &&
         LocalGlassBackgroundBackdrop.current != null
+    val dialogContext = LocalAppDialogContext.current
+    val dialogDarkTheme = LocalAppDarkTheme.current
     if (!glassRequested) {
         Button(
             onClick = onClick,
@@ -176,9 +219,22 @@ fun AppGlassPrimaryButton(
             Color.Unspecified
         },
         surfaceColor = if (glassEnabled) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
+            if (dialogContext) {
+                MaterialTheme.colorScheme.primary.copy(
+                    alpha = if (dialogDarkTheme) 0.30f else 0.28f
+                )
+            } else {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
+            }
         } else {
             MaterialTheme.colorScheme.primaryContainer
+        },
+        borderColor = if (dialogContext && glassEnabled) {
+            MaterialTheme.colorScheme.primary.copy(
+                alpha = if (dialogDarkTheme) 0.46f else 0.38f
+            )
+        } else {
+            Color.Unspecified
         },
         contentColor = if (enabled) {
             MaterialTheme.colorScheme.onPrimaryContainer
@@ -307,7 +363,11 @@ fun AppGlassIconButton(
         enabled = enabled,
         height = size,
         shape = CircleShape,
-        surfaceColor = if (surfaceColor.isSpecified) surfaceColor else defaultControlSurfaceColor(),
+        surfaceColor = if (surfaceColor.isSpecified) {
+            surfaceColor
+        } else {
+            defaultControlSurfaceColor(dialogAccent = Color.Unspecified)
+        },
         contentColor = contentColor,
         contentPadding = PaddingValues(0.dp)
     ) {
@@ -346,18 +406,40 @@ fun AppGlassFilterChip(
         return
     }
 
+    val dialogContext = LocalAppDialogContext.current
+    val dialogDarkTheme = LocalAppDarkTheme.current
     AppLiquidButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         height = 36.dp,
         shape = Capsule(),
-        surfaceColor = if (selected) {
-            accent.copy(alpha = 0.46f)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
+        surfaceColor = when {
+            selected && dialogContext -> MaterialTheme.colorScheme.primary.copy(
+                alpha = if (dialogDarkTheme) 0.16f else 0.13f
+            )
+
+            dialogContext -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
+            selected -> accent.copy(alpha = 0.46f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
         },
-        contentColor = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        border = if (dialogContext) {
+            BorderStroke(
+                width = 0.75.dp,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.32f else 0.14f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (enabled) 0.30f else 0.14f)
+                }
+            )
+        } else {
+            null
+        },
+        contentColor = when {
+            selected && dialogContext -> MaterialTheme.colorScheme.onPrimaryContainer
+            selected -> accent
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
         contentPadding = PaddingValues(horizontal = 12.dp)
     ) {
         leadingIcon?.invoke()

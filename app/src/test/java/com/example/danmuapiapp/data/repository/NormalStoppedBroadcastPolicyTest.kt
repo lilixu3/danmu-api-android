@@ -8,7 +8,7 @@ import org.junit.Test
 class NormalStoppedBroadcastPolicyTest {
 
     @Test
-    fun `重启停机中的 STOPPED 广播应作为停机完成信号`() {
+    fun `重启停机中的 STOPPED 广播仅表示旧实例已报告停止`() {
         val action = decideNormalStoppedBroadcastAction(
             runMode = RunMode.Normal,
             status = ServiceStatus.Stopping,
@@ -16,7 +16,7 @@ class NormalStoppedBroadcastPolicyTest {
             normalStartIssuedAtMs = 0L
         )
 
-        assertEquals(NormalStoppedBroadcastAction.CompleteRestartWait, action)
+        assertEquals(NormalStoppedBroadcastAction.RestartStopReported, action)
     }
 
     @Test
@@ -41,5 +41,21 @@ class NormalStoppedBroadcastPolicyTest {
         )
 
         assertEquals(NormalStoppedBroadcastAction.MarkStopped, action)
+    }
+
+    @Test
+    fun `重启必须等待旧 Service 销毁且端口关闭`() {
+        assertEquals(
+            false,
+            isNormalRestartTeardownComplete(serviceRunning = true, portOpen = false)
+        )
+        assertEquals(
+            false,
+            isNormalRestartTeardownComplete(serviceRunning = false, portOpen = true)
+        )
+        assertEquals(
+            true,
+            isNormalRestartTeardownComplete(serviceRunning = false, portOpen = false)
+        )
     }
 }

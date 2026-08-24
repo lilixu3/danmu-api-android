@@ -12,13 +12,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -46,10 +39,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -310,41 +303,60 @@ internal fun DownloadQueueDialog(
             QueueMetricBadge(modifier = Modifier.weight(1f), label = "失败", value = queueSummary.failed)
         }
 
-        val queueScroll = rememberScrollState()
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(queueScroll),
+                .weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (queueDialogGroups.isEmpty()) {
-                Text(
-                    text = "队列暂无任务",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                item(key = "queue-empty", contentType = "queue-empty") {
+                    Text(
+                        text = "队列暂无任务",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             } else {
-                Text(
-                    text = "任务分组",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
+                item(key = "queue-heading", contentType = "queue-heading") {
+                    Text(
+                        text = "任务分组",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 queueDialogGroups.forEach { group ->
                     val expanded = expandedQueueGroupKeys.contains(group.key)
-                    DownloadQueueGroupCard(
-                        group = group,
-                        expanded = expanded,
-                        onToggle = {
-                            onExpandedQueueGroupKeysChange(
-                                if (expanded) {
-                                    expandedQueueGroupKeys - group.key
-                                } else {
-                                    expandedQueueGroupKeys + group.key
-                                }
+                    item(
+                        key = "queue-group:${group.key}",
+                        contentType = "queue-group"
+                    ) {
+                        DownloadQueueGroupCard(
+                            group = group,
+                            expanded = expanded,
+                            onToggle = {
+                                onExpandedQueueGroupKeysChange(
+                                    if (expanded) {
+                                        expandedQueueGroupKeys - group.key
+                                    } else {
+                                        expandedQueueGroupKeys + group.key
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    if (expanded) {
+                        items(
+                            items = group.tasks,
+                            key = { task -> "queue-task:${task.taskId}" },
+                            contentType = { "queue-task" }
+                        ) { task ->
+                            DownloadQueueTaskRow(
+                                task = task,
+                                modifier = Modifier.padding(horizontal = 8.dp)
                             )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -447,54 +459,37 @@ internal fun DownloadQueueGroupCard(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onToggle)
                 .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggle),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Text(
-                        text = group.animeTitle,
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "共 ${group.total} · 待 ${group.pending} · 运行 ${group.running} · 完成 ${group.completed} · 失败 ${group.failed}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                Text(
+                    text = group.animeTitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "共 ${group.total} · 待 ${group.pending} · 运行 ${group.running} · 完成 ${group.completed} · 失败 ${group.failed}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    group.tasks.forEach { task ->
-                        DownloadQueueTaskRow(task = task)
-                    }
-                }
-            }
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -536,7 +531,10 @@ internal fun QueueMetricBadge(
 }
 
 @Composable
-internal fun DownloadQueueTaskRow(task: DanmuDownloadTask) {
+internal fun DownloadQueueTaskRow(
+    task: DanmuDownloadTask,
+    modifier: Modifier = Modifier
+) {
     val status = task.statusEnum()
     val statusText = when (status) {
         DownloadQueueStatus.Pending -> "待处理"
@@ -558,10 +556,14 @@ internal fun DownloadQueueTaskRow(task: DanmuDownloadTask) {
     val displaySource = task.source.trim().ifBlank { "unknown" }
     val detailText = task.lastDetail.trim()
 
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
+    Surface(
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
+        )
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
@@ -579,7 +581,7 @@ internal fun DownloadQueueTaskRow(task: DanmuDownloadTask) {
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                AppGlassSurface(
+                Surface(
                     shape = RoundedCornerShape(999.dp),
                     color = statusColor.copy(alpha = 0.13f)
                 ) {

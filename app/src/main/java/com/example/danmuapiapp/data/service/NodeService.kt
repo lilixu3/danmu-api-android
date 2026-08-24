@@ -197,6 +197,8 @@ class NodeService : Service() {
     private var startupStartedAtMs = 0L
     private var currentStartExplicit = false
     private var runtimeWakeLock: PowerManager.WakeLock? = null
+    @Volatile
+    private var serviceStopRequested = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -224,6 +226,7 @@ class NodeService : Service() {
             null -> {
                 // START_STICKY 重建会传入 null intent，仅在用户期望运行时恢复。
                 if (!NodeKeepAlivePrefs.isDesiredRunning(this)) {
+                    serviceStopRequested = true
                     stopSelf(startId)
                     return START_NOT_STICKY
                 }
@@ -319,6 +322,7 @@ class NodeService : Service() {
             startupStartedAtMs = 0L
             currentStartExplicit = false
             nodeThread = null
+            serviceStopRequested = true
         }
         releaseRuntimeWakeLock()
         broadcastStatus(
@@ -420,11 +424,13 @@ class NodeService : Service() {
                                     )
                                     recordRecoveryFailure()
                                     SystemHeartbeatScheduler.refresh(applicationContext)
+                                    serviceStopRequested = true
                                     broadcastStatus(STATUS_ERROR, message = msg, error = msg)
                                     stopForegroundAndSelf()
                                 }
 
                                 NodeRuntimeExitAction.ReportStopped -> {
+                                    serviceStopRequested = true
                                     broadcastStatus(STATUS_STOPPED, message = "服务已停止")
                                     stopForegroundAndSelf()
                                 }
@@ -489,8 +495,15 @@ class NodeService : Service() {
                         delay(minOf(profile.startupRecheckIntervalMs, remainingBudgetMs))
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                AppDiagnosticLogger.i(
+                    this@NodeService,
+                    TAG,
+                    "启动流程因服务停止/销毁而取消，generation=$generation"
+                )
+                throw cancelled
             } catch (t: Throwable) {
-                if (runtimeGeneration.get() == generation) {
+                if (!serviceStopRequested && runtimeGeneration.get() == generation) {
                     handleStartupFailure(generation, buildErrorMessage(t), t)
                 }
             }
@@ -510,39 +523,47 @@ class NodeService : Service() {
 
         val preparedDeferred = CompletableDeferred<Result<java.io.File>>()
         scope.launch {
-            val prepared = runCatching {
-                publishStarting("正在检查运行环境…")
-                val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
-                NodeProjectManager.migrateAllCoreLayouts(projectDir)
-                publishStarting("正在同步启动配置…")
-                // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
-                val envVariant = runCatching {
-                    java.io.File(projectDir, "config/.env").takeIf { it.exists() }
-                        ?.readText(Charsets.UTF_8)
-                        ?.let { DotEnvCodec.parse(it)["DANMU_API_VARIANT"] }
-                        ?.trim()
-                }.getOrNull()
-                NodeProjectManager.writeRuntimeEnv(
-                    context = this@NodeService,
-                    targetProjectDir = projectDir,
-                    preferredVariantKey = envVariant
-                )
-                when (val health = RuntimeDependencyHealthChecker.inspectSelectedCore(
-                    context = this@NodeService,
-                    projectDir = projectDir
-                )) {
-                    RuntimeDependencyHealthChecker.Status.Ready -> Unit
-                    RuntimeDependencyHealthChecker.Status.CoreUnavailable -> {
-                        throw IllegalStateException("当前核心未安装或文件不完整")
-                    }
-                    is RuntimeDependencyHealthChecker.Status.Missing -> {
-                        throw RuntimeDependenciesMissingException(
-                            variant = health.variant,
-                            missingDependencies = health.dependencies
+            val prepared: Result<java.io.File> = try {
+                Result.success(
+                    run {
+                        publishStarting("正在检查运行环境…")
+                        val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
+                        NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                        publishStarting("正在同步启动配置…")
+                        // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
+                        val envVariant = runCatching {
+                            java.io.File(projectDir, "config/.env").takeIf { it.exists() }
+                                ?.readText(Charsets.UTF_8)
+                                ?.let { DotEnvCodec.parse(it)["DANMU_API_VARIANT"] }
+                                ?.trim()
+                        }.getOrNull()
+                        NodeProjectManager.writeRuntimeEnv(
+                            context = this@NodeService,
+                            targetProjectDir = projectDir,
+                            preferredVariantKey = envVariant
                         )
+                        when (val health = RuntimeDependencyHealthChecker.inspectSelectedCore(
+                            context = this@NodeService,
+                            projectDir = projectDir
+                        )) {
+                            RuntimeDependencyHealthChecker.Status.Ready -> Unit
+                            RuntimeDependencyHealthChecker.Status.CoreUnavailable -> {
+                                throw IllegalStateException("当前核心未安装或文件不完整")
+                            }
+                            is RuntimeDependencyHealthChecker.Status.Missing -> {
+                                throw RuntimeDependenciesMissingException(
+                                    variant = health.variant,
+                                    missingDependencies = health.dependencies
+                                )
+                            }
+                        }
+                        projectDir
                     }
-                }
-                projectDir
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                Result.failure(throwable)
             }
             preparedDeferred.complete(prepared)
         }
@@ -573,7 +594,9 @@ class NodeService : Service() {
     }
 
     private fun handleStartupFailure(generation: Long, message: String, throwable: Throwable? = null) {
-        if (runtimeGeneration.get() != generation) return
+        if (serviceStopRequested || throwable is CancellationException || runtimeGeneration.get() != generation) {
+            return
+        }
         AppDiagnosticLogger.e(this, TAG, "Failed to start node: $message", throwable)
         synchronized(stateLock) {
             isRunning = false
@@ -583,6 +606,7 @@ class NodeService : Service() {
             if (nodeThread?.isAlive != true) {
                 nodeThread = null
             }
+            serviceStopRequested = true
         }
         recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
@@ -592,7 +616,7 @@ class NodeService : Service() {
     }
 
     private suspend fun handleStartupTimeout(generation: Long, message: String) {
-        if (runtimeGeneration.get() != generation) return
+        if (serviceStopRequested || runtimeGeneration.get() != generation) return
         val startupFailure = StartupFailureStore.readNormal(this)
         val resolvedMessage = startupFailure?.userMessage() ?: message
         AppDiagnosticLogger.w(
@@ -611,6 +635,7 @@ class NodeService : Service() {
             if (!threadAlive) {
                 nodeThread = null
             }
+            serviceStopRequested = true
         }
         recordRecoveryFailure()
         SystemHeartbeatScheduler.refresh(applicationContext)
@@ -653,6 +678,7 @@ class NodeService : Service() {
             // Node/V8 停不干净时，直接终止 :node 进程，避免后续无法重启。
             AppDiagnosticLogger.w(this@NodeService, TAG, "普通模式停止超时，强制结束 :node 进程")
             publishStopping("停止较慢，正在强制回收服务进程…")
+            serviceStopRequested = true
             broadcastStatus(STATUS_STOPPED, message = "服务已停止")
             delay(350)
             releaseRuntimeWakeLock()
@@ -761,6 +787,7 @@ class NodeService : Service() {
         if (runtimeGeneration.get() != generation) return
         synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
+            serviceStopRequested = true
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
@@ -777,6 +804,7 @@ class NodeService : Service() {
 
     private fun stopForegroundAndSelf() {
         synchronized(stateLock) {
+            serviceStopRequested = true
             isStopping = false
         }
         releaseRuntimeWakeLock()
@@ -834,9 +862,11 @@ class NodeService : Service() {
     }
 
     private fun shouldAcceptStartRequest(): Boolean {
+        if (serviceStopRequested) return false
         val staleTimeoutMs = runtimeProfile().startupStaleTimeoutMs
         val anyPortOpen = resolveCandidatePorts().any { it in 1..65535 && isPortOpen(it) }
         synchronized(stateLock) {
+            if (serviceStopRequested) return false
             val threadAlive = nodeThread?.isAlive == true
             val staleFlags = (isRunning || isStopping) &&
                 !threadAlive &&
@@ -1047,6 +1077,7 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
+        serviceStopRequested = true
         scope.cancel()
         synchronized(stateLock) {
             nodeThread?.interrupt()

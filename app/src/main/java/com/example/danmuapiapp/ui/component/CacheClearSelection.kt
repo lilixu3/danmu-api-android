@@ -29,6 +29,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +40,9 @@ import com.example.danmuapiapp.domain.model.CacheClearCapability
 import com.example.danmuapiapp.domain.model.CacheClearItem
 import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 
 internal data class CacheClearItemPresentation(
     val title: String,
@@ -124,32 +129,78 @@ internal fun CacheClearSelectionToolbar(
 }
 
 @Composable
+internal fun CacheClearSelectionPanel(
+    selectedItems: Set<CacheClearItem>,
+    selectionEnabled: Boolean,
+    onToggle: (CacheClearItem) -> Unit,
+    onSelectAll: () -> Unit,
+    onSelectNone: () -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    val colors = MaterialTheme.colorScheme
+    val liquidDialog = LocalGlassMaterial.current.enabled && LocalAppDialogContext.current
+    val panelContent: @Composable () -> Unit = {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(if (liquidDialog) 0.dp else 10.dp)
+        ) {
+            CacheClearSelectionToolbar(
+                selectedCount = selectedItems.size,
+                selectionEnabled = selectionEnabled,
+                onSelectAll = onSelectAll,
+                onSelectNone = onSelectNone,
+                modifier = if (liquidDialog) {
+                    Modifier.padding(start = 10.dp, top = 4.dp, end = 4.dp, bottom = 4.dp)
+                } else {
+                    Modifier
+                }
+            )
+            CacheClearSelectionList(
+                selectedItems = selectedItems,
+                selectionEnabled = selectionEnabled,
+                onToggle = onToggle,
+                compact = compact,
+                framed = !liquidDialog
+            )
+        }
+    }
+
+    if (liquidDialog) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = Color.Transparent,
+            border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.40f)),
+            content = panelContent
+        )
+    } else {
+        Column(modifier = modifier, content = { panelContent() })
+    }
+}
+
+@Composable
 internal fun CacheClearSelectionList(
     selectedItems: Set<CacheClearItem>,
     selectionEnabled: Boolean,
     onToggle: (CacheClearItem) -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    framed: Boolean = true
 ) {
-    AppGlassSurface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-    ) {
+    val colors = MaterialTheme.colorScheme
+    val liquidDialog = LocalGlassMaterial.current.enabled && LocalAppDialogContext.current
+    val darkTheme = LocalAppDarkTheme.current
+    val listShape = RoundedCornerShape(14.dp)
+    val listBorder = BorderStroke(
+        1.dp,
+        colors.outlineVariant.copy(alpha = if (liquidDialog) 0.40f else 0.55f)
+    )
+    val listContent: @Composable () -> Unit = {
         Column {
             CacheClearItem.entries.forEachIndexed { index, item ->
                 val presentation = cacheClearItemPresentation(item)
                 val selected = item in selectedItems
-                AppGlassSurface(
-                    onClick = { onToggle(item) },
-                    enabled = selectionEnabled,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    }
-                ) {
+                val rowContent: @Composable () -> Unit = {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -163,15 +214,18 @@ internal fun CacheClearSelectionList(
                         AppGlassSurface(
                             modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                             shape = RoundedCornerShape(9.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            color = if (selected && liquidDialog) {
+                                colors.primary.copy(alpha = 0.12f)
+                            } else {
+                                colors.surfaceContainerHigh
+                            }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     presentation.icon,
                                     contentDescription = null,
                                     modifier = Modifier.size(if (compact) 17.dp else 19.dp),
-                                    tint = if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (selected) colors.primary else colors.onSurfaceVariant
                                 )
                             }
                         }
@@ -179,6 +233,7 @@ internal fun CacheClearSelectionList(
                             Text(
                                 presentation.title,
                                 style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onSurface,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -187,7 +242,7 @@ internal fun CacheClearSelectionList(
                                 Text(
                                     presentation.detail,
                                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = colors.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -200,14 +255,62 @@ internal fun CacheClearSelectionList(
                         )
                     }
                 }
+                if (liquidDialog) {
+                    Surface(
+                        onClick = { onToggle(item) },
+                        enabled = selectionEnabled,
+                        shape = RectangleShape,
+                        color = if (selected) {
+                            colors.primary.copy(alpha = if (darkTheme) 0.16f else 0.13f)
+                        } else {
+                            Color.Transparent
+                        },
+                        contentColor = colors.onSurface,
+                        content = rowContent
+                    )
+                } else {
+                    AppGlassSurface(
+                        onClick = { onToggle(item) },
+                        enabled = selectionEnabled,
+                        shape = RectangleShape,
+                        color = if (selected) {
+                            colors.primaryContainer.copy(
+                                alpha = if (LocalGlassMaterial.current.enabled) 0.72f else 0.16f
+                            )
+                        } else {
+                            colors.surfaceContainerLow
+                        },
+                        content = rowContent
+                    )
+                }
                 if (index != CacheClearItem.entries.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(start = if (compact) 52.dp else 59.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        color = colors.outlineVariant.copy(alpha = if (liquidDialog) 0.34f else 0.45f)
                     )
                 }
             }
         }
+    }
+
+    if (liquidDialog && !framed) {
+        listContent()
+    } else if (liquidDialog) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = listShape,
+            color = Color.Transparent,
+            border = listBorder,
+            content = listContent
+        )
+    } else {
+        AppGlassSurface(
+            modifier = modifier.fillMaxWidth(),
+            shape = listShape,
+            color = colors.surfaceContainerLow,
+            border = listBorder,
+            content = listContent
+        )
     }
 }
 

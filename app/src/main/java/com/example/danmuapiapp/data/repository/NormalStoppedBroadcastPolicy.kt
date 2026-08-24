@@ -4,9 +4,16 @@ import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 
 internal enum class NormalStoppedBroadcastAction {
-    CompleteRestartWait,
+    RestartStopReported,
     IgnoreAsStale,
     MarkStopped
+}
+
+internal fun isNormalRestartTeardownComplete(
+    serviceRunning: Boolean,
+    portOpen: Boolean
+): Boolean {
+    return !serviceRunning && !portOpen
 }
 
 internal fun decideNormalStoppedBroadcastAction(
@@ -19,7 +26,7 @@ internal fun decideNormalStoppedBroadcastAction(
         return NormalStoppedBroadcastAction.MarkStopped
     }
     if (pendingNormalRestart && status == ServiceStatus.Stopping) {
-        return NormalStoppedBroadcastAction.CompleteRestartWait
+        return NormalStoppedBroadcastAction.RestartStopReported
     }
     if (status == ServiceStatus.Starting && normalStartIssuedAtMs > 0L) {
         return NormalStoppedBroadcastAction.IgnoreAsStale

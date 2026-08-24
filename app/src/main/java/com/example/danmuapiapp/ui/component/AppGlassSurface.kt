@@ -7,6 +7,7 @@ package com.example.danmuapiapp.ui.component
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -27,6 +28,7 @@ import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
+import com.kyant.shapes.RoundedRectangularShape
 
 enum class AppGlassSurfaceRole {
     Card,
@@ -52,23 +54,25 @@ fun AppGlassSurface(
     val spec = LocalGlassMaterial.current
     val backdrop = backdropOverride ?: LocalGlassBackgroundBackdrop.current
     val darkTheme = LocalAppDarkTheme.current
-    val glassEnabled = spec.enabled && backdrop != null
     val dialogContent = LocalAppDialogContext.current && role == AppGlassSurfaceRole.Card
-    val dialogContentAlpha = if (darkTheme) 0.62f else 0.68f
+    // The dialog shell owns the only backdrop pass. Cards rendered inside it
+    // are tonal overlays; refracting the same scene again creates visible
+    // bands between the header, body, and action area.
+    val dialogFlatSurface = spec.enabled && dialogContent
+    val glassEnabled = spec.enabled && backdrop != null && !dialogFlatSurface
     val surfaceAlpha = glassAlpha?.coerceIn(0f, 1f) ?: when (role) {
         AppGlassSurfaceRole.Card -> spec.contentAlpha
         AppGlassSurfaceRole.Dialog -> spec.dialogAlpha
     }
-    val tintAlpha = if (dialogContent && glassAlpha == null && color.alpha >= 0.34f) {
-        maxOf(minOf(color.alpha, surfaceAlpha), dialogContentAlpha)
-    } else {
-        minOf(color.alpha, surfaceAlpha)
-    }
-    val tint = color.copy(alpha = tintAlpha)
-    val fallbackColor = if (dialogContent && !glassEnabled && color.alpha >= 0.34f) {
-        color.copy(alpha = 1f)
-    } else {
-        color
+    val tint = color.copy(alpha = minOf(color.alpha, surfaceAlpha))
+    // Backdrop's lens shader only accepts rounded-rectangle shapes. Keep blur
+    // and color treatment for arbitrary shapes such as RectangleShape, but do
+    // not let the optional refraction effect crash composition.
+    val lensSupported = shape is CornerBasedShape || shape is RoundedRectangularShape
+    val fallbackColor = when {
+        dialogFlatSurface -> color
+        dialogContent && !glassEnabled && color.alpha >= 0.34f -> color.copy(alpha = 1f)
+        else -> color
     }
     val glassModifier = if (glassEnabled) {
         Modifier.drawBackdrop(
@@ -77,9 +81,22 @@ fun AppGlassSurface(
             effects = {
                 when (role) {
                     AppGlassSurfaceRole.Card -> {
-                        vibrancy()
-                        blur(spec.blurRadius.toPx())
-                        lens(16.dp.toPx(), 32.dp.toPx())
+                        if (dialogContent) {
+                            colorControls(
+                                brightness = if (darkTheme) 0.02f else 0.05f,
+                                saturation = 0.92f
+                            )
+                            blur(if (darkTheme) 12.dp.toPx() else 16.dp.toPx())
+                            if (lensSupported) {
+                                lens(10.dp.toPx(), 20.dp.toPx())
+                            }
+                        } else {
+                            vibrancy()
+                            blur(spec.blurRadius.toPx())
+                            if (lensSupported) {
+                                lens(16.dp.toPx(), 32.dp.toPx())
+                            }
+                        }
                     }
 
                     AppGlassSurfaceRole.Dialog -> {
@@ -90,7 +107,9 @@ fun AppGlassSurface(
                             saturation = 1.08f
                         )
                         blur(if (darkTheme) 12.dp.toPx() else 18.dp.toPx())
-                        lens(20.dp.toPx(), 40.dp.toPx(), depthEffect = true)
+                        if (lensSupported) {
+                            lens(20.dp.toPx(), 40.dp.toPx(), depthEffect = true)
+                        }
                     }
                 }
             },
@@ -116,7 +135,7 @@ fun AppGlassSurface(
         contentColor = contentColor,
         tonalElevation = if (glassEnabled) 0.dp else tonalElevation,
         shadowElevation = if (glassEnabled) 0.dp else shadowElevation,
-        border = if (glassEnabled) null else border
+        border = if (glassEnabled && !dialogContent) null else border
     ) {
         content()
     }
