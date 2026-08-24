@@ -179,19 +179,17 @@ class RuntimeRepositoryImpl @Inject constructor(
                             return
                         }
 
-                        NormalStoppedBroadcastAction.CompleteRestartWait -> {
-                            normalStoppedBroadcastSeq.incrementAndGet()
+                        NormalStoppedBroadcastAction.RestartStopReported -> {
                             normalPendingExplicitStart = false
                             updateStatusMessage(
                                 expectedStatus = ServiceStatus.Stopping,
-                                message = "旧实例已停止，正在重新启动服务…"
+                                message = "旧实例已报告停止，正在等待服务销毁…"
                             )
-                            addLog(LogLevel.Info, "普通模式旧实例已停止，重启流程继续")
+                            addLog(LogLevel.Info, "普通模式旧实例已报告停止，等待旧 Service 完成销毁")
                             return
                         }
 
                         NormalStoppedBroadcastAction.MarkStopped -> {
-                            normalStoppedBroadcastSeq.incrementAndGet()
                             normalPendingExplicitStart = false
                             markStopped(message)
                             addLog(LogLevel.Info, "服务已停止")
@@ -245,7 +243,6 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     @Volatile
     private var normalPendingExplicitStart = false
-    private val normalStoppedBroadcastSeq = AtomicLong(0L)
 
     private data class CandidateStartAttempt(
         val variant: ApiVariant,
@@ -738,14 +735,12 @@ class RuntimeRepositoryImpl @Inject constructor(
             addLog(LogLevel.Info, "正在应用服务配置：$changedText")
 
             updateRuntimeTransition(transitionId, "正在安全停止旧服务并应用配置…")
-            val stopBroadcastSeqBefore = normalStoppedBroadcastSeq.get()
             stopServiceLocked()
             val stopped = if (oldMode == RunMode.Normal) {
                 waitForRestartStopCompletion(
                     mode = oldMode,
                     oldPort = oldPort,
-                    timeoutMs = 12_000L,
-                    stopBroadcastSeqBefore = stopBroadcastSeqBefore
+                    timeoutMs = 12_000L
                 )
             } else {
                 waitForRuntimeStopped(oldMode, oldPort, timeoutMs = 12_000L)
@@ -1158,7 +1153,6 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.runMode) {
             RunMode.Normal -> {
                 val restarting = pendingNormalRestart
-                val stopBroadcastSeqBefore = normalStoppedBroadcastSeq.get()
                 val stopResult = runCatching {
                     NodeService.stop(context)
                 }
@@ -1187,8 +1181,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                         waitForRestartStopCompletion(
                             mode = RunMode.Normal,
                             oldPort = stopPort,
-                            timeoutMs = NORMAL_STOP_TIMEOUT_MS,
-                            stopBroadcastSeqBefore = stopBroadcastSeqBefore
+                            timeoutMs = NORMAL_STOP_TIMEOUT_MS
                         )
                     } else {
                         waitForRuntimeStopped(
@@ -1258,13 +1251,11 @@ class RuntimeRepositoryImpl @Inject constructor(
                 pendingNormalRestart = true
                 try {
                     val oldPort = state.port
-                    val stopBroadcastSeqBefore = normalStoppedBroadcastSeq.get()
                     stopServiceLocked()
                     val stopped = waitForRestartStopCompletion(
                         mode = RunMode.Normal,
                         oldPort = oldPort,
-                        timeoutMs = NORMAL_RESTART_STOP_TIMEOUT_MS,
-                        stopBroadcastSeqBefore = stopBroadcastSeqBefore
+                        timeoutMs = NORMAL_RESTART_STOP_TIMEOUT_MS
                     )
                     if (!stopped) {
                         addLog(LogLevel.Warn, "普通模式重启前停止较慢，请稍后重试")
@@ -2622,30 +2613,29 @@ class RuntimeRepositoryImpl @Inject constructor(
         return !isNormalProcessRunning() && !isPortOpen(port)
     }
 
-    private fun isNormalRestartStopCompleted(oldPort: Int, stopBroadcastSeqBefore: Long): Boolean {
-        if (normalStoppedBroadcastSeq.get() > stopBroadcastSeqBefore) {
-            return true
-        }
-        return !isNormalServiceRunning() && !isPortOpen(oldPort)
+    private fun isNormalRestartStopCompleted(oldPort: Int): Boolean {
+        return isNormalRestartTeardownComplete(
+            serviceRunning = isNormalServiceRunning(),
+            portOpen = isPortOpen(oldPort)
+        )
     }
 
     private suspend fun waitForRestartStopCompletion(
         mode: RunMode,
         oldPort: Int,
-        timeoutMs: Long,
-        stopBroadcastSeqBefore: Long
+        timeoutMs: Long
     ): Boolean {
         if (mode != RunMode.Normal) {
             return waitForRuntimeStopped(mode, oldPort, timeoutMs)
         }
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (isNormalRestartStopCompleted(oldPort, stopBroadcastSeqBefore)) {
+            if (isNormalRestartStopCompleted(oldPort)) {
                 return true
             }
             delay(180)
         }
-        return isNormalRestartStopCompleted(oldPort, stopBroadcastSeqBefore)
+        return isNormalRestartStopCompleted(oldPort)
     }
 
     private suspend fun waitForRuntimeStopped(mode: RunMode, oldPort: Int, timeoutMs: Long): Boolean {

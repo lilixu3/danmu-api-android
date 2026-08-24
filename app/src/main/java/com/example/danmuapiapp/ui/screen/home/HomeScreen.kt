@@ -432,18 +432,9 @@ fun HomeScreen(
             viewModel.resetCoreUpdateCheckDialogState()
         }
     }
-    LaunchedEffect(activeOverlay, queueDialogGroups) {
-        if (activeOverlay != HomeOverlay.DownloadQueue) return@LaunchedEffect
+    LaunchedEffect(queueDialogGroups) {
         val validKeys = queueDialogGroups.map { it.key }.toSet()
-        if (validKeys.isEmpty()) {
-            expandedQueueGroupKeys = emptySet()
-            return@LaunchedEffect
-        }
-        expandedQueueGroupKeys = if (expandedQueueGroupKeys.isEmpty()) {
-            setOf(queueDialogGroups.first().key)
-        } else {
-            expandedQueueGroupKeys.intersect(validKeys).ifEmpty { setOf(queueDialogGroups.first().key) }
-        }
+        expandedQueueGroupKeys = expandedQueueGroupKeys.intersect(validKeys)
     }
     val shouldShowRuntimePermissionHint = state.runMode == RunMode.Normal &&
         (!hasNotificationPermission || !isBatteryWhitelisted)
@@ -540,7 +531,10 @@ fun HomeScreen(
                     isQueueDownloading = isQueueDownloading,
                     isQueuePaused = isQueuePaused,
                     queueSummary = queueSummary,
-                    onOpenDownloadDialog = { activeOverlay = HomeOverlay.DownloadQueue },
+                    onOpenDownloadDialog = {
+                        expandedQueueGroupKeys = emptySet()
+                        activeOverlay = HomeOverlay.DownloadQueue
+                    },
                     onOpenUnreadAnnouncements = ::openUnreadAnnouncementsEntry
                 )
 

@@ -5,12 +5,15 @@
 package com.example.danmuapiapp.ui.component.liquid
 
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +41,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import com.kyant.shapes.RoundedRectangularShape
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -53,24 +57,25 @@ fun AppLiquidButton(
     shape: Shape = RoundedCornerShape(14.dp),
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
+    border: BorderStroke? = null,
     contentColor: Color = LocalContentColor.current,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     val spec = LocalGlassMaterial.current
     val backdrop = LocalGlassBackgroundBackdrop.current
-    val glassEnabled = spec.enabled && backdrop != null
     val dialogContext = LocalAppDialogContext.current
+    // AppDialog already has one refracting shell. A second backdrop pass for
+    // every button makes the action row look like a separate glass sheet.
+    val dialogFlatSurface = spec.enabled && dialogContext
+    val glassEnabled = spec.enabled && backdrop != null && !dialogFlatSurface
+    val lensSupported = shape is CornerBasedShape || shape is RoundedRectangularShape
     val resolvedTint = if (dialogContext && tint.isSpecified) {
         tint.copy(alpha = if (tint.alpha >= 0.99f) 0.16f else tint.alpha.coerceAtMost(0.22f))
     } else {
         tint
     }
-    val resolvedSurfaceColor = if (dialogContext && surfaceColor.isSpecified) {
-        surfaceColor.copy(alpha = maxOf(surfaceColor.alpha, if (glassEnabled) 0.72f else 1f))
-    } else {
-        surfaceColor
-    }
+    val resolvedSurfaceColor = surfaceColor
     val animationScope = rememberCoroutineScope()
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope)
@@ -91,7 +96,9 @@ fun AppLiquidButton(
                         effects = {
                             vibrancy()
                             blur(2.dp.toPx())
-                            lens(12.dp.toPx(), 24.dp.toPx())
+                            if (lensSupported) {
+                                lens(12.dp.toPx(), 24.dp.toPx())
+                            }
                         },
                         layerBlock = if (enabled) {
                             {
@@ -128,6 +135,13 @@ fun AppLiquidButton(
                     Modifier
                         .clip(shape)
                         .background(fallbackColor)
+                        .then(
+                            if (border != null) {
+                                Modifier.border(border, shape)
+                            } else {
+                                Modifier
+                            }
+                        )
                 }
             )
                 .clickable(

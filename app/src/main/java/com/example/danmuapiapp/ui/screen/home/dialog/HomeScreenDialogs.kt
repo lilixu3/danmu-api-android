@@ -143,8 +143,7 @@ import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import com.example.danmuapiapp.ui.theme.appTonalButtonColors
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.component.CacheClearCapabilityNotice
-import com.example.danmuapiapp.ui.component.CacheClearSelectionList
-import com.example.danmuapiapp.ui.component.CacheClearSelectionToolbar
+import com.example.danmuapiapp.ui.component.CacheClearSelectionPanel
 import java.net.URI
 import kotlin.math.max
 
@@ -289,16 +288,12 @@ internal fun CacheQuickDialog(
                         )
                     }
                     CacheClearCapabilityNotice(capability)
-                    CacheClearSelectionToolbar(
-                        selectedCount = selectedItems.size,
-                        selectionEnabled = capability.supportsSelective && !isClearing,
-                        onSelectAll = onSelectAll,
-                        onSelectNone = onSelectNone
-                    )
-                    CacheClearSelectionList(
+                    CacheClearSelectionPanel(
                         selectedItems = selectedItems,
                         selectionEnabled = capability.supportsSelective && !isClearing,
                         onToggle = onToggleItem,
+                        onSelectAll = onSelectAll,
+                        onSelectNone = onSelectNone,
                         compact = true
                     )
                     Text(

@@ -11,9 +11,6 @@ import com.example.danmuapiapp.ui.component.AppGlassSurface
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -130,7 +127,7 @@ internal fun QueuePage(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
             DownloadPanelCard {
@@ -223,22 +220,40 @@ internal fun QueuePage(
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
-            items(groups, key = { it.animeTitle }) { group ->
-                QueueGroupRow(
-                    group = group,
-                    isFirst = group == groups.first(),
-                    isLast = group == groups.last(),
-                    expanded = expandedGroupTitles.contains(group.animeTitle),
-                    onToggleExpand = {
-                        expandedGroupTitles = if (expandedGroupTitles.contains(group.animeTitle)) {
-                            expandedGroupTitles - group.animeTitle
-                        } else {
-                            expandedGroupTitles + group.animeTitle
-                        }
-                    },
-                    onMoveUp = { viewModel.moveQueueGroupUp(group.animeTitle) },
-                    onMoveDown = { viewModel.moveQueueGroupDown(group.animeTitle) }
-                )
+            groups.forEachIndexed { index, group ->
+                val expanded = expandedGroupTitles.contains(group.animeTitle)
+                item(
+                    key = "queue-group:${group.animeTitle}",
+                    contentType = "queue-group"
+                ) {
+                    QueueGroupRow(
+                        group = group,
+                        isFirst = index == 0,
+                        isLast = index == groups.lastIndex,
+                        expanded = expanded,
+                        onToggleExpand = {
+                            expandedGroupTitles = if (expanded) {
+                                expandedGroupTitles - group.animeTitle
+                            } else {
+                                expandedGroupTitles + group.animeTitle
+                            }
+                        },
+                        onMoveUp = { viewModel.moveQueueGroupUp(group.animeTitle) },
+                        onMoveDown = { viewModel.moveQueueGroupDown(group.animeTitle) }
+                    )
+                }
+                if (expanded) {
+                    items(
+                        items = group.episodes,
+                        key = { episode -> "queue-task:${episode.taskId}" },
+                        contentType = { "queue-task" }
+                    ) { episode ->
+                        QueueEpisodeTaskRow(
+                            task = episode,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -286,87 +301,68 @@ internal fun QueueGroupRow(
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
         border = BorderStroke(1.dp, accentColor.copy(alpha = 0.28f))
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggleExpand)
-                    .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggleExpand)
+                .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    group.animeTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                LinearProgressIndicator(
+                    progress = { group.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = accentColor
+                )
+                val stateText = when {
+                    group.runningEpisodeNo != null -> "正在下载第${group.runningEpisodeNo}集"
+                    group.pending > 0 -> "排队待下载"
+                    group.failed > 0 -> "已结束（含失败）"
+                    else -> "已结束"
+                }
+                Text(
+                    "${group.completed}/${group.total} · $stateText",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StatBadge("待", group.pending)
+                    StatBadge("跑", group.running, accentColor)
+                    StatBadge("成", group.success, Color(0xFF2E7D32))
+                    if (group.failed > 0) StatBadge("败", group.failed, Color(0xFFC62828))
+                }
+                if (group.detail.isNotBlank()) {
                     Text(
-                        group.animeTitle,
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
+                        group.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    LinearProgressIndicator(
-                        progress = { group.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = accentColor
-                    )
-                    val stateText = when {
-                        group.runningEpisodeNo != null -> "正在下载第${group.runningEpisodeNo}集"
-                        group.pending > 0 -> "排队待下载"
-                        group.failed > 0 -> "已结束（含失败）"
-                        else -> "已结束"
-                    }
-                    Text(
-                        "${group.completed}/${group.total} · $stateText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        StatBadge("待", group.pending)
-                        StatBadge("跑", group.running, accentColor)
-                        StatBadge("成", group.success, Color(0xFF2E7D32))
-                        if (group.failed > 0) StatBadge("败", group.failed, Color(0xFFC62828))
-                    }
-                    if (group.detail.isNotBlank()) {
-                        Text(
-                            group.detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    AppGlassIconButton(onClick = onToggleExpand, size = 32.dp) {
-                        Icon(
-                            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                            if (expanded) "收起" else "展开",
-                            Modifier.size(20.dp)
-                        )
-                    }
-                    AppGlassIconButton(onClick = onMoveUp, enabled = !isFirst, size = 32.dp) {
-                        Icon(Icons.Rounded.KeyboardArrowUp, "上移", Modifier.size(20.dp))
-                    }
-                    AppGlassIconButton(onClick = onMoveDown, enabled = !isLast, size = 32.dp) {
-                        Icon(Icons.Rounded.KeyboardArrowDown, "下移", Modifier.size(20.dp))
-                    }
                 }
             }
-
-            AnimatedVisibility(
-                visible = expanded && group.episodes.isNotEmpty(),
-                enter = expandVertically(),
-                exit = shrinkVertically()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    group.episodes.forEach { episode ->
-                        QueueEpisodeTaskRow(task = episode)
-                    }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                AppGlassIconButton(onClick = onToggleExpand, size = 32.dp) {
+                    Icon(
+                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        if (expanded) "收起" else "展开",
+                        Modifier.size(20.dp)
+                    )
+                }
+                AppGlassIconButton(onClick = onMoveUp, enabled = !isFirst, size = 32.dp) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, "上移", Modifier.size(20.dp))
+                }
+                AppGlassIconButton(onClick = onMoveDown, enabled = !isLast, size = 32.dp) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, "下移", Modifier.size(20.dp))
                 }
             }
         }
@@ -374,7 +370,10 @@ internal fun QueueGroupRow(
 }
 
 @Composable
-internal fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
+internal fun QueueEpisodeTaskRow(
+    task: AnimeQueueEpisodeItem,
+    modifier: Modifier = Modifier
+) {
     val statusColor = when (task.status) {
         DownloadQueueStatus.Pending -> MaterialTheme.colorScheme.primary
         DownloadQueueStatus.Running -> Color(0xFF1565C0)
@@ -386,10 +385,10 @@ internal fun QueueEpisodeTaskRow(task: AnimeQueueEpisodeItem) {
     val sourceText = task.source.ifBlank { "unknown" }
     val titleText = task.episodeTitle.ifBlank { "未命名剧集" }
 
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
+    Surface(
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
     ) {
         Column(
