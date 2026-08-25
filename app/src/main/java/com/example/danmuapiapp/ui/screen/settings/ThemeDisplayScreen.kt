@@ -26,7 +26,9 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -55,9 +57,12 @@ import com.example.danmuapiapp.domain.model.AppBackgroundMode
 import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassTuningPreset
 import com.example.danmuapiapp.domain.model.NightModePreference
+import com.example.danmuapiapp.domain.model.matchingPreset
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.SettingsGroup
+import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
@@ -76,10 +81,12 @@ fun ThemeDisplayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val glassMaterial by viewModel.glassMaterial.collectAsStateWithLifecycle()
+    val glassTuning by viewModel.glassTuning.collectAsStateWithLifecycle()
     val appBackground by viewModel.appBackground.collectAsStateWithLifecycle()
     val liquidGlassSupported = remember { isLiquidGlassSupported(Build.VERSION.SDK_INT) }
     val liquidGlassEnabled = liquidGlassSupported &&
         glassMaterial == GlassMaterialPreference.LiquidGlass
+    val selectedGlassPreset = glassTuning.matchingPreset()
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
@@ -117,6 +124,7 @@ fun ThemeDisplayScreen(
     var customRefreshEditing by rememberSaveable {
         mutableStateOf(appBackground.randomRefreshPolicy == AppBackgroundRefreshPolicy.Custom)
     }
+    var showGlassAdvancedSettings by rememberSaveable { mutableStateOf(false) }
     val localImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -202,6 +210,61 @@ fun ThemeDisplayScreen(
                     }
                 )
                 if (liquidGlassEnabled) {
+                    SettingsDivider()
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "玻璃风格",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            GlassTuningPreset.entries.forEach { preset ->
+                                AppGlassFilterChip(
+                                    selected = selectedGlassPreset == preset,
+                                    onClick = { viewModel.setGlassPreset(preset) },
+                                    label = { Text(preset.label) },
+                                    leadingIcon = if (selectedGlassPreset == preset) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Check,
+                                                contentDescription = null
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
+                        }
+                        Text(
+                            text = selectedGlassPreset?.description ?: if (glassTuning.adaptiveLuminance) {
+                                "自定义参数 · 随景开启"
+                            } else {
+                                "自定义参数"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    SettingsDivider()
+                    SettingsItem(
+                        title = "高级玻璃设置",
+                        subtitle = selectedGlassPreset?.let { "当前：${it.label}" }
+                            ?: if (glassTuning.adaptiveLuminance) {
+                                "当前：自定义随景参数"
+                            } else {
+                                "当前：自定义参数"
+                            },
+                        icon = Icons.Rounded.Tune,
+                        onClick = { showGlassAdvancedSettings = true }
+                    )
                     SettingsDivider()
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -472,6 +535,13 @@ fun ThemeDisplayScreen(
                 )
             }
         }
+    }
+
+    if (showGlassAdvancedSettings && liquidGlassEnabled) {
+        GlassAdvancedSettingsDialog(
+            onDismissRequest = { showGlassAdvancedSettings = false },
+            onSave = viewModel::setGlassTuning
+        )
     }
 
 }

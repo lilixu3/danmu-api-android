@@ -19,17 +19,23 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
+val defaultVersionName = "1.0.5.78"
+val defaultVersionCode = 164
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "1.0.5.78"
+    ?: defaultVersionName
 val configuredVersionCode = findProperty("versionCode")
     ?.toString()
     ?.trim()
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 164
+    ?: defaultVersionCode
+val isExplicitVersionName = findProperty("versionName")
+    ?.toString()?.trim()?.takeIf { it.isNotEmpty() } != null
+val isExplicitVersionCode = findProperty("versionCode")
+    ?.toString()?.trim()?.toIntOrNull()?.takeIf { it > 0 } != null
 val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 val rawAbiFilters = (findProperty("abiFilters") as? String)
     ?.split(',')
@@ -47,6 +53,20 @@ val configuredAbiFilters = if (rawAbiFilters.isEmpty()) defaultReleaseAbis else 
 val preparedNativeRuntimeDir = layout.buildDirectory.dir("prepared-native-runtime").get().asFile
 val requestedTaskNames = gradle.startParameter.taskNames.map { it.lowercase() }
 val isBundleTaskRequested = requestedTaskNames.any { it.contains("bundle") }
+
+// 发布防呆：release/bundle 任务未显式传 -PversionName/-PversionCode 时给出醒目告警，
+// 避免工作流漏传参数后静默产出旧版本号的产物。
+gradle.projectsEvaluated {
+    val isReleaseLike = requestedTaskNames.any { it.contains("release") || it.contains("bundle") }
+    if (isReleaseLike && (!isExplicitVersionName || !isExplicitVersionCode)) {
+        logger.warn(
+            "⚠️⚠️⚠️ 当前构建包含 release/bundle 任务，但未显式指定版本：\n" +
+                "   versionName=${if (isExplicitVersionName) "(显式指定)" else "$defaultVersionName (内置默认值!)"}\n" +
+                "   versionCode=${if (isExplicitVersionCode) "(显式指定)" else "$defaultVersionCode (内置默认值!)"}\n" +
+                "   如需发布，请通过 -PversionName=... -PversionCode=... 显式传入。"
+        )
+    }
+}
 val testMissingRuntimePackage = (findProperty("testMissingRuntimePackage") as? String)
     ?.trim()
     ?.takeIf(String::isNotBlank)
@@ -97,10 +117,18 @@ val localProps = Properties().apply {
     }
 }
 
-val legacyProjectDir = file("/data/user/0/com.termux/files/home/danmu-api-android-main")
+val legacyProjectDir = listOf(
+    System.getenv("DANMU_LEGACY_PROJECT_DIR")?.trim()?.takeIf { it.isNotEmpty() },
+    (findProperty("legacyProjectDir") as? String)?.trim()?.takeIf { it.isNotEmpty() },
+    localProps.getProperty("legacy.projectDir")?.trim()?.takeIf { it.isNotEmpty() }
+).firstOrNull()?.let { file(it) }
+
+// 旧仓库仅作为签名兜底来源；不再硬编码机器特定路径，
+// 需要时通过环境变量 DANMU_LEGACY_PROJECT_DIR、
+// 属性 -PlegacyProjectDir 或 local.properties 的 legacy.projectDir 显式指定。
 val legacyLocalProps = Properties().apply {
-    val propsFile = legacyProjectDir.resolve("local.properties")
-    if (propsFile.exists()) {
+    val propsFile = legacyProjectDir?.resolve("local.properties")
+    if (propsFile != null && propsFile.exists()) {
         propsFile.inputStream().use { load(it) }
     }
 }
@@ -125,13 +153,13 @@ fun isUsableKeystore(file: java.io.File): Boolean {
     return file.exists() && file.isFile && file.length() > 128L
 }
 
-val defaultLegacyKeystore = legacyProjectDir.resolve("danmuapi-ci.jks")
-val defaultPrimaryKeystore = rootProject.file("danmuapi-ci.jks")
-val fallbackKeystore = rootProject.file("keystore.jks")
 val configuredStorePath = resolveSigningValue(
     envKeys = listOf("ANDROID_KEYSTORE_PATH"),
     propKeys = listOf("keystore.path")
 )
+val defaultLegacyKeystore = legacyProjectDir?.resolve("danmuapi-ci.jks")
+val defaultPrimaryKeystore = rootProject.file("danmuapi-ci.jks")
+val fallbackKeystore = rootProject.file("keystore.jks")
 val resolvedStoreFile = sequenceOf(
     configuredStorePath?.let { file(it) },
     defaultLegacyKeystore,

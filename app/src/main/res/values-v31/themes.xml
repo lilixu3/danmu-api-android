@@ -1,12 +1,10 @@
 <resources>
     <!-- Android 12+ 启动页属性仅放在 v31，避免低版本属性冲突 -->
-    <style name="Theme.DanmuApiApp.Startup" parent="Theme.DanmuApiApp.NightSky">
-        <item name="android:windowBackground">@drawable/bg_main</item>
-        <item name="android:colorBackground">?attr/danmuBgStart</item>
-        <item name="android:windowSplashScreenBackground">?attr/danmuBgStart</item>
+    <style name="Theme.DanmuApiApp.SplashEntry" parent="Theme.SplashScreen">
+        <!-- API 31+ 由平台直接读取以下属性渲染启动画面，保持原有图标外观 -->
+        <item name="android:windowSplashScreenBackground">@color/bg_start</item>
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.DanmuApiApp.Startup</item>
     </style>
 </resources>

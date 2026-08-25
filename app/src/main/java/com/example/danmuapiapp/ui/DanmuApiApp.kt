@@ -318,7 +318,6 @@ private fun DanmuApiMainContent() {
             composable(SettingsRoute.HarmonyGuide) {
                 HarmonyGuideScreen(onBack = { navController.popBackStack() })
             }
-
             composable(ToolRoute.Console) {
                 ConsoleScreen()
             }

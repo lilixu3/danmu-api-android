@@ -37,10 +37,15 @@ import androidx.compose.ui.util.lerp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterialTuning
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
+import com.example.danmuapiapp.ui.theme.glassEffectStyle
+import com.example.danmuapiapp.ui.theme.rememberGlassAdaptiveEffect
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
 import com.kyant.shapes.RoundedRectangularShape
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -58,6 +63,7 @@ fun AppLiquidButton(
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
     border: BorderStroke? = null,
+    materialRole: GlassMaterialRole? = null,
     contentColor: Color = LocalContentColor.current,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
     content: @Composable RowScope.() -> Unit
@@ -69,13 +75,40 @@ fun AppLiquidButton(
     // every button makes the action row look like a separate glass sheet.
     val dialogFlatSurface = spec.enabled && dialogContext
     val glassEnabled = spec.enabled && backdrop != null && !dialogFlatSurface
+    val resolvedMaterialRole = materialRole ?: if (dialogContext) {
+        GlassMaterialRole.DialogButton
+    } else {
+        GlassMaterialRole.Button
+    }
+    val baseEffectStyle = glassEffectStyle(resolvedMaterialRole)
+    val adaptiveEffect = rememberGlassAdaptiveEffect(baseEffectStyle)
+    val effectStyle = adaptiveEffect.style
+    val tuningOverride = if (spec.enabled) {
+        LocalGlassMaterialTuning.current.overrideFor(resolvedMaterialRole)
+    } else {
+        null
+    }
     val lensSupported = shape is CornerBasedShape || shape is RoundedRectangularShape
-    val resolvedTint = if (dialogContext && tint.isSpecified) {
+    val baseTint = if (dialogContext && tint.isSpecified) {
         tint.copy(alpha = if (tint.alpha >= 0.99f) 0.16f else tint.alpha.coerceAtMost(0.22f))
     } else {
         tint
     }
-    val resolvedSurfaceColor = surfaceColor
+    val tunedSurfaceAlpha = if (adaptiveEffect.active) {
+        effectStyle.surfaceAlpha
+    } else {
+        tuningOverride?.surfaceAlpha
+    }
+    val resolvedTint = if (tunedSurfaceAlpha != null && baseTint.isSpecified) {
+        baseTint.copy(alpha = minOf(baseTint.alpha, tunedSurfaceAlpha))
+    } else {
+        baseTint
+    }
+    val resolvedSurfaceColor = if (tunedSurfaceAlpha != null && surfaceColor.isSpecified) {
+        surfaceColor.copy(alpha = tunedSurfaceAlpha)
+    } else {
+        surfaceColor
+    }
     val animationScope = rememberCoroutineScope()
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope)
@@ -88,16 +121,38 @@ fun AppLiquidButton(
 
     CompositionLocalProvider(LocalContentColor provides contentColor) {
         Row(
-            modifier.then(
+            modifier
+                .then(adaptiveEffect.positionModifier)
+                .then(
                 if (glassEnabled) {
                     Modifier.drawBackdrop(
                         backdrop = backdrop,
                         shape = { shape },
                         effects = {
-                            vibrancy()
-                            blur(2.dp.toPx())
+                            colorControls(
+                                brightness = effectStyle.brightness,
+                                contrast = effectStyle.contrast,
+                                saturation = effectStyle.saturation
+                            )
+                            blur(effectStyle.blurRadius.toPx())
                             if (lensSupported) {
-                                lens(12.dp.toPx(), 24.dp.toPx())
+                                lens(
+                                    effectStyle.refractionHeight.toPx(),
+                                    effectStyle.refractionAmount.toPx(),
+                                    depthEffect = effectStyle.depthEffect,
+                                    chromaticAberration = effectStyle.chromaticAberration
+                                )
+                            }
+                        },
+                        highlight = {
+                            if (effectStyle.highlightAlpha > 0f) {
+                                Highlight.Plain.copy(
+                                    width = effectStyle.highlightWidth,
+                                    blurRadius = effectStyle.highlightWidth / 2f,
+                                    alpha = effectStyle.highlightAlpha
+                                )
+                            } else {
+                                null
                             }
                         },
                         layerBlock = if (enabled) {

@@ -44,6 +44,8 @@ import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairOrigin
 import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassTuningPreset
+import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.domain.model.isValidBackgroundImageUrl
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
@@ -112,6 +114,7 @@ class SettingsViewModel @Inject constructor(
     val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val nightMode = settingsRepo.nightMode
     val glassMaterial = settingsRepo.glassMaterial
+    val glassTuning = settingsRepo.glassTuning
     val appBackground = settingsRepo.appBackground
     val appDpiOverride = settingsRepo.appDpiOverride
     val hideFromRecents = settingsRepo.hideFromRecents
@@ -420,6 +423,15 @@ class SettingsViewModel @Inject constructor(
             GlassMaterialPreference.LiquidGlass -> "已启用液态玻璃"
             GlassMaterialPreference.Off -> "已关闭液态玻璃"
         }
+    }
+
+    fun setGlassTuning(tuning: GlassTuningPreference) {
+        settingsRepo.setGlassTuning(tuning)
+    }
+
+    fun setGlassPreset(preset: GlassTuningPreset) {
+        settingsRepo.setGlassTuning(preset.tuning)
+        operationMessage = "已切换为${preset.label}玻璃"
     }
 
     fun setAppBackgroundMode(mode: AppBackgroundMode) {

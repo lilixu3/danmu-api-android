@@ -119,6 +119,19 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
+    <!--
+      MainActivity 的清单主题：接入 core-splashscreen 兼容实现。
+      API 23-30 上 installSplashScreen() 要求主题继承 Theme.SplashScreen，
+      否则回退为系统默认白底+图标（正是这里要避免的闪烁）；
+      启动画面结束后由 postSplashScreenTheme 切换到上面的 Startup 主题。
+    -->
+    <style name="Theme.DanmuApiApp.SplashEntry" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/bg_start</item>
+        <!-- 与旧版纯背景外观保持一致，不展示图标 -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_transparent_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.DanmuApiApp.Startup</item>
+    </style>
+
     <!-- 圆角对话框（关于/电池提示等） -->
     <style name="ThemeOverlay.DanmuApiApp.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="shapeAppearanceOverlay">@style/ShapeAppearance.DanmuApiApp.Dialog</item>

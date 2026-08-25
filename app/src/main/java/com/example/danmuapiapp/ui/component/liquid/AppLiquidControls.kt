@@ -29,6 +29,7 @@ import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
 import com.kyant.shapes.Capsule
 
 @Composable
@@ -80,6 +81,7 @@ fun AppGlassButton(
     ),
     height: Dp = if (LocalAppDialogContext.current) 44.dp else 48.dp,
     shape: Shape = RoundedCornerShape(if (LocalAppDialogContext.current) 12.dp else 14.dp),
+    materialRole: GlassMaterialRole? = null,
     content: @Composable RowScope.() -> Unit
 ) {
     val glassRequested = LocalGlassMaterial.current.enabled
@@ -170,6 +172,11 @@ fun AppGlassButton(
         contentPadding = contentPadding,
         height = height,
         shape = shape,
+        materialRole = materialRole ?: if (dialogContext) {
+            GlassMaterialRole.DialogButton
+        } else {
+            GlassMaterialRole.Button
+        },
         content = content
     )
 }
@@ -244,6 +251,11 @@ fun AppGlassPrimaryButton(
         contentPadding = contentPadding,
         height = height,
         shape = shape,
+        materialRole = if (dialogContext) {
+            GlassMaterialRole.DialogPrimaryButton
+        } else {
+            GlassMaterialRole.PrimaryButton
+        },
         content = content
     )
 }
@@ -303,6 +315,11 @@ fun AppGlassDangerButton(
         contentPadding = contentPadding,
         height = height,
         shape = shape,
+        materialRole = if (LocalAppDialogContext.current) {
+            GlassMaterialRole.DialogButton
+        } else {
+            GlassMaterialRole.Button
+        },
         content = content
     )
 }
@@ -363,6 +380,11 @@ fun AppGlassIconButton(
         enabled = enabled,
         height = size,
         shape = CircleShape,
+        materialRole = if (LocalAppDialogContext.current) {
+            GlassMaterialRole.DialogButton
+        } else {
+            GlassMaterialRole.Button
+        },
         surfaceColor = if (surfaceColor.isSpecified) {
             surfaceColor
         } else {
@@ -414,6 +436,11 @@ fun AppGlassFilterChip(
         enabled = enabled,
         height = 36.dp,
         shape = Capsule(),
+        materialRole = when {
+            selected -> GlassMaterialRole.Selected
+            dialogContext -> GlassMaterialRole.DialogButton
+            else -> GlassMaterialRole.Button
+        },
         surfaceColor = when {
             selected && dialogContext -> MaterialTheme.colorScheme.primary.copy(
                 alpha = if (dialogDarkTheme) 0.16f else 0.13f
@@ -476,6 +503,11 @@ fun AppGlassAssistChip(
         enabled = enabled,
         height = 36.dp,
         shape = Capsule(),
+        materialRole = if (LocalAppDialogContext.current) {
+            GlassMaterialRole.DialogButton
+        } else {
+            GlassMaterialRole.Button
+        },
         tint = accent.copy(alpha = 0.12f),
         surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f),
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,

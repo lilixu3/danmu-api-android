@@ -23,6 +23,7 @@ import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.AppBackgroundMode
 import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.ui.component.AppDialogHost
 
 /** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
@@ -106,9 +107,12 @@ private val GlassLightColorScheme = LegacyLightColorScheme
 fun DanmuApiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
+    glassTuning: GlassTuningPreference = GlassTuningPreference(),
     appBackground: AppBackgroundPreference = AppBackgroundPreference(),
     content: @Composable () -> Unit
 ) {
+    val glassTuningState = remember(glassTuning) { GlassMaterialTuningState(glassTuning) }
+    val adaptiveLuminanceState = remember { GlassAdaptiveLuminanceState() }
     val useGlassPalette = usesLiquidGlassPalette(glassMaterial)
     val colorScheme = when {
         useGlassPalette && darkTheme -> GlassDarkColorScheme
@@ -124,7 +128,9 @@ fun DanmuApiTheme(
     CompositionLocalProvider(
         LocalAppDarkTheme provides darkTheme,
         LocalAppBackground provides appBackground,
-        LocalAppBackgroundForegroundKey provides foregroundKey
+        LocalAppBackgroundForegroundKey provides foregroundKey,
+        LocalGlassMaterialTuning provides glassTuningState,
+        LocalGlassAdaptiveLuminance provides adaptiveLuminanceState
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

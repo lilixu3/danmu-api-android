@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val nightMode by settingsRepository.nightMode.collectAsStateWithLifecycle()
             val glassMaterial by settingsRepository.glassMaterial.collectAsStateWithLifecycle()
+            val glassTuning by settingsRepository.glassTuning.collectAsStateWithLifecycle()
             val appBackground by settingsRepository.appBackground.collectAsStateWithLifecycle()
             val startupUiState by runtimeWarmupCoordinator.uiState.collectAsStateWithLifecycle()
             val darkTheme = when (nightMode) {
@@ -100,6 +101,7 @@ class MainActivity : ComponentActivity() {
             DanmuApiTheme(
                 darkTheme = darkTheme,
                 glassMaterial = glassMaterial,
+                glassTuning = glassTuning,
                 appBackground = appBackground
             ) {
                 val view = LocalView.current

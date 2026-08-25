@@ -55,6 +55,7 @@ import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -392,6 +393,7 @@ fun AppDialogOption(
         shape = shape,
         color = optionColor,
         contentColor = optionContentColor,
+        materialRole = if (selected) GlassMaterialRole.Selected else GlassMaterialRole.DialogButton,
         glassAlpha = if (selected) selectedAlpha else 0.72f,
         border = BorderStroke(
             width = 1.dp,

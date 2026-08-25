@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
@@ -94,11 +95,11 @@ class EnvConfigRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun readCurrentRawContent(): Result<String> {
-        return readEnvText(envFile())
+    override suspend fun readCurrentRawContent(): Result<String> {
+        return withContext(Dispatchers.IO) { readEnvText(envFile()) }
     }
 
-    override fun setValue(key: String, value: String) {
+    override suspend fun setValue(key: String, value: String) = withContext(Dispatchers.IO) {
         val isRuntimeToken = key.equals("TOKEN", ignoreCase = true)
         val normalizedValue = if (isRuntimeToken) {
             RuntimeTokenNormalizer.normalizeInput(value)
@@ -107,7 +108,7 @@ class EnvConfigRepositoryImpl @Inject constructor(
         }
         if (isRuntimeToken && normalizedValue.isBlank()) {
             deleteKey(key)
-            return
+            return@withContext
         }
 
         val file = envFile()
@@ -139,36 +140,38 @@ class EnvConfigRepositoryImpl @Inject constructor(
         reload()
     }
 
-    override fun deleteKey(key: String) {
+    override suspend fun deleteKey(key: String) = withContext(Dispatchers.IO) {
         val file = envFile()
         val lines = readEnvText(file)
             .map { text -> if (text.isBlank()) emptyList() else text.split('\n') }
             .getOrElse {
                 Log.w(TAG, "读取 .env 失败，跳过删除：${file.absolutePath}", it)
-                return
+                return@withContext
             }
             .filterNot { line ->
-            !line.startsWith("#") && line.indexOf('=').let { idx ->
-                idx > 0 && line.substring(0, idx).trim() == key
+                !line.startsWith("#") && line.indexOf('=').let { idx ->
+                    idx > 0 && line.substring(0, idx).trim() == key
+                }
             }
-        }
         val out = lines.joinToString("\n").trimEnd() + "\n"
         writeEnvText(file, out).onFailure { Log.w(TAG, "写入 .env 失败：${file.absolutePath}", it) }
         reload()
     }
 
-    override fun saveRawContent(content: String): Result<String> {
-        val file = envFile()
-        val out = normalizeRawContentForSave(content)
-        val writeResult = writeEnvText(file, out)
-        writeResult.onFailure {
-            Log.w(TAG, "写入 .env 失败：${file.absolutePath}", it)
+    override suspend fun saveRawContent(content: String): Result<String> {
+        return withContext(Dispatchers.IO) {
+            val file = envFile()
+            val out = normalizeRawContentForSave(content)
+            val writeResult = writeEnvText(file, out)
+            writeResult.onFailure {
+                Log.w(TAG, "写入 .env 失败：${file.absolutePath}", it)
+            }
+            if (writeResult.isSuccess) {
+                _rawContent.value = out
+                reload()
+            }
+            writeResult.map { out }
         }
-        if (writeResult.isSuccess) {
-            _rawContent.value = out
-            reload()
-        }
-        return writeResult.map { out }
     }
 
     override fun getEnvFilePath(): String = envFile().absolutePath

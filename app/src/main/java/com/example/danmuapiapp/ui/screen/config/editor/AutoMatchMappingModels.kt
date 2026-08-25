@@ -43,15 +43,15 @@ private val AUTO_MATCH_FILENAME_REGEX =
     Regex("(?i)(?:^|[\\s._\\-\\[\\]()])S(\\d+)E(\\d+)")
 
 internal fun parseAutoMatchMappingDrafts(raw: String): List<AutoMatchMappingDraft> {
-    return raw.split(';').mapNotNull { part ->
-        val rule = part.trim()
+    return MappingTableCodec.splitEntries(raw).mapNotNull { entry ->
+        val rule = entry.trim()
         if (rule.isBlank()) return@mapNotNull null
-        val arrow = rule.indexOf("->")
-        if (arrow < 0 || rule.indexOf("->", arrow + 2) >= 0) {
-            return@mapNotNull AutoMatchMappingDraft(sourceTitle = rule)
+        val arrow = MappingTableCodec.findArrow(rule)
+        if (arrow == null || MappingTableCodec.countArrows(rule) > 1) {
+            return@mapNotNull AutoMatchMappingDraft(sourceTitle = MappingTableCodec.unescape(rule))
         }
-        val sourceRaw = rule.substring(0, arrow).trim()
-        val targetRaw = rule.substring(arrow + 2).trim()
+        val sourceRaw = MappingTableCodec.unescape(rule.substring(0, arrow)).trim()
+        val targetRaw = MappingTableCodec.unescape(rule.substring(arrow + 2)).trim()
         val source = parseAutoMatchSide(sourceRaw, allowPlatform = false)
         val target = parseAutoMatchSide(targetRaw, allowPlatform = true)
         AutoMatchMappingDraft(
@@ -70,19 +70,23 @@ internal fun parseAutoMatchMappingDrafts(raw: String): List<AutoMatchMappingDraf
 
 internal fun serializeAutoMatchMappingDrafts(rows: List<AutoMatchMappingDraft>): String {
     return rows.filterNot(AutoMatchMappingDraft::isEmpty).joinToString(";") { row ->
-        val source = serializeAutoMatchSide(
-            title = row.sourceTitle,
-            season = row.sourceSeason,
-            startEpisode = row.sourceStartEpisode,
-            endEpisode = row.sourceEndEpisode
+        val source = MappingTableCodec.escape(
+            serializeAutoMatchSide(
+                title = row.sourceTitle,
+                season = row.sourceSeason,
+                startEpisode = row.sourceStartEpisode,
+                endEpisode = row.sourceEndEpisode
+            )
         )
-        val target = serializeAutoMatchSide(
-            title = row.targetTitle,
-            season = row.targetSeason,
-            startEpisode = row.targetStartEpisode,
-            endEpisode = row.targetEndEpisode
-        ) + row.targetPlatform.trim().lowercase(Locale.ROOT).takeIf { it.isNotBlank() }
-            ?.let { " @$it" }.orEmpty()
+        val target = MappingTableCodec.escape(
+            serializeAutoMatchSide(
+                title = row.targetTitle,
+                season = row.targetSeason,
+                startEpisode = row.targetStartEpisode,
+                endEpisode = row.targetEndEpisode
+            ) + row.targetPlatform.trim().lowercase(Locale.ROOT).takeIf { it.isNotBlank() }
+                ?.let { " @$it" }.orEmpty()
+        )
         "$source->$target"
     }
 }
@@ -92,18 +96,22 @@ internal fun validateAutoMatchMappingTable(
     allowedPlatforms: List<String> = emptyList()
 ): AutoMatchMappingValidation {
     if (raw.isBlank()) return AutoMatchMappingValidation(valid = true)
-    val rules = raw.split(';').filter { it.isNotBlank() }
+    val rules = MappingTableCodec.splitEntries(raw).map { it.trim() }.filter { it.isNotBlank() }
     if (rules.isEmpty()) return AutoMatchMappingValidation(valid = true)
 
     rules.forEachIndexed { index, text ->
-        val arrow = text.indexOf("->")
-        if (arrow < 0 || text.indexOf("->", arrow + 2) >= 0) {
+        val arrow = MappingTableCodec.findArrow(text)
+        if (arrow == null || MappingTableCodec.countArrows(text) > 1) {
             return invalidRule(index, "需要且只能包含一个 ->")
         }
-        val source = parseAutoMatchSide(text.substring(0, arrow), allowPlatform = false)
-            ?: return invalidRule(index, "来源季集格式无效")
-        val target = parseAutoMatchSide(text.substring(arrow + 2), allowPlatform = true)
-            ?: return invalidRule(index, "目标季集格式无效")
+        val source = parseAutoMatchSide(
+            MappingTableCodec.unescape(text.substring(0, arrow)),
+            allowPlatform = false
+        ) ?: return invalidRule(index, "来源季集格式无效")
+        val target = parseAutoMatchSide(
+            MappingTableCodec.unescape(text.substring(arrow + 2)),
+            allowPlatform = true
+        ) ?: return invalidRule(index, "目标季集格式无效")
         val sourceBounded = source.endEpisode != null
         val targetBounded = target.endEpisode != null
         if (sourceBounded != targetBounded) {
@@ -133,13 +141,17 @@ internal fun previewAutoMatchMapping(
 ): AutoMatchMappingPreview? {
     if (!validateAutoMatchMappingTable(raw, allowedPlatforms).valid) return null
     val input = parsePreviewFileName(fileName) ?: return null
-    val candidates = raw.split(';').mapIndexedNotNull { index, text ->
-        val arrow = text.indexOf("->")
-        if (arrow < 0) return@mapIndexedNotNull null
-        val source = parseAutoMatchSide(text.substring(0, arrow), allowPlatform = false)
-            ?: return@mapIndexedNotNull null
-        val target = parseAutoMatchSide(text.substring(arrow + 2), allowPlatform = true)
-            ?: return@mapIndexedNotNull null
+    val candidates = MappingTableCodec.splitEntries(raw).mapIndexedNotNull { index, entry ->
+        val text = entry.trim()
+        val arrow = MappingTableCodec.findArrow(text) ?: return@mapIndexedNotNull null
+        val source = parseAutoMatchSide(
+            MappingTableCodec.unescape(text.substring(0, arrow)),
+            allowPlatform = false
+        ) ?: return@mapIndexedNotNull null
+        val target = parseAutoMatchSide(
+            MappingTableCodec.unescape(text.substring(arrow + 2)),
+            allowPlatform = true
+        ) ?: return@mapIndexedNotNull null
         if (normalizeAutoMatchTitle(source.title) != normalizeAutoMatchTitle(input.title)) {
             return@mapIndexedNotNull null
         }

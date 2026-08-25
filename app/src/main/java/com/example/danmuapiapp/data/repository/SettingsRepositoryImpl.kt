@@ -17,6 +17,7 @@ import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
@@ -115,6 +116,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private val _glassMaterial = MutableStateFlow(AppAppearancePrefs.readGlassMaterial(uiPrefs))
     override val glassMaterial: StateFlow<GlassMaterialPreference> = _glassMaterial.asStateFlow()
+
+    private val _glassTuning = MutableStateFlow(AppAppearancePrefs.readGlassTuning(uiPrefs))
+    override val glassTuning: StateFlow<GlassTuningPreference> = _glassTuning.asStateFlow()
 
     private val _appBackground = MutableStateFlow(AppAppearancePrefs.readAppBackground(uiPrefs))
     override val appBackground: StateFlow<AppBackgroundPreference> = _appBackground.asStateFlow()
@@ -265,6 +269,12 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setGlassMaterial(material: GlassMaterialPreference) {
         AppAppearancePrefs.writeGlassMaterial(uiPrefs, material)
         _glassMaterial.value = material
+    }
+
+    override fun setGlassTuning(tuning: GlassTuningPreference) {
+        val normalized = tuning.normalized()
+        AppAppearancePrefs.writeGlassTuning(uiPrefs, normalized)
+        _glassTuning.value = normalized
     }
 
     override fun setAppBackground(background: AppBackgroundPreference) {
@@ -457,6 +467,7 @@ class SettingsRepositoryImpl @Inject constructor(
         _normalModeStabilityMode.value = NormalModeStabilityPrefs.get(context)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
         _glassMaterial.value = AppAppearancePrefs.readGlassMaterial(uiPrefs)
+        _glassTuning.value = AppAppearancePrefs.readGlassTuning(uiPrefs)
         _appBackground.value = AppAppearancePrefs.readAppBackground(uiPrefs)
         _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)
         _hideFromRecents.value = AppAppearancePrefs.readHideFromRecents(uiPrefs)

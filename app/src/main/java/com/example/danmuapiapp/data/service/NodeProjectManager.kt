@@ -360,7 +360,24 @@ object NodeProjectManager {
             }
         }
 
-        envFile.writeText(lines.joinToString("\n").trimEnd() + "\n")
+        // 先写临时文件再原子替换，避免写入中途被杀产生半个 .env，
+        // 也缩小与主进程并发读改写的丢失更新窗口。
+        val finalContent = lines.joinToString("\n").trimEnd() + "\n"
+        val tempFile = File(envFile.parentFile, ".env.tmp-${android.os.Process.myPid()}")
+        runCatching {
+            tempFile.writeText(finalContent, Charsets.UTF_8)
+            if (!tempFile.renameTo(envFile)) {
+                // renameTo 在目标已存在时部分文件系统会失败，退化为先删后改。
+                envFile.delete()
+                if (!tempFile.renameTo(envFile)) {
+                    error("rename failed")
+                }
+            }
+        }.onFailure {
+            runCatching { tempFile.delete() }
+            // 兜底直接写回，保证功能不因原子替换失败而中断。
+            envFile.writeText(finalContent, Charsets.UTF_8)
+        }
         ensureOptionalRuntimeDependencies(context, targetProjectDir)
         cleanupLegacyLogFiles(targetProjectDir)
     }

@@ -685,6 +685,14 @@ object RootRuntimeController {
             return OpResult(false, "停止失败", "缺少 Root 权限")
         }
 
+        if (!pidSafeToSignal(context, pid)) {
+            // pid 文件已过期（原进程退出后系统复用了该 PID），
+            // 不能对陌生进程发信号；端口侧的 __shutdown 已尝试过，按停止成功收尾。
+            AppDiagnosticLogger.w(context, "RootRuntimeController", "pid=$pid 的 cmdline 与 Root 运行时不匹配，按过期 pid 记录处理")
+            clearRuntimeMarkers(context)
+            return OpResult(true, "已停止")
+        }
+
         RootShell.exec("kill -TERM $pid 2>/dev/null || true", timeoutMs = 5000L)
         if (waitForPidExit(pid, timeoutMs = 3000L) || waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 2500L)) {
             clearRuntimeMarkers(context)
@@ -716,7 +724,7 @@ object RootRuntimeController {
         // 兜底确认：端口仍被占用时说明旧进程未完全退出，避免误判“已重启”。
         if (isRunningFast(port)) {
             val pid = beforePid ?: readPid(context)
-            if (pid != null && RootShell.hasRoot(1500L)) {
+            if (pid != null && RootShell.hasRoot(1500L) && pidSafeToSignal(context, pid)) {
                 RootShell.exec("kill -KILL $pid 2>/dev/null || true", timeoutMs = 3500L)
                 waitForPidExit(pid, timeoutMs = 1800L)
                 waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 1800L)
@@ -1308,6 +1316,39 @@ $indentedAction
             [ -d /proc/${'$'}PID ]
         """.trimIndent()
         return RootShell.exec(script, timeoutMs = 1200L).ok
+    }
+
+    /**
+     * kill 前校验 /proc/$PID/cmdline 是否为本应用的 Root 运行时，防止 pid 文件残留
+     * 且系统已把该 PID 复用给无关进程时以 root 权限误杀。与 [isRunning] 的身份校验一致。
+     *
+     * 返回 false 仅表示“cmdline 明确不匹配”（应按过期 pid 记录处理）；
+     * 进程已退出或校验通道不可用（无 root/超时）时返回 true 以保持原有可用性。
+     */
+    private fun pidSafeToSignal(context: Context, pid: Int): Boolean {
+        val script = """
+            PID=${shellQuote(pid.toString())}
+            if [ ! -d /proc/${'$'}PID ]; then
+              echo IDENT_GONE
+              exit 0
+            fi
+            CMDLINE=${'$'}(tr '\\0' ' ' < /proc/${'$'}PID/cmdline 2>/dev/null || true)
+            if echo "${'$'}CMDLINE" | grep -q ${shellQuote(mainClassName)}; then
+              echo IDENT_OK
+            else
+              echo IDENT_FAIL
+            fi
+        """.trimIndent()
+        val result = RootShell.exec(script, timeoutMs = 2500L)
+        if (!result.ok) {
+            AppDiagnosticLogger.w(
+                context,
+                "RootRuntimeController",
+                "pid=$pid 身份校验不可用(exit=${result.exitCode})，保守放行"
+            )
+            return true
+        }
+        return !result.stdout.contains("IDENT_FAIL")
     }
 
     private fun waitForPidExit(pid: Int, timeoutMs: Long): Boolean {

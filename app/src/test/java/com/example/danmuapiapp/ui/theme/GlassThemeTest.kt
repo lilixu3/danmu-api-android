@@ -5,6 +5,10 @@ import com.example.danmuapiapp.domain.model.AppBackgroundMode
 import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassEffectOverridePreference
+import com.example.danmuapiapp.domain.model.GlassMaterialTarget
+import com.example.danmuapiapp.domain.model.GlassTuningPreset
+import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -39,6 +43,80 @@ class GlassThemeTest {
         assertTrue(spec.enabled)
         assertEquals(0.48f, spec.contentAlpha)
         assertEquals(0.78f, spec.dialogAlpha)
+    }
+
+    @Test
+    fun crystalPreset_appliesToAllResolvedMaterialRoles() {
+        val spec = resolveGlassMaterialSpec(
+            GlassMaterialPreference.LiquidGlass,
+            darkTheme = false,
+            tuning = GlassMaterialTuningState(GlassTuningPreset.Crystal.tuning)
+        )
+
+        assertEquals(2.dp, spec.card.blurRadius)
+        assertEquals(0.22f, spec.card.surfaceAlpha)
+        assertEquals(7.dp, spec.dialog.blurRadius)
+        assertEquals(0.64f, spec.dialog.surfaceAlpha)
+        assertEquals(0.18f, spec.button.surfaceAlpha)
+        assertEquals(0.12f, spec.dialogButton.surfaceAlpha)
+        assertEquals(0.58f, spec.primaryButton.surfaceAlpha)
+        assertEquals(0.26f, spec.dialogPrimaryButton.surfaceAlpha)
+        assertEquals(0.13f, spec.selected.surfaceAlpha)
+        assertEquals(0.26f, spec.bottomBar.surfaceAlpha)
+    }
+
+    @Test
+    fun roleTuning_overridesOnlyTheRequestedGlassRole() {
+        val tuning = GlassMaterialTuningState()
+        tuning.setOverride(
+            GlassMaterialRole.Dialog,
+            GlassEffectOverride(
+                blurRadius = 24.dp,
+                surfaceAlpha = 0.64f
+            )
+        )
+
+        val spec = resolveGlassMaterialSpec(
+            GlassMaterialPreference.LiquidGlass,
+            darkTheme = false,
+            tuning = tuning
+        )
+
+        assertEquals(24.dp, spec.dialog.blurRadius)
+        assertEquals(0.64f, spec.dialog.surfaceAlpha)
+        assertEquals(8.dp, spec.card.blurRadius)
+        assertEquals(0.56f, spec.card.surfaceAlpha)
+
+        val disabled = resolveGlassMaterialSpec(
+            GlassMaterialPreference.Off,
+            darkTheme = false,
+            tuning = tuning
+        )
+        assertFalse(disabled.enabled)
+        assertEquals(0.dp, disabled.dialog.blurRadius)
+    }
+
+    @Test
+    fun persistedTuning_mapsToUiRolesAndBack() {
+        val preference = GlassTuningPreference(
+            adaptiveLuminance = true,
+            overrides = mapOf(
+                GlassMaterialTarget.BottomBar to GlassEffectOverridePreference(
+                    blurRadius = 14f,
+                    chromaticAberration = true
+                )
+            )
+        )
+        val tuning = GlassMaterialTuningState(preference)
+
+        assertEquals(14.dp, tuning.bottomBarOverride?.blurRadius)
+        assertEquals(true, tuning.bottomBarOverride?.chromaticAberration)
+        assertTrue(tuning.adaptiveLuminance)
+        assertEquals(preference, tuning.toPreference())
+
+        tuning.reset()
+        assertFalse(tuning.adaptiveLuminance)
+        assertTrue(tuning.toPreference().isDefault)
     }
 
     @Test

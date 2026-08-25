@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
 import com.example.danmuapiapp.domain.model.normalizeGithubBranch
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
+import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
 
 data class CustomCoreSettingsInput(
     val displayName: String = "",
@@ -131,7 +132,8 @@ fun CustomCoreSettingsForm(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Surface(
+        AppGlassSurface(
+            materialRole = GlassMaterialRole.Card,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
             border = BorderStroke(
@@ -188,7 +190,8 @@ fun CustomCoreSettingsForm(
                 Text("留空时优先使用链接里的分支，否则读取仓库默认分支")
             }
         )
-        Surface(
+        AppGlassSurface(
+            materialRole = GlassMaterialRole.Card,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
             border = BorderStroke(

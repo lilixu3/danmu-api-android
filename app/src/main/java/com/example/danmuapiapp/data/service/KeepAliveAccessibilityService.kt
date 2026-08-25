@@ -13,9 +13,14 @@ import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * 无障碍保活服务：普通模式下在异常退出时自动拉起前台服务。
+ *
+ * 注意：socket 探测与核心文件扫描都是阻塞操作（单次可达数百毫秒），
+ * 一律在 [probeExecutor] 后台线程执行；主线程只做偏好读取与调度。
  */
 class KeepAliveAccessibilityService : AccessibilityService() {
 
@@ -30,6 +35,9 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     @Volatile
     private var restartInFlight = false
     private val activeEventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+    private val probeExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "a11y-keepalive-probe").apply { isDaemon = true }
+    }
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -90,12 +98,9 @@ class KeepAliveAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (isNodeRunning()) {
-            refreshA11yEventListeningMode()
-            refreshHeartbeatSchedule()
-            return
-        }
-
+        // 先做 30 秒节流，再交给后台线程探测。
+        // 探测绝不能在主线程进行：服务停止期间每个窗口事件都会到来，
+        // 否则每个事件都要做一次最多 220ms 的 socket 连接尝试。
         val now = SystemClock.uptimeMillis()
         if (now - lastEventTickUptimeMs < 30_000L) return
         lastEventTickUptimeMs = now
@@ -106,6 +111,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        probeExecutor.shutdownNow()
         unregisterStatusReceiverSafe()
         unregisterControlReceiverSafe()
         super.onDestroy()
@@ -140,18 +146,24 @@ class KeepAliveAccessibilityService : AccessibilityService() {
                 return
             }
 
-            if (isNodeRunning()) {
-                refreshA11yEventListeningMode()
-                return
-            }
+            // socket 探测与核心文件检查都是阻塞 IO，放到后台线程执行。
+            probeExecutor.execute {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                val appContext = applicationContext
+                val running = runCatching { isNodeRunning() }.getOrDefault(true)
+                if (running) {
+                    handler.post { runCatching { refreshA11yEventListeningMode(nodeRunning = true) } }
+                    return@execute
+                }
+                val projectDir = RuntimePaths.normalProjectDir(appContext)
+                val coreInstalled = runCatching {
+                    NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)
+                }.getOrDefault(false)
+                if (!coreInstalled) return@execute
 
-            val projectDir = RuntimePaths.normalProjectDir(this)
-            if (!NodeProjectManager.hasSelectedCoreInstalled(this, projectDir)) {
-                return
+                triggerRecoveryAwareStart(projectDir)
+                handler.post { runCatching { refreshA11yEventListeningMode(nodeRunning = false) } }
             }
-
-            triggerRecoveryAwareStart(projectDir)
-            refreshA11yEventListeningMode()
         } finally {
             refreshHeartbeatSchedule()
         }
@@ -209,8 +221,12 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun refreshA11yEventListeningMode() {
-        val shouldListen = NodeKeepAlivePrefs.shouldAllowA11yRestart(this) && !isNodeRunning()
+    /**
+     * @param nodeRunning 由调用方传入的探测结果；主线程的低频调用方
+     *   （状态广播、onServiceConnected）可省略，此时才在当前线程探测。
+     */
+    private fun refreshA11yEventListeningMode(nodeRunning: Boolean = isNodeRunning()) {
+        val shouldListen = NodeKeepAlivePrefs.shouldAllowA11yRestart(this) && !nodeRunning
         if (shouldListen == isEventListeningEnabled) return
         val info = runCatching { serviceInfo }.getOrNull() ?: return
         info.eventTypes = if (shouldListen) activeEventTypes else 0
