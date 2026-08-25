@@ -647,7 +647,9 @@ class AppUpdateService @Inject constructor(
             runCatching { if (!dir.exists()) dir.mkdirs() }
             File(dir, fileName)
         } else {
-            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+            // 兜底目录使用专用子目录，避免 FileProvider 需要授权整个 filesDir。
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: File(context.filesDir, "apk-downloads")
             runCatching { if (!dir.exists()) dir.mkdirs() }
             File(dir, fileName)
         }

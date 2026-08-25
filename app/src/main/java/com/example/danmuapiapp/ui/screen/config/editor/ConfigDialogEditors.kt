@@ -550,24 +550,30 @@ private data class StableMapRow(
 )
 
 private fun parseStableMapRows(raw: String): List<StableMapRow> {
-    return raw.split(';')
+    return MappingTableCodec.splitEntries(raw)
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .map { item ->
-            val idx = item.indexOf("->")
-            if (idx >= 0) StableMapRow(item.substring(0, idx).trim(), item.substring(idx + 2).trim())
-            else StableMapRow(item, "")
+            val arrow = MappingTableCodec.findArrow(item)
+            if (arrow != null) {
+                StableMapRow(
+                    MappingTableCodec.unescape(item.substring(0, arrow).trim()),
+                    MappingTableCodec.unescape(item.substring(arrow + 2).trim())
+                )
+            } else {
+                StableMapRow(MappingTableCodec.unescape(item), "")
+            }
         }
 }
 
 private fun serializeStableMapRows(rows: List<StableMapRow>): String {
     return rows.mapNotNull { row ->
-        val left = row.left.trim()
-        val right = row.right.trim()
+        val left = MappingTableCodec.escape(row.left.trim())
+        val right = MappingTableCodec.escape(row.right.trim())
         when {
             left.isBlank() && right.isBlank() -> null
             right.isBlank() -> left
-            else -> "$left->$right"
+            else -> "$left->${right}"
         }
     }.joinToString(";")
 }

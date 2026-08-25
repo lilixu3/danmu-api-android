@@ -1107,6 +1107,10 @@ class HomeViewModel @Inject constructor(
             postMessage("服务切换中，请稍后再修改端口")
             return
         }
+        if (port !in 1..65535) {
+            postMessage("端口必须在 1-65535 之间")
+            return
+        }
         if (state.runMode == RunMode.Normal && port in 1..1023) {
             postMessage("普通模式无法监听 1-1023 端口，请切换 Root 模式或改用 1024+ 端口")
             return

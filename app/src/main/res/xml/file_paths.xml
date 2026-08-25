@@ -1,14 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅声明实际需要通过 FileProvider 分享的精确子目录，
+  禁止把整个 filesDir/cacheDir 暴露为可授权范围
+  （filesDir/nodejs-project/config/.env 含 API Token）。
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <files-path
-        name="files"
-        path="." />
+    <!-- ConsoleScreen 日志导出分享 -->
     <cache-path
-        name="cache"
-        path="." />
+        name="log-exports"
+        path="log-exports/" />
+    <!-- DiagnosticsScreen 诊断报告分享 -->
+    <cache-path
+        name="diagnostic-exports"
+        path="diagnostic-exports/" />
+    <!-- AppUpdateService APK 下载与安装（外部 app 专属目录） -->
     <external-files-path
-        name="external_files"
-        path="." />
+        name="update_apk"
+        path="Download/" />
+    <!-- AppUpdateService 无外部存储权限时的 filesDir 兜底子目录 -->
+    <files-path
+        name="update_apk_fallback"
+        path="apk-downloads/" />
+    <!-- 旧版存储（API<=28）直接写入公共 Download 目录的 APK -->
     <external-path
         name="external_downloads"
         path="Download/" />

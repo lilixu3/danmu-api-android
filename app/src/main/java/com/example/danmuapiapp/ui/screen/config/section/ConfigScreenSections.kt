@@ -174,7 +174,7 @@ internal fun VisualEditMode(
 @Composable
 internal fun RawEditMode(
     rawContent: String,
-    onSave: (String) -> Result<String>,
+    onSave: (String) -> Unit,
     onRequireAdminMode: () -> Unit,
     envFilePath: String,
     editable: Boolean,
@@ -223,16 +223,9 @@ internal fun RawEditMode(
         AppGlassButton(
             onClick = {
                 if (editable) {
-                    onSave(text).fold(
-                        onSuccess = { savedContent ->
-                            text = savedContent
-                            lastSyncedRaw = savedContent
-                            saveError = null
-                        },
-                        onFailure = { error ->
-                            saveError = "保存失败：${error.message ?: "请查看日志"}"
-                        }
-                    )
+                    // 保存为异步：成功后仓库会 reload 并通过 rawContent 流回填编辑器；
+                    // 失败提示由 ViewModel 的 operationMessage 呈现。
+                    onSave(text)
                 } else {
                     onRequireAdminMode()
                 }

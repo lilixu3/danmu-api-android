@@ -556,7 +556,7 @@ internal fun DownloadQueueTaskRow(
     val displaySource = task.source.trim().ifBlank { "unknown" }
     val detailText = task.lastDetail.trim()
 
-    Surface(
+    AppGlassSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),

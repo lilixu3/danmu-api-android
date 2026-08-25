@@ -85,6 +85,7 @@ class CompatModeActivity : ComponentActivity() {
             DanmuApiTheme(
                 darkTheme = darkTheme,
                 glassMaterial = uiState.glassMaterial,
+                glassTuning = uiState.glassTuning,
                 appBackground = uiState.appBackground
             ) {
                 val view = LocalView.current

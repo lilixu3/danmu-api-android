@@ -133,6 +133,7 @@ interface SettingsRepository {
     val normalModeStabilityMode: StateFlow<NormalModeStabilityMode>
     val nightMode: StateFlow<NightModePreference>
     val glassMaterial: StateFlow<GlassMaterialPreference>
+    val glassTuning: StateFlow<GlassTuningPreference>
     val appBackground: StateFlow<AppBackgroundPreference>
     val appDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
@@ -158,6 +159,7 @@ interface SettingsRepository {
     fun setNormalModeStabilityMode(mode: NormalModeStabilityMode)
     fun setNightMode(mode: NightModePreference)
     fun setGlassMaterial(material: GlassMaterialPreference)
+    fun setGlassTuning(tuning: GlassTuningPreference)
     fun setAppBackground(background: AppBackgroundPreference)
     fun setAppDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)

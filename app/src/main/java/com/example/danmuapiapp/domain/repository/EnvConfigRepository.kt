@@ -9,9 +9,14 @@ interface EnvConfigRepository {
     val isCatalogLoading: StateFlow<Boolean>
     val rawContent: StateFlow<String>
     fun reload()
-    fun readCurrentRawContent(): Result<String>
-    fun setValue(key: String, value: String)
-    fun deleteKey(key: String)
-    fun saveRawContent(content: String): Result<String>
+
+    /**
+     * 以下读写均涉及磁盘 IO；Root 模式下还会执行 Root Shell 命令（单次可达数秒），
+     * 因此全部为挂起函数，实现内部保证切换到 IO 调度器，禁止在主线程同步调用。
+     */
+    suspend fun readCurrentRawContent(): Result<String>
+    suspend fun setValue(key: String, value: String)
+    suspend fun deleteKey(key: String)
+    suspend fun saveRawContent(content: String): Result<String>
     fun getEnvFilePath(): String
 }

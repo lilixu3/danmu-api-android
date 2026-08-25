@@ -9,7 +9,11 @@ import com.example.danmuapiapp.domain.model.AppBackgroundMode
 import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
+import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.domain.model.NightModePreference
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 object AppAppearancePrefs {
     const val PREFS_UI_LEGACY = "danmu_ui_prefs"
@@ -17,6 +21,7 @@ object AppAppearancePrefs {
 
     const val PREF_KEY_NIGHT_MODE = "night_mode_pref"
     const val PREF_KEY_GLASS_MATERIAL = "glass_material_pref"
+    const val PREF_KEY_GLASS_TUNING = "glass_tuning_v1"
     const val PREF_KEY_BACKGROUND_MODE = "background_mode"
     const val PREF_KEY_BACKGROUND_LOCAL_URI = "background_local_uri"
     const val PREF_KEY_BACKGROUND_ONLINE_URL = "background_online_url"
@@ -32,6 +37,12 @@ object AppAppearancePrefs {
     const val APP_DPI_SYSTEM = -1
     const val APP_DPI_MIN = 120
     const val APP_DPI_MAX = 960
+
+    private val appearanceJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = false
+        explicitNulls = false
+    }
 
     fun readNightMode(prefs: SharedPreferences): NightModePreference {
         if (!prefs.contains(PREF_KEY_NIGHT_MODE)) {
@@ -76,6 +87,28 @@ object AppAppearancePrefs {
         material: GlassMaterialPreference
     ) {
         prefs.edit { putInt(PREF_KEY_GLASS_MATERIAL, material.storageValue) }
+    }
+
+    fun readGlassTuning(prefs: SharedPreferences): GlassTuningPreference {
+        val raw = prefs.safeGetString(PREF_KEY_GLASS_TUNING)
+        if (raw.isBlank()) return GlassTuningPreference()
+        return runCatching {
+            appearanceJson.decodeFromString<GlassTuningPreference>(raw).normalized()
+        }.getOrDefault(GlassTuningPreference())
+    }
+
+    fun writeGlassTuning(
+        prefs: SharedPreferences,
+        tuning: GlassTuningPreference
+    ) {
+        val normalized = tuning.normalized()
+        prefs.edit {
+            if (normalized.isDefault) {
+                remove(PREF_KEY_GLASS_TUNING)
+            } else {
+                putString(PREF_KEY_GLASS_TUNING, appearanceJson.encodeToString(normalized))
+            }
+        }
     }
 
     fun readAppBackground(prefs: SharedPreferences): AppBackgroundPreference {

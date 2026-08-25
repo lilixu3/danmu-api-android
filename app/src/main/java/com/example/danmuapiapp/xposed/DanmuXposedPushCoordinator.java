@@ -64,7 +64,9 @@ final class DanmuXposedPushCoordinator {
     private volatile WeakReference<Activity> autoLoopActivity = null;
     private volatile PendingAutoPush pendingAutoPush = null;
     private final Object autoPlanLock = new Object();
-    private final Object autoMatchWorkLock = new Object();
+    private final Object autoMatchClaimLock = new Object();
+    private String autoMatchClaimSignature = "";
+    private long autoMatchClaimExpiresAtMs = 0L;
     private volatile String activeAutoMatchSignature = "";
     private volatile long activeAutoMatchGeneration = 0L;
     private volatile long activeAutoMatchObservedAtMs = 0L;
@@ -90,6 +92,8 @@ final class DanmuXposedPushCoordinator {
     private static final long AUTO_PENDING_FAST_WINDOW_MS = 20_000L;
     private static final long AUTO_PENDING_TTL_MS = 120_000L;
     private static final long AUTO_FAILURE_COOLDOWN_MS = 15_000L;
+    /** 匹配认领租期：覆盖最坏情况的多关键词搜索超时；到期后允许其他线程重新认领，防止永久卡死。 */
+    private static final long AUTO_MATCH_CLAIM_TTL_MS = 90_000L;
 
     DanmuXposedPushCoordinator(Host host, DanmuXposedEpisodeRepository episodeRepository) {
         this.host = host;
@@ -210,36 +214,20 @@ final class DanmuXposedPushCoordinator {
             AutoMatchToken token = observeAutoMediaSelection(media);
             PendingAutoPush plan = getPendingAutoPush(token);
             if (plan == null) {
-                synchronized (autoMatchWorkLock) {
-                    plan = getPendingAutoPush(token);
-                    if (plan == null) {
-                        if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
-                        long matchStartedAtMs = System.currentTimeMillis();
-                        String searchTitle = normalizeSearchTitle(media.title);
-                        if (searchTitle.isEmpty()) searchTitle = media.title;
-                        DirectSearch search = episodeRepository.searchAnimeDirect(context, searchTitle);
-                        if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
-                        if (search.animes.isEmpty()) {
-                            clearPendingAutoPush(token);
-                            return new BridgeRow("error", "自动推送未找到剧名：" + searchTitle, "");
-                        }
-                        EpisodeCandidate selected = episodeRepository.selectAutoEpisodeInSearchOrder(search.animes, target);
-                        if (!isAutoMatchCurrent(token) || !isCurrentActivitySelection(token, media.port)) {
-                            return supersededAutoPushRow();
-                        }
-                        if (selected == null) {
-                            clearPendingAutoPush(token);
-                            return new BridgeRow("error", "自动推送未找到可确认的同名同季剧集：" + media.title + " " + media.displayEpisode(), "");
-                        }
-                        long matchedAtMs = System.currentTimeMillis();
-                        plan = new PendingAutoPush(
-                            matchSignature, token.generation, selected, media.port,
-                            token.observedAtMs, matchedAtMs);
-                        if (!setPendingAutoPush(plan, token)) return supersededAutoPushRow();
-                        host.log(Log.INFO, "auto pre-match completed in " +
-                            Math.max(0L, matchedAtMs - matchStartedAtMs) + "ms; selection age=" +
-                            Math.max(0L, matchedAtMs - token.observedAtMs) + "ms");
-                    }
+                // 去重改为“按签名认领”：同一签名只允许一个线程做匹配，
+                // 网络请求全部在锁外执行——此前整个匹配过程持有
+                // autoMatchWorkLock，宿主网络差时自动轮询与手动搜索
+                // 会互相阻塞数十秒。
+                String claimSignature = matchSignature;
+                if (!tryClaimAutoMatch(claimSignature)) {
+                    return new BridgeRow("skip_inflight", "已有相同的自动匹配在进行", "");
+                }
+                try {
+                    AutoMatchOutcome outcome = matchAndStoreAutoPlan(context, media, target, token, matchSignature);
+                    if (outcome.row != null) return outcome.row;
+                    plan = outcome.plan;
+                } finally {
+                    releaseAutoMatchClaim(claimSignature);
                 }
             }
             if (!isAutoMatchCurrent(token)) return supersededAutoPushRow();
@@ -499,6 +487,72 @@ final class DanmuXposedPushCoordinator {
 
     private BridgeRow supersededAutoPushRow() {
         return new BridgeRow(STATUS_SUPERSEDED, "播放选集已变化，已丢弃旧匹配结果", "");
+    }
+
+    private boolean tryClaimAutoMatch(String matchSignature) {
+        String signature = matchSignature == null ? "" : matchSignature;
+        long now = System.currentTimeMillis();
+        synchronized (autoMatchClaimLock) {
+            if (signature.equals(autoMatchClaimSignature) && now < autoMatchClaimExpiresAtMs) {
+                return false;
+            }
+            autoMatchClaimSignature = signature;
+            autoMatchClaimExpiresAtMs = now + AUTO_MATCH_CLAIM_TTL_MS;
+            return true;
+        }
+    }
+
+    private void releaseAutoMatchClaim(String matchSignature) {
+        String signature = matchSignature == null ? "" : matchSignature;
+        synchronized (autoMatchClaimLock) {
+            if (signature.equals(autoMatchClaimSignature)) {
+                autoMatchClaimSignature = "";
+                autoMatchClaimExpiresAtMs = 0L;
+            }
+        }
+    }
+
+    /**
+     * 执行搜索与剧集匹配（全部为锁外网络请求），成功时把计划写入
+     * pendingAutoPush；失败/过期时返回对应的反馈行。
+     */
+    private AutoMatchOutcome matchAndStoreAutoPlan(
+        Context context,
+        ShellMedia media,
+        MediaIdentity target,
+        AutoMatchToken token,
+        String matchSignature
+    ) throws Exception {
+        if (!isAutoMatchCurrent(token)) return AutoMatchOutcome.row(supersededAutoPushRow());
+        long matchStartedAtMs = System.currentTimeMillis();
+        String searchTitle = normalizeSearchTitle(media.title);
+        if (searchTitle.isEmpty()) searchTitle = media.title;
+        DirectSearch search = episodeRepository.searchAnimeDirect(context, searchTitle);
+        if (!isAutoMatchCurrent(token)) return AutoMatchOutcome.row(supersededAutoPushRow());
+        if (search.animes.isEmpty()) {
+            clearPendingAutoPush(token);
+            return AutoMatchOutcome.row(new BridgeRow("error", "自动推送未找到剧名：" + searchTitle, ""));
+        }
+        EpisodeCandidate selected = episodeRepository.selectAutoEpisodeInSearchOrder(search.animes, target);
+        if (!isAutoMatchCurrent(token) || !isCurrentActivitySelection(token, media.port)) {
+            return AutoMatchOutcome.row(supersededAutoPushRow());
+        }
+        if (selected == null) {
+            clearPendingAutoPush(token);
+            return AutoMatchOutcome.row(new BridgeRow(
+                "error",
+                "自动推送未找到可确认的同名同季剧集：" + media.title + " " + media.displayEpisode(),
+                ""));
+        }
+        long matchedAtMs = System.currentTimeMillis();
+        PendingAutoPush plan = new PendingAutoPush(
+            matchSignature, token.generation, selected, media.port,
+            token.observedAtMs, matchedAtMs);
+        if (!setPendingAutoPush(plan, token)) return AutoMatchOutcome.row(supersededAutoPushRow());
+        host.log(Log.INFO, "auto pre-match completed in " +
+            Math.max(0L, matchedAtMs - matchStartedAtMs) + "ms; selection age=" +
+            Math.max(0L, matchedAtMs - token.observedAtMs) + "ms");
+        return AutoMatchOutcome.plan(plan);
     }
 
     private void invalidateAutoMediaSelection() {
@@ -855,6 +909,24 @@ final class DanmuXposedPushCoordinator {
             this.matchSignature = matchSignature == null ? "" : matchSignature;
             this.generation = generation;
             this.observedAtMs = observedAtMs;
+        }
+    }
+
+    private static final class AutoMatchOutcome {
+        final PendingAutoPush plan;
+        final BridgeRow row;
+
+        private AutoMatchOutcome(PendingAutoPush plan, BridgeRow row) {
+            this.plan = plan;
+            this.row = row;
+        }
+
+        static AutoMatchOutcome plan(PendingAutoPush plan) {
+            return new AutoMatchOutcome(plan, null);
+        }
+
+        static AutoMatchOutcome row(BridgeRow row) {
+            return new AutoMatchOutcome(null, row);
         }
     }
 }

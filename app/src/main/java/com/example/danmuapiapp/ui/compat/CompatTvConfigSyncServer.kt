@@ -49,6 +49,9 @@ class CompatTvConfigSyncServer(
     private val githubProxyService: GithubProxyService
 ) {
 
+    private class RequestEntityTooLargeException :
+        java.io.IOException("请求行、头部或同步数据过大")
+
     data class UiState(
         val isReady: Boolean = false,
         val host: String = "",
@@ -62,6 +65,17 @@ class CompatTvConfigSyncServer(
     private val stateMutex = Mutex()
     private val token = UUID.randomUUID().toString().replace("-", "").take(12)
     private val deviceName = buildDeviceName()
+
+    companion object {
+        /** 单行（请求行/header 行）最大字节数，防止无换行洪泛导致内存耗尽。 */
+        private const val MAX_LINE_BYTES = 8 * 1024
+
+        /** header 条数上限。 */
+        private const val MAX_HEADER_COUNT = 64
+
+        /** POST body 上限：正常 .env 同步内容远小于该值。 */
+        private const val MAX_BODY_BYTES = 256 * 1024
+    }
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -168,6 +182,9 @@ class CompatTvConfigSyncServer(
                 while (true) {
                     val line = readLine(input) ?: break
                     if (line.isBlank()) break
+                    if (headers.size >= MAX_HEADER_COUNT) {
+                        throw RequestEntityTooLargeException()
+                    }
                     val index = line.indexOf(':')
                     if (index <= 0) continue
                     val name = line.substring(0, index).trim().lowercase(Locale.ROOT)
@@ -177,6 +194,12 @@ class CompatTvConfigSyncServer(
 
                 val uri = URI("http://localhost$rawPath")
                 if (method == "GET" && uri.path == "/sync/apply") {
+                    // 状态查询同样要求同步码，避免向同网段任意设备泄露同步状态。
+                    val queryToken = parseQuery(uri.rawQuery)["token"].orEmpty().trim()
+                    if (queryToken != token) {
+                        writeResponse(output, 403, TvConfigSyncResponse(false, "同步码已失效或不匹配"))
+                        return
+                    }
                     writeResponse(output, 200, TvConfigSyncResponse(true, _uiState.value.statusText))
                     return
                 }
@@ -186,13 +209,16 @@ class CompatTvConfigSyncServer(
                     return
                 }
 
-                val queryToken = parseQuery(uri.rawQuery)["token"].orEmpty().trim()
-                if (queryToken != token) {
+                val queryToken2 = parseQuery(uri.rawQuery)["token"].orEmpty().trim()
+                if (queryToken2 != token) {
                     writeResponse(output, 403, TvConfigSyncResponse(false, "同步码已失效或不匹配"))
                     return
                 }
 
                 val contentLength = headers["content-length"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                if (contentLength > MAX_BODY_BYTES) {
+                    throw RequestEntityTooLargeException()
+                }
                 val bodyBytes = readExact(input, contentLength)
                 if (bodyBytes == null) {
                     writeResponse(output, 400, TvConfigSyncResponse(false, "同步数据不完整"))
@@ -211,7 +237,15 @@ class CompatTvConfigSyncServer(
             }.onFailure { error ->
                 runCatching {
                     val output = BufferedOutputStream(socket.getOutputStream())
-                    writeResponse(output, 500, TvConfigSyncResponse(false, error.message ?: "同步失败"))
+                    val statusCode = when (error) {
+                        is RequestEntityTooLargeException -> 413
+                        else -> 500
+                    }
+                    writeResponse(
+                        output,
+                        statusCode,
+                        TvConfigSyncResponse(ok = false, message = error.message ?: "同步失败")
+                    )
                 }
             }
         }
@@ -409,6 +443,10 @@ class CompatTvConfigSyncServer(
             if (value == -1) {
                 return if (buffer.size() > 0) buffer.toString(Charsets.UTF_8.name()) else null
             }
+            if (buffer.size() >= MAX_LINE_BYTES) {
+                // 无换行的超长行只可能是恶意洪泛，立即中断解析。
+                throw RequestEntityTooLargeException()
+            }
             if (value == '\n'.code) {
                 break
             }
@@ -442,6 +480,7 @@ class CompatTvConfigSyncServer(
             400 -> "HTTP/1.1 400 Bad Request"
             403 -> "HTTP/1.1 403 Forbidden"
             404 -> "HTTP/1.1 404 Not Found"
+            413 -> "HTTP/1.1 413 Content Too Large"
             else -> "HTTP/1.1 500 Internal Server Error"
         }
         val header = buildString {

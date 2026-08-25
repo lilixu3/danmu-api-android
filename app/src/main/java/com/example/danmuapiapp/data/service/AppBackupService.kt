@@ -211,11 +211,11 @@ class AppBackupService @Inject constructor(
         AppBackupPreview(bundle.createdAtMs, bundle.appVersion, bundle.sections.toSet())
     }
 
-    fun restore(
+    suspend fun restore(
         raw: String,
         selectedSections: Set<AppBackupSection>,
         currentEnvContent: String,
-        environmentWriter: (String) -> Result<String>
+        environmentWriter: suspend (String) -> Result<String>
     ): Result<AppBackupRestoreResult> = runCatching {
         val bundle = AppBackupCodec.decode(raw) as AppBackupBundle
         val available = bundle.sections.toSet()
@@ -271,8 +271,14 @@ class AppBackupService @Inject constructor(
             }
         } catch (restoreError: Throwable) {
             val rollbackErrors = mutableListOf<Throwable>()
-            fun rollback(block: () -> Unit) {
-                runCatching(block).exceptionOrNull()?.let(rollbackErrors::add)
+            suspend fun rollback(block: suspend () -> Unit) {
+                try {
+                    block()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (rollbackError: Throwable) {
+                    rollbackErrors.add(rollbackError)
+                }
             }
             // Restore preferences first so an environment rollback targets the original run mode.
             if (previousAppPreferences.isNotEmpty()) {

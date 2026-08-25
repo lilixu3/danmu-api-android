@@ -44,14 +44,20 @@ import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.GlassEffectStyle
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
+import com.example.danmuapiapp.ui.theme.glassEffectStyle
+import com.example.danmuapiapp.ui.theme.rememberGlassAdaptiveEffect
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
 import com.kyant.shapes.Capsule
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
@@ -70,6 +76,9 @@ fun LiquidBottomTabs(
 ) {
     val isLightTheme = !LocalAppDarkTheme.current
     val spec = LocalGlassMaterial.current
+    val baseBottomBarStyle = glassEffectStyle(GlassMaterialRole.BottomBar)
+    val adaptiveEffect = rememberGlassAdaptiveEffect(baseBottomBarStyle)
+    val bottomBarStyle = adaptiveEffect.style
     val colors = MaterialTheme.colorScheme
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
     val containerColor = if (!spec.enabled) {
@@ -80,14 +89,14 @@ fun LiquidBottomTabs(
         } else {
             colors.surfaceContainer
         }
-        glassBase.copy(alpha = spec.bottomBarAlpha)
+        glassBase.copy(alpha = bottomBarStyle.surfaceAlpha)
     }
 
     // Do not allocate a recording layer when the user selected the solid path.
     val tabsBackdrop = if (spec.enabled) rememberLayerBackdrop() else null
 
     BoxWithConstraints(
-        modifier,
+        modifier.then(adaptiveEffect.positionModifier),
         contentAlignment = Alignment.CenterStart
     ) {
         val density = LocalDensity.current
@@ -167,12 +176,33 @@ fun LiquidBottomTabs(
                         backdrop = backdrop,
                         shape = { Capsule() },
                         effects = {
-                            vibrancy()
-                            blur(spec.blurRadius.toPx())
+                            if (bottomBarStyle.usesReferenceVibrancy()) {
+                                vibrancy()
+                            } else {
+                                colorControls(
+                                    brightness = bottomBarStyle.brightness,
+                                    contrast = bottomBarStyle.contrast,
+                                    saturation = bottomBarStyle.saturation
+                                )
+                            }
+                            blur(bottomBarStyle.blurRadius.toPx())
                             lens(
-                                spec.refractionHeight.toPx(),
-                                spec.refractionAmount.toPx()
+                                bottomBarStyle.refractionHeight.toPx(),
+                                bottomBarStyle.refractionAmount.toPx(),
+                                depthEffect = bottomBarStyle.depthEffect,
+                                chromaticAberration = bottomBarStyle.chromaticAberration
                             )
+                        },
+                        highlight = {
+                            if (bottomBarStyle.highlightAlpha > 0f) {
+                                Highlight.Plain.copy(
+                                    width = bottomBarStyle.highlightWidth,
+                                    blurRadius = bottomBarStyle.highlightWidth / 2f,
+                                    alpha = bottomBarStyle.highlightAlpha
+                                )
+                            } else {
+                                null
+                            }
                         },
                         layerBlock = {
                             val progress = dampedDragAnimation.pressProgress
@@ -217,11 +247,21 @@ fun LiquidBottomTabs(
                             shape = { Capsule() },
                             effects = {
                                 val progress = dampedDragAnimation.pressProgress
-                                vibrancy()
-                                blur(spec.blurRadius.toPx())
+                                if (bottomBarStyle.usesReferenceVibrancy()) {
+                                    vibrancy()
+                                } else {
+                                    colorControls(
+                                        brightness = bottomBarStyle.brightness,
+                                        contrast = bottomBarStyle.contrast,
+                                        saturation = bottomBarStyle.saturation
+                                    )
+                                }
+                                blur(bottomBarStyle.blurRadius.toPx())
                                 lens(
-                                    spec.refractionHeight.toPx() * progress,
-                                    spec.refractionAmount.toPx() * progress
+                                    bottomBarStyle.refractionHeight.toPx() * progress,
+                                    bottomBarStyle.refractionAmount.toPx() * progress,
+                                    depthEffect = bottomBarStyle.depthEffect,
+                                    chromaticAberration = bottomBarStyle.chromaticAberration
                                 )
                             },
                             onDrawSurface = { drawRect(containerColor) }
@@ -281,4 +321,8 @@ fun LiquidBottomTabs(
                 .fillMaxWidth(1f / tabsCount)
         )
     }
+}
+
+private fun GlassEffectStyle.usesReferenceVibrancy(): Boolean {
+    return brightness == 0f && contrast == 1f && saturation == 1.5f
 }

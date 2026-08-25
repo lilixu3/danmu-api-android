@@ -17,16 +17,18 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterialTuning
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
+import com.example.danmuapiapp.ui.theme.glassEffectStyle
+import com.example.danmuapiapp.ui.theme.rememberGlassAdaptiveEffect
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.shapes.RoundedRectangularShape
 
@@ -45,6 +47,7 @@ fun AppGlassSurface(
     shadowElevation: Dp = 0.dp,
     border: BorderStroke? = null,
     role: AppGlassSurfaceRole = AppGlassSurfaceRole.Card,
+    materialRole: GlassMaterialRole? = null,
     backdropOverride: Backdrop? = null,
     glassAlpha: Float? = null,
     onClick: (() -> Unit)? = null,
@@ -53,23 +56,46 @@ fun AppGlassSurface(
 ) {
     val spec = LocalGlassMaterial.current
     val backdrop = backdropOverride ?: LocalGlassBackgroundBackdrop.current
-    val darkTheme = LocalAppDarkTheme.current
     val dialogContent = LocalAppDialogContext.current && role == AppGlassSurfaceRole.Card
+    val resolvedMaterialRole = materialRole ?: if (role == AppGlassSurfaceRole.Dialog) {
+        GlassMaterialRole.Dialog
+    } else {
+        GlassMaterialRole.Card
+    }
+    val baseEffectStyle = glassEffectStyle(resolvedMaterialRole)
+    val adaptiveEffect = rememberGlassAdaptiveEffect(baseEffectStyle)
+    val effectStyle = adaptiveEffect.style
+    val tuningOverride = if (spec.enabled) {
+        LocalGlassMaterialTuning.current.overrideFor(resolvedMaterialRole)
+    } else {
+        null
+    }
     // The dialog shell owns the only backdrop pass. Cards rendered inside it
     // are tonal overlays; refracting the same scene again creates visible
     // bands between the header, body, and action area.
     val dialogFlatSurface = spec.enabled && dialogContent
     val glassEnabled = spec.enabled && backdrop != null && !dialogFlatSurface
-    val surfaceAlpha = glassAlpha?.coerceIn(0f, 1f) ?: when (role) {
-        AppGlassSurfaceRole.Card -> spec.contentAlpha
-        AppGlassSurfaceRole.Dialog -> spec.dialogAlpha
+    // Existing callers keep their explicit alpha unless a saved role override
+    // or the adaptive preset deliberately owns the material opacity.
+    val surfaceAlpha = when {
+        adaptiveEffect.active -> effectStyle.surfaceAlpha
+        tuningOverride?.surfaceAlpha != null -> tuningOverride.surfaceAlpha.coerceIn(0f, 1f)
+        glassAlpha != null -> glassAlpha.coerceIn(0f, 1f)
+        else -> effectStyle.surfaceAlpha
     }
-    val tint = color.copy(alpha = minOf(color.alpha, surfaceAlpha))
+    val tint = if (adaptiveEffect.active || tuningOverride?.surfaceAlpha != null) {
+        color.copy(alpha = surfaceAlpha)
+    } else {
+        color.copy(alpha = minOf(color.alpha, surfaceAlpha))
+    }
     // Backdrop's lens shader only accepts rounded-rectangle shapes. Keep blur
     // and color treatment for arbitrary shapes such as RectangleShape, but do
     // not let the optional refraction effect crash composition.
     val lensSupported = shape is CornerBasedShape || shape is RoundedRectangularShape
     val fallbackColor = when {
+        // Dialog internals stay flat to avoid recursive backdrop passes while
+        // saved and adaptive material opacity still applies to their fill.
+        dialogFlatSurface && (adaptiveEffect.active || tuningOverride?.surfaceAlpha != null) -> tint
         dialogFlatSurface -> color
         dialogContent && !glassEnabled && color.alpha >= 0.34f -> color.copy(alpha = 1f)
         else -> color
@@ -79,42 +105,31 @@ fun AppGlassSurface(
             backdrop = backdrop,
             shape = { shape },
             effects = {
-                when (role) {
-                    AppGlassSurfaceRole.Card -> {
-                        if (dialogContent) {
-                            colorControls(
-                                brightness = if (darkTheme) 0.02f else 0.05f,
-                                saturation = 0.92f
-                            )
-                            blur(if (darkTheme) 12.dp.toPx() else 16.dp.toPx())
-                            if (lensSupported) {
-                                lens(10.dp.toPx(), 20.dp.toPx())
-                            }
-                        } else {
-                            vibrancy()
-                            blur(spec.blurRadius.toPx())
-                            if (lensSupported) {
-                                lens(16.dp.toPx(), 32.dp.toPx())
-                            }
-                        }
-                    }
-
-                    AppGlassSurfaceRole.Dialog -> {
-                        // Keep the dialog neutral. Strong saturation makes a photo
-                        // background bleed blue/green into the whole modal.
-                        colorControls(
-                            brightness = if (darkTheme) 0.04f else 0.08f,
-                            saturation = 1.08f
-                        )
-                        blur(if (darkTheme) 12.dp.toPx() else 18.dp.toPx())
-                        if (lensSupported) {
-                            lens(20.dp.toPx(), 40.dp.toPx(), depthEffect = true)
-                        }
-                    }
+                colorControls(
+                    brightness = effectStyle.brightness,
+                    contrast = effectStyle.contrast,
+                    saturation = effectStyle.saturation
+                )
+                blur(effectStyle.blurRadius.toPx())
+                if (lensSupported) {
+                    lens(
+                        effectStyle.refractionHeight.toPx(),
+                        effectStyle.refractionAmount.toPx(),
+                        depthEffect = effectStyle.depthEffect,
+                        chromaticAberration = effectStyle.chromaticAberration
+                    )
                 }
             },
             highlight = {
-                if (role == AppGlassSurfaceRole.Dialog) Highlight.Plain else null
+                if (effectStyle.highlightAlpha > 0f) {
+                    Highlight.Plain.copy(
+                        width = effectStyle.highlightWidth,
+                        blurRadius = effectStyle.highlightWidth / 2f,
+                        alpha = effectStyle.highlightAlpha
+                    )
+                } else {
+                    null
+                }
             },
             onDrawSurface = { drawRect(tint) }
         )
@@ -129,7 +144,10 @@ fun AppGlassSurface(
     }
 
     Surface(
-        modifier = modifier.then(glassModifier).then(clickModifier),
+        modifier = modifier
+            .then(adaptiveEffect.positionModifier)
+            .then(glassModifier)
+            .then(clickModifier),
         shape = shape,
         color = if (glassEnabled) Color.Transparent else fallbackColor,
         contentColor = contentColor,

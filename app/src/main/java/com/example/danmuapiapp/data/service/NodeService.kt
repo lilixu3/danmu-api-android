@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.danmuapiapp.MainActivity
@@ -68,6 +69,8 @@ class NodeService : Service() {
         private const val START_TIMEOUT_KILL_DELAY_MS = 350L
         private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
+        /** 进程启动未满该时长时不允许判僵死，避免误杀慢机型的正常启动过程。 */
+        private const val STALE_PROCESS_MIN_UPTIME_MS = 10_000L
 
         fun start(context: Context, userInitiated: Boolean = true): Boolean {
             // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
@@ -129,9 +132,39 @@ class NodeService : Service() {
             stopTimeoutMs: Long = 4000L
         ): Boolean {
             val appContext = context.applicationContext
+            // 慢机型的端口就绪时间可能远超确认窗口：进程刚拉起时绝不判僵死，避免误杀正常启动。
+            if (!hasProcessExceededMinUptime(appContext)) {
+                AppDiagnosticLogger.i(
+                    appContext,
+                    TAG,
+                    ":node 进程启动未满 ${STALE_PROCESS_MIN_UPTIME_MS}ms，跳过僵死回收"
+                )
+                return true
+            }
             if (!confirmStaleProcess(appContext, port, confirmTimeoutMs)) return true
             if (!killProcessIfRunning(appContext) && isProcessRunning(appContext)) return false
             return waitForProcessStop(appContext, port, stopTimeoutMs)
+        }
+
+        /** 进程不存在或读取失败时返回 true（维持原行为），仅在确认进程刚启动不久时返回 false。 */
+        private fun hasProcessExceededMinUptime(context: Context): Boolean {
+            val pid = findProcessPid(context) ?: return true
+            val startedElapsedMs = readProcessStartedElapsedMs(pid) ?: return true
+            return SystemClock.elapsedRealtime() - startedElapsedMs >= STALE_PROCESS_MIN_UPTIME_MS
+        }
+
+        private fun readProcessStartedElapsedMs(pid: Int): Long? {
+            return runCatching {
+                val stat = java.io.File("/proc/$pid/stat").readText()
+                // comm 字段可含空格与括号，取最后一个 ')' 之后的内容；其后首个字段是 state（第 3 列）。
+                val fields = stat.substringAfterLast(')').trim().split(' ')
+                // starttime 是第 22 列，相对 state（第 3 列）的索引为 22 - 3 = 19。
+                val startTimeTicks = fields.getOrNull(19)?.toLongOrNull() ?: return null
+                val clockTicksPerSecond = runCatching {
+                    android.system.Os.sysconf(android.system.OsConstants._SC_CLK_TCK)
+                }.getOrDefault(100L)
+                SystemClock.elapsedRealtime() - startTimeTicks * 1000L / clockTicksPerSecond
+            }.getOrNull()
         }
 
         private fun findProcessPid(context: Context): Int? {
@@ -242,8 +275,24 @@ class NodeService : Service() {
             startServiceInForeground("正在启动...")
             publishStarting("正在准备运行环境…", explicitStart = explicitStart)
             startNode()
+        } else {
+            satisfyForegroundStartContract()
         }
         return START_STICKY
+    }
+
+    /**
+     * 每次 startForegroundService() 都必须配套调用 startForeground()，否则系统会抛出
+     * RemoteServiceException 并杀掉整个 :node 进程。拒绝启动请求时也必须先满足该契约：
+     * 若运行时确实存活则仅刷新前台通知；否则展示过渡通知后立即自行退出。
+     */
+    private fun satisfyForegroundStartContract() {
+        val threadAlive = isNodeThreadAlive()
+        val stopping = synchronized(stateLock) { isStopping }
+        startServiceInForeground(if (threadAlive || stopping) "服务状态同步中…" else "服务未在运行")
+        if (!threadAlive && !stopping) {
+            stopForegroundAndSelf()
+        }
     }
 
     private fun runtimeProfile(): NormalModeRuntimeProfile {
@@ -522,62 +571,93 @@ class NodeService : Service() {
         }
 
         val preparedDeferred = CompletableDeferred<Result<java.io.File>>()
-        scope.launch {
-            val prepared: Result<java.io.File> = try {
-                Result.success(
-                    run {
-                        publishStarting("正在检查运行环境…")
-                        val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
-                        NodeProjectManager.migrateAllCoreLayouts(projectDir)
-                        publishStarting("正在同步启动配置…")
-                        // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
-                        val envVariant = runCatching {
-                            java.io.File(projectDir, "config/.env").takeIf { it.exists() }
-                                ?.readText(Charsets.UTF_8)
-                                ?.let { DotEnvCodec.parse(it)["DANMU_API_VARIANT"] }
-                                ?.trim()
-                        }.getOrNull()
-                        NodeProjectManager.writeRuntimeEnv(
-                            context = this@NodeService,
-                            targetProjectDir = projectDir,
-                            preferredVariantKey = envVariant
-                        )
-                        when (val health = RuntimeDependencyHealthChecker.inspectSelectedCore(
-                            context = this@NodeService,
-                            projectDir = projectDir
-                        )) {
-                            RuntimeDependencyHealthChecker.Status.Ready -> Unit
-                            RuntimeDependencyHealthChecker.Status.CoreUnavailable -> {
-                                throw IllegalStateException("当前核心未安装或文件不完整")
+        var prepareJob: Job? = null
+        try {
+            prepareJob = scope.launch {
+                val prepared: Result<java.io.File> = try {
+                    Result.success(
+                        run {
+                            ensureGenerationCurrent(generation)
+                            publishStartingForGeneration(generation, "正在检查运行环境…")
+                            val projectDir = NodeProjectManager.ensureProjectExtracted(this@NodeService)
+                            NodeProjectManager.migrateAllCoreLayouts(projectDir)
+                            ensureGenerationCurrent(generation)
+                            publishStartingForGeneration(generation, "正在同步启动配置…")
+                            // 从主进程已写入的 .env 中读取 variant，避免 :node 进程 SharedPreferences 跨进程不一致覆盖。
+                            val envVariant = runCatching {
+                                java.io.File(projectDir, "config/.env").takeIf { it.exists() }
+                                    ?.readText(Charsets.UTF_8)
+                                    ?.let { DotEnvCodec.parse(it)["DANMU_API_VARIANT"] }
+                                    ?.trim()
+                            }.getOrNull()
+                            NodeProjectManager.writeRuntimeEnv(
+                                context = this@NodeService,
+                                targetProjectDir = projectDir,
+                                preferredVariantKey = envVariant
+                            )
+                            ensureGenerationCurrent(generation)
+                            when (val health = RuntimeDependencyHealthChecker.inspectSelectedCore(
+                                context = this@NodeService,
+                                projectDir = projectDir
+                            )) {
+                                RuntimeDependencyHealthChecker.Status.Ready -> Unit
+                                RuntimeDependencyHealthChecker.Status.CoreUnavailable -> {
+                                    throw IllegalStateException("当前核心未安装或文件不完整")
+                                }
+                                is RuntimeDependencyHealthChecker.Status.Missing -> {
+                                    throw RuntimeDependenciesMissingException(
+                                        variant = health.variant,
+                                        missingDependencies = health.dependencies
+                                    )
+                                }
                             }
-                            is RuntimeDependencyHealthChecker.Status.Missing -> {
-                                throw RuntimeDependenciesMissingException(
-                                    variant = health.variant,
-                                    missingDependencies = health.dependencies
-                                )
-                            }
+                            projectDir
                         }
-                        projectDir
-                    }
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (throwable: Throwable) {
-                Result.failure(throwable)
+                    )
+                } catch (stale: StartupGenerationStaleException) {
+                    AppDiagnosticLogger.i(
+                        this@NodeService,
+                        TAG,
+                        "放弃过期的启动准备工作：${stale.message}"
+                    )
+                    return@launch
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (throwable: Throwable) {
+                    Result.failure(throwable)
+                }
+                preparedDeferred.complete(prepared)
             }
-            preparedDeferred.complete(prepared)
-        }
 
-        val prepared = withTimeoutOrNull(remainingBudgetMs) {
-            preparedDeferred.await()
+            val prepared = withTimeoutOrNull(remainingBudgetMs) {
+                preparedDeferred.await()
+            }
+            if (prepared == null) {
+                handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
+                return null
+            }
+            return prepared.getOrElse { throwable ->
+                handleStartupFailure(generation, buildErrorMessage(throwable), throwable)
+                null
+            }
+        } finally {
+            // 超时/失败后终止仍在进行的准备工作，
+            // 避免其用过期消息覆盖通知/UI 或与新启动流程并发写 config/.env。
+            prepareJob?.cancel()
         }
-        if (prepared == null) {
-            handleStartupTimeout(generation, "普通模式启动超时：运行环境准备未完成")
-            return null
+    }
+
+    private class StartupGenerationStaleException(message: String) : IllegalStateException(message)
+
+    private fun ensureGenerationCurrent(generation: Long) {
+        if (runtimeGeneration.get() != generation) {
+            throw StartupGenerationStaleException("启动流程 generation=$generation 已过期")
         }
-        return prepared.getOrElse { throwable ->
-            handleStartupFailure(generation, buildErrorMessage(throwable), throwable)
-            null
+    }
+
+    private fun publishStartingForGeneration(generation: Long, message: String) {
+        if (runtimeGeneration.get() == generation) {
+            publishStarting(message)
         }
     }
 

@@ -40,9 +40,11 @@ import com.example.danmuapiapp.domain.model.CacheClearCapability
 import com.example.danmuapiapp.domain.model.CacheClearItem
 import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
 import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
 import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
+import com.example.danmuapiapp.ui.theme.glassEffectStyle
+import com.example.danmuapiapp.ui.theme.rememberGlassAdaptiveEffect
 
 internal data class CacheClearItemPresentation(
     val title: String,
@@ -189,7 +191,7 @@ internal fun CacheClearSelectionList(
 ) {
     val colors = MaterialTheme.colorScheme
     val liquidDialog = LocalGlassMaterial.current.enabled && LocalAppDialogContext.current
-    val darkTheme = LocalAppDarkTheme.current
+    val selectedStyle = glassEffectStyle(GlassMaterialRole.Selected)
     val listShape = RoundedCornerShape(14.dp)
     val listBorder = BorderStroke(
         1.dp,
@@ -200,6 +202,7 @@ internal fun CacheClearSelectionList(
             CacheClearItem.entries.forEachIndexed { index, item ->
                 val presentation = cacheClearItemPresentation(item)
                 val selected = item in selectedItems
+                val adaptiveSelectedEffect = rememberGlassAdaptiveEffect(selectedStyle)
                 val rowContent: @Composable () -> Unit = {
                     Row(
                         modifier = Modifier
@@ -258,10 +261,11 @@ internal fun CacheClearSelectionList(
                 if (liquidDialog) {
                     Surface(
                         onClick = { onToggle(item) },
+                        modifier = adaptiveSelectedEffect.positionModifier,
                         enabled = selectionEnabled,
                         shape = RectangleShape,
                         color = if (selected) {
-                            colors.primary.copy(alpha = if (darkTheme) 0.16f else 0.13f)
+                            colors.primary.copy(alpha = adaptiveSelectedEffect.style.surfaceAlpha)
                         } else {
                             Color.Transparent
                         },

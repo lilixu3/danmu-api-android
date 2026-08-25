@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 import com.example.danmuapiapp.domain.model.AnimeCacheLink
 import com.example.danmuapiapp.domain.model.EnvVarDef
@@ -15,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -68,28 +70,35 @@ class ConfigViewModel @Inject constructor(
 
     fun setValue(key: String, value: String) {
         if (!ensureAdminMode()) return
-        envConfigRepo.setValue(key, value)
-        _operationMessage.value = "已保存 $key"
+        // 写 .env 涉及磁盘 IO（Root 模式为 Root Shell），必须离开主线程。
+        viewModelScope.launch {
+            envConfigRepo.setValue(key, value)
+            _operationMessage.value = "已保存 $key"
+        }
     }
 
     fun deleteKey(key: String) {
         if (!ensureAdminMode()) return
-        envConfigRepo.deleteKey(key)
-        _operationMessage.value = "已删除 $key"
+        viewModelScope.launch {
+            envConfigRepo.deleteKey(key)
+            _operationMessage.value = "已删除 $key"
+        }
     }
 
-    fun saveRawContent(content: String): Result<String> {
+    fun saveRawContent(content: String) {
         if (!ensureAdminMode()) {
-            return Result.failure(IllegalStateException("当前为只读模式，请先开启管理员模式"))
+            _operationMessage.value = "当前为只读模式，请先开启管理员模式"
+            return
         }
-        val result = envConfigRepo.saveRawContent(content)
-        result.fold(
-            onSuccess = { _operationMessage.value = "源码已保存" },
-            onFailure = { error ->
-                _operationMessage.value = "源码保存失败：${error.message ?: "请查看日志"}"
-            }
-        )
-        return result
+        viewModelScope.launch {
+            val result = envConfigRepo.saveRawContent(content)
+            result.fold(
+                onSuccess = { _operationMessage.value = "源码已保存" },
+                onFailure = { error ->
+                    _operationMessage.value = "源码保存失败：${error.message ?: "请查看日志"}"
+                }
+            )
+        }
     }
 
     suspend fun fetchRecentAnimeCache(): Result<List<AnimeCacheItem>> {
