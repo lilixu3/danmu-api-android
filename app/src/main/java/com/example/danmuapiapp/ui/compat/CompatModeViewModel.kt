@@ -2,14 +2,11 @@ package com.example.danmuapiapp.ui.compat
 
 import android.app.Activity
 import android.content.Context
-import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
-import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
-import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.AppBackgroundPreference
 import com.example.danmuapiapp.domain.model.CoreDownloadProgress
@@ -23,10 +20,8 @@ import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GithubProxyOption
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.GlassTuningPreference
-import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
-import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
@@ -57,7 +52,6 @@ data class CompatModeUiState(
     val isCoreInfoLoading: Boolean = true,
     val isOperating: Boolean = false,
     val operationProgressTitle: String = "",
-    val keepAlive: CompatKeepAliveUiState = CompatKeepAliveUiState(),
     val syncState: CompatTvConfigSyncServer.UiState = CompatTvConfigSyncServer.UiState(),
     val appUpdate: CompatAppUpdateUiState = CompatAppUpdateUiState(),
     val coreDisplayNames: CoreVariantDisplayNames = CoreVariantDisplayNames(),
@@ -81,19 +75,6 @@ data class CompatModeUiState(
 internal fun CompatModeUiState.dismissLocalNetworkGuideForThisLaunch(): CompatModeUiState {
     return copy(localNetworkGuideDismissedThisLaunch = true)
 }
-
-data class CompatKeepAliveUiState(
-    val summary: String = "正在读取后台运行状态",
-    val detail: String = "",
-    val actionLabel: String = "启用推荐方案",
-    val actionEnabled: Boolean = true,
-    val recommendedProfileEnabled: Boolean = false,
-    val isRootMode: Boolean = false,
-    val hasNotificationPermission: Boolean = true,
-    val desiredRunning: Boolean = false,
-    val accessibilityEnabled: Boolean = false,
-    val heartbeatModeLabel: String = ""
-)
 
 data class CompatAppUpdateUiState(
     val currentVersion: String = "未知",
@@ -158,10 +139,6 @@ class CompatModeViewModel(
             coreInfos = graph.coreRepository.coreInfoList.value,
             downloadProgress = graph.coreRepository.downloadProgress.value,
             isCoreInfoLoading = graph.coreRepository.isCoreInfoLoading.value,
-            keepAlive = buildKeepAliveUiState(
-                runtimeState = graph.runtimeRepository.runtimeState.value,
-                isOperating = false
-            ),
             appUpdate = CompatAppUpdateUiState(
                 currentVersion = graph.appUpdateService.currentVersionName()
             ),
@@ -186,11 +163,7 @@ class CompatModeViewModel(
             _uiState.update { state ->
                 state.copy(
                     isOperating = operating,
-                    operationProgressTitle = if (operating) "正在修复运行时依赖" else "",
-                    keepAlive = buildKeepAliveUiState(
-                        runtimeState = state.runtimeState,
-                        isOperating = operating
-                    )
+                    operationProgressTitle = if (operating) "正在修复运行时依赖" else ""
                 )
             }
         },
@@ -217,9 +190,13 @@ class CompatModeViewModel(
     }
 
     fun onActivityResumed(activity: Activity) {
+        graph.runtimeRepository.setAppForeground(true)
         graph.appUpdateService.tryResumePendingInstall(activity)
-        refreshKeepAliveUi()
         graph.updateChecker.onAppResume()
+    }
+
+    fun onActivityStopped() {
+        graph.runtimeRepository.setAppForeground(false)
     }
 
     fun dismissLocalNetworkGuideForThisLaunch() {
@@ -264,53 +241,6 @@ class CompatModeViewModel(
         if (!_uiState.value.isOperating) {
             graph.runtimeRepository.stopService()
         }
-    }
-
-    fun toggleKeepAliveProfile() {
-        if (_uiState.value.isOperating) return
-        val runtimeState = _uiState.value.runtimeState
-        if (runtimeState.runMode == RunMode.Root) {
-            emitEvent("当前是 Root 模式，请使用 Root 开机自启")
-            return
-        }
-
-        val recommendedProfileEnabled = graph.settingsRepository.autoStart.value &&
-            graph.settingsRepository.keepAlive.value &&
-            graph.settingsRepository.keepAliveHeartbeatEnabled.value &&
-            graph.settingsRepository.keepAliveHeartbeatMode.value == KeepAliveHeartbeatMode.System &&
-            NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(appContext) ==
-            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
-
-        if (recommendedProfileEnabled) {
-            graph.settingsRepository.setAutoStart(false)
-            graph.settingsRepository.setKeepAliveHeartbeatMode(KeepAliveHeartbeatMode.Accessibility)
-            graph.settingsRepository.setKeepAliveHeartbeatEnabled(false)
-            graph.settingsRepository.setKeepAlive(false)
-            NodeKeepAlivePrefs.requestDisableAccessibilityService(appContext)
-            SystemHeartbeatScheduler.refresh(appContext)
-            refreshKeepAliveUi()
-            emitEvent("已关闭 TV 实验保活")
-            return
-        }
-
-        graph.settingsRepository.setAutoStart(true)
-        graph.settingsRepository.setKeepAlive(true)
-        graph.settingsRepository.setKeepAliveHeartbeatEnabled(true)
-        graph.settingsRepository.setKeepAliveHeartbeatMode(KeepAliveHeartbeatMode.System)
-        graph.settingsRepository.setKeepAliveHeartbeatIntervalMinutes(
-            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
-        )
-        SystemHeartbeatScheduler.refresh(appContext)
-        refreshKeepAliveUi()
-
-        val message = if (!NodeKeepAlivePrefs.isDesiredRunning(appContext)) {
-            "已启用 TV 实验保活，请再手动启动一次服务"
-        } else if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext)) {
-            "已启用 TV 实验保活，请授予通知权限"
-        } else {
-            "已启用 TV 实验保活"
-        }
-        emitEvent(message)
     }
 
     fun switchVariant(variant: ApiVariant) {
@@ -854,13 +784,7 @@ class CompatModeViewModel(
             graph.runtimeRepository.runtimeState.collectLatest { state ->
                 syncServer.updateHost(resolveSyncHost(state))
                 _uiState.update {
-                    it.copy(
-                        runtimeState = state,
-                        keepAlive = buildKeepAliveUiState(
-                            runtimeState = state,
-                            isOperating = it.isOperating
-                        )
-                    )
+                    it.copy(runtimeState = state)
                 }
             }
         }
@@ -939,21 +863,6 @@ class CompatModeViewModel(
                 _uiState.update { it.copy(syncState = syncState) }
             }
         }
-
-        val keepAliveFlows = listOf(
-            graph.settingsRepository.autoStart,
-            graph.settingsRepository.keepAlive,
-            graph.settingsRepository.keepAliveHeartbeatEnabled,
-            graph.settingsRepository.keepAliveHeartbeatMode,
-            graph.settingsRepository.keepAliveHeartbeatIntervalMinutes
-        )
-        keepAliveFlows.forEach { flow ->
-            viewModelScope.launch {
-                flow.collectLatest {
-                    refreshKeepAliveUi()
-                }
-            }
-        }
     }
 
     private fun performCoreOperation(title: String, block: suspend () -> Unit) {
@@ -961,11 +870,7 @@ class CompatModeViewModel(
         _uiState.update {
             it.copy(
                 isOperating = true,
-                operationProgressTitle = title,
-                keepAlive = buildKeepAliveUiState(
-                    runtimeState = it.runtimeState,
-                    isOperating = true
-                )
+                operationProgressTitle = title
             )
         }
         viewModelScope.launch {
@@ -975,11 +880,7 @@ class CompatModeViewModel(
                 _uiState.update {
                     it.copy(
                         isOperating = false,
-                        operationProgressTitle = "",
-                        keepAlive = buildKeepAliveUiState(
-                            runtimeState = it.runtimeState,
-                            isOperating = false
-                        )
+                        operationProgressTitle = ""
                     )
                 }
             }
@@ -1001,114 +902,6 @@ class CompatModeViewModel(
             }
         )
         return false
-    }
-
-    private fun refreshKeepAliveUi() {
-        _uiState.update {
-            it.copy(
-                keepAlive = buildKeepAliveUiState(
-                    runtimeState = it.runtimeState,
-                    isOperating = it.isOperating
-                )
-            )
-        }
-    }
-
-    private fun buildKeepAliveUiState(
-        runtimeState: RuntimeState,
-        isOperating: Boolean
-    ): CompatKeepAliveUiState {
-        val autoStartEnabled = graph.settingsRepository.autoStart.value
-        val keepAliveEnabled = graph.settingsRepository.keepAlive.value
-        val heartbeatEnabled = graph.settingsRepository.keepAliveHeartbeatEnabled.value
-        val heartbeatMode = graph.settingsRepository.keepAliveHeartbeatMode.value
-        val heartbeatIntervalMinutes = if (heartbeatMode == KeepAliveHeartbeatMode.System) {
-            NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(appContext)
-        } else {
-            graph.settingsRepository.keepAliveHeartbeatIntervalMinutes.value
-        }
-        val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(appContext)
-        val hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext)
-        val accessibilityEnabled = NodeKeepAlivePrefs.isAccessibilityServiceEnabled(appContext)
-        val isRootMode = runtimeState.runMode == RunMode.Root
-        val recommendedProfileEnabled = !isRootMode &&
-            autoStartEnabled &&
-            keepAliveEnabled &&
-            heartbeatEnabled &&
-            heartbeatMode == KeepAliveHeartbeatMode.System &&
-            heartbeatIntervalMinutes == NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES
-        val hasPartialConfig = autoStartEnabled ||
-            keepAliveEnabled ||
-            heartbeatEnabled ||
-            heartbeatMode == KeepAliveHeartbeatMode.System
-
-        val summary = when {
-            isRootMode -> "Root 模式优先使用 Root 开机自启"
-            recommendedProfileEnabled ->
-                "已启用后台恢复：系统心跳约 ${heartbeatIntervalMinutes} 分钟兜底一次"
-            hasPartialConfig -> "后台恢复配置不完整，建议重新应用 TV 推荐方案"
-            else -> "未启用后台恢复，服务被系统回收后不会自动恢复"
-        }
-
-        val detail = buildString {
-            append("该能力用于掉线后兜底恢复，不承诺让 TV 后台长期常驻。")
-            when {
-                isRootMode -> {
-                    append("\n当前是 Root 模式，稳定保活应使用完整设置页里的 Root 开机模块。")
-                }
-                recommendedProfileEnabled -> {
-                    append("\n已配置：普通模式开机恢复、系统定时心跳、${heartbeatIntervalMinutes} 分钟恢复间隔。")
-                    append("\n运行期间会保持 CPU 唤醒，降低部分盒子待机后服务被打断的概率。")
-                    if (!desiredRunning) {
-                        append("\n启用后请至少手动启动一次服务，系统才会按“期望运行”继续恢复。")
-                    }
-                    if (!hasNotificationPermission) {
-                        append("\n当前缺少通知权限，系统恢复拉起前台服务可能失败。")
-                    }
-                    if (Build.VERSION.SDK_INT >= 35) {
-                        append("\nAndroid 15 及以上限制开机直接拉起前台服务，仍以系统心跳兜底为主。")
-                    }
-                    if (accessibilityEnabled) {
-                        append("\n检测到无障碍保活已启用，支持的设备上它也会一起参与恢复。")
-                    }
-                }
-                else -> {
-                    append(
-                        "\n开启后会自动配置：普通模式开机恢复、系统定时心跳、" +
-                            "${NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES} 分钟恢复间隔。"
-                    )
-                    if (hasPartialConfig) {
-                        append(
-                            "\n当前状态：开机恢复${if (autoStartEnabled) "开" else "关"}，" +
-                                "保活${if (keepAliveEnabled) "开" else "关"}，" +
-                                "心跳${if (heartbeatEnabled) "开" else "关"}，" +
-                                "模式${heartbeatMode.label}。"
-                        )
-                    }
-                    if (Build.VERSION.SDK_INT >= 35) {
-                        append("\n新系统上开机恢复可能被限制，因此不要把它当成常驻保活。")
-                    }
-                }
-            }
-        }
-
-        return CompatKeepAliveUiState(
-            summary = summary,
-            detail = detail,
-            actionLabel = when {
-                isRootMode -> "Root 模式无需此项"
-                recommendedProfileEnabled -> "关闭后台恢复"
-                hasPartialConfig -> "重新应用推荐方案"
-                else -> "启用推荐方案"
-            },
-            actionEnabled = !isOperating && !isRootMode,
-            recommendedProfileEnabled = recommendedProfileEnabled,
-            isRootMode = isRootMode,
-            hasNotificationPermission = hasNotificationPermission,
-            desiredRunning = desiredRunning,
-            accessibilityEnabled = accessibilityEnabled,
-            heartbeatModeLabel = heartbeatMode.label
-        )
     }
 
     private fun resolveVariantLabel(variant: ApiVariant): String {

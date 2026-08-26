@@ -13,7 +13,6 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
         if (intent?.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
 
         val appContext = context.applicationContext
-        SystemHeartbeatScheduler.refresh(appContext)
         RuntimeWarmupManager.markUpdatePending(appContext)
 
         val pending = goAsync()
@@ -22,7 +21,6 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
             try {
                 runCatching {
                     val shouldAutoStart = RuntimeModePrefs.get(appContext) == RunMode.Normal &&
-                        NodeKeepAlivePrefs.isKeepAliveEnabled(appContext) &&
                         NodeKeepAlivePrefs.isDesiredRunning(appContext)
 
                     if (shouldAutoStart) {

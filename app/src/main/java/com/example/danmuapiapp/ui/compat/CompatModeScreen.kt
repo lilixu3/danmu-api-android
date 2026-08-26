@@ -48,7 +48,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Sync
@@ -137,7 +136,6 @@ data class CompatModeActions(
     val onDismissBranchPicker: () -> Unit,
     val onDeleteCore: (ApiVariant) -> Unit,
     val onSaveCustomCore: (String, String) -> Unit,
-    val onToggleKeepAliveProfile: () -> Unit,
     val onCheckAppUpdate: () -> Unit,
     val onDownloadAppUpdate: () -> Unit,
     val onInstallAppUpdate: () -> Unit,
@@ -360,7 +358,6 @@ private fun CompatSettingsPage(
                     .focusGroup(),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                KeepAliveCard(uiState, actions)
                 CompatModeExitCard(
                     onRequestExitCompatMode = onRequestExitCompatMode
                 )
@@ -370,7 +367,6 @@ private fun CompatSettingsPage(
         Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
             AppUpdateCard(uiState, actions)
             CompatAppDisplayCard(uiState, actions)
-            KeepAliveCard(uiState, actions)
             GithubProxyCard(proxyPickerState, actions)
             CompatModeExitCard(
                 onRequestExitCompatMode = onRequestExitCompatMode
@@ -690,13 +686,6 @@ private fun ServiceHeroCard(
                     tone = ButtonTone.Secondary,
                     enabled = isRunning && !isBusy,
                     onClick = actions.onStopService
-                )
-                TvActionButton(
-                    text = if (uiState.keepAlive.recommendedProfileEnabled) "后台恢复 开" else "后台恢复 关",
-                    icon = if (uiState.keepAlive.recommendedProfileEnabled) Icons.Rounded.Shield else Icons.Rounded.Security,
-                    tone = ButtonTone.Secondary,
-                    enabled = uiState.keepAlive.actionEnabled && !isBusy,
-                    onClick = actions.onToggleKeepAliveProfile
                 )
             }
         }
@@ -1047,73 +1036,6 @@ private fun OperationProgressCard(uiState: CompatModeUiState) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(7.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun KeepAliveCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    val state = uiState.keepAlive
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "后台运行健康度",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = state.summary,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = if (state.recommendedProfileEnabled) "推荐方案已启用" else "可配置",
-                    color = if (state.recommendedProfileEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Text(
-                text = state.detail,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 20.sp
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvActionButton(
-                    text = state.actionLabel,
-                    icon = if (state.recommendedProfileEnabled) Icons.Rounded.Shield else Icons.Rounded.Security,
-                    tone = ButtonTone.Primary,
-                    enabled = state.actionEnabled,
-                    onClick = actions.onToggleKeepAliveProfile
-                )
-                if (state.isRootMode) {
-                    StatusChip(
-                        text = "Root 模式",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                } else {
-                    StatusChip(
-                        text = "心跳：${state.heartbeatModeLabel}",
-                        color = MaterialTheme.colorScheme.secondary
                     )
                 }
             }

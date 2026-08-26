@@ -6,9 +6,9 @@ import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.service.CoreUpdateCheckPolicy
-import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.NormalModeStabilityPrefs
+import com.example.danmuapiapp.data.service.NormalNotificationBehaviorPrefs
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.safeGetBoolean
 import com.example.danmuapiapp.data.util.safeGetString
@@ -18,9 +18,9 @@ import com.example.danmuapiapp.domain.model.CoreBranchSelections
 import com.example.danmuapiapp.domain.model.CoreVariantDisplayNames
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.GlassTuningPreference
-import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
+import com.example.danmuapiapp.domain.model.NormalNotificationBehavior
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreConfig
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
 import com.example.danmuapiapp.domain.model.normalizeGithubBranch
@@ -80,22 +80,6 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _autoStart = MutableStateFlow(NormalAutoStartPrefs.isBootAutoStartEnabled(context))
     override val autoStart: StateFlow<Boolean> = _autoStart.asStateFlow()
 
-    private val _keepAlive = MutableStateFlow(NodeKeepAlivePrefs.isKeepAliveEnabled(context))
-    override val keepAlive: StateFlow<Boolean> = _keepAlive.asStateFlow()
-
-    private val _keepAliveHeartbeatEnabled =
-        MutableStateFlow(NodeKeepAlivePrefs.isHeartbeatEnabled(context))
-    override val keepAliveHeartbeatEnabled: StateFlow<Boolean> = _keepAliveHeartbeatEnabled.asStateFlow()
-
-    private val _keepAliveHeartbeatMode =
-        MutableStateFlow(NodeKeepAlivePrefs.getHeartbeatMode(context))
-    override val keepAliveHeartbeatMode: StateFlow<KeepAliveHeartbeatMode> = _keepAliveHeartbeatMode.asStateFlow()
-
-    private val _keepAliveHeartbeatIntervalMinutes =
-        MutableStateFlow(NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context))
-    override val keepAliveHeartbeatIntervalMinutes: StateFlow<Int> =
-        _keepAliveHeartbeatIntervalMinutes.asStateFlow()
-
     private val _coreUpdateCheckIntervalMinutes = MutableStateFlow(
         CoreUpdateCheckPolicy.normalizeIntervalMinutes(
             settingsPrefs.getInt(
@@ -110,6 +94,11 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _normalModeStabilityMode = MutableStateFlow(NormalModeStabilityPrefs.get(context))
     override val normalModeStabilityMode: StateFlow<NormalModeStabilityMode> =
         _normalModeStabilityMode.asStateFlow()
+
+    private val _normalNotificationBehavior =
+        MutableStateFlow(NormalNotificationBehaviorPrefs.get(context))
+    override val normalNotificationBehavior: StateFlow<NormalNotificationBehavior> =
+        _normalNotificationBehavior.asStateFlow()
 
     private val _nightMode = MutableStateFlow(AppAppearancePrefs.readNightMode(uiPrefs))
     override val nightMode: StateFlow<NightModePreference> = _nightMode.asStateFlow()
@@ -228,27 +217,6 @@ class SettingsRepositoryImpl @Inject constructor(
         _autoStart.value = enabled
     }
 
-    override fun setKeepAlive(enabled: Boolean) {
-        NodeKeepAlivePrefs.setKeepAliveEnabled(context, enabled)
-        _keepAlive.value = enabled
-    }
-
-    override fun setKeepAliveHeartbeatEnabled(enabled: Boolean) {
-        NodeKeepAlivePrefs.setHeartbeatEnabled(context, enabled)
-        _keepAliveHeartbeatEnabled.value = enabled
-    }
-
-    override fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode) {
-        NodeKeepAlivePrefs.setHeartbeatMode(context, mode)
-        _keepAliveHeartbeatMode.value = mode
-    }
-
-    override fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int) {
-        val normalized = NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(minutes)
-        NodeKeepAlivePrefs.setHeartbeatIntervalMinutes(context, normalized)
-        _keepAliveHeartbeatIntervalMinutes.value = normalized
-    }
-
     override fun setCoreUpdateCheckIntervalMinutes(minutes: Int) {
         val normalized = CoreUpdateCheckPolicy.normalizeIntervalMinutes(minutes)
         settingsPrefs.edit { putInt(CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY, normalized) }
@@ -258,6 +226,11 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setNormalModeStabilityMode(mode: NormalModeStabilityMode) {
         NormalModeStabilityPrefs.set(context, mode)
         _normalModeStabilityMode.value = mode
+    }
+
+    override fun setNormalNotificationBehavior(behavior: NormalNotificationBehavior) {
+        NormalNotificationBehaviorPrefs.set(context, behavior)
+        _normalNotificationBehavior.value = behavior
     }
 
     override fun setNightMode(mode: NightModePreference) {
@@ -454,10 +427,6 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun reloadFromStorage() {
         _githubProxy.value = githubProxyPrefs.safeGetString("selected_proxy", "original").ifBlank { "original" }
         _autoStart.value = NormalAutoStartPrefs.isBootAutoStartEnabled(context)
-        _keepAlive.value = NodeKeepAlivePrefs.isKeepAliveEnabled(context)
-        _keepAliveHeartbeatEnabled.value = NodeKeepAlivePrefs.isHeartbeatEnabled(context)
-        _keepAliveHeartbeatMode.value = NodeKeepAlivePrefs.getHeartbeatMode(context)
-        _keepAliveHeartbeatIntervalMinutes.value = NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(context)
         _coreUpdateCheckIntervalMinutes.value = CoreUpdateCheckPolicy.normalizeIntervalMinutes(
             settingsPrefs.getInt(
                 CORE_UPDATE_CHECK_INTERVAL_MINUTES_KEY,
@@ -465,6 +434,7 @@ class SettingsRepositoryImpl @Inject constructor(
             )
         )
         _normalModeStabilityMode.value = NormalModeStabilityPrefs.get(context)
+        _normalNotificationBehavior.value = NormalNotificationBehaviorPrefs.reloadFromSettings(context)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
         _glassMaterial.value = AppAppearancePrefs.readGlassMaterial(uiPrefs)
         _glassTuning.value = AppAppearancePrefs.readGlassTuning(uiPrefs)

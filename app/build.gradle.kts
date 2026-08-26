@@ -19,8 +19,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.78"
-val defaultVersionCode = 164
+val defaultVersionName = "1.0.5.79"
+val defaultVersionCode = 165
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()

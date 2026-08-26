@@ -25,6 +25,7 @@ import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.domain.model.ErrorHandler
+import com.example.danmuapiapp.domain.model.NormalNotificationBehavior
 import kotlinx.coroutines.*
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -49,6 +50,12 @@ class NodeService : Service() {
             get() = "$actionPrefix.START_NODE"
         val ACTION_STOP: String
             get() = "$actionPrefix.STOP_NODE"
+        val ACTION_ENSURE_FOREGROUND: String
+            get() = "$actionPrefix.ENSURE_NODE_FOREGROUND"
+        val ACTION_REFRESH_NOTIFICATION: String
+            get() = "$actionPrefix.REFRESH_NODE_NOTIFICATION"
+        val ACTION_NOTIFICATION_DISMISSED: String
+            get() = "$actionPrefix.NODE_NOTIFICATION_DISMISSED"
         val ACTION_STATUS: String
             get() = "$actionPrefix.NODE_STATUS"
         const val EXTRA_STATUS = "status"
@@ -69,25 +76,19 @@ class NodeService : Service() {
         private const val START_TIMEOUT_KILL_DELAY_MS = 350L
         private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
+        private const val UNEXPECTED_FOREGROUND_REATTACH_MIN_INTERVAL_MS = 30_000L
         /** 进程启动未满该时长时不允许判僵死，避免误杀慢机型的正常启动过程。 */
         private const val STALE_PROCESS_MIN_UPTIME_MS = 10_000L
+        private val lastUnexpectedForegroundReattachAtMs = AtomicLong(0L)
 
         fun start(context: Context, userInitiated: Boolean = true): Boolean {
-            // 在调用进程先写入期望状态，避免跨进程停止/保活竞态。
+            // 在调用进程先写入期望状态，避免跨进程启动/停止竞态。
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, true)
-            RuntimeIdentityStore.ensureInstanceId(appContext)
             if (userInitiated) {
-                NodeKeepAlivePrefs.clearRestartBackoff(appContext)
-            } else {
-                val blockedMs = NodeKeepAlivePrefs.getRestartBlockRemainingMs(appContext)
-                if (blockedMs > 0L) {
-                    AppDiagnosticLogger.w(appContext, TAG, "普通模式后台恢复暂缓，剩余 ${blockedMs}ms")
-                    SystemHeartbeatScheduler.refresh(appContext)
-                    return false
-                }
+                NormalNotificationBehaviorPrefs.clearManuallyHidden(appContext)
             }
-            SystemHeartbeatScheduler.refresh(appContext)
+            RuntimeIdentityStore.ensureInstanceId(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_EXPLICIT_START, userInitiated)
@@ -101,15 +102,90 @@ class NodeService : Service() {
         }
 
         fun stop(context: Context) {
-            // 在调用进程先写入期望状态，确保保活侧立即可见“用户要停止”。
+            // 在调用进程先写入期望状态，确保 :node 进程立即可见“用户要停止”。
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, false)
-            NodeKeepAlivePrefs.clearRestartBackoff(appContext)
-            SystemHeartbeatScheduler.refresh(appContext)
+            NormalNotificationBehaviorPrefs.clearManuallyHidden(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+
+        fun ensureForegroundNotification(context: Context): Boolean {
+            val appContext = context.applicationContext
+            if (!NodeKeepAlivePrefs.isDesiredRunning(appContext)) return false
+            if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(appContext)) return false
+            val intent = Intent(appContext, NodeService::class.java).apply {
+                action = ACTION_ENSURE_FOREGROUND
+            }
+            return runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    appContext.startForegroundService(intent)
+                } else {
+                    appContext.startService(intent)
+                }
+                true
+            }.onFailure {
+                AppDiagnosticLogger.w(
+                    appContext,
+                    TAG,
+                    "重新挂接普通模式前台通知失败：${it.message}",
+                    it
+                )
+            }.getOrDefault(false)
+        }
+
+        fun refreshForegroundNotification(context: Context): Boolean {
+            val appContext = context.applicationContext
+            if (!NodeKeepAlivePrefs.isDesiredRunning(appContext)) return false
+            val intent = Intent(appContext, NodeService::class.java).apply {
+                action = ACTION_REFRESH_NOTIFICATION
+            }
+            return runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    appContext.startForegroundService(intent)
+                } else {
+                    appContext.startService(intent)
+                }
+                true
+            }.onFailure {
+                AppDiagnosticLogger.w(
+                    appContext,
+                    TAG,
+                    "刷新普通模式前台通知失败：${it.message}",
+                    it
+                )
+            }.getOrDefault(false)
+        }
+
+        fun isForegroundNotificationActive(context: Context): Boolean {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return false
+            return runCatching {
+                manager.activeNotifications.any { notification ->
+                    notification.id == NOTIFICATION_ID &&
+                        (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                            notification.notification.channelId == CHANNEL_ID)
+                }
+            }.getOrDefault(false)
+        }
+
+        fun canDisplayForegroundNotification(context: Context): Boolean {
+            if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(context)) return false
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return false
+            return runCatching {
+                if (!manager.areNotificationsEnabled()) return@runCatching false
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                    manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+            }.getOrDefault(false)
+        }
+
+        private fun claimUnexpectedForegroundReattach(): Boolean {
+            val now = SystemClock.elapsedRealtime()
+            val previous = lastUnexpectedForegroundReattachAtMs.getAndSet(now)
+            return previous <= 0L || now - previous >= UNEXPECTED_FOREGROUND_REATTACH_MIN_INTERVAL_MS
         }
 
         fun isProcessRunning(context: Context): Boolean {
@@ -231,6 +307,8 @@ class NodeService : Service() {
     private var currentStartExplicit = false
     private var runtimeWakeLock: PowerManager.WakeLock? = null
     @Volatile
+    private var foregroundStarted = false
+    @Volatile
     private var serviceStopRequested = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -246,8 +324,7 @@ class NodeService : Service() {
         when (action) {
             ACTION_STOP -> {
                 NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
-                NodeKeepAlivePrefs.clearRestartBackoff(applicationContext)
-                SystemHeartbeatScheduler.refresh(applicationContext)
+                NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
                 stopNode()
                 return START_NOT_STICKY
             }
@@ -255,16 +332,64 @@ class NodeService : Service() {
                 copyLanAddressToClipboard()
                 return START_NOT_STICKY
             }
-            ACTION_START -> Unit
+            ACTION_NOTIFICATION_DISMISSED -> {
+                return handleNotificationDismissed(startId)
+            }
+            ACTION_REFRESH_NOTIFICATION -> {
+                return handleNotificationRefresh(startId)
+            }
+            ACTION_START -> {
+                // 明确启动以及新建的服务会开启一个新的通知会话；重复的开机广播
+                // 不应覆盖用户刚刚选择的“尊重关闭”。
+                if (explicitStart || !foregroundStarted) {
+                    NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
+                }
+            }
+            ACTION_ENSURE_FOREGROUND -> {
+                if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
+                    AppDiagnosticLogger.i(this, TAG, "按设置保留用户手动关闭的服务通知")
+                    if (!foregroundStarted) stopSelf(startId)
+                    return START_STICKY
+                }
+            }
             null -> {
                 // START_STICKY 重建会传入 null intent，仅在用户期望运行时恢复。
                 if (!NodeKeepAlivePrefs.isDesiredRunning(this)) {
                     serviceStopRequested = true
-                    stopSelf(startId)
+                    if (tryEnterForeground("服务已停止", startId)) {
+                        stopForegroundAndSelf(startId)
+                    }
                     return START_NOT_STICKY
+                }
+                if (!foregroundStarted) {
+                    // null intent 表示 Service 被系统重新创建，视为新的服务会话。
+                    NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
                 }
             }
             else -> return START_NOT_STICKY
+        }
+
+        // ACTION_START 来自 startForegroundService()。先进入前台，再做端口探测和幂等判定，
+        // 确保重复启动、开机双广播及慢设备上都不会触发系统的 5 秒前台服务异常。
+        if (!tryEnterForeground(currentForegroundMessage(), startId)) {
+            return START_NOT_STICKY
+        }
+
+        if (adoptReachableRuntimeIfNeeded(explicitStart)) {
+            return START_STICKY
+        }
+
+        if (action == ACTION_ENSURE_FOREGROUND) {
+            val hasActiveRuntime = synchronized(stateLock) {
+                isRunning || isStopping || nodeThread?.isAlive == true || startupStartedAtMs > 0L
+            }
+            if (hasActiveRuntime) {
+                AppDiagnosticLogger.i(this, TAG, "前台服务通知已确认，保留现有运行时")
+                return START_STICKY
+            }
+            AppDiagnosticLogger.w(this, TAG, "未发现可挂接的普通模式运行时，结束通知恢复请求")
+            stopForegroundAndSelf(startId)
+            return START_NOT_STICKY
         }
 
         val shouldStart = shouldAcceptStartRequest()
@@ -272,27 +397,136 @@ class NodeService : Service() {
             synchronized(stateLock) {
                 currentStartExplicit = explicitStart
             }
-            startServiceInForeground("正在启动...")
             publishStarting("正在准备运行环境…", explicitStart = explicitStart)
             startNode()
+        } else if (synchronized(stateLock) {
+                shouldStopServiceAfterRejectedStart(
+                    serviceStopRequested = serviceStopRequested,
+                    running = isRunning,
+                    stopping = isStopping,
+                    threadAlive = nodeThread?.isAlive == true
+                )
+            }
+        ) {
+            stopForegroundAndSelf(startId)
         } else {
-            satisfyForegroundStartContract()
+            AppDiagnosticLogger.i(this, TAG, "忽略重复启动请求，保留现有前台服务")
         }
         return START_STICKY
     }
 
-    /**
-     * 每次 startForegroundService() 都必须配套调用 startForeground()，否则系统会抛出
-     * RemoteServiceException 并杀掉整个 :node 进程。拒绝启动请求时也必须先满足该契约：
-     * 若运行时确实存活则仅刷新前台通知；否则展示过渡通知后立即自行退出。
-     */
-    private fun satisfyForegroundStartContract() {
-        val threadAlive = isNodeThreadAlive()
-        val stopping = synchronized(stateLock) { isStopping }
-        startServiceInForeground(if (threadAlive || stopping) "服务状态同步中…" else "服务未在运行")
-        if (!threadAlive && !stopping) {
-            stopForegroundAndSelf()
+    private fun handleNotificationDismissed(startId: Int): Int {
+        when (NormalNotificationBehaviorPrefs.get(this)) {
+            NormalNotificationBehavior.ForegroundRestore -> {
+                NormalNotificationBehaviorPrefs.setManuallyHidden(this, hidden = true)
+                AppDiagnosticLogger.i(this, TAG, "用户手动关闭服务通知，等待进入后台时恢复")
+            }
+
+            NormalNotificationBehavior.ImmediateRestore -> {
+                NormalNotificationBehaviorPrefs.clearManuallyHidden(this)
+                if (tryEnterForeground(currentForegroundMessage(), startId)) {
+                    AppDiagnosticLogger.i(this, TAG, "用户手动关闭服务通知，已按设置立即恢复")
+                }
+            }
+
+            NormalNotificationBehavior.RespectDismissal -> {
+                NormalNotificationBehaviorPrefs.setManuallyHidden(this, hidden = true)
+                cancelForegroundNotification()
+                AppDiagnosticLogger.i(this, TAG, "用户手动关闭服务通知，按设置保持隐藏")
+            }
         }
+        return START_STICKY
+    }
+
+    private fun handleNotificationRefresh(startId: Int): Int {
+        if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
+            cancelForegroundNotification()
+            return START_STICKY
+        }
+        if (!tryEnterForeground(currentForegroundMessage(), startId)) {
+            return START_NOT_STICKY
+        }
+        val hasActiveRuntime = synchronized(stateLock) {
+            isRunning || isStopping || nodeThread?.isAlive == true || startupStartedAtMs > 0L
+        }
+        if (!hasActiveRuntime) {
+            stopForegroundAndSelf(startId)
+            return START_NOT_STICKY
+        }
+        return START_STICKY
+    }
+
+    private fun currentForegroundMessage(): String {
+        return synchronized(stateLock) {
+            when {
+                isStopping -> "正在停止服务…"
+                isRunning && nodeThread?.isAlive == true -> "服务运行中"
+                isRunning -> "正在启动服务…"
+                else -> "正在同步服务状态…"
+            }
+        }
+    }
+
+    private fun tryEnterForeground(message: String, startId: Int): Boolean {
+        return try {
+            if (foregroundStarted && NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
+                cancelForegroundNotification()
+                return true
+            }
+            startServiceInForeground(message)
+            true
+        } catch (throwable: Throwable) {
+            val detail = buildErrorMessage(throwable)
+            AppDiagnosticLogger.e(this, TAG, "前台服务通知创建失败：$detail", throwable)
+            synchronized(stateLock) {
+                serviceStopRequested = true
+            }
+            broadcastStatus(
+                STATUS_ERROR,
+                message = "无法启动前台服务：$detail",
+                error = "无法启动前台服务：$detail"
+            )
+            // Node 与 Service 同处 :node 进程。无法建立前台服务时必须结束整个进程，
+            // 否则会再次形成“API 仍可用，但通知和前台服务已消失”的脱管状态。
+            stopSelf(startId)
+            android.os.Process.killProcess(android.os.Process.myPid())
+            false
+        }
+    }
+
+    private fun adoptReachableRuntimeIfNeeded(explicitStart: Boolean): Boolean {
+        val shouldProbe = synchronized(stateLock) {
+            !serviceStopRequested && !isRunning && !isStopping && nodeThread == null
+        }
+        if (!shouldProbe) return false
+
+        val ownedPort = resolveCandidatePorts().firstOrNull { port ->
+            port in 1..65535 && isPortOpen(port) && isRuntimeOwnedByApp(port)
+        } ?: return false
+
+        val adopted = synchronized(stateLock) {
+            if (serviceStopRequested || isRunning || isStopping || nodeThread != null) {
+                false
+            } else {
+                isRunning = true
+                isStopping = false
+                startupStartedAtMs = 0L
+                currentStartExplicit = explicitStart
+                runningPublishedGeneration = runtimeGeneration.get()
+                true
+            }
+        }
+        if (!adopted) return false
+
+        syncRuntimeWakeLock()
+        updateNotification("服务运行中")
+        broadcastStatus(
+            STATUS_RUNNING,
+            message = "已重新挂接前台服务，接口保持可用",
+            explicitStart = explicitStart
+        )
+        AppDiagnosticLogger.i(this, TAG, "已接管端口 $ownedPort 上的现有运行时并恢复前台通知")
+        return true
     }
 
     private fun runtimeProfile(): NormalModeRuntimeProfile {
@@ -310,6 +544,7 @@ class NodeService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        foregroundStarted = true
     }
 
     private fun syncRuntimeWakeLock() {
@@ -363,7 +598,7 @@ class NodeService : Service() {
     }
 
     override fun onTimeout(startId: Int) {
-        AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，已停止前台服务")
+        AppDiagnosticLogger.e(this, TAG, "普通模式前台服务触发系统超时，结束 :node 进程")
         synchronized(stateLock) {
             isRunning = false
             isStopping = false
@@ -376,10 +611,11 @@ class NodeService : Service() {
         releaseRuntimeWakeLock()
         broadcastStatus(
             STATUS_ERROR,
-            message = "前台服务被系统超时限制，已停止",
-            error = "前台服务被系统超时限制，已停止"
+            message = "前台服务被系统超时限制，运行时已结束",
+            error = "前台服务被系统超时限制，运行时已结束"
         )
         stopForegroundAndSelf()
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
@@ -401,6 +637,8 @@ class NodeService : Service() {
             explicitStart = currentStartExplicit
         }
         syncRuntimeWakeLock()
+        // 真正开始新的运行代次时，手动关闭状态不再沿用到新服务会话。
+        NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
 
         StartupFailureStore.clearNormal(this)
 
@@ -471,8 +709,6 @@ class NodeService : Service() {
                                         projectDir = projectDir,
                                         message = startupFailure?.detail ?: msg
                                     )
-                                    recordRecoveryFailure()
-                                    SystemHeartbeatScheduler.refresh(applicationContext)
                                     serviceStopRequested = true
                                     broadcastStatus(STATUS_ERROR, message = msg, error = msg)
                                     stopForegroundAndSelf()
@@ -669,15 +905,20 @@ class NodeService : Service() {
         return (profile.startupTotalTimeoutMs - elapsedMs).coerceAtLeast(0L)
     }
 
-    private fun recordRecoveryFailure() {
-        NodeKeepAlivePrefs.recordRecoveryFailure(applicationContext)
-    }
-
     private fun handleStartupFailure(generation: Long, message: String, throwable: Throwable? = null) {
         if (serviceStopRequested || throwable is CancellationException || runtimeGeneration.get() != generation) {
             return
         }
         AppDiagnosticLogger.e(this, TAG, "Failed to start node: $message", throwable)
+        if (isNodeThreadAlive()) {
+            broadcastStatus(
+                STATUS_ERROR,
+                message = "启动流程失败，正在回收残留运行时：$message",
+                error = message
+            )
+            stopNode()
+            return
+        }
         synchronized(stateLock) {
             isRunning = false
             isStopping = false
@@ -688,8 +929,6 @@ class NodeService : Service() {
             }
             serviceStopRequested = true
         }
-        recordRecoveryFailure()
-        SystemHeartbeatScheduler.refresh(applicationContext)
         updateNotification("启动失败：$message")
         broadcastStatus(STATUS_ERROR, message = message, error = message)
         stopForegroundAndSelf()
@@ -697,6 +936,12 @@ class NodeService : Service() {
 
     private suspend fun handleStartupTimeout(generation: Long, message: String) {
         if (serviceStopRequested || runtimeGeneration.get() != generation) return
+        val reachable = resolveCandidatePorts().any { it in 1..65535 && isPortOpen(it) }
+        if (reachable && isNodeThreadAlive()) {
+            AppDiagnosticLogger.w(this, TAG, "启动超时边界检测到端口已就绪，保留前台服务")
+            publishRunningIfNeeded(generation)
+            return
+        }
         val startupFailure = StartupFailureStore.readNormal(this)
         val resolvedMessage = startupFailure?.userMessage() ?: message
         AppDiagnosticLogger.w(
@@ -704,27 +949,33 @@ class NodeService : Service() {
             TAG,
             startupFailure?.detail?.takeIf { it.isNotBlank() } ?: resolvedMessage
         )
+        val threadAlive = isNodeThreadAlive()
+        if (threadAlive) {
+            broadcastStatus(
+                STATUS_ERROR,
+                message = "$resolvedMessage，正在回收残留运行时",
+                error = resolvedMessage
+            )
+            AppDiagnosticLogger.w(this, TAG, "启动超时但 Node 线程仍存活，保持前台通知直至进程完成回收")
+            stopNode()
+            return
+        }
         synchronized(stateLock) {
             if (runtimeGeneration.get() != generation) return
-            val threadAlive = nodeThread?.isAlive == true
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
             currentStartExplicit = false
-            if (!threadAlive) {
-                nodeThread = null
-            }
+            nodeThread = null
             serviceStopRequested = true
         }
-        recordRecoveryFailure()
-        SystemHeartbeatScheduler.refresh(applicationContext)
         updateNotification("启动失败：$resolvedMessage")
         broadcastStatus(STATUS_ERROR, message = resolvedMessage, error = resolvedMessage)
         AppDiagnosticLogger.w(
             this,
             TAG,
-            "普通模式启动超时，已停止前台服务；不再强制结束 :node 进程"
+            "普通模式启动超时且 Node 线程已退出，停止前台服务"
         )
         stopForegroundAndSelf()
     }
@@ -854,7 +1105,6 @@ class NodeService : Service() {
             }
         }
         if (publishExplicitStart == null) return
-        NodeKeepAlivePrefs.noteSuccessfulStart(applicationContext)
         updateNotification("服务运行中")
         broadcastStatus(
             STATUS_RUNNING,
@@ -877,16 +1127,18 @@ class NodeService : Service() {
                 nodeThread = null
             }
         }
+        NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
         // 主动广播停止，避免仓库层仅靠兜底超时判断导致“已停却报错”。
         broadcastStatus(STATUS_STOPPED, message = "服务已停止")
         stopForegroundAndSelf()
     }
 
-    private fun stopForegroundAndSelf() {
+    private fun stopForegroundAndSelf(startId: Int? = null) {
         synchronized(stateLock) {
             serviceStopRequested = true
             isStopping = false
         }
+        foregroundStarted = false
         releaseRuntimeWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -894,7 +1146,11 @@ class NodeService : Service() {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
-        stopSelf()
+        if (startId != null) {
+            stopSelf(startId)
+        } else {
+            stopSelf()
+        }
     }
 
     private fun isRuntimeOwnedByApp(port: Int): Boolean {
@@ -1053,6 +1309,7 @@ class NodeService : Service() {
             NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = getString(R.string.notification_channel_desc)
+            setShowBadge(false)
         }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         nm.createNotificationChannel(channel)
@@ -1075,11 +1332,21 @@ class NodeService : Service() {
             setPackage(packageName)
         }
         val copyLanPendingIntent = PendingIntent.getService(this, 2, copyLanIntent, pendingFlags)
+        val dismissIntent = Intent(this, NodeService::class.java).apply {
+            action = ACTION_NOTIFICATION_DISMISSED
+            setPackage(packageName)
+        }
+        val dismissPendingIntent = PendingIntent.getService(this, 3, dismissIntent, pendingFlags)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(dismissPendingIntent)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 getString(R.string.notification_action_stop),
@@ -1096,7 +1363,16 @@ class NodeService : Service() {
 
     private fun updateNotification(text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
+            nm.cancel(NOTIFICATION_ID)
+            return
+        }
         nm.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun cancelForegroundNotification() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        nm.cancel(NOTIFICATION_ID)
     }
 
     private fun copyLanAddressToClipboard() {
@@ -1157,18 +1433,55 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
-        serviceStopRequested = true
-        scope.cancel()
-        synchronized(stateLock) {
-            nodeThread?.interrupt()
+        val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(applicationContext)
+        val destroySnapshot = synchronized(stateLock) {
+            val unexpected = shouldReportUnexpectedNodeServiceDestroy(
+                serviceStopRequested = serviceStopRequested,
+                stopping = isStopping,
+                desiredRunning = desiredRunning,
+                running = isRunning,
+                threadAlive = nodeThread?.isAlive == true,
+                startupStarted = startupStartedAtMs > 0L
+            )
+            val threadToInterrupt = nodeThread
+            serviceStopRequested = true
             nodeThread = null
             isRunning = false
             isStopping = false
             runningPublishedGeneration = -1L
             startupStartedAtMs = 0L
             currentStartExplicit = false
+            unexpected to threadToInterrupt
         }
+        scope.cancel()
+        destroySnapshot.second?.interrupt()
         releaseRuntimeWakeLock()
+        val shouldReattach = destroySnapshot.first &&
+            desiredRunning &&
+            claimUnexpectedForegroundReattach()
+        if (destroySnapshot.first) {
+            val message = if (shouldReattach) {
+                "普通模式前台服务意外终止，正在重新挂接"
+            } else {
+                "普通模式前台服务意外终止，请重新启动服务"
+            }
+            AppDiagnosticLogger.e(this, TAG, message)
+            broadcastStatus(STATUS_ERROR, message = message, error = message)
+        }
         super.onDestroy()
+        if (shouldReattach) {
+            Handler(Looper.getMainLooper()).post {
+                val requested = ensureForegroundNotification(applicationContext)
+                AppDiagnosticLogger.i(
+                    applicationContext,
+                    TAG,
+                    if (requested) {
+                        "异常销毁后已请求重新挂接前台服务"
+                    } else {
+                        "异常销毁后无法重新挂接前台服务，等待用户返回应用"
+                    }
+                )
+            }
+        }
     }
 }

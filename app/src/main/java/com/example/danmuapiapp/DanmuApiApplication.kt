@@ -5,10 +5,8 @@ import android.content.Context
 import android.os.Build
 import android.os.UserManager
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
-import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
-import com.example.danmuapiapp.data.util.DeviceCompatMode
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
@@ -36,15 +34,6 @@ class DanmuApiApplication : Application() {
             AppDiagnosticLogger.w(this, TAG, "初始化夜间模式失败，已跳过：${it.message}", it)
         }
 
-        if (DeviceCompatMode.shouldUseCompatMode(this)) {
-            AppDiagnosticLogger.i(this, TAG, "检测到兼容设备，继续初始化系统心跳以支持 TV 实验性保活")
-        }
-
-        runCatching {
-            SystemHeartbeatScheduler.refresh(this)
-        }.onFailure {
-            AppDiagnosticLogger.w(this, TAG, "初始化系统心跳调度失败，已跳过：${it.message}", it)
-        }
     }
 
     private fun isUserUnlockedSafe(): Boolean {

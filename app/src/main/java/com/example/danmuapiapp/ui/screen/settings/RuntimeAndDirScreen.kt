@@ -6,11 +6,8 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,22 +15,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.SettingsAccessibility
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -48,10 +40,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -60,10 +50,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.service.HarmonyCompatDetector
-import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
-import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
+import com.example.danmuapiapp.domain.model.NormalNotificationBehavior
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.screen.home.NormalModeKeepAliveGuideNavigator
@@ -73,7 +62,6 @@ import com.example.danmuapiapp.ui.component.SettingsItem
 import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
-import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
 @Composable
@@ -83,11 +71,8 @@ fun RuntimeAndDirScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
-    val keepAliveEnabled by viewModel.keepAlive.collectAsStateWithLifecycle()
-    val heartbeatEnabled by viewModel.keepAliveHeartbeatEnabled.collectAsStateWithLifecycle()
-    val heartbeatMode by viewModel.keepAliveHeartbeatMode.collectAsStateWithLifecycle()
-    val heartbeatIntervalMinutes by viewModel.keepAliveHeartbeatIntervalMinutes.collectAsStateWithLifecycle()
     val normalModeStabilityMode by viewModel.normalModeStabilityMode.collectAsStateWithLifecycle()
+    val normalNotificationBehavior by viewModel.normalNotificationBehavior.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -104,14 +89,6 @@ fun RuntimeAndDirScreen(
     val keepAliveManufacturer = remember { NormalModeKeepAliveGuideNavigator.manufacturerName() }
     val recentsLockHint = remember { NormalModeKeepAliveGuideNavigator.recentsLockHint() }
     val autoStartHint = remember { NormalModeKeepAliveGuideNavigator.autoStartHint() }
-    val heartbeatPresetMinutes = remember {
-        listOf(5, 15, 30, 60, 120)
-    }
-    val effectiveSystemIntervalMinutes = heartbeatIntervalMinutes
-        .coerceAtLeast(NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES)
-    var heartbeatInput by rememberSaveable(heartbeatIntervalMinutes) {
-        mutableStateOf(heartbeatIntervalMinutes.toString())
-    }
     val workDirInfo = viewModel.workDirInfo
     val normalRuntimeProfile = remember(
         normalModeStabilityMode,
@@ -195,134 +172,6 @@ fun RuntimeAndDirScreen(
                         onCheckedChange = viewModel::setNormalBootAutoStart
                     )
                     SettingsDivider()
-                    SettingsSwitchItem(
-                        title = "无障碍保活",
-                        subtitle = if (viewModel.a11yEnabled) {
-                            "已检测到无障碍服务，异常退出可自动拉起"
-                        } else {
-                            "未启用系统无障碍，建议先前往系统开启"
-                        },
-                        icon = Icons.Rounded.AccessibilityNew,
-                        checked = keepAliveEnabled,
-                        onCheckedChange = {
-                            viewModel.setKeepAliveEnabled(it)
-                            viewModel.refreshRuntimeRelatedStates()
-                        }
-                    )
-                    SettingsDivider()
-                    SettingsSwitchItem(
-                        title = "心跳兜底检查（默认关闭）",
-                        subtitle = if (heartbeatEnabled) {
-                            when (heartbeatMode) {
-                                KeepAliveHeartbeatMode.Accessibility -> {
-                                    "已开启：无障碍心跳，每 ${heartbeatIntervalMinutes} 分钟检查一次"
-                                }
-                                KeepAliveHeartbeatMode.System -> {
-                                    "已开启：系统定时心跳，每 ${effectiveSystemIntervalMinutes} 分钟检查一次"
-                                }
-                            }
-                        } else {
-                            "关闭：仅使用事件驱动保活，不做定时检查"
-                        },
-                        icon = Icons.Rounded.PowerSettingsNew,
-                        checked = heartbeatEnabled,
-                        onCheckedChange = { viewModel.setKeepAliveHeartbeatEnabled(it) }
-                    )
-                    if (heartbeatEnabled) {
-                        SettingsDivider(startIndent = 16.dp)
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                text = "心跳模式",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                KeepAliveHeartbeatMode.entries.forEachIndexed { index, mode ->
-                                    SegmentedButton(
-                                        selected = heartbeatMode == mode,
-                                        onClick = { viewModel.setKeepAliveHeartbeatMode(mode) },
-                                        shape = SegmentedButtonDefaults.itemShape(
-                                            index = index,
-                                            count = KeepAliveHeartbeatMode.entries.size
-                                        )
-                                    ) {
-                                        Text(mode.label)
-                                    }
-                                }
-                            }
-                            Text(
-                                text = if (heartbeatMode == KeepAliveHeartbeatMode.System) {
-                                    "系统定时模式会受 Doze 和厂商省电影响，触发时间可能延后。"
-                                } else {
-                                    "无障碍模式由保活服务内定时触发，适合对恢复速度要求更高的场景。"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "心跳间隔（分钟）",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                heartbeatPresetMinutes.forEach { preset ->
-                                    AppGlassAssistChip(
-                                        onClick = {
-                                            heartbeatInput = preset.toString()
-                                            viewModel.setKeepAliveHeartbeatIntervalMinutes(preset)
-                                        },
-                                        label = { Text("$preset") }
-                                    )
-                                }
-                            }
-                            OutlinedTextField(
-                                value = heartbeatInput,
-                                onValueChange = { input ->
-                                    heartbeatInput = input.filter { it.isDigit() }.take(4)
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                label = { Text("自定义分钟") },
-                                placeholder = { Text("例如 20") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                AppGlassButton(
-                                    onClick = {
-                                        val parsed = heartbeatInput.toIntOrNull()
-                                        if (parsed == null) {
-                                            viewModel.postMessage("请输入有效的心跳分钟数")
-                                        } else {
-                                            viewModel.setKeepAliveHeartbeatIntervalMinutes(parsed)
-                                        }
-                                    }
-                                ) {
-                                    Text("应用间隔")
-                                }
-                            }
-                            if (heartbeatMode == KeepAliveHeartbeatMode.System) {
-                                Text(
-                                    text = "系统定时模式最小按 ${NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_SYSTEM_MIN_MINUTES} 分钟执行。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        SettingsDivider()
-                    } else {
-                        SettingsDivider()
-                    }
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -353,22 +202,35 @@ fun RuntimeAndDirScreen(
                         )
                     }
                     SettingsDivider()
-                    SettingsItem(
-                        title = "系统无障碍设置",
-                        subtitle = if (viewModel.a11yEnabled) "已启用，点击可管理" else "未启用，点击前往开启",
-                        icon = Icons.Rounded.SettingsAccessibility,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                )
-                            }.onFailure {
-                                viewModel.postMessage("无法打开无障碍设置")
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "服务通知行为",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            NormalNotificationBehavior.entries.forEachIndexed { index, behavior ->
+                                SegmentedButton(
+                                    selected = normalNotificationBehavior == behavior,
+                                    onClick = { viewModel.setNormalNotificationBehavior(behavior) },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index = index,
+                                        count = NormalNotificationBehavior.entries.size
+                                    )
+                                ) {
+                                    Text(behavior.label)
+                                }
                             }
                         }
-                    )
+                        Text(
+                            text = normalNotificationBehavior.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     SettingsDivider()
                     SettingsItem(
                         title = "保活建议",
