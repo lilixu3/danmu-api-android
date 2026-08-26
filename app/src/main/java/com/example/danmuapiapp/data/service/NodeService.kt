@@ -61,6 +61,7 @@ class NodeService : Service() {
         const val EXTRA_STATUS = "status"
         const val EXTRA_MESSAGE = "status_message"
         const val EXTRA_EXPLICIT_START = "explicit_start"
+        const val EXTRA_FORCE_FOREGROUND = "force_foreground"
         const val STATUS_STARTING = "starting"
         const val STATUS_RUNNING = "running"
         const val STATUS_STOPPING = "stopping"
@@ -112,12 +113,17 @@ class NodeService : Service() {
             context.startService(intent)
         }
 
-        fun ensureForegroundNotification(context: Context): Boolean {
+        fun ensureForegroundNotification(context: Context, force: Boolean = false): Boolean {
             val appContext = context.applicationContext
             if (!NodeKeepAlivePrefs.isDesiredRunning(appContext)) return false
-            if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(appContext)) return false
+            if (force) {
+                NormalNotificationBehaviorPrefs.clearManuallyHidden(appContext)
+            } else if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(appContext)) {
+                return false
+            }
             val intent = Intent(appContext, NodeService::class.java).apply {
                 action = ACTION_ENSURE_FOREGROUND
+                putExtra(EXTRA_FORCE_FOREGROUND, force)
             }
             return runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -346,7 +352,10 @@ class NodeService : Service() {
                 }
             }
             ACTION_ENSURE_FOREGROUND -> {
-                if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
+                val forceForeground = intent.getBooleanExtra(EXTRA_FORCE_FOREGROUND, false)
+                if (forceForeground) {
+                    NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
+                } else if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
                     AppDiagnosticLogger.i(this, TAG, "按设置保留用户手动关闭的服务通知")
                     if (!foregroundStarted) stopSelf(startId)
                     return START_STICKY
@@ -1471,7 +1480,7 @@ class NodeService : Service() {
         super.onDestroy()
         if (shouldReattach) {
             Handler(Looper.getMainLooper()).post {
-                val requested = ensureForegroundNotification(applicationContext)
+                val requested = ensureForegroundNotification(applicationContext, force = true)
                 AppDiagnosticLogger.i(
                     applicationContext,
                     TAG,
