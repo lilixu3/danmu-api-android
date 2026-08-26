@@ -7,13 +7,9 @@ import com.example.danmuapiapp.domain.model.RunMode
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent.action != Intent.ACTION_USER_UNLOCKED
-        ) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
         val appContext = context.applicationContext
-        SystemHeartbeatScheduler.refresh(appContext)
-
         if (!NormalAutoStartPrefs.isBootAutoStartEnabled(appContext)) return
 
         val pending = goAsync()

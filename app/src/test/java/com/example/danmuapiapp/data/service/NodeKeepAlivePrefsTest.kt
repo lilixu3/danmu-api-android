@@ -20,47 +20,6 @@ class NodeKeepAlivePrefsTest {
     }
 
     @Test
-    fun `clearRestartBackoff should use commit for cross process visibility`() {
-        val prefs = FakeSharedPreferences().apply {
-            seedInt("recovery_failure_count", 3)
-            seedLong("recovery_block_until_ms", 123L)
-        }
-
-        NodeKeepAlivePrefs.clearRestartBackoff(prefs)
-
-        assertEquals(0, prefs.getInt("recovery_failure_count", -1))
-        assertEquals(0L, prefs.getLong("recovery_block_until_ms", -1L))
-        assertEquals(1, prefs.commitCount)
-        assertEquals(0, prefs.applyCount)
-    }
-
-    @Test
-    fun `recordRecoveryFailure should commit updated block window`() {
-        val prefs = FakeSharedPreferences().apply {
-            seedBoolean("desired_running", true)
-        }
-
-        NodeKeepAlivePrefs.recordRecoveryFailure(prefs)
-
-        assertEquals(1, prefs.getInt("recovery_failure_count", 0))
-        assertTrue(prefs.getLong("recovery_block_until_ms", 0L) > System.currentTimeMillis())
-        assertEquals(1, prefs.commitCount)
-        assertEquals(0, prefs.applyCount)
-    }
-
-    @Test
-    fun `recordRecoveryFailure should do nothing when desired running is false`() {
-        val prefs = FakeSharedPreferences()
-
-        NodeKeepAlivePrefs.recordRecoveryFailure(prefs)
-
-        assertEquals(0, prefs.commitCount)
-        assertEquals(0, prefs.applyCount)
-        assertFalse(prefs.contains("recovery_failure_count"))
-        assertFalse(prefs.contains("recovery_block_until_ms"))
-    }
-
-    @Test
     fun `compat runtime wake lock should be enabled only while tv service is running`() {
         assertTrue(
             NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
@@ -103,18 +62,6 @@ private class FakeSharedPreferences : SharedPreferences {
         private set
     var applyCount: Int = 0
         private set
-
-    fun seedBoolean(key: String, value: Boolean) {
-        data[key] = value
-    }
-
-    fun seedInt(key: String, value: Int) {
-        data[key] = value
-    }
-
-    fun seedLong(key: String, value: Long) {
-        data[key] = value
-    }
 
     override fun getAll(): MutableMap<String, *> = data.toMutableMap()
 

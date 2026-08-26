@@ -140,7 +140,6 @@ class CompatModeActivity : ComponentActivity() {
                         onDismissBranchPicker = compatViewModel::dismissBranchDialog,
                         onDeleteCore = compatViewModel::deleteCore,
                         onSaveCustomCore = compatViewModel::saveCustomCore,
-                        onToggleKeepAliveProfile = compatViewModel::toggleKeepAliveProfile,
                         onCheckAppUpdate = compatViewModel::checkAppUpdate,
                         onDownloadAppUpdate = compatViewModel::downloadAppUpdate,
                         onInstallAppUpdate = {
@@ -212,6 +211,13 @@ class CompatModeActivity : ComponentActivity() {
         if (::compatViewModel.isInitialized) {
             compatViewModel.onActivityResumed(this)
         }
+    }
+
+    override fun onStop() {
+        if (::compatViewModel.isInitialized) {
+            compatViewModel.onActivityStopped()
+        }
+        super.onStop()
     }
 
     private fun refreshLocalNetworkPermissionState() {

@@ -18,6 +18,7 @@ import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
+import com.example.danmuapiapp.data.service.NormalNotificationBehaviorPrefs
 import com.example.danmuapiapp.data.service.FavoriteCacheStore
 import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.data.service.NodeProjectManager
@@ -480,6 +481,20 @@ class RuntimeRepositoryImpl @Inject constructor(
         appForeground = foreground
         if (foreground) {
             refreshRuntimeState()
+        } else {
+            val state = _runtimeState.value
+            if (state.runMode == RunMode.Normal &&
+                (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting)
+            ) {
+                if (settingsRepository.normalNotificationBehavior.value ==
+                    NormalNotificationBehavior.ForegroundRestore
+                ) {
+                    NormalNotificationBehaviorPrefs.clearManuallyHidden(context)
+                }
+                if (!NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)) {
+                    NodeService.ensureForegroundNotification(context)
+                }
+            }
         }
     }
 
@@ -1652,7 +1667,21 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.runMode) {
             RunMode.Normal -> {
                 if (isNormalRuntimeReachable(state.port)) {
-                    markRunning(forceNewStart = false)
+                    val notificationSuppressed =
+                        NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
+                    val foregroundRequested = if (notificationSuppressed) {
+                        false
+                    } else {
+                        NodeService.ensureForegroundNotification(context)
+                    }
+                    markRunning(
+                        forceNewStart = false,
+                        statusMessage = when {
+                            notificationSuppressed -> "接口已就绪，通知按设置保持隐藏"
+                            foregroundRequested -> "接口可用，正在恢复前台服务通知"
+                            else -> "接口已就绪，可直接在局域网访问"
+                        }
+                    )
                     if (state.status == ServiceStatus.Error || state.status == ServiceStatus.Stopped) {
                         addLog(LogLevel.Info, "检测到普通模式服务仍可访问，已自动纠正为运行中")
                     }
@@ -1754,8 +1783,90 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Stopped,
-            ServiceStatus.Error,
-            ServiceStatus.Running -> Unit
+            ServiceStatus.Error -> Unit
+
+            ServiceStatus.Running -> {
+                val canDisplayNotification = NodeService.canDisplayForegroundNotification(context)
+                val notificationManuallyHidden =
+                    NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
+                val notificationActive = if (canDisplayNotification) {
+                    NodeService.isForegroundNotificationActive(context)
+                } else {
+                    false
+                }
+                val nextUnreachableCount = if (portOpen) {
+                    0
+                } else {
+                    reconcileConsecutiveDeadCount + 1
+                }
+                reconcileConsecutiveDeadCount = nextUnreachableCount
+
+                when (
+                    decideNormalRunningReconcileAction(
+                        consecutiveUnreachableCount = nextUnreachableCount,
+                        serviceRunning = serviceRunning,
+                        processRunning = processRunning,
+                        portOpen = portOpen,
+                        notificationActive = notificationActive,
+                        canDisplayNotification = canDisplayNotification,
+                        notificationManuallyHidden = notificationManuallyHidden
+                    )
+                ) {
+                    NormalRunningReconcileAction.Healthy -> {
+                        updateStatusMessage(
+                            expectedStatus = ServiceStatus.Running,
+                            message = if (canDisplayNotification) {
+                                "接口已就绪，可直接在局域网访问"
+                            } else {
+                                "接口正常；通知权限或服务通知渠道已关闭"
+                            }
+                        )
+                    }
+
+                    NormalRunningReconcileAction.RespectUserDismissal -> {
+                        updateStatusMessage(
+                            expectedStatus = ServiceStatus.Running,
+                            message = "接口正常；通知按设置保持隐藏"
+                        )
+                    }
+
+                    NormalRunningReconcileAction.RestoreForeground -> {
+                        val requested = NodeService.ensureForegroundNotification(context)
+                        val repairMessage = if (requested) {
+                            "接口正常，正在重新挂接前台服务通知"
+                        } else {
+                            "接口正常，但前台服务通知恢复失败"
+                        }
+                        val shouldLogRepair = state.statusMessage != repairMessage
+                        updateStatusMessage(
+                            expectedStatus = ServiceStatus.Running,
+                            message = repairMessage
+                        )
+                        if (shouldLogRepair) {
+                            addLog(
+                                if (requested) LogLevel.Warn else LogLevel.Error,
+                                if (requested) {
+                                    "检测到 API 仍可用但前台服务或通知缺失，已请求重新挂接"
+                                } else {
+                                    "检测到 API 仍可用但前台服务或通知缺失，重新挂接失败"
+                                }
+                            )
+                        }
+                    }
+
+                    NormalRunningReconcileAction.WaitForNextProbe -> Unit
+
+                    NormalRunningReconcileAction.MarkStopped -> {
+                        markStopped("普通模式运行状态已失效，请重新启动")
+                        addLog(LogLevel.Warn, "连续检测到普通模式服务、进程和端口均已退出")
+                    }
+
+                    NormalRunningReconcileAction.MarkError -> {
+                        markError("普通模式进程仍在，但 API 接口已不可达，请重新启动")
+                        addLog(LogLevel.Error, "普通模式前台服务或进程残留，但 API 端口连续不可达")
+                    }
+                }
+            }
         }
     }
 
