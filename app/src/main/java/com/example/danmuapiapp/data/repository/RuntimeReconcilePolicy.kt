@@ -38,10 +38,13 @@ internal fun decideNormalRunningReconcileAction(
     notificationManuallyHidden: Boolean = false
 ): NormalRunningReconcileAction {
     if (portOpen) {
+        if (!serviceRunning) {
+            return NormalRunningReconcileAction.RestoreForeground
+        }
         if (notificationManuallyHidden) {
             return NormalRunningReconcileAction.RespectUserDismissal
         }
-        return if (!serviceRunning || (canDisplayNotification && !notificationActive)) {
+        return if (canDisplayNotification && !notificationActive) {
             NormalRunningReconcileAction.RestoreForeground
         } else {
             NormalRunningReconcileAction.Healthy

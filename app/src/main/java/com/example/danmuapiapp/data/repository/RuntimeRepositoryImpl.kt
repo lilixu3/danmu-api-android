@@ -1667,12 +1667,16 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.runMode) {
             RunMode.Normal -> {
                 if (isNormalRuntimeReachable(state.port)) {
+                    val serviceRunning = isNormalServiceRunning()
                     val notificationSuppressed =
                         NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
-                    val foregroundRequested = if (notificationSuppressed) {
+                    val foregroundRequested = if (notificationSuppressed && serviceRunning) {
                         false
                     } else {
-                        NodeService.ensureForegroundNotification(context)
+                        NodeService.ensureForegroundNotification(
+                            context = context,
+                            force = !serviceRunning
+                        )
                     }
                     markRunning(
                         forceNewStart = false,
@@ -1831,7 +1835,10 @@ class RuntimeRepositoryImpl @Inject constructor(
                     }
 
                     NormalRunningReconcileAction.RestoreForeground -> {
-                        val requested = NodeService.ensureForegroundNotification(context)
+                        val requested = NodeService.ensureForegroundNotification(
+                            context = context,
+                            force = !serviceRunning
+                        )
                         val repairMessage = if (requested) {
                             "接口正常，正在重新挂接前台服务通知"
                         } else {

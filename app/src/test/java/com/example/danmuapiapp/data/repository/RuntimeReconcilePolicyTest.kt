@@ -98,6 +98,21 @@ class RuntimeReconcilePolicyTest {
     }
 
     @Test
+    fun `前台服务已销毁但接口仍可用时必须优先恢复服务`() {
+        assertTrue(
+            decideNormalRunningReconcileAction(
+                consecutiveUnreachableCount = 0,
+                serviceRunning = false,
+                processRunning = true,
+                portOpen = true,
+                notificationActive = false,
+                canDisplayNotification = true,
+                notificationManuallyHidden = true
+            ) == NormalRunningReconcileAction.RestoreForeground
+        )
+    }
+
+    @Test
     fun `运行信号短暂缺失时不应立即判停`() {
         assertTrue(
             decideNormalRunningReconcileAction(
