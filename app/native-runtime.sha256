@@ -1,13 +1,15 @@
-# Node 24.19.0 运行时清单：digidem/nodejs-mobile v24.19.0-2 (full)
-# libnode.so 来自 digidem 官方 release；libnative-lib.so 由仓库内
+# Node 24.19.0 运行时清单：digidem/nodejs-mobile v24.19.0-2 **lite** 变体
+# --without-amaro/--without-inspector/--without-sqlite/--with-intl=none +
+# V8 pointer compression（Android）+ gc-sections；已验证核心零 Intl 依赖；
+# libnode.so 来自 digidem 官方 lite release；libnative-lib.so 由仓库内
 # app/src/main/cpp/native-lib.cpp 以 NDK r29 + C++20 编译并保持 16KB 页对齐；
 # libc++_shared.so 与编译所用 NDK 同源。
-e1218fefccd7e66d9ad5b8e031e6f98dc32815e362214e7e01b6c87da64067cd  libnode/bin/arm64-v8a/libnode.so
+24c731d4d62df2af4f0ee3f696124a55f069009783cc4fbc0368029802fe2feb  libnode/bin/arm64-v8a/libnode.so
 3a10ad08ae144ac5ddbb8c3aa82fe7d36593a1abe042acfdca97c25af236ab92  jni-current/arm64-v8a/libnative-lib.so
 0c52cfab2df0d957d8b346a2bdc5ae8d71feca2591924d77e1cd724d5bf74352  jni-current/arm64-v8a/libc++_shared.so
-841a867421a95c671d0b22552d8a0d840e5a9ef179545fafc5b5d7c295778585  libnode/bin/armeabi-v7a/libnode.so
+2b1876b0d9c45d93d6df42009a7378e4f48d3ed679e3ad5d3c6768621212182a  libnode/bin/armeabi-v7a/libnode.so
 62779bd2069d4137351cd093a96b85efe3d02e7901b1f57212edee212ace39e0  jni-current/armeabi-v7a/libnative-lib.so
 7ce65fd0fdd49236bc2ee618f6968dbb3fca46434845f563f2bb4c994878853e  jni-current/armeabi-v7a/libc++_shared.so
-8931f81c19a9a25881a2b5945a989d62121d69e9e2d95fd41050525ba6866d9d  libnode/bin/x86_64/libnode.so
+bd2ec0be68626be773a1de61cb1a0554de8bc84be7ef0ddb25a3a99d7c080ed1  libnode/bin/x86_64/libnode.so
 8f613273cd3da5b12485c42be53d80d640b77bf3bdaf3e88590068f4973ddd80  jni-current/x86_64/libnative-lib.so
 e28cb9e0f456caf8498d0e8562b3ac3f73bf78c07555a52b5602396f240abec3  jni-current/x86_64/libc++_shared.so
