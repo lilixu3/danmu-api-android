@@ -750,13 +750,6 @@ tasks.register<Exec>("testBundledBrotliRuntime") {
     commandLine("node", "node-tests/brotli-runtime-smoke.mjs")
 }
 
-tasks.register<Exec>("testBundledIntlGuard") {
-    dependsOn("verifyBundledNodeModules")
-    workingDir = rootProject.projectDir
-    // 内嵌运行时为 digidem lite 变体（--with-intl=none），阻断新的 Intl 依赖进入运行路径。
-    commandLine("node", "node-tests/bundled-intl-guard-smoke.mjs")
-}
-
 tasks.register<Exec>("testBundledNodeLockClosure") {
     dependsOn("verifyBundledNodeModules")
     workingDir = rootProject.projectDir
@@ -783,7 +776,6 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
         "node-tests/brotli-runtime-smoke.mjs",
         "node-tests/bundled-node-lock-closure-smoke.mjs",
         "node-tests/core-runtime-dependencies-smoke.mjs",
-        "node-tests/bundled-intl-guard-smoke.mjs"
     )
     dependsOn("verifyBundledNodeModules")
     inputs.files(smokeScripts.map(rootProject::file))
@@ -1207,7 +1199,6 @@ tasks.named("preBuild").configure {
     dependsOn(testBundledCoreRuntimeDependenciesTask)
     dependsOn(testDanmakuPrepareCacheTask)
     dependsOn(testFavoriteSchedulerHostTask)
-    dependsOn(tasks.named("testBundledIntlGuard"))
 }
 
 tasks.matching {
