@@ -280,3 +280,9 @@ lint 指出 `NodeService.kt:269` 使用 `wakeLock.acquire()` 无 timeout，存�
 | 5 | WakeLock timeout | DONE | 2026-06-18 | `NodeServiceWakeLockPolicyTest` + `:app:testDebugUnitTest` 通过 |
 | 6 | GitHub token 加密存储 | DONE | 2026-06-18 | `SettingsRepositoryImpl` / `GithubProxyService` 改为 `SecureStringStore`，`compileDebugKotlin` 随测试通过 |
 | 7 | 构建链固定输入 | DONE | 2026-07-28 | 默认构建移除 sibling/ZIP 隐式输入，增加 Node 18、原生哈希与 APK 内容门禁 |
+
+---
+
+> **更新（2026-08-27）：** 内嵌运行时已升级至 digidem/nodejs-mobile **v24.19.0-2**（详见 git 历史提交 9dc2b0b 与双清单）。
+> 本文中出现的 "Node 18.20.4" 为成文时的历史门禁值；当前发版机 smoke 门禁已放宽为与内嵌版本同 major（24.x），
+> 校验逻辑见 app/build.gradle.kts 的 verifyEmbeddedNodeCompatibility。
