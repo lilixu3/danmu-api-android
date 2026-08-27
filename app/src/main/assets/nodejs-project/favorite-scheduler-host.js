@@ -7,7 +7,8 @@ const { pathToFileURL } = require('url');
 const INIT_TIMEOUT_MS = 8000;
 const FAVORITE_CACHE_FILE = 'favoritesCache';
 const REDIS_SYNC_DEBOUNCE_MS = 100;
-const REDIS_SYNC_POLL_MS = 250;
+/** Low-frequency safety net for when fs.watch is unavailable or misses events. */
+const REDIS_SYNC_FALLBACK_POLL_MS = 2000;
 
 function moduleCandidates(projectDir, variantDir, relativePath) {
   const base = path.join(projectDir, variantDir);
@@ -203,10 +204,7 @@ function startFavoriteRedisBridge({ cacheFile, globals, loadFavorites, updateRed
     return activeSync;
   };
 
-  const pollFile = () => {
-    const currentFileStamp = favoriteFileStamp(cacheFile);
-    if (currentFileStamp === lastFileStamp) return;
-    lastFileStamp = currentFileStamp;
+  const scheduleSync = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
@@ -214,17 +212,43 @@ function startFavoriteRedisBridge({ cacheFile, globals, loadFavorites, updateRed
     }, REDIS_SYNC_DEBOUNCE_MS);
   };
 
-  // Capture the baseline synchronously, then compare it ourselves. fs.watchFile
-  // can miss a write that lands before its first internal stat completes.
-  const poller = setInterval(pollFile, REDIS_SYNC_POLL_MS);
-  poller.unref?.();
+  const pollFile = () => {
+    const currentFileStamp = favoriteFileStamp(cacheFile);
+    if (currentFileStamp === lastFileStamp) return;
+    lastFileStamp = currentFileStamp;
+    scheduleSync();
+  };
+
+  // Event-driven wake-up via fs.watch (inotify). The watcher must cover the
+  // parent directory: persistence may swap the file atomically (write temp +
+  // rename), which would silently detach a watcher placed on the file itself.
+  // Stamp comparison stays authoritative so debounced or partially written
+  // updates still trigger exactly one sync.
+  let directoryWatcher = null;
+  try {
+    directoryWatcher = fs.watch(path.dirname(cacheFile), (_event, filename) => {
+      if (stopped) return;
+      if (!filename || filename === path.basename(cacheFile)) pollFile();
+    });
+  } catch (error) {
+    directoryWatcher = null;
+    log('[favorite] fs.watch unavailable, falling back to polling:', error?.message || error);
+  }
+
+  // Capture the baseline synchronously; the first fallback tick also covers a
+  // write that lands between the baseline capture and watcher installation.
+  const fallbackPoller = setInterval(pollFile, REDIS_SYNC_FALLBACK_POLL_MS);
+  directoryWatcher?.unref?.();
+  fallbackPoller.unref?.();
   return {
     sync,
     stop() {
       stopped = true;
       if (timer) clearTimeout(timer);
       timer = null;
-      clearInterval(poller);
+      clearInterval(fallbackPoller);
+      try { directoryWatcher?.close(); } catch {}
+      directoryWatcher = null;
     },
   };
 }

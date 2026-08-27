@@ -442,6 +442,17 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun restartServiceAndAwait() {
+        cancelCandidateObservation()
+        operationMutex.withLock {
+            runCatching {
+                restartServiceLocked()
+            }.onFailure {
+                handleRuntimeOperationFailure("重启服务", it)
+            }
+        }
+    }
+
     override fun refreshRuntimeState() {
         scope.launch {
             try {

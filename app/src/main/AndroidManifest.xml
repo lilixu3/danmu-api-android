@@ -88,6 +88,10 @@
             android:theme="@style/Theme.DanmuApiApp" />
 
         <service
+            android:name="com.example.danmuapiapp.data.service.NotificationRuntimeActionService"
+            android:exported="false" />
+
+        <service
             android:name="com.example.danmuapiapp.data.service.NodeService"
             android:exported="false"
             android:foregroundServiceType="specialUse"

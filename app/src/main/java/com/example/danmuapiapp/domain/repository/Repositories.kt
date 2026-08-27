@@ -9,6 +9,7 @@ interface RuntimeRepository {
     fun startService()
     fun stopService()
     fun restartService()
+    suspend fun restartServiceAndAwait()
     fun refreshRuntimeState()
     suspend fun refreshRuntimeStateAndAwait()
     fun setAppForeground(foreground: Boolean)

@@ -50,6 +50,8 @@ class NodeService : Service() {
             get() = "$actionPrefix.START_NODE"
         val ACTION_STOP: String
             get() = "$actionPrefix.STOP_NODE"
+        val ACTION_RESTART: String
+            get() = "$actionPrefix.RESTART_NODE"
         val ACTION_ENSURE_FOREGROUND: String
             get() = "$actionPrefix.ENSURE_NODE_FOREGROUND"
         val ACTION_REFRESH_NOTIFICATION: String
@@ -1336,6 +1338,11 @@ class NodeService : Service() {
             setPackage(packageName)
         }
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, pendingFlags)
+        val restartIntent = Intent(this, NotificationRuntimeActionService::class.java).apply {
+            action = ACTION_RESTART
+            setPackage(packageName)
+        }
+        val restartPendingIntent = PendingIntent.getService(this, 4, restartIntent, pendingFlags)
         val copyLanIntent = Intent(this, NodeService::class.java).apply {
             action = ACTION_COPY_LAN_ADDRESS
             setPackage(packageName)
@@ -1360,6 +1367,11 @@ class NodeService : Service() {
                 android.R.drawable.ic_menu_close_clear_cancel,
                 getString(R.string.notification_action_stop),
                 stopPendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_popup_sync,
+                getString(R.string.notification_action_restart),
+                restartPendingIntent
             )
             .addAction(
                 android.R.drawable.ic_menu_share,
@@ -1393,7 +1405,8 @@ class NodeService : Service() {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 if (clipboard != null && isValid) {
                     clipboard.setPrimaryClip(ClipData.newPlainText("局域网地址", lanUrl))
-                    val displayUrl = maskTokenInUrl(lanUrl)
+                    // 复制内容本就含真实 token，提示直接展示完整地址，避免“看起来被截断”的困惑。
+                    val displayUrl = lanUrl
                     Toast.makeText(
                         appCtx,
                         "已复制：$displayUrl",
@@ -1426,19 +1439,6 @@ class NodeService : Service() {
             AppDiagnosticLogger.w(applicationContext, TAG, "readTokenFromEnvFile 失败: ${e.message}", e)
             ""
         }
-    }
-
-    private fun maskTokenInUrl(url: String): String {
-        // 隐藏 token 路径段，例如 http://192.168.1.5:9321/abc123 → http://192.168.1.5:9321/****
-        val lastSlash = url.lastIndexOf('/')
-        if (lastSlash <= 0) return url
-        val beforeSlash = url.substring(0, lastSlash)
-        val afterSlash = url.substring(lastSlash + 1)
-        // 仅当斜杠后是 token（不含 : 和更多路径）才脱敏
-        if (afterSlash.isNotBlank() && !afterSlash.contains(':') && !afterSlash.contains('/')) {
-            return "$beforeSlash/****"
-        }
-        return url
     }
 
     override fun onDestroy() {
