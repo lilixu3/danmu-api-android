@@ -71,4 +71,15 @@ function scanRuntimeNoise(directory) {
 scanRuntimeNoise(nodeModulesRoot);
 assert.deepEqual(runtimeNoise, [], `基础运行时混入非运行时文件：${runtimeNoise.slice(0, 20).join(', ')}`);
 
+// dan-any CJS 产物的 fast-xml-builder interop 在 Node 24 require(esm) 下
+// 会把 ESM namespace 塞进 .default；refresh 流程必须已应用防护补丁。
+for (const entry of readdirSync(resolve(nodeModulesRoot, '@dan-uni/dan-any/dist'), { withFileTypes: true })) {
+  if (!entry.name.startsWith('adapters-') || !entry.name.endsWith('.cjs')) continue;
+  const text = readFileSync(resolve(nodeModulesRoot, '@dan-uni/dan-any/dist', entry.name), 'utf8');
+  assert(
+    !text.includes('new o.default('),
+    `${entry.name} 缺少 fast-xml-builder interop 防护补丁（Node24 require(esm) 兼容）`,
+  );
+}
+
 console.log(`Bundled lock closure smoke: OK (${packageRoots.size} packages)`);
