@@ -514,6 +514,22 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
             }
         }
 
+    // Node 24 require(esm) 返回 ESM namespace，dan-any 打包产物对
+    // fast-xml-builder 的 interop 会把整个 namespace 塞进 .default，
+    // 使 `new o.default()` 失效。仅 CJS 理论路径受影响（生产全走 ESM），
+    // 此处做幂等防护补丁，保证该调用点在两种模块体系下均可构造。
+    val fxbInteropPatched = "new (typeof o.default===\"function\"?o.default:o.default.default)("
+    rootDir.walkTopDown()
+        .filter { it.isFile && it.name.startsWith("adapters-") && it.name.endsWith(".cjs") }
+        .forEach { file ->
+            val text = file.readText(Charsets.UTF_8)
+            val patched = text.replace("new o.default(", "$fxbInteropPatched")
+            if (patched != text) {
+                file.writeText(patched, Charsets.UTF_8)
+                println("已修补 dan-any fast-xml-builder interop：${file.name}")
+            }
+        }
+
     rootDir.walkBottomUp()
         .filter { it.isDirectory && it != rootDir && it.list()?.isEmpty() == true }
         .forEach { it.delete() }
