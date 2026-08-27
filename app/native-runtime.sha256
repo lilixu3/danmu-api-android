@@ -3,11 +3,11 @@
 # app/src/main/cpp/native-lib.cpp 以 NDK r29 + C++20 编译并保持 16KB 页对齐；
 # libc++_shared.so 与编译所用 NDK 同源。
 e1218fefccd7e66d9ad5b8e031e6f98dc32815e362214e7e01b6c87da64067cd  libnode/bin/arm64-v8a/libnode.so
-508105c5916172e277c6231524d4b6a56ff1595c3efdc707b3ce2fde2a228d1b  jni-current/arm64-v8a/libnative-lib.so
+3a10ad08ae144ac5ddbb8c3aa82fe7d36593a1abe042acfdca97c25af236ab92  jni-current/arm64-v8a/libnative-lib.so
 0c52cfab2df0d957d8b346a2bdc5ae8d71feca2591924d77e1cd724d5bf74352  jni-current/arm64-v8a/libc++_shared.so
 841a867421a95c671d0b22552d8a0d840e5a9ef179545fafc5b5d7c295778585  libnode/bin/armeabi-v7a/libnode.so
-29668fe4e5d87d50934442d1ea7cf370d8ab1e70064d53e548d35acd096a15b1  jni-current/armeabi-v7a/libnative-lib.so
+62779bd2069d4137351cd093a96b85efe3d02e7901b1f57212edee212ace39e0  jni-current/armeabi-v7a/libnative-lib.so
 7ce65fd0fdd49236bc2ee618f6968dbb3fca46434845f563f2bb4c994878853e  jni-current/armeabi-v7a/libc++_shared.so
 8931f81c19a9a25881a2b5945a989d62121d69e9e2d95fd41050525ba6866d9d  libnode/bin/x86_64/libnode.so
-9d0e5781f38ce447a5e64c5824a52f0ce05ddbaf0d2cf94dd09e24ee69751189  jni-current/x86_64/libnative-lib.so
+8f613273cd3da5b12485c42be53d80d640b77bf3bdaf3e88590068f4973ddd80  jni-current/x86_64/libnative-lib.so
 e28cb9e0f456caf8498d0e8562b3ac3f73bf78c07555a52b5602396f240abec3  jni-current/x86_64/libc++_shared.so

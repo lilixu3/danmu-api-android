@@ -88,6 +88,12 @@ fun AboutScreen(
                     icon = Icons.Rounded.Build
                 )
                 SettingsDivider()
+                SettingsValueItem(
+                    title = "Node 运行时",
+                    value = remember { com.example.danmuapiapp.NodeBridge.nodeVersionOrNull() } ?: "不可用",
+                    icon = Icons.Rounded.Memory
+                )
+                SettingsDivider()
                 SettingsItem(
                     title = "检查更新",
                     subtitle = when {

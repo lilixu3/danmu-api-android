@@ -5,6 +5,18 @@
 #include <unistd.h>
 #include "node.h"
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_danmuapiapp_NodeBridge_getNodeVersion(
+        JNIEnv *env,
+        jobject /* this */) {
+    // 编译期常量，来自 node.h，与实际打包的 libnode.so 版本一致。
+    const std::string version =
+            std::to_string(NODE_MAJOR_VERSION) + "." +
+            std::to_string(NODE_MINOR_VERSION) + "." +
+            std::to_string(NODE_PATCH_VERSION);
+    return env->NewStringUTF(version.c_str());
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_example_danmuapiapp_NodeBridge_startNodeWithArguments(
         JNIEnv *env,
