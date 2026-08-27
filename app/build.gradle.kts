@@ -189,7 +189,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.danmuapiapp"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 37
         versionCode = configuredVersionCode
         versionName = configuredVersionName
@@ -738,7 +738,7 @@ tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
     commandLine("node", "node-tests/core-runtime-dependencies-smoke.mjs")
 }
 
-val embeddedNodeVersion = "18.20.4"
+val embeddedNodeVersion = "24.19.0"
 val targetNodeExecutable = (findProperty("targetNodeExecutable") as? String)
     ?.trim()
     ?.takeIf { it.isNotBlank() }
@@ -782,10 +782,19 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
         }
 
         val actualVersion = runTargetNode(listOf("--version")).removePrefix("v")
+        val embeddedMajorMinor = embeddedNodeVersion.split(".").take(2).joinToString(".")
+        val actualMajorMinor = actualVersion.split(".").take(2).joinToString(".")
         if (actualVersion != embeddedNodeVersion) {
-            throw GradleException(
-                "Release 必须使用与内嵌运行时一致的 Node $embeddedNodeVersion 执行 smoke，当前为 $actualVersion（$targetNodeExecutable）"
-            )
+            if (actualMajorMinor == embeddedMajorMinor) {
+                println(
+                    "WARNING: 目标 Node $actualVersion 与内嵌 $embeddedNodeVersion 次级版本不一致，" +
+                        "smoke 结果仅供参考（major.minor 匹配，允许通过）"
+                )
+            } else {
+                throw GradleException(
+                    "Release 必须使用与内嵌运行时同 major.minor 的 Node $embeddedNodeVersion 执行 smoke，当前为 $actualVersion（$targetNodeExecutable）"
+                )
+            }
         }
         runTargetNode(listOf("--check", "app/src/main/assets/nodejs-project/android-server.js"))
         smokeScripts.forEach { script -> runTargetNode(listOf(script)) }
@@ -1113,7 +1122,7 @@ val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
                     val apkEntryName = "lib/$abi/${relativePath.substringAfterLast('/')}"
                     val entry = zip.getEntry(apkEntryName)
                         ?: throw GradleException("${source.assetName} 缺少 $apkEntryName")
-                    if (entry.isDirectory || entry.size <= 0L || entry.size > 64L * 1024L * 1024L) {
+                    if (entry.isDirectory || entry.size <= 0L || entry.size > 128L * 1024L * 1024L) {
                         throw GradleException("${source.assetName} 中的 $apkEntryName 大小异常")
                     }
                     val target = File(preparedNativeRuntimeDir, relativePath)

@@ -1,9 +1,13 @@
-ce00e709fe6b84c5a57b48cbcba8549cf594d752d386a93a8b2c6b76fb9d021a  libnode/bin/arm64-v8a/libnode.so
-bc700f690bdcdc0917edf59c129cefe35ebab167205d207dba2a9b8616d6180e  libnode/bin/armeabi-v7a/libnode.so
-b61f294fd5753d459a016f3c3a0f1d7a6f838311e87cffba85f185bbee1be55d  libnode/bin/x86_64/libnode.so
-dfdbbc6d633d7d7734271ee3b7a288976393ec0ec38f1fedc99360f266ad5279  jni-current/arm64-v8a/libc++_shared.so
-256c17ae87a03b24223af558553d2fd2f0ea507dc7ead679bcf8899fae2888a2  jni-current/arm64-v8a/libnative-lib.so
-4d48066957347b4411d72143c5c55758eac6149c2173fad6a7b2841ee6d4f1c6  jni-current/armeabi-v7a/libc++_shared.so
-18f86bf932883badb11262a8367dda00fbd1403a04f600ffe632e6b6b65588f4  jni-current/armeabi-v7a/libnative-lib.so
-f137f39c78bff2a2e3e23a46033e82b79631ccf0de5a00f6a3b48f625a5c4356  jni-current/x86_64/libc++_shared.so
-ad3f2e25cedd1db940c7f5a3d53c0cdc7d2998c571fe65fda4de01f1f17da80f  jni-current/x86_64/libnative-lib.so
+# Node 24.19.0 运行时清单：digidem/nodejs-mobile v24.19.0-2 (full)
+# libnode.so 来自 digidem 官方 release；libnative-lib.so 由仓库内
+# app/src/main/cpp/native-lib.cpp 以 NDK r29 + C++20 编译并保持 16KB 页对齐；
+# libc++_shared.so 与编译所用 NDK 同源。
+e1218fefccd7e66d9ad5b8e031e6f98dc32815e362214e7e01b6c87da64067cd  libnode/bin/arm64-v8a/libnode.so
+508105c5916172e277c6231524d4b6a56ff1595c3efdc707b3ce2fde2a228d1b  jni-current/arm64-v8a/libnative-lib.so
+0c52cfab2df0d957d8b346a2bdc5ae8d71feca2591924d77e1cd724d5bf74352  jni-current/arm64-v8a/libc++_shared.so
+841a867421a95c671d0b22552d8a0d840e5a9ef179545fafc5b5d7c295778585  libnode/bin/armeabi-v7a/libnode.so
+29668fe4e5d87d50934442d1ea7cf370d8ab1e70064d53e548d35acd096a15b1  jni-current/armeabi-v7a/libnative-lib.so
+7ce65fd0fdd49236bc2ee618f6968dbb3fca46434845f563f2bb4c994878853e  jni-current/armeabi-v7a/libc++_shared.so
+8931f81c19a9a25881a2b5945a989d62121d69e9e2d95fd41050525ba6866d9d  libnode/bin/x86_64/libnode.so
+9d0e5781f38ce447a5e64c5824a52f0ce05ddbaf0d2cf94dd09e24ee69751189  jni-current/x86_64/libnative-lib.so
+e28cb9e0f456caf8498d0e8562b3ac3f73bf78c07555a52b5602396f240abec3  jni-current/x86_64/libc++_shared.so
