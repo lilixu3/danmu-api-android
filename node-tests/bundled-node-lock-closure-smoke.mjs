@@ -10,6 +10,9 @@ const excludedPackageRoots = new Set([
   '@electric-sql/pglite',
   '@electric-sql/pglite-tools',
   'drizzle-orm',
+  // Node >= 16.5 内置 node:stream/web；该包仅作为 fetch-blob 在
+  // 无原生 ReadableStream 环境的兜底，内嵌 Node 24 永不触达。
+  'web-streams-polyfill',
 ]);
 
 for (const lockPath of Object.keys(lock.packages ?? {})) {
@@ -51,6 +54,9 @@ function scanRuntimeNoise(directory) {
       lower.endsWith('.d.ts') ||
       lower.endsWith('.d.cts') ||
       lower.endsWith('.d.mts') ||
+      lower.endsWith('.ts') ||
+      lower.endsWith('.mts') ||
+      lower.endsWith('.cts') ||
       lower.endsWith('.map') ||
       lower === 'readme' ||
       lower.startsWith('readme.') ||
