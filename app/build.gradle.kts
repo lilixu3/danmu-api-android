@@ -487,7 +487,13 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
         "pako/dist/pako_inflate.es5.js",
         "pako/dist/pako_inflate.es5.min.js",
         "pako/dist/pako_inflate.js",
-        "pako/dist/pako_inflate.min.js"
+        "pako/dist/pako_inflate.min.js",
+        // brotli 仅在弹幕链路使用 decompress；encode 半边零引用
+        "brotli/build/encode.js",
+        "brotli/build/mem.js",
+        "brotli/compress.js",
+        "brotli/enc/pre.js",
+        "brotli/index.js"
     )
 
     rootDir.walkTopDown()
