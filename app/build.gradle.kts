@@ -423,7 +423,10 @@ fun readBundledNodeDependencyNames(): List<String> {
 val androidRuntimeExcludedNodeModules = setOf(
     "@electric-sql/pglite",
     "@electric-sql/pglite-tools",
-    "drizzle-orm"
+    "drizzle-orm",
+    // Node >= 16.5 内置 node:stream/web；web-streams-polyfill 仅作为
+    // fetch-blob 在无原生 ReadableStream 环境的兜底，内嵌 Node 24 永不触达。
+    "web-streams-polyfill"
 )
 
 private val retainedOpenccRuntimeFiles = setOf(
@@ -493,6 +496,11 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
             val relativePath = file.relativeTo(rootDir).invariantSeparatorsPath
             val shouldDelete =
                 relativePath.endsWith(".map") ||
+                    // 普通 TS 源码副本仅供编辑器跳转/调试映射使用，
+                    // runtime-pack 生产链早已全局剥离且验证安全。
+                    relativePath.endsWith(".ts") ||
+                    relativePath.endsWith(".mts") ||
+                    relativePath.endsWith(".cts") ||
                     relativePath.endsWith(".d.ts") ||
                     relativePath.endsWith(".d.cts") ||
                     relativePath.endsWith(".d.mts") ||

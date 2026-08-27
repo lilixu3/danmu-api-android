@@ -17,7 +17,7 @@ internal object RuntimeDependencyPackProtocol {
     const val INSTALLED_MANIFEST_FILE = ".danmuapiapp-runtime-pack.json"
     const val LEGACY_INSTALLED_LOCK_FILE = ".danmuapiapp-runtime-lock.json"
     const val RUNTIME_PROTOCOL = 2
-    const val EMBEDDED_NODE_MAJOR = 18
+    const val EMBEDDED_NODE_MAJOR = 24
     const val MAX_MANIFEST_BYTES = 1024 * 1024
     const val MAX_MANIFEST_SIGNATURE_BYTES = 16 * 1024
     const val MAX_ARCHIVE_BYTES = 64L * 1024L * 1024L
