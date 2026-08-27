@@ -32,6 +32,14 @@ object NodeBridge {
     external fun startNodeWithArguments(args: Array<String>): Int
     external fun setEnvironmentVariable(name: String, value: String, overwrite: Boolean): Boolean
 
+    /**
+     * 内嵌 Node 运行时版本（编译期常量，来自 node.h）。
+     * 返回 "major.minor.patch"，如 "24.19.0"；运行时库加载失败时返回 null。
+     */
+    fun nodeVersionOrNull(): String? = runCatching { getNodeVersion() }.getOrNull()
+
+    private external fun getNodeVersion(): String
+
     private fun cleanPath(raw: String): String {
         var s = raw.trim()
         while (s.length >= 2) {
