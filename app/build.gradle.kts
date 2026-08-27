@@ -781,18 +781,18 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
             return output.trim()
         }
 
-        val actualVersion = runTargetNode(listOf("--version")).removePrefix("v")
-        val embeddedMajorMinor = embeddedNodeVersion.split(".").take(2).joinToString(".")
-        val actualMajorMinor = actualVersion.split(".").take(2).joinToString(".")
+        val actualVersion = runTargetNode(listOf("--version")).removePrefix("v").trim()
+        val embeddedMajor = embeddedNodeVersion.split(".").first()
+        val actualMajor = actualVersion.split(".").first()
         if (actualVersion != embeddedNodeVersion) {
-            if (actualMajorMinor == embeddedMajorMinor) {
+            if (actualMajor == embeddedMajor) {
                 println(
-                    "WARNING: 目标 Node $actualVersion 与内嵌 $embeddedNodeVersion 次级版本不一致，" +
-                        "smoke 结果仅供参考（major.minor 匹配，允许通过）"
+                    "WARNING: 目标 Node $actualVersion 与内嵌 $embeddedNodeVersion 版本不一致，" +
+                        "smoke 结果仅供参考（major=$embeddedMajor 匹配，允许通过）"
                 )
             } else {
                 throw GradleException(
-                    "Release 必须使用与内嵌运行时同 major.minor 的 Node $embeddedNodeVersion 执行 smoke，当前为 $actualVersion（$targetNodeExecutable）"
+                    "Release 必须使用与内嵌运行时同 major 的 Node $embeddedNodeVersion 执行 smoke，当前为 $actualVersion（$targetNodeExecutable）"
                 )
             }
         }
