@@ -23,29 +23,10 @@ internal object DanmuPayloadInspector {
             DanmuDownloadFormat.Xml,
             DanmuDownloadFormat.BiliXml -> inspectXml(payload, format)
 
-            DanmuDownloadFormat.Ass -> inspectAss(payload, format)
-
             DanmuDownloadFormat.DanuniBinPb -> inspectBinary(payload, contentType)
 
             else -> inspectJson(payload, format)
         }
-    }
-
-    private fun inspectAss(
-        payload: ByteArray,
-        format: DanmuDownloadFormat
-    ): DanmuPayloadInspection {
-        val text = payload
-            .take(TEXT_PREFIX_LIMIT)
-            .toByteArray()
-            .toString(Charsets.UTF_8)
-            .removePrefix("\uFEFF")
-            .trimStart()
-        if (!text.startsWith("[Script Info]")) {
-            return invalid(format, "返回内容不是 ASS 字幕")
-        }
-        val count = text.lineSequence().count { it.startsWith("Dialogue:") }
-        return DanmuPayloadInspection(valid = true, count = count)
     }
 
     private fun inspectXml(
@@ -144,8 +125,7 @@ internal object DanmuPayloadInspector {
 
             DanmuDownloadFormat.Xml,
             DanmuDownloadFormat.BiliXml,
-            DanmuDownloadFormat.DanuniBinPb,
-            DanmuDownloadFormat.Ass -> return invalid(format, "格式检查器调用错误")
+            DanmuDownloadFormat.DanuniBinPb -> return invalid(format, "格式检查器调用错误")
         }
         return DanmuPayloadInspection(valid = true, count = count)
     }
