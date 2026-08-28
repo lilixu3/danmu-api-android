@@ -782,6 +782,7 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
         "node-tests/brotli-runtime-smoke.mjs",
         "node-tests/bundled-node-lock-closure-smoke.mjs",
         "node-tests/core-runtime-dependencies-smoke.mjs",
+        "node-tests/danmaku-ass-regression.mjs"
     )
     dependsOn("verifyBundledNodeModules")
     inputs.files(smokeScripts.map(rootProject::file))
