@@ -14,7 +14,7 @@ class DesktopSmokeTest {
     @Test
     fun buildInfoContainsBaseLines() {
         val lines = buildInfoLines()
-        assertTrue(lines.first().contains("弹幕 API Desktop"))
+        assertTrue(lines.first().contains("弹幕API"))
         assertTrue(lines.any { it.startsWith("OS:") })
         assertTrue(lines.any { it.startsWith("Java:") })
     }
@@ -26,7 +26,7 @@ class DesktopSmokeTest {
             StartConfig(
                 nodeExe = File("Z:/definitely/missing/node.exe"),
                 scriptDir = File("Z:/definitely/missing"),
-                dataHome = File("build/tmp-desktop-smoke-home"),
+                identityFile = File("build/tmp-desktop-smoke-home/instance-id"),
             )
         )
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
