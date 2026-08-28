@@ -34,17 +34,13 @@ object RootNodeEntry {
         }
 
         try {
-            // Node 24 运行时要求：Root 模式同样在启动前设置 TMPDIR/HOME。
-            runCatching {
-                val cacheDir = entry.let { File(it).parentFile?.parentFile }?.resolve("cache")
-                val tmpDir = if (cacheDir != null && cacheDir.parentFile != null) {
-                    cacheDir.resolve("tmp")
-                } else {
-                    File("/data/local/tmp")
-                }
-                tmpDir.mkdirs()
-                NodeBridge.setEnvironmentVariable("TMPDIR", tmpDir.absolutePath, true)
-            }
+            // Node 24 运行时要求：Root 模式同样在启动前提供 TMPDIR/HOME。
+            // HOME 锚定运行时根目录，避免 os.homedir() 回退到 su 环境的 /。
+            val runtimeRoot = File(entry).parentFile?.parentFile
+            NodeRuntimeEnv.install(
+                tmpDir = runtimeRoot?.resolve("cache/tmp") ?: File("/data/local/tmp"),
+                homeDir = runtimeRoot
+            )
             NodeBridge.startNodeWithArguments(arrayOf("node", entry))
         } catch (t: Throwable) {
             System.err.println("RootNodeEntry crashed: ${t.message}")

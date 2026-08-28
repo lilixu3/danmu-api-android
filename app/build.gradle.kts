@@ -1,3 +1,4 @@
+import java.io.RandomAccessFile
 import java.util.Properties
 import java.util.zip.ZipFile
 import java.security.MessageDigest
@@ -488,12 +489,12 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
         "pako/dist/pako_inflate.es5.min.js",
         "pako/dist/pako_inflate.js",
         "pako/dist/pako_inflate.min.js",
-        // brotli 仅在弹幕链路使用 decompress；encode 半边零引用
+        // brotli 仅在弹幕链路使用 decompress；encode 半边零引用。
+        // index.js 保留为包根兼容入口（仅导出 decompress），不在裁剪之列。
         "brotli/build/encode.js",
         "brotli/build/mem.js",
         "brotli/compress.js",
-        "brotli/enc/pre.js",
-        "brotli/index.js"
+        "brotli/enc/pre.js"
     )
 
     rootDir.walkTopDown()
@@ -971,6 +972,69 @@ fun sha256(file: File): String {
     }
 }
 
+/**
+ * 16KB 页对齐门禁：Android 15+ 的 16KB 内核设备（仅 64 位 ABI）要求
+ * 可执行段按 16KB 对齐加载；armeabi-v7a 不存在 16KB 内核，仅需 ≥4KB。
+ * 解析 ELF program header 校验所有 PT_LOAD 的 p_align，覆盖上游
+ * libnode.so / libc++_shared.so 与本地编译的 libnative-lib.so，
+ * 防止任一环节的对齐回归静默进入 APK。
+ */
+private val ELF_16K_REQUIRED_ABIS = setOf("arm64-v8a", "x86_64")
+
+fun assertElfLoadAlignment(file: File) {
+    RandomAccessFile(file, "r").use { raf ->
+        fun u8(): Int = raf.read().also { if (it < 0) throw GradleException("ELF 文件被截断：${file.name}") }
+        fun u16At(offset: Long): Int {
+            raf.seek(offset)
+            return u8() or (u8() shl 8)
+        }
+        fun u32At(offset: Long): Long {
+            raf.seek(offset)
+            var value = 0L
+            repeat(4) { value = (value shl 8) or u8().toLong() }
+            return value
+        }
+        fun u64At(offset: Long): Long {
+            raf.seek(offset)
+            var value = 0L
+            repeat(8) { value = (value shl 8) or u8().toLong() }
+            return value
+        }
+
+        val ident = ByteArray(16)
+        raf.readFully(ident)
+        val isElf = ident[0] == 0x7F.toByte() && ident[1] == 0x45.toByte() &&
+            ident[2] == 0x4C.toByte() && ident[3] == 0x46.toByte()
+        if (!isElf) throw GradleException("内嵌运行时出现非 ELF 的 .so：${file.name}")
+        if (ident[5].toInt() != 1) throw GradleException("不支持大端 ELF .so：${file.name}")
+        val is64 = ident[4].toInt() == 2
+
+        val phoff = if (is64) u64At(0x20) else u32At(0x1C)
+        val phentsize = u16At(if (is64) 0x36 else 0x2A).toLong()
+        val phnum = u16At(if (is64) 0x38 else 0x2C)
+        if (phnum <= 0 || phentsize <= 0L || phoff + phnum * phentsize > raf.length()) {
+            throw GradleException("ELF program header 非法或越界：${file.name}")
+        }
+
+        val relativePath = file.relativeTo(preparedNativeRuntimeDir).invariantSeparatorsPath
+        val minRequired = if (ELF_16K_REQUIRED_ABIS.any { "/$it/" in "/$relativePath" }) 16384L else 4096L
+        var sawLoad = false
+        for (i in 0 until phnum) {
+            val base = phoff + i * phentsize
+            if (u32At(base) != 1L) continue
+            sawLoad = true
+            val align = if (is64) u64At(base + 48) else u32At(base + 28)
+            if (align < minRequired) {
+                throw GradleException(
+                    "$relativePath 的 PT_LOAD 对齐为 ${align}B，低于 ${minRequired}B 页要求" +
+                        "（${if (minRequired == 16384L) "16KB 内核设备无法加载" else "文件异常"}）"
+                )
+            }
+        }
+        if (!sawLoad) throw GradleException("ELF 缺少 PT_LOAD 段：${file.name}")
+    }
+}
+
 fun readNativeRuntimeChecksums(): Map<String, String> {
     if (!nativeRuntimeChecksumFile.isFile) {
         throw GradleException("缺少原生运行时校验清单：${nativeRuntimeChecksumFile.absolutePath}")
@@ -1166,6 +1230,11 @@ val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
                 }
             }
         }
+
+        // 页对齐门禁：对解包后的全部 .so 逐一校验（含 canUseLegacyFiles 本地路径）。
+        preparedNativeRuntimeDir.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".so") }
+            .forEach { soFile -> assertElfLoadAlignment(soFile) }
     }
 }
 
