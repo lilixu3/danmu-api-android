@@ -10,6 +10,8 @@
 .cxx
 local.properties
 /app/build
+/desktop/build
+/desktop/.kotlin
 /dist
 *.jks
 

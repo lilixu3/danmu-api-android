@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "DanmuApiApp"
 include(":app")
+include(":desktop")
