@@ -99,4 +99,5 @@ private fun pagePlan(page: DesktopPage): PagePlan = when (page) {
         taskIds = "W-0204 / W-0601 ~ W-0606（P2/P6）",
     )
     DesktopPage.Overview -> PagePlan("概览页已实现。", emptyList(), "W-0401")
+    DesktopPage.About -> PagePlan("关于页已实现。", emptyList(), "—")
 }

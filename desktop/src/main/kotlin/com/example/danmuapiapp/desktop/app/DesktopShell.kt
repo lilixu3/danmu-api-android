@@ -56,6 +56,19 @@ enum class DesktopPage(val label: String) {
     Activity("活动"),
     Tools("工具"),
     Settings("设置"),
+    About("关于"),
+}
+
+/** 主题偏好：system / light / dark。 */
+enum class ThemePreference(val key: String, val label: String) {
+    System("system", "跟随系统"),
+    Light("light", "浅色"),
+    Dark("dark", "深色");
+
+    companion object {
+        fun fromKey(raw: String?): ThemePreference =
+            entries.firstOrNull { it.key == raw } ?: System
+    }
 }
 
 @Composable
@@ -67,9 +80,17 @@ fun statusColor(phase: ServicePhase, isDark: Boolean): Color = when (phase) {
 }
 
 @Composable
-fun DesktopShell(controller: DesktopRuntimeController, paths: DesktopPaths) {
+fun DesktopShell(
+    controller: DesktopRuntimeController,
+    themePreference: ThemePreference,
+    onThemeChange: (ThemePreference) -> Unit,
+) {
     val state by controller.state.collectAsState()
-    val dark = isSystemInDarkTheme()
+    val dark = when (themePreference) {
+        ThemePreference.Light -> false
+        ThemePreference.Dark -> true
+        ThemePreference.System -> isSystemInDarkTheme()
+    }
     var page by remember { mutableStateOf(DesktopPage.Overview) }
 
     MaterialTheme(colorScheme = if (dark) DarkScheme else LightScheme) {
@@ -89,7 +110,13 @@ fun DesktopShell(controller: DesktopRuntimeController, paths: DesktopPaths) {
                     ) {
                         when (page) {
                             DesktopPage.Overview -> OverviewPage(controller, controller.paths, state, dark)
-                            DesktopPage.Settings -> SettingsPage(controller.settings, controller.paths)
+                            DesktopPage.Settings -> SettingsPage(
+                                settings = controller.settings,
+                                paths = controller.paths,
+                                themePreference = themePreference,
+                                onThemeChange = onThemeChange,
+                            )
+                            DesktopPage.About -> AboutPage()
                             else -> PlaceholderPage(page)
                         }
                     }
