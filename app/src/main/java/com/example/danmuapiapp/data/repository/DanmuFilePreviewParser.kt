@@ -41,8 +41,74 @@ object DanmuFilePreviewParser {
                 .copy(format = format)
             DanmuPayloadKind.Json -> parseJson(input, fileName, relativePath, bytes, safeLimit, format)
                 .copy(format = format)
+            DanmuPayloadKind.Text -> parseAssText(input, fileName, relativePath, bytes, safeLimit)
+                .copy(format = format)
             DanmuPayloadKind.Binary -> error("${format.label} 是二进制格式，不支持内容预览")
         }
+    }
+
+    /**
+     * ASS 文本预览：逐行解析 Dialogue 事件行。
+     * 行格式：Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+     */
+    private fun parseAssText(
+        input: InputStream,
+        fileName: String,
+        relativePath: String,
+        bytes: Long,
+        previewLimit: Int
+    ): DanmuFilePreview {
+        val items = mutableListOf<DanmuPreviewItem>()
+        var count = 0
+        var truncated = false
+
+        val startSeconds: (String) -> Double? = { token ->
+            val pieces = token.trim().split(':')
+            runCatching {
+                when (pieces.size) {
+                    3 -> pieces[0].toInt() * 3600 + pieces[1].toInt() * 60 + pieces[2].toDouble()
+                    2 -> pieces[0].toInt() * 60 + pieces[1].toDouble()
+                    else -> null
+                }
+            }.getOrNull()
+        }
+
+        input.bufferedReader(Charsets.UTF_8).useLines { lines ->
+            for (raw in lines) {
+                if (!raw.startsWith("Dialogue:")) continue
+                count++
+                if (items.size >= previewLimit) {
+                    truncated = true
+                    continue
+                }
+                val body = raw.removePrefix("Dialogue:").trim()
+                // Text 字段本身可含逗号，固定前 9 段后剩余整体为文本
+                val parts = body.split(',').toMutableList()
+                if (parts.size < 10) continue
+                val text = parts.drop(9).joinToString(",")
+                val style = parts.getOrNull(3).orEmpty()
+                val timeSeconds = startSeconds(parts.getOrNull(1).orEmpty())
+                items.add(
+                    DanmuPreviewItem(
+                        index = items.size,
+                        timeSeconds = timeSeconds,
+                        mode = style,
+                        text = text,
+                    )
+                )
+            }
+        }
+
+        return DanmuFilePreview(
+            format = DanmuDownloadFormat.Ass,
+            fileName = fileName,
+            relativePath = relativePath,
+            bytes = bytes,
+            count = count,
+            previewLimit = previewLimit,
+            truncated = truncated,
+            items = items,
+        )
     }
 
     fun count(payload: ByteArray, format: DanmuDownloadFormat): Int? {

@@ -6,6 +6,8 @@ const path = require('path');
 const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
+// ASS 字幕输出：vendored tiansh/ass-danmaku（MPL-2.0）+ 装配层（见 lib/ass-danmaku/）
+const _assDanmaku = require('./lib/ass-danmaku/index.js');
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -2470,14 +2472,21 @@ function createMainServer() {
 
       const shouldQuietCoreLogs = _isQuietCoreLogRequest(fullUrl, clientIp);
       const quietLogStart = shouldQuietCoreLogs ? _quietLogScanStartHint() : 0;
+      // format=ass：核心始终按 json 产弹幕，由 App 转发层就地转换为 ASS 字幕。
+      const wantsAss = strippedPathname.startsWith('/api/v2/comment/') &&
+        fullUrl.searchParams.get('format') === 'ass';
       const wantsOverride = strippedPathname.startsWith('/api/v2/comment/') &&
-        (Math.abs(offsetSec) > 1e-6 || fontSize !== null);
+        (wantsAss || Math.abs(offsetSec) > 1e-6 || fontSize !== null);
 
       if (wantsOverride) {
         // Hand a clean URL to core (avoid unknown param side-effects), then post-process output.
         const cleanUrl = new URL(fullUrl.toString());
         for (const k of ['offset', 'danmu_offset', 'offsetMs', 'offset_ms', 'fontSize', 'font_size', 'fontsize']) {
           cleanUrl.searchParams.delete(k);
+        }
+        if (wantsAss) {
+          // 核心（dan-any）没有 ASS 转换器：强制核心输出 json，再由转发层转换为 ASS。
+          cleanUrl.searchParams.set('format', 'json');
         }
 
         const coreReq = new Request(cleanUrl.toString(), {
@@ -2506,6 +2515,17 @@ function createMainServer() {
         // Body has been rewritten; remove content-length/content-encoding to avoid mismatch.
         outHeaders.delete('content-length');
         outHeaders.delete('content-encoding');
+
+        if (wantsAss) {
+          const episodeHint = cleanUrl.pathname.split('/').pop() || 'danmaku';
+          outText = await _assDanmaku.renderDanmakuAss(outText, {
+            name: episodeHint,
+            url: fullUrl.toString(),
+          }, fontSize && fontSize > 0 ? { fontSize: fontSize / 25 } : undefined);
+          outHeaders.set('content-type', 'text/x-ssa; charset=utf-8');
+          outHeaders.set('x-danmu-format', 'ass');
+          outHeaders.set('content-disposition', 'attachment; filename="danmaku.ass"');
+        }
 
         const outRes = new Response(outText, {
           status: coreRes.status,

@@ -354,7 +354,11 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 ?.trim()
                 ?.lowercase()
                 .orEmpty()
-            if (resolvedFormat.isNotBlank() && resolvedFormat != input.format.value) {
+            if (resolvedFormat.isNotBlank() && resolvedFormat != input.format.value &&
+                // format=ass 由 App 转发层把核心响应（json）就地转换为 ASS，
+                // 核心侧的 X-Danmu-Format 仍是 json，属预期行为
+                input.format != DanmuDownloadFormat.Ass
+            ) {
                 error(
                     "核心实际返回格式为 $resolvedFormat，与请求的 ${input.format.value} 不一致"
                 )
@@ -786,6 +790,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 text.startsWith("{") && text.contains("\"data\"") && text.contains("\"danmu\"")
             DanmuDownloadFormat.DanuniJson -> text.startsWith("[")
             DanmuDownloadFormat.DplayerJson -> text.startsWith("{") && text.contains("\"data\"")
+            DanmuDownloadFormat.Ass -> text.startsWith("[Script Info]")
             DanmuDownloadFormat.DanuniBinPb -> true
         }
     }
