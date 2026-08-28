@@ -664,15 +664,11 @@ class NodeService : Service() {
                 RuntimeIdentityStore.exportToEnv(applicationContext)
                 // Node 24 运行时要求：启动前显式提供 TMPDIR/HOME，
                 // 并可选启用 V8 编译缓存加快二次启动。
-                runCatching {
-                    val tmpDir = File(applicationContext.cacheDir, "tmp").apply { mkdirs() }
-                    NodeBridge.setEnvironmentVariable("TMPDIR", tmpDir.absolutePath, true)
-                    NodeBridge.setEnvironmentVariable("HOME", applicationContext.filesDir.absolutePath, true)
-                    val compileCache = File(applicationContext.cacheDir, "node-compile-cache")
-                    if (compileCache.exists() || compileCache.mkdirs()) {
-                        NodeBridge.setEnvironmentVariable("NODE_COMPILE_CACHE", compileCache.absolutePath, true)
-                    }
-                }
+                NodeRuntimeEnv.install(
+                    tmpDir = File(applicationContext.cacheDir, "tmp"),
+                    homeDir = applicationContext.filesDir,
+                    compileCacheDir = File(applicationContext.cacheDir, "node-compile-cache")
+                )
                 val startCanceled = synchronized(stateLock) {
                     runtimeGeneration.get() != generation || !isRunning || isStopping
                 }

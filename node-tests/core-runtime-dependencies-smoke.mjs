@@ -7,7 +7,7 @@ const runtimeRoot = resolve('app/src/main/assets/nodejs-project');
 const entrySource = readFileSync(resolve(runtimeRoot, 'main.js'), 'utf8');
 const polyfillLoadIndex = entrySource.indexOf("require('./runtime-polyfills.js')");
 const serverLoadIndex = entrySource.indexOf("require('./android-server.js')");
-assert(polyfillLoadIndex >= 0, 'main.js 未加载 Node 18 兼容层');
+assert(polyfillLoadIndex >= 0, 'main.js 未加载运行时兼容层');
 assert(serverLoadIndex > polyfillLoadIndex, '兼容层必须早于 android-server.js 加载');
 
 await import(pathToFileURL(resolve(runtimeRoot, 'runtime-polyfills.js')).href);
