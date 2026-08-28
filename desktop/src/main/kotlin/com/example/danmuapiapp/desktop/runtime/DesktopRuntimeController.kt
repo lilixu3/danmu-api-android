@@ -81,6 +81,9 @@ class DesktopRuntimeController(
         supervisor = null
     }
 
+    /** 无感自启模式用：node 子进程是否仍存活。 */
+    fun isChildAlive(): Boolean = supervisor?.isChildAlive() ?: false
+
     private fun settingsFile(): File = DesktopSettings.defaultSettingsFile()
 
     private fun submit(block: () -> Unit) {

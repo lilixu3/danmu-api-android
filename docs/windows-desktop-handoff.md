@@ -54,11 +54,18 @@
 - [x] UI（P3/W-0401 最小闭环 + 设置页基础功能）：
       - 概览页：状态总览卡（语义色容器随状态变化）、连接（本机/局域网地址、Token）、
         核心与运行时、目录四个分区；失败横幅；底部状态条；
-      - 左侧导航：概览 + 核心/配置/下载/活动/工具（诚实占位）+ 设置；
+      - 左侧导航：概览 + 核心/配置/下载/活动/工具（诚实占位）+ 设置 + 关于；
       - 设置页：运行目录自定义（settings.properties 持久化，重启生效）+ GitHub 线路
-        并行测速与选择（即时生效）；
+        并行测速与选择（即时生效）+ 外观主题（跟随系统/浅色/深色，实时切换）+
+        开机自启 + GitHub Token；
       - `DesktopRuntimeController` 串行化操作并映射状态，首启自动解压随包运行时并
         在线安装核心；UI 启动 → 外部健康检查一致 → UI 停止，全部实测通过（含用户手测）。
+- [x] **无感开机自启**（用户要求：不进界面的后台自启）：
+      - HKCU Run 键写 `"<exe>" --autostart`；带该参数启动时走 headless 路径
+        （无 Compose 窗口），后台运行服务，node 退出/被接管后进程自动退出；
+      - 同身份实例的 UI 透明接管：preflight 检测到端口被本应用身份占用时，
+        自动 /__shutdown 旧实例并等待端口释放后正常启动（异身份仍明确报错）。
+- [x] 设置页已含：GitHub Token（存本机设置文件；桌面 P0 未接 API 校验，接入规范见下）。
 - [x] 品牌对齐 Android：应用名「弹幕API」（与 strings.xml app_name 一致）；
       窗口/任务栏/安装器图标由 Android 矢量启动图标渲染生成（desktop/icons/danmuapi.ico +
       branding PNG，生成脚本 C:\Tools\_downloads\icon-gen\gen-icon.js）。
@@ -195,11 +202,16 @@ Next task:
 
 ## 当前下一任务
 
-`W-0004`（收尾）：在干净 Windows 用户环境（新账户或干净虚拟机）执行
-`DanmuApiDesktop-0.1.0.exe` 安装 → 启动 → 卸载，确认：
+设置页第二批基础功能（安卓端规格已完成调研，见下）：
 
-1. 安装后 app jar 内含 `runtime/node.exe` 与 `runtime/nodejs-project/**`；
-2. 安装版可启动并显示"已随包提供"；
-3. 卸载不误删用户数据目录（`%LOCALAPPDATA%\DanmuApi`）与用户选择的下载目录。
+1. **管理员模式（ADMIN_TOKEN）**：.env 明文行 + 会话比对（未配置→"保存并进入管理员模式"，
+   已配置→输入进入）；管理 API 以 `/{ADMIN_TOKEN}` 为 URL 路径前缀 + `Authorization: Bearer {运行时TOKEN}` 头；
+   清缓存 `POST /{token}/api/cache/clear`；规格来源 AdminSessionRepositoryImpl / EnvConfigRepositoryImpl / CacheClearProtocol。
+2. **备份与恢复**：JSON schema v2（`format:"danmu-api-app-backup"`），敏感键正则
+   `(?i).*(TOKEN|PASSWORD|PASSWD|SECRET|API[_-]?KEY|COOKIE|AUTH).*` 不入库；env 恢复为合并非敏感键+整体回滚。
+3. **WebDAV**：MKCOL 逐级 + PUT/GET，Basic auth，固定文件名 `.env`/`favorites.json`/`app-backup.json`，坚果云 /dav 特判。
+4. **局域网配置同步**：接收方 ServerSocket 随机端口 + 12 位码，`POST /sync/apply?token=&v=1&device=`，
+   payload v2 传输 .env 全量 + 端口/变体/仓库偏好（发送方剥离 githubToken）；需与手机端联调。
+5. **GitHub Token 校验接入**：保存前 `GET https://api.github.com/user`（返回 login 才有效），仅对 api.github.com 请求挂 Bearer。
 
-完成后写 P0 Gate 决策记录（确认或否决 D-002/D-004），进入 P1（W-0101 依赖审计）。
+每项完成需带真实命令与结果（交接格式见上）。

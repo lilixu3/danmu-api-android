@@ -19,6 +19,16 @@ class DesktopSettings(private val settingsFile: File) {
     var githubProxyId: String
         private set
 
+    /** 主题：system / light / dark（默认跟随系统）。 */
+    @Volatile
+    var theme: String
+        private set
+
+    /** GitHub Token（提高 API 限额；仅存本机设置文件）。 */
+    @Volatile
+    var githubToken: String
+        private set
+
     init {
         if (settingsFile.isFile) {
             runCatching {
@@ -29,6 +39,8 @@ class DesktopSettings(private val settingsFile: File) {
         }
         runtimeRootOverride = values[RUNTIME_ROOT]?.trim()?.takeIf { it.isNotBlank() }
         githubProxyId = values[GITHUB_PROXY]?.trim()?.takeIf { it.isNotBlank() } ?: PROXY_ORIGINAL
+        theme = values[THEME]?.trim()?.takeIf { it in listOf("system", "light", "dark") } ?: "system"
+        githubToken = values[GITHUB_TOKEN]?.trim().orEmpty()
     }
 
     fun setRuntimeRoot(path: String?) {
@@ -39,6 +51,16 @@ class DesktopSettings(private val settingsFile: File) {
     fun setGithubProxy(id: String) {
         githubProxyId = id
         persist(GITHUB_PROXY, id)
+    }
+
+    fun setTheme(value: String) {
+        theme = if (value in listOf("system", "light", "dark")) value else "system"
+        persist(THEME, theme)
+    }
+
+    fun setGithubToken(token: String) {
+        githubToken = token.trim()
+        persist(GITHUB_TOKEN, githubToken.ifBlank { null })
     }
 
     private fun persist(key: String, value: String?) {
@@ -66,6 +88,8 @@ class DesktopSettings(private val settingsFile: File) {
     companion object {
         private const val RUNTIME_ROOT = "runtime_root"
         private const val GITHUB_PROXY = "github_proxy"
+        private const val THEME = "theme"
+        private const val GITHUB_TOKEN = "github_token"
 
         /** 与 Android GithubProxyService 的 PROXY_ID_ORIGINAL 一致。 */
         const val PROXY_ORIGINAL = "original"

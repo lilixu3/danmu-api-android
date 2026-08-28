@@ -4,14 +4,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.example.danmuapiapp.desktop.app.DesktopShell
+import com.example.danmuapiapp.desktop.app.ThemePreference
 import com.example.danmuapiapp.desktop.node.DesktopCoreInstaller
-import com.example.danmuapiapp.desktop.runtime.DesktopPaths
+import com.example.danmuapiapp.desktop.runtime.AutostartManager
 import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
-import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.desktop.runtime.ServicePhase
 import java.awt.Dimension
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
@@ -40,28 +42,61 @@ fun loadWindowIcons(): List<BufferedImage> {
     }.filter { it.width > 0 }
 }
 
-fun main() = application {
-    val controller = remember { DesktopRuntimeController() }
-    var closing by mutableStateOf(false)
+fun main(args: Array<String>) {
+    // 无感自启：开机自启参数走无窗口后台模式，直接运行服务，不进入 UI
+    if (AutostartManager.isAutostartLaunch(args)) {
+        runHeadlessService()
+        return
+    }
+    application {
+        val controller = remember { DesktopRuntimeController() }
+        var themePref by mutableStateOf(ThemePreference.fromKey(controller.settings.theme))
+        var closing by mutableStateOf(false)
 
-    val windowState = rememberWindowState(width = 1280.dp, height = 800.dp)
-    Window(
-        onCloseRequest = {
-            // 兜底：确认 node.exe 不残留（优雅关闭，必要时强杀），之后再退出
-            if (!closing) {
-                closing = true
-                controller.shutdown()
+        val windowState = rememberWindowState(width = 1280.dp, height = 800.dp)
+        Window(
+            onCloseRequest = {
+                // 兜底：确认 node.exe 不残留（优雅关闭，必要时强杀），之后再退出
+                if (!closing) {
+                    closing = true
+                    controller.shutdown()
+                }
+                exitApplication()
+            },
+            title = APP_NAME,
+            state = windowState,
+        ) {
+            window.minimumSize = Dimension(960, 640)
+            val icons = remember { loadWindowIcons() }
+            if (icons.isNotEmpty()) {
+                window.iconImages = icons
             }
-            exitApplication()
-        },
-        title = APP_NAME,
-        state = windowState,
-    ) {
-        window.minimumSize = Dimension(960, 640)
-        val icons = remember { loadWindowIcons() }
-        if (icons.isNotEmpty()) {
-            window.iconImages = icons
+            DesktopShell(
+                controller = controller,
+                themePreference = themePref,
+                onThemeChange = { themePref = it },
+            )
         }
-        DesktopShell(controller, DesktopPaths())
+    }
+}
+
+/**
+ * 无感自启：无窗口后台运行 Node 服务。
+ * - 服务被外部接管（UI 同身份 /__shutdown）或停止后，本进程自动退出；
+ * - 注册 ShutdownHook 兜底，系统关机时同样不残留 node.exe。
+ */
+private fun runHeadlessService() {
+    val controller = DesktopRuntimeController()
+    Runtime.getRuntime().addShutdownHook(Thread { runCatching { controller.shutdown() } })
+    controller.start()
+    while (true) {
+        when (controller.state.value.phase) {
+            ServicePhase.Running -> {
+                if (!controller.isChildAlive()) return
+            }
+            ServicePhase.Stopped, ServicePhase.Failed -> return
+            else -> {}
+        }
+        Thread.sleep(1500)
     }
 }

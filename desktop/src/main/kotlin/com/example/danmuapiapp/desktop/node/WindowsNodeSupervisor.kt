@@ -197,20 +197,38 @@ class WindowsNodeSupervisor {
 
     /**
      * 端口占用预检（对齐 Android NormalStartPreflightPolicy 的对外语义）：
-     * 端口已被监听时，无论归属一律给出明确失败，不 spawn 必然 EADDRINUSE 的子进程。
+     * - 端口空闲：直接通过；
+     * - 同身份实例占用（如开机自启的无窗口进程）：优雅接管——/__shutdown 远端实例并等待端口释放；
+     * - 其他实例占用：明确失败。
      */
     private fun preflightPort(config: StartConfig) {
-        if (isPortFree(config.port)) return
-        val health = runCatching { healthBody(config.port) }.getOrNull()
-        val sameIdentity = health != null && jsonQuoted(health, "runtimeIdentity") == identity
-        throw IOException(
-            if (sameIdentity) {
-                "端口 ${config.port} 已有本应用实例在运行，请先停止该实例后再启动"
-            } else {
-                "端口 ${config.port} 已有其他实例在运行，请先停止外部进程后再启动"
+        while (!isPortFree(config.port)) {
+            val health = runCatching { healthBody(config.port) }.getOrNull()
+            val sameIdentity = health != null && jsonQuoted(health, "runtimeIdentity") == identity
+            if (!sameIdentity) {
+                throw IOException("端口 ${config.port} 已有其他实例在运行，请先停止外部进程后再启动")
             }
-        )
+            runCatching {
+                client.send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:${config.port}/__shutdown"))
+                        .timeout(Duration.ofSeconds(3))
+                        .GET()
+                        .build(),
+                    HttpResponse.BodyHandlers.discarding(),
+                )
+            }
+            val deadline = System.currentTimeMillis() + 10_000
+            while (!isPortFree(config.port) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(300)
+            }
+            if (!isPortFree(config.port)) {
+                throw IOException("端口 ${config.port} 被本应用实例占用且无法释放，请关闭该实例后重试")
+            }
+        }
     }
+
+    /** 无感自启模式用：node 子进程是否仍存活。 */
+    fun isChildAlive(): Boolean = process?.isAlive ?: false
 
     /** Running 要求：身份、端口、PID、工作目录与健康接口逐项一致（计划 7.2 节）。 */
     private fun probeHealth(config: StartConfig, proc: Process): Boolean {

@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.desktop.node.GithubProxyCatalog
+import com.example.danmuapiapp.desktop.runtime.AutostartManager
 import com.example.danmuapiapp.desktop.runtime.DesktopPaths
 import com.example.danmuapiapp.desktop.runtime.DesktopSettings
 import kotlinx.coroutines.Dispatchers
@@ -50,13 +52,23 @@ import kotlinx.coroutines.withContext
  * 运行目录更改保存后需重启应用生效；GitHub 线路即时生效（影响后续核心下载）。
  */
 @Composable
-fun SettingsPage(settings: DesktopSettings, paths: DesktopPaths) {
+fun SettingsPage(
+    settings: DesktopSettings,
+    paths: DesktopPaths,
+    themePreference: ThemePreference,
+    onThemeChange: (ThemePreference) -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var runtimeRootText by remember { mutableStateOf(settings.runtimeRootOverride ?: "") }
     var savedHint by remember { mutableStateOf("") }
     var latencies by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var testing by remember { mutableStateOf(false) }
     var selectedProxy by remember { mutableStateOf(settings.githubProxyId) }
+    var themePref by remember { mutableStateOf(themePreference) }
+    var autostartEnabled by remember { mutableStateOf(AutostartManager.isEnabled()) }
+    var autostartError by remember { mutableStateOf<String?>(null) }
+    var githubTokenText by remember { mutableStateOf(settings.githubToken) }
+    var tokenHint by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -70,6 +82,131 @@ fun SettingsPage(settings: DesktopSettings, paths: DesktopPaths) {
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
         )
+
+        Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "外观",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemePreference.entries.forEach { pref ->
+                        Surface(
+                            onClick = {
+                                themePref = pref
+                                settings.setTheme(pref.key)
+                                onThemeChange(pref)
+                            },
+                            shape = RoundedCornerShape(Dimens.ItemCorner),
+                            color = if (themePref == pref) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            contentColor = if (themePref == pref) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) {
+                            Text(
+                                text = pref.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "通用",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "开机自启", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "开机后台自动启动弹幕服务（无窗口常驻）；打开应用即可管理服务",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autostartEnabled,
+                        onCheckedChange = { checked ->
+                            val error = if (checked) AutostartManager.enable() else AutostartManager.disable()
+                            autostartError = error
+                            autostartEnabled = if (error == null) checked else AutostartManager.isEnabled()
+                        },
+                        enabled = AutostartManager.isSupported(),
+                    )
+                }
+                if (!AutostartManager.isSupported()) {
+                    Text(
+                        text = "开发运行模式不支持开机自启，请使用打包版应用。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!autostartError.isNullOrBlank()) {
+                    Text(
+                        text = autostartError ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "GitHub Token",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                OutlinedTextField(
+                    value = githubTokenText,
+                    onValueChange = { githubTokenText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    label = { Text("Personal Access Token（可选）") },
+                    supportingText = { Text("用于提升 GitHub API 限额（核心版本检查/资源下载）；仅保存在本机设置文件中") },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        settings.setGithubToken(githubTokenText)
+                        tokenHint = "已保存。"
+                    }) { Text("保存") }
+                    if (githubTokenText.isBlank()) {
+                        Text(
+                            text = "未设置（匿名限额）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
+                    if (tokenHint.isNotBlank()) {
+                        Text(
+                            text = tokenHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
+                }
+            }
+        }
 
         Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
