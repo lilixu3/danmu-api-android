@@ -8,7 +8,6 @@ import java.util.Locale
 enum class DanmuPayloadKind {
     Json,
     Xml,
-    Text,
     Binary
 }
 
@@ -74,13 +73,6 @@ enum class DanmuDownloadFormat(
         extension = "ddplay.json",
         mimeType = "application/json",
         payloadKind = DanmuPayloadKind.Json
-    ),
-    Ass(
-        value = "ass",
-        label = "ASS 字幕",
-        extension = "ass",
-        mimeType = "text/x-ssa",
-        payloadKind = DanmuPayloadKind.Text
     ),
     DplayerJson(
         value = "dplayer.json",
