@@ -18,20 +18,31 @@ enum class DesktopRuntimeState { Stopped, Preparing, Starting, Running, Stopping
 
 data class StartConfig(
     val nodeExe: File,
+    /** nodejs-project 目录；与 Android 普通模式一致，它同时是 DANMU_API_HOME（服务端默认取脚本目录）。 */
     val scriptDir: File,
-    val dataHome: File,
-    val variant: String = "desktop-p0",
+    /** 服务端口：与 Android/核心默认一致，写入 config/.env（DANMU_API_PORT），不在进程环境注入。 */
+    val port: Int = DEFAULT_PORT,
+    /** 监听地址：与 Android 默认 listenMode=Ipv4Only 一致（0.0.0.0，局域网可访问）。 */
+    val listenHost: String = DEFAULT_LISTEN_HOST,
+    /** 核心变体：与 Android 默认一致。 */
+    val variant: String = "stable",
+    /** 安装身份文件（持久化，等价 Android RuntimeIdentityStore）。 */
+    val identityFile: File,
     val startupTimeoutMs: Long = 30_000,
     val shutdownTimeoutMs: Long = 10_000,
-    /** 核心缓存目录（在线下载的 zipball 缓存），null 用系统临时目录。 */
-    val coreCacheDir: File? = null,
     /** 核心准备策略：默认在线下载（核心不随包内置）；测试可注入 no-op。 */
     val ensureCore: (File) -> Unit = { scriptDir ->
-        DesktopCoreInstaller.ensureCoreInstalled(scriptDir, coreCacheDir)
+        DesktopCoreInstaller.ensureCoreInstalled(scriptDir)
     },
-    /** 测试用：强制使用指定端口（例如模拟端口占用）。 */
-    val fixedPort: Int? = null,
-)
+    ) {
+    companion object {
+        /** 与 Android 端及核心默认端口一致（config/.env 的 DANMU_API_PORT）。 */
+        const val DEFAULT_PORT = 9321
+
+        /** 与 Android 默认监听模式（RuntimeListenMode.Ipv4Only）一致。 */
+        const val DEFAULT_LISTEN_HOST = "0.0.0.0"
+    }
+}
 
 data class RuntimeSnapshot(
     val state: DesktopRuntimeState,
@@ -42,9 +53,13 @@ data class RuntimeSnapshot(
 )
 
 /**
- * W-0003 最小进程监督器：用固定版本 node.exe 子进程运行现有 Node 运行时，
- * 以“子进程存活 + 端口监听 + 健康接口身份/端口/PID/工作目录一致”多重条件判定 Running，
- * 以“子进程退出 + 端口释放（旧身份不可达）”判定 Stopped。不依赖单一 STOPPED 消息。
+ * W-0003/W-0203 进程监督器。与 Android NodeService 的基础约定对齐：
+ * - 端口/监听/变体写 `$HOME(config)/.env`（服务端从 .env 读取，.env 覆盖进程环境变量）；
+ * - TOKEN 不注入：无用户配置时沿用核心 envs.js 默认值（87654321）；
+ * - DANMU_API_RUNTIME_IDENTITY 注入持久安装身份；
+ * - TMPDIR/HOME/NODE_COMPILE_CACHE 显式注入，避免写到程序安装目录。
+ * Running 判定：进程存活 + 端口 + 健康接口身份/端口/PID/工作目录一致；
+ * Stopped 判定：进程退出 + 端口释放（旧身份不可达）。
  */
 class WindowsNodeSupervisor {
 
@@ -86,30 +101,28 @@ class WindowsNodeSupervisor {
             }
             // 与 Android 端一致：核心不随包内置，缺失时在线下载安装到运行时目录
             config.ensureCore(config.scriptDir)
-            prepareDataHome(config.dataHome)
-            port = config.fixedPort ?: reserveFreePort()
-            identity = "desktop-" + UUID.randomUUID()
+            identity = ensureIdentity(config.identityFile)
+            prepareRuntimeDirs(config)
+            port = config.port
             this.config = config
+            preflightPort(config)
         } catch (t: Throwable) {
             return fail(t.message ?: "准备阶段失败")
         }
 
         stateRef.set(DesktopRuntimeState.Starting)
-        val pb = ProcessBuilder(config.nodeExe.absolutePath, File(config.scriptDir, "main.js").absolutePath)
-        pb.directory(config.dataHome)
-        // 计划 7.3 节要求显式注入的环境变量；路径一律由参数注入，不在 JS 内拼接盘符。
+        val scriptDir = config.scriptDir
+        val pb = ProcessBuilder(config.nodeExe.absolutePath, File(scriptDir, "main.js").absolutePath)
+        pb.directory(scriptDir)
+        // 对齐 Android NodeRuntimeEnv：只注入运行环境变量，业务配置一律走 .env
         pb.environment().apply {
-            put("DANMU_API_PORT", port.toString())
-            put("DANMU_API_HOST", "127.0.0.1")
-            put("DANMU_API_HOME", config.dataHome.absolutePath)
-            put("DANMU_API_VARIANT", config.variant)
             put("DANMU_API_RUNTIME_IDENTITY", identity)
-            put("HOME", config.dataHome.absolutePath)
-            put("TEMP", File(config.dataHome, "tmp").absolutePath)
-            put("TMP", File(config.dataHome, "tmp").absolutePath)
-            put("NODE_COMPILE_CACHE", File(config.dataHome, "compile-cache").absolutePath)
+            put("HOME", scriptDir.parentFile?.absolutePath ?: scriptDir.absolutePath)
+            put("TEMP", File(scriptDir, "tmp").absolutePath)
+            put("TMP", File(scriptDir, "tmp").absolutePath)
+            put("NODE_COMPILE_CACHE", File(scriptDir, "compile-cache").absolutePath)
         }
-        val logsDir = File(config.dataHome, "logs")
+        val logsDir = File(scriptDir, "logs")
         pb.redirectOutput(File(logsDir, "node-stdout.log"))
         pb.redirectError(File(logsDir, "node-stderr.log"))
 
@@ -182,8 +195,37 @@ class WindowsNodeSupervisor {
         return snapshot
     }
 
+    /**
+     * 端口占用预检（对齐 Android NormalStartPreflightPolicy 的对外语义）：
+     * 端口已被监听时，无论归属一律给出明确失败，不 spawn 必然 EADDRINUSE 的子进程。
+     */
+    private fun preflightPort(config: StartConfig) {
+        if (isPortFree(config.port)) return
+        val health = runCatching { healthBody(config.port) }.getOrNull()
+        val sameIdentity = health != null && jsonQuoted(health, "runtimeIdentity") == identity
+        throw IOException(
+            if (sameIdentity) {
+                "端口 ${config.port} 已有本应用实例在运行，请先停止该实例后再启动"
+            } else {
+                "端口 ${config.port} 已有其他实例在运行，请先停止外部进程后再启动"
+            }
+        )
+    }
+
     /** Running 要求：身份、端口、PID、工作目录与健康接口逐项一致（计划 7.2 节）。 */
     private fun probeHealth(config: StartConfig, proc: Process): Boolean {
+        val body = healthBody(config.port) ?: return false
+        if (jsonQuoted(body, "runtimeIdentity") != identity) return false
+        if (jsonInt(body, "main") != config.port) return false
+        if (jsonInt(body, "pid")?.toLong() != proc.pid().toLong()) return false
+        val resolvedHome = jsonQuoted(body, "resolvedHome")?.let(::jsonUnescape) ?: return false
+        if (File(resolvedHome).canonicalPath != config.scriptDir.canonicalPath) return false
+        val cwd = jsonQuoted(body, "cwd")?.let(::jsonUnescape) ?: return false
+        if (File(cwd).canonicalPath != config.scriptDir.canonicalPath) return false
+        return true
+    }
+
+    private fun healthBody(port: Int): String? {
         val response = client.send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__health"))
                 .timeout(Duration.ofMillis(800))
@@ -191,39 +233,62 @@ class WindowsNodeSupervisor {
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
-        if (response.statusCode() != 200) return false
-        val body = response.body()
-        if (jsonQuoted(body, "runtimeIdentity") != identity) return false
-        if (jsonInt(body, "main") != port) return false
-        if (jsonInt(body, "pid")?.toLong() != proc.pid().toLong()) return false
-        val resolvedHome = jsonQuoted(body, "resolvedHome")?.let(::jsonUnescape) ?: return false
-        if (File(resolvedHome).canonicalPath != config.dataHome.canonicalPath) return false
-        val cwd = jsonQuoted(body, "cwd")?.let(::jsonUnescape) ?: return false
-        if (File(cwd).canonicalPath != config.dataHome.canonicalPath) return false
-        return true
+        if (response.statusCode() != 200) return null
+        return response.body()
     }
 
-    private fun prepareDataHome(dataHome: File) {
-        File(dataHome, "config").mkdirs()
-        File(dataHome, "logs").mkdirs()
-        File(dataHome, "tmp").mkdirs()
-        File(dataHome, "compile-cache").mkdirs()
-        // 运行时服务会用 $DANMU_API_HOME/config/.env 覆盖进程环境变量；
-        // 清除其中可能的 DANMU_API_PORT 行，保证端口由宿主环境变量决定。
-        val envFile = File(dataHome, "config/.env")
-        if (!envFile.exists()) {
-            envFile.writeText("# danmu desktop: 端口与身份由宿主环境变量注入\n")
+    /**
+     * 运行时目录准备，语义对齐 Android NodeProjectManager 写 config/.env：
+     * 覆盖 DANMU_API_PORT / DANMU_API_HOST / DANMU_API_VARIANT，保留 TOKEN 与其他键，
+     * 并创建 .cache / config / logs / tmp / compile-cache 目录。
+     */
+    private fun prepareRuntimeDirs(config: StartConfig) {
+        val home = config.scriptDir
+        listOf("config", "logs", ".cache", "tmp", "compile-cache").forEach {
+            File(home, it).mkdirs()
+        }
+        val envFile = File(home, "config/.env")
+        val existing = if (envFile.isFile) {
+            envFile.readLines(Charsets.UTF_8)
         } else {
-            val sanitized = envFile.readLines().filterNot { it.contains("DANMU_API_PORT") }
-            envFile.writeText(sanitized.joinToString(System.lineSeparator()) + System.lineSeparator())
+            emptyList()
         }
+        val overrides = mapOf(
+            "DANMU_API_PORT" to config.port.toString(),
+            "DANMU_API_HOST" to config.listenHost,
+            "DANMU_API_VARIANT" to config.variant,
+        )
+        val seen = mutableSetOf<String>()
+        val lines = existing.mapNotNull { rawLine ->
+            val key = rawLine.substringBefore('=').trim().uppercase()
+            when {
+                overrides.containsKey(key) -> {
+                    seen += key
+                    "${key}=${overrides.getValue(key)}"
+                }
+                rawLine.isNotBlank() -> rawLine
+                else -> null
+            }
+        }.toMutableList()
+        overrides.forEach { (key, value) ->
+            if (key !in seen) lines += "$key=$value"
+        }
+        envFile.parentFile?.mkdirs()
+        envFile.writeText(lines.joinToString(System.lineSeparator()) + System.lineSeparator())
     }
 
-    private fun reserveFreePort(): Int {
-        ServerSocket().use { socket ->
-            socket.bind(InetSocketAddress("127.0.0.1", 0))
-            return socket.localPort
+    /** 安装身份持久化（等价 Android RuntimeIdentityStore：一次生成，长期复用）。 */
+    private fun ensureIdentity(identityFile: File): String {
+        identityFile.parentFile?.mkdirs()
+        val existing = if (identityFile.isFile) {
+            identityFile.readText(Charsets.UTF_8).trim()
+        } else {
+            ""
         }
+        if (existing.isNotBlank()) return existing
+        val created = "desktop-" + UUID.randomUUID()
+        identityFile.writeText(created)
+        return created
     }
 
     private fun isPortFree(target: Int): Boolean {

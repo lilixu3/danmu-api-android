@@ -55,6 +55,11 @@ compose.desktop {
                 "java.net.http",
             )
 
+            windows {
+                // 与 Android 启动图标同源（由 gen-icon 脚本从矢量 drawable 渲染生成）
+                iconFile.set(rootProject.file("desktop/icons/danmuapi.ico"))
+            }
+
         // W-0004：随包运行资源走 JVM classpath 资源（见下方 prepareDesktopAppResources），
         // 由 jpackage --input 的应用 jar 自动带入所有产物；首启由宿主解压到可写数据目录。
         // 不使用 compose 的 appResourcesRootDir（1.12 实测 createDistributable 与
@@ -86,6 +91,17 @@ val prepareDesktopAppResources = tasks.register<Sync>("prepareDesktopAppResource
                     "该产物仅适合 UI 开发，不能启动 Node 运行时。"
             )
         }
+    }
+    doLast {
+        // 生成随包资源清单，供运行期 ClasspathRuntimeExtractor 首启解压
+        val dest = desktopRuntimeResources.get().asFile
+        val manifest = dest.walkTopDown()
+            .filter { it.isFile }
+            .map { it.relativeTo(dest).invariantSeparatorsPath.replace('\\', '/') }
+            .filterNot { it == "runtime-manifest.txt" }
+            .sorted()
+            .joinToString("\n")
+        File(dest, "runtime-manifest.txt").writeText(manifest + "\n")
     }
 }
 

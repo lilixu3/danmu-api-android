@@ -8,14 +8,14 @@
 
 | 字段 | 值 |
 |---|---|
-| 状态 | P0 大部分完成：W-0001/W-0002/W-0003 已验收，W-0004 本机部分完成 |
-| 当前阶段 | P0 → P0 Gate 待关闭 |
-| 当前任务 | W-0004 剩余：干净 Windows 用户环境的安装/启动/卸载实测 |
+| 状态 | **P0 全部任务完成（W-0001 ~ W-0004）**；概览页 UI 与真实服务闭环已可用 |
+| 当前阶段 | P0 Gate 决策 + P1 启动（W-0101 依赖审计） |
+| 当前任务 | 写 P0 Gate 决策记录（D-002/D-004 转"确认"）；开始 P1 共享层审计 |
 | 基线分支 | `test` |
 | 文档提交基线 | `2565526` |
-| 最后更新 | 2026-08-28 |
+| 最后更新 | 2026-08-28（晚） |
 | Windows 构建 | 已执行（本机 Windows 10 22H2 x64 实测） |
-| Windows 实机 | 已部分验证（本机即验证机；干净用户环境安装测试待做） |
+| Windows 实机 | 已验证（安装/启动/卸载/数据保留 + UI 真实启停闭环，均在本机实测） |
 | 发布状态 | 仅为本地实现与验证；未推送远程，未发版，未上传资产 |
 
 ## 工作方式变更（用户决策 2026-08-28）
@@ -32,15 +32,39 @@
       仓库 `.gitignore` 有意排除 `/.github/`，以本机命令作为构建探针等价载体。
 - [x] W-0002：最小 `:desktop` 模块（Compose Multiplatform Desktop 1.12.0 + Kotlin 2.4.10 +
       Gradle 9.6.0 + JDK 21 toolchain），窗口/中文渲染/最小尺寸实测通过（截图证据）。
-- [x] W-0003：`WindowsNodeSupervisor` 进程监督器，真实 node.exe 子进程 + 四重 Running 判定
+- [x] W-0003：`WindowsNodeSupervisor` 进程监督器，真实 node.exe 子进程 + 多重 Running 判定
       （进程存活/端口/健康接口身份+端口+PID+工作目录）+ 优雅关闭/强杀/端口释放/身份消失确认。
       含 20 次连续启动/停止长冒烟，无残留 node.exe。
+- [x] **基础约定与 Android 对齐（用户纠偏后重做）**：
+      - 端口默认 **9321**，与 Android NodeProjectManager 同机制写入 `config/.env`
+        （覆盖 DANMU_API_PORT/DANMU_API_HOST/DANMU_API_VARIANT 三键，保留 TOKEN 与其他键）；
+      - 监听默认 **0.0.0.0**（RuntimeListenMode.Ipv4Only）；
+      - **TOKEN 不注入**：无用户配置时沿用核心默认 87654321（TokenDefaults 语义）；
+      - `DANMU_API_RUNTIME_IDENTITY` 持久化安装身份（instance-id 文件，等价 RuntimeIdentityStore）；
+      - 端口占用预检（对齐 NormalStartPreflightPolicy 对外文案）；
+      - 创建 config/logs/.cache/tmp/compile-cache 目录（.cache 为核心缓存目录）。
 - [x] `DesktopCoreInstaller`：核心不随包内置，与 Android 一致在线下载安装
       （huangxd-/danmu_api@main zipball，本地缓存，zip-slip 防护，danmu_api/ 嵌套目录上提，
       ESM package.json 保证）。用户决策：核心在线下载更新是基础能力。
-- [x] W-0004（部分）：免安装包（`packagePortableZip`）+ 直装 EXE（`packageExe`）均产出并
-      实测启动；随包资源（node.exe + nodejs-project）以内嵌 classpath 资源进应用 jar。
+- [x] **GitHub 代理线路（对齐 Android GithubProxyService/SpeedTester）**：直连 + 4 个
+      GH-Proxy 镜像；多候选 URL 变换（{url}/%s/?url=/路径前缀）逐个回退下载；raw 资源
+      并行测速（快测 + 慢测兜底）；选择持久化到设置。
+- [x] W-0004（完整）：免安装包 + 直装 EXE 产出并实测；**EXE 图形安装 → 安装版启动 →
+      静默卸载 → 用户数据保留 全链路验收通过**（见验证历史）。
+- [x] UI（P3/W-0401 最小闭环 + 设置页基础功能）：
+      - 概览页：状态总览卡（语义色容器随状态变化）、连接（本机/局域网地址、Token）、
+        核心与运行时、目录四个分区；失败横幅；底部状态条；
+      - 左侧导航：概览 + 核心/配置/下载/活动/工具（诚实占位）+ 设置；
+      - 设置页：运行目录自定义（settings.properties 持久化，重启生效）+ GitHub 线路
+        并行测速与选择（即时生效）；
+      - `DesktopRuntimeController` 串行化操作并映射状态，首启自动解压随包运行时并
+        在线安装核心；UI 启动 → 外部健康检查一致 → UI 停止，全部实测通过（含用户手测）。
+- [x] 品牌对齐 Android：应用名「弹幕API」（与 strings.xml app_name 一致）；
+      窗口/任务栏/安装器图标由 Android 矢量启动图标渲染生成（desktop/icons/danmuapi.ico +
+      branding PNG，生成脚本 C:\Tools\_downloads\icon-gen\gen-icon.js）。
 - [x] 修复 Android ELF 16KB 门禁小端解析 bug（见修复记录；该修复此前只存在于旧目录未提交）。
+- [x] 环境清理（用户要求）：360 画报已彻底移除（HKCU Run 自启动项删除、进程终止、
+      Roaming\360huabao 目录删除；系统屏保本就未启用，无 .scr 注册）。
 
 ## 当前决策
 
@@ -90,7 +114,10 @@ Migration: 交接命令与文档不再考虑 Termux 路径；Android 基线中 U
 | 2026-08-28 | 同上 | 同上 | 打包应用镜像启动 + 屏幕截图 | PASS | 窗口 1280x800、中文/等宽渲染正常、显示"node.exe: 已随包提供（内嵌资源）" |
 | 2026-08-28 | 同上 | 同上 | `gradlew :app:checkNodeRuntimeScripts :app:testNodeRuntimeParsing :app:testBundledBrotliRuntime :app:testBundledNodeLockClosure :app:testBundledCoreRuntimeDependencies` | PASS | 全部 OK |
 | 2026-08-28 | 同上 | 同上 | `gradlew :app:testDebugUnitTest` | 部分 | 469 用例：458 过 / 11 失败；失败全部为 "Cannot run program sh"（Root 模式 Unix-only 测试，Windows 环境限制，与桌面端改动无关；完整基线以 Termux/CI 为准） |
-| 2026-08-28 | 同上 | 同上 | `gradlew :app:prepareNativeRuntime`（由测试触发） | 修复后 PASS | 见修复记录 1 |
+| 2026-08-28 | 同上 | 同上 | EXE 图形安装向导（WiX UI）点击完成安装 | PASS | 安装至 `C:\Program Files\DanmuApiDesktop`；安装版 jar 内含 runtime/node.exe 与 nodejs-project/**（jar -tf 验证）；安装版启动截图确认"已随包提供" |
+| 2026-08-28 | 同上 | 同上 | `msiexec /x {4C9043C9-5115-36D9-8C9E-1100DC160E3E} /qn`（提权） | PASS | 退出码 0；安装目录移除；预置的用户数据标记 `%LOCALAPPDATA%\DanmuApi\data\download\保留测试.txt` 卸载后保留（USER_DATA=PRESERVED）。非提权卸载报 1730，需管理员权限 |
+| 2026-08-28 | 同上 | 同上 | UI 点击「启动服务」→ 外部 `curl /__health` 比对 → UI 点击「停止」 | PASS | UI Running：127.0.0.1:6687 / PID 8508 / desktop-3f9547ed…；健康接口 JSON 与 UI 完全一致（cwd=%LOCALAPPDATA%\DanmuApi\data, variant=stable）；停止后状态正确复位、无残留 node.exe |
+| 2026-08-28 | 同上 | 同上 | `gradlew :desktop:test`（含控制器闭环/解压/路径用例） | PASS | 12 用例全过（长冒烟按设计跳过） |
 
 ## 修复记录（对仓库的缺陷修复）
 

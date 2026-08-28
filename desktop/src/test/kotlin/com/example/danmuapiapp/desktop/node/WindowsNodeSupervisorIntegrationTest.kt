@@ -1,10 +1,10 @@
 package com.example.danmuapiapp.desktop.node
 
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,13 +21,16 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * W-0003 Windows 集成验收：真实 node.exe 启动现有运行时副本，
- * 校验 Running/Stopped 判定、端口释放、身份消失与无残留进程。
+ * W-0003 Windows 集成验收：真实 node.exe 启动现有运行时副本（端口固定 9321，与 Android/核心一致），
+ * 校验 Running/Stopped 判定、端口占用预检、端口释放、身份消失与无残留进程。
  */
 class WindowsNodeSupervisorIntegrationTest {
 
     @get:Rule
     val temp = TemporaryFolder()
+
+    private val isWindows: Boolean
+        get() = System.getProperty("os.name").lowercase().contains("windows")
 
     private val supervisors = mutableListOf<WindowsNodeSupervisor>()
 
@@ -39,9 +42,6 @@ class WindowsNodeSupervisorIntegrationTest {
         }
         supervisors.clear()
     }
-
-    private val isWindows: Boolean
-        get() = System.getProperty("os.name").lowercase().contains("windows")
 
     private fun resolveNodeExe(): File? {
         val candidates = listOf(
@@ -100,6 +100,15 @@ class WindowsNodeSupervisorIntegrationTest {
         return output.contains(pid.toString())
     }
 
+    private fun newConfig(scriptDir: File, ensureCore: (File) -> Unit): StartConfig {
+        return StartConfig(
+            nodeExe = resolveNodeExe()!!,
+            scriptDir = scriptDir,
+            identityFile = File(temp.root, "instance-id"),
+            ensureCore = ensureCore,
+        )
+    }
+
     private fun runCycles(cycles: Int) {
         val nodeExe = resolveNodeExe()
         assumeTrue("未提供 node.exe（-PdanmuNodeExe），跳过", nodeExe != null)
@@ -111,24 +120,26 @@ class WindowsNodeSupervisorIntegrationTest {
             val supervisor = WindowsNodeSupervisor()
             supervisors += supervisor
             val cycleStart = System.currentTimeMillis()
-            val running = supervisor.start(
-                StartConfig(nodeExe!!, scriptDir, File(temp.root, "home-$index"))
-            )
+            val running = supervisor.start(newConfig(scriptDir) { dir ->
+                // 各轮复用系统缓存核心；测试期间不重复联网
+                if (!DesktopCoreInstaller.isCoreInstalled(dir)) {
+                    DesktopCoreInstaller.ensureCoreInstalled(dir)
+                }
+            })
             assertEquals("第 ${index + 1} 轮启动应为 Running", DesktopRuntimeState.Running, running.state)
-            assertNotNull(running.port)
+            assertEquals("端口应为核心默认 9321", StartConfig.DEFAULT_PORT, running.port)
             assertNotNull(running.pid)
             assertNotNull(running.runtimeIdentity)
             val identity = running.runtimeIdentity!!
             assertEquals(identity, supervisor.snapshot.runtimeIdentity)
             startedPids += running.pid!!
-            val port = running.port!!
             val stopped = supervisor.stop()
             assertEquals("第 ${index + 1} 轮停止应为 Stopped", DesktopRuntimeState.Stopped, stopped.state)
-            assertTrue("端口 $port 应已释放", isPortFree(port))
-            assertTrue("健康接口应不可达（旧 identity 消失）", healthUnreachable(port))
+            assertTrue("端口 ${StartConfig.DEFAULT_PORT} 应已释放", isPortFree(StartConfig.DEFAULT_PORT))
+            assertTrue("健康接口应不可达（旧 identity 消失）", healthUnreachable(StartConfig.DEFAULT_PORT))
             val lastPid = startedPids.last()
             assertFalse("node.exe (pid=$lastPid) 应已退出", isPidAlive(lastPid))
-            println("cycle ${index + 1}/$cycles: port=$port elapsed=${System.currentTimeMillis() - cycleStart}ms")
+            println("cycle ${index + 1}/$cycles: port=${StartConfig.DEFAULT_PORT} elapsed=${System.currentTimeMillis() - cycleStart}ms")
         }
         println("total $cycles cycles in ${System.currentTimeMillis() - suiteStart}ms")
         startedPids.forEachIndexed { index, pid ->
@@ -157,17 +168,13 @@ class WindowsNodeSupervisorIntegrationTest {
         assumeTrue("仅 Windows 执行", isWindows)
         val scriptDir = copyRuntime()
         val blocker = ServerSocket()
-        blocker.bind(InetSocketAddress("127.0.0.1", 0))
-        val occupiedPort = blocker.localPort
+        blocker.bind(InetSocketAddress("127.0.0.1", StartConfig.DEFAULT_PORT))
         try {
             val supervisor = WindowsNodeSupervisor()
             supervisors += supervisor
-            val snapshot = supervisor.start(
-                StartConfig(nodeExe!!, scriptDir, File(temp.root, "home-conflict"), fixedPort = occupiedPort)
-            )
+            val snapshot = supervisor.start(newConfig(scriptDir) {})
             assertEquals(DesktopRuntimeState.Failed, snapshot.state)
-            assertNotNull(snapshot.failureReason)
-            supervisor.stop()
+            assertTrue(snapshot.failureReason.orEmpty().contains("端口 ${StartConfig.DEFAULT_PORT}"))
         } finally {
             blocker.close()
         }
@@ -181,9 +188,8 @@ class WindowsNodeSupervisorIntegrationTest {
         val scriptDir = copyRuntime()
         File(scriptDir, "main.js").delete()
         val supervisor = WindowsNodeSupervisor()
-        val snapshot = supervisor.start(
-            StartConfig(nodeExe!!, scriptDir, File(temp.root, "home-missing-entry"))
-        )
+        supervisors += supervisor
+        val snapshot = supervisor.start(newConfig(scriptDir) {})
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         assertTrue(snapshot.failureReason.orEmpty().contains("入口缺失"))
     }
@@ -197,9 +203,7 @@ class WindowsNodeSupervisorIntegrationTest {
         File(scriptDir, "node_modules").renameTo(File(scriptDir, "node_modules-hidden"))
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
-        val snapshot = supervisor.start(
-            StartConfig(nodeExe!!, scriptDir, File(temp.root, "home-missing-deps"))
-        )
+        val snapshot = supervisor.start(newConfig(scriptDir) {})
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         supervisor.stop()
     }
@@ -214,9 +218,7 @@ class WindowsNodeSupervisorIntegrationTest {
         assertFalse("运行时源不应内置核心", File(scriptDir, "danmu_api_stable/worker.js").isFile)
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
-        val snapshot = supervisor.start(
-            StartConfig(nodeExe!!, scriptDir, File(temp.root, "home-nocore"), ensureCore = {})
-        )
+        val snapshot = supervisor.start(newConfig(scriptDir) {})
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         supervisor.stop()
     }
@@ -229,5 +231,33 @@ class WindowsNodeSupervisorIntegrationTest {
         assertTrue("在线安装后核心应存在", File(scriptDir, "danmu_api_stable/worker.js").isFile)
         // 幂等：重复调用不再触发下载（无网络断言不可靠，这里验证不抛异常即可）
         DesktopCoreInstaller.ensureCoreInstalled(scriptDir)
+    }
+
+    @Test
+    fun envFileCarriesPortHostVariantAndKeepsToken() {
+        assumeTrue("仅 Windows 执行", isWindows)
+        val scriptDir = copyRuntime()
+        // 预置 .env：带 TOKEN 与未知键，验证 supervisor 覆盖端口/监听/变体但保留 TOKEN
+        val envFile = File(scriptDir, "config/.env")
+        envFile.parentFile?.mkdirs()
+        envFile.writeText("TOKEN=my-token\nDANMU_API_PORT=1234\nCUSTOM_KEY=keep\n")
+        val supervisor = WindowsNodeSupervisor()
+        supervisors += supervisor
+        val nodeExe = resolveNodeExe()
+        assumeTrue("未提供 node.exe，跳过", nodeExe != null)
+        val running = supervisor.start(newConfig(scriptDir) { dir ->
+            if (!DesktopCoreInstaller.isCoreInstalled(dir)) DesktopCoreInstaller.ensureCoreInstalled(dir)
+        })
+        assertEquals(DesktopRuntimeState.Running, running.state)
+        val text = envFile.readText()
+        assertTrue("TOKEN 应被保留", text.contains("TOKEN=my-token"))
+        assertTrue("未知键应被保留", text.contains("CUSTOM_KEY=keep"))
+        assertTrue(
+            "端口应写为核心默认 9321",
+            text.contains("DANMU_API_PORT=${StartConfig.DEFAULT_PORT}"),
+        )
+        assertTrue("监听地址应写为 0.0.0.0", text.contains("DANMU_API_HOST=0.0.0.0"))
+        assertTrue(text.contains("DANMU_API_VARIANT=stable"))
+        supervisor.stop()
     }
 }

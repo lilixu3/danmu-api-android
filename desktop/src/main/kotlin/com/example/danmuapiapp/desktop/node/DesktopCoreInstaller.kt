@@ -15,6 +15,7 @@ import java.util.zip.ZipInputStream
  *
  * 与 Android 端一致：danmu_api 核心（stable/dev 变体）**不随包内置**，
  * 首次启动时从 GitHub 在线下载 zipball 并解压到运行时目录（scriptDir/danmu_api_stable）。
+ * 下载走用户选择的 GitHub 线路（多候选回退），无法直连 GitHub 的用户可在设置中选择镜像。
  * 包内只内置 Node 宿主、polyfill 与 node_modules（与 APK 的 runtime_asset_layout 对齐）。
  *
  * P0 仅实现默认分支下载 + 本地缓存；版本比较、分支选择、更新与回退属于 W-0402。
@@ -25,13 +26,6 @@ object DesktopCoreInstaller {
     const val DEV_REPO = "lilixu3/danmu_api"
     const val DEFAULT_BRANCH = "main"
 
-    private const val MAX_ZIP_BYTES = 128L * 1024L * 1024L
-
-    private val client = HttpClient.newBuilder()
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(15))
-        .build()
-
     fun isCoreInstalled(scriptDir: File): Boolean {
         return File(scriptDir, "danmu_api_stable/worker.js").isFile
     }
@@ -40,11 +34,12 @@ object DesktopCoreInstaller {
     fun ensureCoreInstalled(
         scriptDir: File,
         cacheDir: File? = null,
+        githubProxyId: String = GithubProxyCatalog.ID_ORIGINAL,
         repo: String = STABLE_REPO,
         branch: String = DEFAULT_BRANCH,
     ) {
         if (isCoreInstalled(scriptDir)) return
-        val zip = downloadCoreZip(repo, branch, cacheDir ?: defaultCacheDir())
+        val zip = downloadCoreZip(repo, branch, cacheDir ?: defaultCacheDir(), githubProxyId)
         extractCore(zip, File(scriptDir, "danmu_api_stable"))
         if (!isCoreInstalled(scriptDir)) {
             throw IOException("核心解压后缺少 danmu_api_stable/worker.js: $repo@$branch")
@@ -57,38 +52,14 @@ object DesktopCoreInstaller {
         return File(System.getProperty("java.io.tmpdir"), "danmu-desktop-core-cache")
     }
 
-    private fun downloadCoreZip(repo: String, branch: String, cacheDir: File): File {
-        val url = "https://codeload.github.com/$repo/zip/refs/heads/$branch"
+    private fun downloadCoreZip(repo: String, branch: String, cacheDir: File, proxyId: String): File {
+        val originalUrl = "https://codeload.github.com/$repo/zip/refs/heads/$branch"
         val cacheFile = File(cacheDir, repo.replace('/', '_') + "-" + branch + ".zip")
         if (cacheFile.isFile && cacheFile.length() > 1024) return cacheFile
 
-        // 本机网络可能对 codeload 的 TLS 握手挂死，且 JDK HttpClient 的 request timeout
-        // 覆盖不到连接阶段；用 sendAsync + orTimeout 强制限时，超时快速失败。
-        val request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofMinutes(2))
-            .GET()
-            .build()
-        val response = try {
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
-                .orTimeout(150, TimeUnit.SECONDS)
-                .join()
-        } catch (t: Throwable) {
-            throw IOException("核心下载超时或中断: $url", t)
-        }
-        if (response.statusCode() != 200) {
-            throw IOException("核心下载失败 HTTP ${response.statusCode()}: $url")
-        }
-        val bytes = response.body()
-        if (bytes.isEmpty()) throw IOException("核心下载内容为空: $url")
-        if (bytes.size > MAX_ZIP_BYTES) throw IOException("核心下载超过大小上限: $url")
-
         cacheDir.mkdirs()
-        val part = File(cacheDir, cacheFile.name + ".part")
-        part.writeBytes(bytes)
-        if (!part.renameTo(cacheFile)) {
-            part.copyTo(cacheFile, overwrite = true)
-            part.delete()
-        }
+        // 走所选 GitHub 线路的多候选下载（直连不通时镜像回退，单线路内部带限时）
+        GithubFileDownloader.download(originalUrl, proxyId, cacheFile)
         return cacheFile
     }
 
