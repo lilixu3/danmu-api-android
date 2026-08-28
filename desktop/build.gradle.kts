@@ -58,6 +58,10 @@ compose.desktop {
             windows {
                 // 与 Android 启动图标同源（由 gen-icon 脚本从矢量 drawable 渲染生成）
                 iconFile.set(rootProject.file("desktop/icons/danmuapi.ico"))
+                // 安装体验：允许选择安装目录；创建开始菜单与桌面快捷方式
+                dirChooser = true
+                menu = true
+                shortcut = true
             }
 
         // W-0004：随包运行资源走 JVM classpath 资源（见下方 prepareDesktopAppResources），
