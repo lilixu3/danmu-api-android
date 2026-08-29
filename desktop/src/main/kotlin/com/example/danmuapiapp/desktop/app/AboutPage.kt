@@ -39,11 +39,11 @@ fun AboutPage() {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = APP_NAME + " Desktop",
+                    text = APP_NAME,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
-                AboutRow("桌面端版本", "0.1.0（P0 技术验证）")
+                AboutRow("版本", "0.1.0（Windows 桌面端）")
                 AboutRow("Android 对应版本", "v1.0.5.81（核心与交互约定以 Android 端为准）")
                 AboutRow("项目仓库", "github.com/lilixu3/danmu-api-android")
                 AboutRow("核心来源", DesktopCoreInstaller.STABLE_REPO + " / " + DesktopCoreInstaller.DEV_REPO + "（在线安装）")

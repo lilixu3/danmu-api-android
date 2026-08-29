@@ -42,7 +42,8 @@ compose.desktop {
             // （packagePortableZip，由应用镜像压缩而成，解压即用）。
             // 仅支持 x64：Node.js 官方自 19 起不再提供 32 位 Windows 二进制。
             targetFormats(TargetFormat.Exe)
-            packageName = "DanmuApiDesktop"
+            // 与 Android 端对齐：应用名/安装器名/快捷方式名统一为「弹幕API」
+            packageName = "弹幕API"
             packageVersion = "0.1.0"
             description = "弹幕 API Windows 桌面端"
             vendor = "danmu-api-android"
@@ -117,11 +118,11 @@ tasks.matching { it.name == "processResources" }.configureEach {
     dependsOn(prepareDesktopAppResources)
 }
 
-// 免安装版：压缩应用镜像目录，解压后直接运行 DanmuApiDesktop.exe。
+// 免安装版：压缩应用镜像目录，解压后直接运行 弹幕API.exe。
 val packagePortableZip = tasks.register<Zip>("packagePortableZip") {
     dependsOn("createDistributable")
     from(layout.buildDirectory.dir("compose/binaries/main/app"))
-    archiveBaseName.set("DanmuApiDesktop")
+    archiveBaseName.set("弹幕API")
     archiveClassifier.set("portable-x64")
     destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main/portable"))
 }

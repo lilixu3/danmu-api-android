@@ -148,7 +148,7 @@ private fun NavSidebar(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = "弹幕 API Desktop",
+                    text = "弹幕API",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -234,7 +234,7 @@ private fun StatusStrip(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = "DanmuApiDesktop 0.1.0 · P0",
+                text = "弹幕API 0.1.0",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

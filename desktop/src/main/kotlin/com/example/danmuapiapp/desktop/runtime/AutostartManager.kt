@@ -13,7 +13,9 @@ import java.io.File
 object AutostartManager {
 
     private const val RUN_KEY = "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
-    private const val VALUE_NAME = "DanmuApiDesktop"
+    private const val VALUE_NAME = "DanmuApi"
+    /** 历史版本曾用过的键名，刷新时清理，避免残留失效路径。 */
+    private val LEGACY_VALUE_NAMES = listOf("DanmuApiDesktop")
     private const val AUTOSTART_ARG = "--autostart"
 
     /** 当前进程的可执行文件路径；开发运行返回 null（无法自启）。 */
@@ -32,10 +34,30 @@ object AutostartManager {
         return code == 0 && output.contains(VALUE_NAME, ignoreCase = true)
     }
 
+    /**
+     * 自愈：已开启自启时，用当前可执行路径重写注册表（应对应用移动/重命名/
+     * 重新安装后旧路径失效导致开机不自启），并清理历史键名。
+     * 在应用启动（UI 与 headless）时调用。
+     */
+    fun refreshIfEnabled() {
+        runCatching {
+            if (!isEnabled()) {
+                LEGACY_VALUE_NAMES.forEach { legacy ->
+                    exec("reg", "delete", RUN_KEY, "/v", legacy, "/f")
+                }
+                return
+            }
+            if (isSupported()) enable()
+        }
+    }
+
     /** 启用开机自启；返回 null 表示成功，否则为错误信息。 */
     fun enable(): String? {
         val exe = resolveExecutablePath()
             ?: return "仅打包版应用支持开机自启（开发运行不可用）"
+        LEGACY_VALUE_NAMES.forEach { legacy ->
+            exec("reg", "delete", RUN_KEY, "/v", legacy, "/f")
+        }
         val (code, output) = writeRunValue("\"$exe\" $AUTOSTART_ARG")
         return if (code == 0) {
             null
@@ -62,8 +84,12 @@ object AutostartManager {
             "-Value '" + value.replace("'", "''") + "'"
         val encoded = java.util.Base64.getEncoder()
             .encodeToString(script.toByteArray(Charsets.UTF_16LE))
+        // 用 System32 绝对路径：PATH 里的 powershell 可能是商店别名存根（CreateProcess 拒绝访问），
+        // 开机自启场景下 PATH 也不可靠
+        val powershell = (System.getenv("SystemRoot") ?: System.getenv("windir") ?: "C:\\Windows") +
+            "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
         return exec(
-            "powershell",
+            powershell,
             "-NoProfile",
             "-NonInteractive",
             "-EncodedCommand",
