@@ -27,6 +27,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,18 +39,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.desktop.APP_NAME
 import com.example.danmuapiapp.desktop.node.DesktopCoreInstaller
-import com.example.danmuapiapp.desktop.node.StartConfig
 import com.example.danmuapiapp.desktop.runtime.DesktopPaths
 import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
+import com.example.danmuapiapp.desktop.runtime.FirewallManager
 import com.example.danmuapiapp.desktop.runtime.ServicePhase
 import com.example.danmuapiapp.desktop.runtime.ServiceUiState
 import java.awt.Desktop
 import java.awt.datatransfer.StringSelection
 import java.awt.Toolkit
 import java.io.File
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.util.Collections
 
 @Composable
 fun OverviewPage(
@@ -55,6 +56,9 @@ fun OverviewPage(
     state: ServiceUiState,
     isDark: Boolean,
 ) {
+    val configuredListenHost = remember {
+        runCatching { controller.configuredRuntime().listenHost }.getOrDefault("0.0.0.0")
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -90,11 +94,12 @@ fun OverviewPage(
         }
 
         SectionCard(title = "连接") {
+            val listening = state.phase == ServicePhase.Running
             InfoRow(
                 label = "本机访问",
                 value = state.port?.let { "http://127.0.0.1:$it" } ?: "—",
                 monospace = true,
-                action = if (state.phase == ServicePhase.Running) {
+                action = if (listening) {
                     { CopyAction("http://127.0.0.1:${state.port}") }
                 } else {
                     null
@@ -104,10 +109,45 @@ fun OverviewPage(
             val lanIp = rememberLanAddress()
             InfoRow(
                 label = "局域网访问",
-                value = state.port?.let { lanIp?.let { ip -> "http://$ip:${state.port}" } } ?: "—",
+                value = if (listening) {
+                    lanIp?.let { ip -> "http://$ip:${state.port}" } ?: "未检测到局域网地址"
+                } else {
+                    "—"
+                },
                 monospace = true,
-                supporting = "默认监听 0.0.0.0（与 Android 一致），首次开放局域网访问时注意系统防火墙放行",
+                supporting = if (listening) {
+                    "监听 $configuredListenHost；防火墙已放行 node.exe 入站"
+                } else {
+                    "启动后按监听地址开放局域网访问"
+                },
             )
+            if (listening && configuredListenHost == "0.0.0.0") {
+                val nodeExe = File(paths.runtimeDir, "node.exe")
+                var firewallState by androidx.compose.runtime.remember {
+                    mutableStateOf(
+                        runCatching {
+                            FirewallManager.hasInboundRule(nodeExe.absolutePath)
+                        }.getOrDefault(true),
+                    )
+                }
+                if (!firewallState) {
+                    InfoRow(
+                        label = "防火墙",
+                        value = "尚未放行局域网入站",
+                        supporting = "点击按钮提权添加放行规则（允许 node.exe 入站）",
+                        action = {
+                            TextButton(onClick = {
+                                firewallState = runCatching {
+                                    FirewallManager.ensureInboundRule(
+                                        nodeExe.absolutePath,
+                                        "DanmuApi node.exe",
+                                    ) == null
+                                }.getOrDefault(false)
+                            }) { Text("添加放行") }
+                        },
+                    )
+                }
+            }
             InfoDivider()
             InfoRow(
                 label = "访问 Token",
@@ -286,24 +326,7 @@ private fun CopyAction(text: String) {
 
 @Composable
 private fun rememberLanAddress(): String? {
-    return androidx.compose.runtime.remember {
-        runCatching {
-            val candidates = Collections.list(NetworkInterfaces())
-            candidates.filterIsInstance<Inet4Address>()
-                .firstOrNull { !it.isLoopbackAddress && it.isSiteLocalAddress }
-                ?.hostAddress
-        }.getOrNull()
-    }
-}
-
-private fun NetworkInterfaces(): java.util.Enumeration<InetAddress> {
-    val list = mutableListOf<InetAddress>()
-    val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
-    while (interfaces.hasMoreElements()) {
-        val ni = interfaces.nextElement()
-        Collections.list(ni.inetAddresses).forEach { list.add(it) }
-    }
-    return java.util.Collections.enumeration(list)
+    return androidx.compose.runtime.remember { DesktopTray.lanAddress() }
 }
 
 private fun heroTitle(state: ServiceUiState): String = when (state.phase) {

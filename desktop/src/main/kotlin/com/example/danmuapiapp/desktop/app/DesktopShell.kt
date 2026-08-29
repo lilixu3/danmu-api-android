@@ -115,6 +115,7 @@ fun DesktopShell(
                                 paths = controller.paths,
                                 themePreference = themePreference,
                                 onThemeChange = onThemeChange,
+                                onRuntimeConfigChanged = controller::applyRuntimeConfiguration,
                             )
                             DesktopPage.About -> AboutPage()
                             else -> PlaceholderPage(page)
