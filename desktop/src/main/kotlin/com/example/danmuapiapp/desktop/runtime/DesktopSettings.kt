@@ -44,6 +44,11 @@ class DesktopSettings(private val settingsFile: File) {
     var variantOverride: String?
         private set
 
+    /** 关闭窗口行为：ask（每次询问）/ exit（退出并关闭服务）/ tray（后台运行）。 */
+    @Volatile
+    var closeAction: String
+        private set
+
     /** 是否已设置过端口/监听/变体，区分“未设置”与默认值。 */
     val hasExplicitRuntimeConfig: Boolean
         get() = portOverride != null || listenHostOverride != null || variantOverride != null
@@ -63,6 +68,12 @@ class DesktopSettings(private val settingsFile: File) {
         portOverride = values[PORT]?.trim()?.toIntOrNull()?.takeIf { it in 1..65535 }
         listenHostOverride = values[LISTEN_HOST]?.trim()?.takeIf { it.isNotBlank() }
         variantOverride = values[VARIANT]?.trim()?.lowercase()?.takeIf { it in listOf("stable", "dev", "custom") }
+        closeAction = values[CLOSE_ACTION]?.trim()?.takeIf { it in listOf("ask", "exit", "tray") } ?: "ask"
+    }
+
+    fun setCloseAction(value: String) {
+        closeAction = if (value in listOf("ask", "exit", "tray")) value else "ask"
+        persist(CLOSE_ACTION, closeAction)
     }
 
     fun setPortOverride(value: Int?) {
@@ -130,6 +141,7 @@ class DesktopSettings(private val settingsFile: File) {
         private const val PORT = "port"
         private const val LISTEN_HOST = "listen_host"
         private const val VARIANT = "variant"
+        private const val CLOSE_ACTION = "close_action"
 
         /** 与 Android GithubProxyService 的 PROXY_ID_ORIGINAL 一致。 */
         const val PROXY_ORIGINAL = "original"
