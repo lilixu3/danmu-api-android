@@ -13,7 +13,9 @@ import com.example.danmuapiapp.desktop.app.DesktopShell
 import com.example.danmuapiapp.desktop.app.DesktopTray
 import com.example.danmuapiapp.desktop.app.ThemePreference
 import com.example.danmuapiapp.desktop.node.DesktopCoreInstaller
+import com.example.danmuapiapp.desktop.runtime.AppInstanceLock
 import com.example.danmuapiapp.desktop.runtime.AutostartManager
+import com.example.danmuapiapp.desktop.runtime.DesktopSettings
 import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
 import com.example.danmuapiapp.desktop.runtime.ServicePhase
 import java.awt.Dimension
@@ -49,6 +51,21 @@ fun main(args: Array<String>) {
     // 自愈：已开启自启时用当前路径刷新注册表（应用移动/重装后旧路径失效的场景），
     // 并清理历史版本键名；UI 与 headless 两条路径都执行
     runCatching { AutostartManager.refreshIfEnabled() }
+    // 单实例互斥：多实例会互相抢端口、托盘与服务状态全部失真（Android 靠单进程天然保证）
+    val instanceLockFile = File(DesktopSettings.defaultSettingsFile().parentFile, "app.lock")
+    if (!AppInstanceLock.tryAcquire(instanceLockFile)) {
+        if (AutostartManager.isAutostartLaunch(args)) {
+            // 开机自启撞上已运行实例：正常情况（服务已由在跑实例管理），静默退出
+            return
+        }
+        javax.swing.JOptionPane.showMessageDialog(
+            null,
+            "$APP_NAME 已在运行（可从右下角托盘图标打开）。",
+            APP_NAME,
+            javax.swing.JOptionPane.INFORMATION_MESSAGE,
+        )
+        return
+    }
     // 无感自启：开机自启参数走无窗口后台模式，直接运行服务，不进入 UI
     if (AutostartManager.isAutostartLaunch(args)) {
         runHeadlessService()
@@ -80,10 +97,17 @@ fun main(args: Array<String>) {
             }
             // 界面模式同样保留托盘；关闭窗口即退出应用
             LaunchedEffect(Unit) {
-                runCatching {
+                val error = runCatching {
                     DesktopTray.install(controller) {
                         window.isVisible = true
                         window.toFront()
+                    }
+                }.exceptionOrNull()
+                if (error != null) {
+                    runCatching {
+                        val log = File(controller.paths.logsDir, "tray.log")
+                        log.parentFile?.mkdirs()
+                        log.appendText("${java.time.LocalDateTime.now()}  托盘安装异常：$error${System.lineSeparator()}")
                     }
                 }
             }
@@ -121,8 +145,9 @@ private fun runHeadlessService() {
     })
     // 后台模式同样提供托盘：左键打开应用，右键可启动/停止/重启/退出
     runCatching {
-        DesktopTray.install(controller) { launchAppWindow() }
-    }.onFailure { log("托盘安装失败：${it.message}") }
+        val result = DesktopTray.install(controller) { launchAppWindow() }
+        if (result != null) log("托盘安装失败：$result") else log("托盘已安装")
+    }.onFailure { log("托盘安装异常：${it.message}") }
     controller.start()
     var lastPhase = controller.state.value.phase
     log("首次状态：$lastPhase，message=${controller.state.value.message}")
