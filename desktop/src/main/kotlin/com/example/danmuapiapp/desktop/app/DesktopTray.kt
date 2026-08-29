@@ -31,104 +31,70 @@ object DesktopTray {
     private var lastPhase: ServicePhase? = null
     private var lastAnnouncedPhase: ServicePhase? = null
 
-    fun install(controller: DesktopRuntimeController, onOpenApp: () -> Unit) {
-        if (installed) return
-        if (!SystemTray.isSupported()) return
-        val image = loadTrayImage() ?: run {
-            // 图标加载失败时托盘不会出现，必须留下可见的失败痕迹而不是静默吞掉
-            println("[DesktopTray] 托盘图标资源加载失败（branding/app-icon-32.png）")
-            return
-        }
+    /** 托盘安装诊断结果（null=成功），供调用方写入日志，失败必须暴露而不是静默。 */
+    fun install(controller: DesktopRuntimeController, onOpenApp: () -> Unit): String? {
+        if (installed) return null
+        if (!SystemTray.isSupported()) return "系统不支持托盘（SystemTray.isSupported=false）"
+        val image = loadTrayImage()
+            ?: return "托盘图标资源加载失败（branding/app-icon-32.png）"
         installed = true
 
-        EventQueue.invokeAndWait {
-            val popup = PopupMenu()
-            // AWT 默认菜单字体缺中文字形会显示方块，显式指定中文字体
-            val cjkFont = Font("Microsoft YaHei", Font.PLAIN, 12)
-            popup.font = cjkFont
-            val open = MenuItem("打开应用")
-            val start = MenuItem("启动服务")
-            val stop = MenuItem("停止服务")
-            val restart = MenuItem("重启服务")
-            val exit = MenuItem("退出")
-            listOf(open, start, stop, restart, exit).forEach { it.font = cjkFont }
-            open.addActionListener { EventQueue.invokeLater(onOpenApp) }
-            start.addActionListener { controller.start() }
-            stop.addActionListener { controller.stop() }
-            restart.addActionListener { controller.restart() }
-            exit.addActionListener {
-                controller.shutdown()
-                remove()
-                exitProcess(0)
-            }
-            popup.add(open)
-            popup.addSeparator()
-            popup.add(start)
-            popup.add(stop)
-            popup.add(restart)
-            popup.addSeparator()
-            popup.add(exit)
-
-            val icon = TrayIcon(image, "$APP_NAME - 未运行", popup)
-            icon.isImageAutoSize = true
-            // 左键单击打开应用（AWT 的 action 事件是双击语义，这里用鼠标监听实现单击）
-            icon.addMouseListener(object : MouseAdapter() {
-                override fun mousePressed(e: MouseEvent) {
-                    if (e.button == MouseEvent.BUTTON1) {
-                        EventQueue.invokeLater(onOpenApp)
-                    }
+        // 托盘组件必须在 AWT EDT 创建。注意：Compose Desktop 的 UI 线程本身就是 EDT，
+        // 若当前已在 EDT 直接执行；否则 invokeAndWait 切换。此前 UI 模式在 EDT 上
+        // 调用 invokeAndWait 抛错且被 runCatching 吞掉，正是"手动打开无托盘图标"的根因。
+        var error: String? = null
+        val createOnEdt = Runnable {
+            try {
+                val popup = PopupMenu()
+                // AWT 默认菜单字体缺中文字形会显示方块，显式指定中文字体
+                val cjkFont = Font("Microsoft YaHei", Font.PLAIN, 12)
+                popup.font = cjkFont
+                val open = MenuItem("打开应用")
+                val start = MenuItem("启动服务")
+                val stop = MenuItem("停止服务")
+                val restart = MenuItem("重启服务")
+                val exit = MenuItem("退出")
+                listOf(open, start, stop, restart, exit).forEach { it.font = cjkFont }
+                open.addActionListener { EventQueue.invokeLater(onOpenApp) }
+                start.addActionListener { controller.start() }
+                stop.addActionListener { controller.stop() }
+                restart.addActionListener { controller.restart() }
+                exit.addActionListener {
+                    controller.shutdown()
+                    remove()
+                    exitProcess(0)
                 }
-            })
-            SystemTray.getSystemTray().add(icon)
-            trayIcon = icon
+                popup.add(open)
+                popup.addSeparator()
+                popup.add(start)
+                popup.add(stop)
+                popup.add(restart)
+                popup.addSeparator()
+                popup.add(exit)
+
+                val icon = TrayIcon(image, "$APP_NAME - 未运行", popup)
+                icon.isImageAutoSize = true
+                // 左键单击打开应用（AWT 的 action 事件是双击语义，这里用鼠标监听实现单击）
+                icon.addMouseListener(object : MouseAdapter() {
+                    override fun mousePressed(e: MouseEvent) {
+                        if (e.button == MouseEvent.BUTTON1) {
+                            EventQueue.invokeLater(onOpenApp)
+                        }
+                    }
+                })
+                SystemTray.getSystemTray().add(icon)
+                trayIcon = icon
+            } catch (t: Throwable) {
+                error = t.message ?: t.toString()
+                installed = false
+            }
         }
-
-        // 状态轮询：更新 tooltip，并在关键转换时弹气泡通知
-        Thread({
-            while (installed) {
-                runCatching {
-                    val state = controller.state.value
-                    val phase = state.phase
-                    if (phase != lastPhase) {
-                        lastPhase = phase
-                        EventQueue.invokeLater {
-                            trayIcon?.setToolTip("$APP_NAME - " + when (phase) {
-                                ServicePhase.Running -> "运行中 (127.0.0.1:${state.port})"
-                                ServicePhase.Preparing -> "正在准备运行时"
-                                ServicePhase.Starting -> "正在启动服务"
-                                ServicePhase.Stopping -> "正在停止服务"
-                                ServicePhase.Failed -> "启动失败"
-                                ServicePhase.Stopped -> "未运行"
-                            })
-                        }
-                        // 仅在进入 Running/Failed 时弹一次气泡（自启成功提示走这里）
-                        if (phase != lastAnnouncedPhase && (phase == ServicePhase.Running || phase == ServicePhase.Failed)) {
-                            lastAnnouncedPhase = phase
-                            val lan = lanAddress()
-                            val (title, message, type) = when (phase) {
-                                ServicePhase.Running -> Triple(
-                                    APP_NAME,
-                                    buildString {
-                                        append("服务已在后台启动：http://127.0.0.1:${state.port}")
-                                        if (lan != null) append("（局域网 http://$lan:${state.port}）")
-                                    },
-                                    TrayIcon.MessageType.INFO,
-                                )
-                                else -> Triple(
-                                    APP_NAME,
-                                    "服务启动失败：${state.message.take(120)}",
-                                    TrayIcon.MessageType.ERROR,
-                                )
-                            }
-                            EventQueue.invokeLater {
-                                runCatching { trayIcon?.displayMessage(title, message, type) }
-                            }
-                        }
-                    }
-                }
-                Thread.sleep(1000)
-            }
-        }, "danmu-desktop-tray").apply { isDaemon = true }.start()
+        if (EventQueue.isDispatchThread()) {
+            createOnEdt.run()
+        } else {
+            EventQueue.invokeAndWait(createOnEdt)
+        }
+        return error
     }
 
     fun remove() {
@@ -137,13 +103,6 @@ object DesktopTray {
         }
         trayIcon = null
         installed = false
-    }
-
-    private fun loadTrayImage(): BufferedImage? {
-        val loader = Thread.currentThread().contextClassLoader
-        return loader.getResourceAsStream("branding/app-icon-32.png")?.use { input ->
-            ImageIO.read(input)
-        }?.takeIf { it.width > 0 }
     }
 
     /** 本机站点内 IPv4 地址（供通知/界面展示局域网访问地址）。 */
@@ -159,5 +118,12 @@ object DesktopTray {
             }
             null
         }.getOrNull()
+    }
+
+    private fun loadTrayImage(): BufferedImage? {
+        val loader = Thread.currentThread().contextClassLoader
+        return loader.getResourceAsStream("branding/app-icon-32.png")?.use { input ->
+            ImageIO.read(input)
+        }?.takeIf { it.width > 0 }
     }
 }

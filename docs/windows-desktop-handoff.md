@@ -200,6 +200,11 @@ Next task:
 6. 运行 `git diff --check`。
 7. 没有明确授权时，不 push、不发布、不上传安装包（本次已获本地实现与本地提交授权，推送远程需另行授权）。
 
+## 工程硬标准（所有贡献者适用，违反即返工）
+
+见 [`docs/development-principles.md`](development-principles.md)。核心：**禁止兜底掩盖故障，必须先取证找到根因再修，修复必须可验证，诊断信息不得静默丢弃**。
+实例：托盘"手动打开无图标"的根因是 Compose UI 线程即 AWT EDT，在 EDT 上调 invokeAndWait 抛错被 runCatching 吞掉；正确修法是托盘内部自行处理 EDT 调度并把诊断返回调用方，而不是画兜底图标。
+
 ## 当前下一任务
 
 设置页第二批基础功能（安卓端规格已完成调研，见下）：
