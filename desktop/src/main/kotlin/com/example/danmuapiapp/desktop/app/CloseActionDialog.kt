@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -13,7 +14,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +26,7 @@ import androidx.compose.ui.window.Dialog
 import com.example.danmuapiapp.desktop.APP_NAME
 
 /**
- * 关闭窗口时的行为选择对话框：退出并关闭服务 / 后台运行（最小化到托盘）。
+ * 关闭窗口时的行为选择对话框：后台运行（主选，右侧主位）/ 退出并关闭服务。
  * 可勾选"记住我的选择"，此后关闭窗口不再询问（可在 设置 → 关闭窗口行为 中更改）。
  */
 @Composable
@@ -39,7 +39,7 @@ fun CloseActionDialog(
     Dialog(onCloseRequest = onCancel, title = APP_NAME) {
         Card(shape = RoundedCornerShape(Dimens.CardCorner)) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                modifier = Modifier.fillMaxWidth().padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
@@ -59,13 +59,14 @@ fun CloseActionDialog(
                     )
                 }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     OutlinedButton(onClick = onCancel) { Text("取消") }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { onChoose("tray", dontAsk) }) { Text("后台运行") }
-                    Button(onClick = { onChoose("exit", dontAsk) }) { Text("退出并关闭服务") }
+                    // 主选动作放右侧末位（用户高频选择），用主按钮强调
+                    Button(onClick = { onChoose("tray", dontAsk) }) { Text("后台运行") }
+                    OutlinedButton(onClick = { onChoose("exit", dontAsk) }) { Text("退出并关闭服务") }
                 }
             }
         }

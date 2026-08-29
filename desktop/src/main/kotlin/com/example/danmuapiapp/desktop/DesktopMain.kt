@@ -217,17 +217,38 @@ private fun runHeadlessApp() = application(exitProcessOnExit = false) {
         }.onFailure { log("托盘安装异常：${it.message}") }
 
         controller.start()
+        // 竞态防护：start() 是异步提交，worker 把状态置为 Preparing 之前循环首帧
+        // 读到的仍是 Stopped——曾因此误判"服务已停止"瞬间 exitProcess，托盘/气泡
+        // 全部消失，而 worker 仍抢在 JVM 停止前拉起 node.exe 成为孤儿进程。
+        // 规则：只有"观测到过非 Stopped 状态"之后的 Stopped 才是终止；纯 Stopped
+        // 超过宽限期（15s）视为启动无进展，同样终止并留痕。
+        val startedAt = System.currentTimeMillis()
+        var sawActivity = false
         while (true) {
             val state = controller.state.value
-            if (state.phase == ServicePhase.Running && !controller.isChildAlive()) {
-                log("node 子进程已退出（可能被 UI 接管），headless 进程结束")
-                DesktopTray.remove()
-                exitProcess(0)
-            }
-            if (state.phase == ServicePhase.Stopped || state.phase == ServicePhase.Failed) {
-                log("服务进入 ${state.phase}，headless 进程结束")
-                DesktopTray.remove()
-                exitProcess(0)
+            if (state.phase != ServicePhase.Stopped) sawActivity = true
+            when {
+                state.phase == ServicePhase.Running && !controller.isChildAlive() -> {
+                    log("node 子进程已退出（可能被 UI 接管），headless 进程结束")
+                    DesktopTray.remove()
+                    exitProcess(0)
+                }
+                state.phase == ServicePhase.Failed -> {
+                    log("服务进入 Failed：${state.message.take(200)}，headless 进程结束")
+                    DesktopTray.remove()
+                    exitProcess(0)
+                }
+                state.phase == ServicePhase.Stopped && sawActivity -> {
+                    log("服务已停止，headless 进程结束")
+                    DesktopTray.remove()
+                    exitProcess(0)
+                }
+                state.phase == ServicePhase.Stopped &&
+                    System.currentTimeMillis() - startedAt > 15_000 -> {
+                    log("启动无进展（Stopped 超过 15s），headless 进程结束")
+                    DesktopTray.remove()
+                    exitProcess(0)
+                }
             }
             delay(1500)
         }
