@@ -9,6 +9,7 @@ import java.awt.TrayIcon
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
+import java.io.File
 import javax.imageio.ImageIO
 
 /**
@@ -58,13 +59,18 @@ object DesktopTray {
                 icon.addMouseListener(object : MouseAdapter() {
                     override fun mousePressed(e: MouseEvent) {
                         if (e.button == MouseEvent.BUTTON1) {
-                            EventQueue.invokeLater(onOpenApp)
+                            runCatching { EventQueue.invokeLater(onOpenApp) }
+                                .onFailure(::logError)
                         }
                     }
 
                     override fun mouseReleased(e: MouseEvent) {
                         if (e.button == MouseEvent.BUTTON3) {
-                            e.component.let { c -> onMenu(c.locationOnScreen.x, c.locationOnScreen.y) }
+                            // 必须用事件自带的屏幕坐标：TrayIcon 非常规显示组件，
+                            // component.locationOnScreen 会抛 IllegalComponentStateException
+                            // （曾导致右键菜单完全不弹且异常被吞）。
+                            runCatching { onMenu(e.xOnScreen, e.yOnScreen) }
+                                .onFailure(::logError)
                         }
                     }
                 })
@@ -158,5 +164,16 @@ object DesktopTray {
         return loader.getResourceAsStream("branding/app-icon-32.png")?.use { input ->
             ImageIO.read(input)
         }?.takeIf { it.width > 0 }
+    }
+
+    /** 托盘链路错误落盘（%LOCALAPPDATA%\DanmuApi\logs\tray.log），禁止静默吞掉。 */
+    private fun logError(t: Throwable) {
+        runCatching {
+            val appdata = System.getenv("LOCALAPPDATA")
+                ?: (System.getProperty("user.home") + "\\AppData\\Local")
+            val log = File(appdata, "DanmuApi/logs/tray.log")
+            log.parentFile?.mkdirs()
+            log.appendText("${java.time.LocalDateTime.now()}  ${t.message ?: t.toString()}${System.lineSeparator()}")
+        }
     }
 }
