@@ -76,6 +76,7 @@ fun SettingsPage(
     var testing by remember { mutableStateOf(false) }
     var selectedProxy by remember { mutableStateOf(settings.githubProxyId) }
     var themePref by remember { mutableStateOf(themePreference) }
+    var closeActionPref by remember { mutableStateOf(settings.closeAction) }
     var autostartEnabled by remember { mutableStateOf(AutostartManager.isEnabled()) }
     var autostartError by remember { mutableStateOf<String?>(null) }
     var githubTokenText by remember { mutableStateOf(settings.githubToken) }
@@ -130,6 +131,53 @@ fun SettingsPage(
                         }
                     }
                 }
+            }
+        }
+
+        Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "关闭窗口行为",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "ask" to "每次询问",
+                        "tray" to "后台运行",
+                        "exit" to "退出并关闭服务",
+                    ).forEach { (key, label) ->
+                        Surface(
+                            onClick = {
+                                settings.setCloseAction(key)
+                                closeActionPref = key
+                            },
+                            shape = RoundedCornerShape(Dimens.ItemCorner),
+                            color = if (closeActionPref == key) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            contentColor = if (closeActionPref == key) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "「后台运行」关闭窗口后服务继续，托盘图标可恢复窗口；「退出并关闭服务」会停止 node.exe。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

@@ -22,8 +22,6 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import com.example.danmuapiapp.desktop.APP_NAME
 import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
-import java.awt.event.WindowAdapter
-import java.awt.event.WindowEvent
 
 /**
  * 托盘右键菜单窗：无边框、置顶的小窗，用 Compose 渲染（中文可靠），
@@ -41,8 +39,11 @@ fun TrayMenuWindow(
 ) {
     val state by controller.state.collectAsState()
     val menuWidth = 216.dp
-    val x = screenX.coerceAtLeast(0)
-    val y = screenY.coerceAtLeast(0)
+    val menuHeightEstimate = 260
+    val screenH = java.awt.Toolkit.getDefaultToolkit().screenSize.height
+    val screenW = java.awt.Toolkit.getDefaultToolkit().screenSize.width
+    val x = screenX.coerceIn(0, screenW - menuWidth.value.toInt() - 8)
+    val y = screenY.coerceAtLeast(0).coerceAtMost(screenH - menuHeightEstimate)
 
     Window(
         onCloseRequest = onClose,
@@ -56,11 +57,8 @@ fun TrayMenuWindow(
             position = WindowPosition.Absolute(x.dp, y.dp),
         ),
     ) {
-        window.addWindowFocusListener(object : WindowAdapter() {
-            override fun windowLostFocus(e: WindowEvent) {
-                onClose()
-            }
-        })
+        // 注意：不使用"失去焦点自动关闭"——菜单窗创建瞬间的焦点竞争会导致闪没。
+        // 关闭途径：点击菜单项、再次右键托盘图标（切换显隐）。
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.surface,

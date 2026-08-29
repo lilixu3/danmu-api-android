@@ -139,7 +139,16 @@ class WindowsNodeSupervisorIntegrationTest {
                     }
                 },
             ))
-            assertEquals("第 ${index + 1} 轮启动应为 Running", DesktopRuntimeState.Running, running.state)
+            assertEquals(
+                "第 ${index + 1} 轮启动应为 Running",
+                DesktopRuntimeState.Running,
+                running.state,
+            )
+            if (running.state != DesktopRuntimeState.Running) {
+                org.junit.Assert.fail(
+                    "启动失败原因：${running.failureReason?.take(500) ?: "未知"}",
+                )
+            }
             assertEquals("端口应为核心默认 9321", StartConfig.DEFAULT_PORT, running.port)
             assertNotNull(running.pid)
             assertNotNull(running.runtimeIdentity)

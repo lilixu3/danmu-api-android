@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.example.danmuapiapp.desktop.app.CloseActionDialog
 import com.example.danmuapiapp.desktop.app.DesktopShell
 import com.example.danmuapiapp.desktop.app.DesktopTray
 import com.example.danmuapiapp.desktop.app.ThemePreference
@@ -79,19 +80,41 @@ fun main(args: Array<String>) {
         var closing by mutableStateOf(false)
         var trayMenuVisible by remember { mutableStateOf(false) }
         var trayMenuPos by remember { mutableStateOf(IntOffset.Zero) }
-        var mainWindow: java.awt.Window? = null
+        var closeDialogVisible by remember { mutableStateOf(false) }
+        var mainWindow by remember { mutableStateOf<java.awt.Window?>(null) }
+
+        fun hideToTray() {
+            // 后台运行：仅隐藏窗口，服务继续，托盘左键/菜单可恢复
+            mainWindow?.isVisible = false
+        }
+
+        fun exitCompletely() {
+            DesktopTray.remove()
+            controller.shutdown()
+            exitProcess(0)
+        }
+
+        fun restoreWindow() {
+            val w = mainWindow ?: return
+            // 最小化状态下 toFront 无法还原，必须先把 state 归位 NORMAL（AWT peer 是 JFrame）
+            if (w is java.awt.Frame && w.state == java.awt.Frame.ICONIFIED) {
+                w.state = java.awt.Frame.NORMAL
+            }
+            w.isVisible = true
+            w.toFront()
+        }
+
+        fun handleCloseRequest() {
+            when (controller.settings.closeAction) {
+                "exit" -> exitCompletely()
+                "tray" -> hideToTray()
+                else -> closeDialogVisible = true
+            }
+        }
 
         val windowState = rememberWindowState(width = 1280.dp, height = 800.dp)
         Window(
-            onCloseRequest = {
-                // 兜底：确认 node.exe 不残留（优雅关闭，必要时强杀），之后再退出
-                if (!closing) {
-                    closing = true
-                    DesktopTray.remove()
-                    controller.shutdown()
-                }
-                exitApplication()
-            },
+            onCloseRequest = ::handleCloseRequest,
             title = APP_NAME,
             state = windowState,
         ) {
@@ -105,13 +128,10 @@ fun main(args: Array<String>) {
                 val error = runCatching {
                     DesktopTray.install(
                         controller,
-                        onOpenApp = {
-                            window.isVisible = true
-                            window.toFront()
-                        },
+                        onOpenApp = { restoreWindow() },
                         onMenu = { x, y ->
                             trayMenuPos = IntOffset(x, y)
-                            trayMenuVisible = true
+                            trayMenuVisible = !trayMenuVisible
                         },
                     )
                 }.exceptionOrNull()
@@ -134,16 +154,22 @@ fun main(args: Array<String>) {
                 screenX = trayMenuPos.x,
                 screenY = trayMenuPos.y,
                 controller = controller,
-                onOpenApp = {
-                    mainWindow?.isVisible = true
-                    mainWindow?.toFront()
-                },
-                onExitApp = {
-                    DesktopTray.remove()
-                    controller.shutdown()
-                    exitProcess(0)
-                },
+                onOpenApp = { restoreWindow() },
+                onExitApp = ::exitCompletely,
                 onClose = { trayMenuVisible = false },
+            )
+        }
+        if (closeDialogVisible) {
+            CloseActionDialog(
+                onChoose = { action, rememberChoice ->
+                    closeDialogVisible = false
+                    if (rememberChoice) controller.settings.setCloseAction(action)
+                    when (action) {
+                        "exit" -> exitCompletely()
+                        "tray" -> hideToTray()
+                    }
+                },
+                onCancel = { closeDialogVisible = false },
             )
         }
     }
