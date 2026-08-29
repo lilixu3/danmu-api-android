@@ -100,10 +100,15 @@ class WindowsNodeSupervisorIntegrationTest {
         return output.contains(pid.toString())
     }
 
-    private fun newConfig(scriptDir: File, ensureCore: (File) -> Unit): StartConfig {
+    private fun newConfig(
+        scriptDir: File,
+        ensureCore: (File) -> Unit,
+        port: Int = StartConfig.DEFAULT_PORT,
+    ): StartConfig {
         return StartConfig(
             nodeExe = resolveNodeExe()!!,
             scriptDir = scriptDir,
+            port = port,
             identityFile = File(temp.root, "instance-id"),
             ensureCore = ensureCore,
         )
@@ -113,6 +118,11 @@ class WindowsNodeSupervisorIntegrationTest {
         val nodeExe = resolveNodeExe()
         assumeTrue("未提供 node.exe（-PdanmuNodeExe），跳过", nodeExe != null)
         assumeTrue("仅 Windows 执行", isWindows)
+        // 本机已有服务实例（如开机自启后台）占用默认端口时，集成测试无意义，按环境前提跳过
+        assumeTrue(
+            "端口 ${StartConfig.DEFAULT_PORT} 被本机服务占用，跳过（请暂停服务后重跑）",
+            isPortFree(StartConfig.DEFAULT_PORT),
+        )
         val scriptDir = copyRuntime()
         val startedPids = mutableListOf<Long>()
         val suiteStart = System.currentTimeMillis()
@@ -120,12 +130,15 @@ class WindowsNodeSupervisorIntegrationTest {
             val supervisor = WindowsNodeSupervisor()
             supervisors += supervisor
             val cycleStart = System.currentTimeMillis()
-            val running = supervisor.start(newConfig(scriptDir) { dir ->
-                // 各轮复用系统缓存核心；测试期间不重复联网
-                if (!DesktopCoreInstaller.isCoreInstalled(dir)) {
-                    DesktopCoreInstaller.ensureCoreInstalled(dir)
-                }
-            })
+            val running = supervisor.start(newConfig(
+                scriptDir,
+                ensureCore = { dir ->
+                    // 各轮复用系统缓存核心；测试期间不重复联网
+                    if (!DesktopCoreInstaller.isCoreInstalled(dir)) {
+                        DesktopCoreInstaller.ensureCoreInstalled(dir)
+                    }
+                },
+            ))
             assertEquals("第 ${index + 1} 轮启动应为 Running", DesktopRuntimeState.Running, running.state)
             assertEquals("端口应为核心默认 9321", StartConfig.DEFAULT_PORT, running.port)
             assertNotNull(running.pid)
@@ -172,7 +185,7 @@ class WindowsNodeSupervisorIntegrationTest {
         try {
             val supervisor = WindowsNodeSupervisor()
             supervisors += supervisor
-            val snapshot = supervisor.start(newConfig(scriptDir) {})
+            val snapshot = supervisor.start(newConfig(scriptDir, ensureCore = {}))
             assertEquals(DesktopRuntimeState.Failed, snapshot.state)
             assertTrue(snapshot.failureReason.orEmpty().contains("端口 ${StartConfig.DEFAULT_PORT}"))
         } finally {
@@ -189,7 +202,7 @@ class WindowsNodeSupervisorIntegrationTest {
         File(scriptDir, "main.js").delete()
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
-        val snapshot = supervisor.start(newConfig(scriptDir) {})
+        val snapshot = supervisor.start(newConfig(scriptDir, ensureCore = {}))
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         assertTrue(snapshot.failureReason.orEmpty().contains("入口缺失"))
     }
@@ -203,7 +216,7 @@ class WindowsNodeSupervisorIntegrationTest {
         File(scriptDir, "node_modules").renameTo(File(scriptDir, "node_modules-hidden"))
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
-        val snapshot = supervisor.start(newConfig(scriptDir) {})
+        val snapshot = supervisor.start(newConfig(scriptDir, ensureCore = {}))
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         supervisor.stop()
     }
@@ -218,7 +231,7 @@ class WindowsNodeSupervisorIntegrationTest {
         assertFalse("运行时源不应内置核心", File(scriptDir, "danmu_api_stable/worker.js").isFile)
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
-        val snapshot = supervisor.start(newConfig(scriptDir) {})
+        val snapshot = supervisor.start(newConfig(scriptDir, ensureCore = {}))
         assertEquals(DesktopRuntimeState.Failed, snapshot.state)
         supervisor.stop()
     }
@@ -236,25 +249,30 @@ class WindowsNodeSupervisorIntegrationTest {
     @Test
     fun envFileCarriesPortHostVariantAndKeepsToken() {
         assumeTrue("仅 Windows 执行", isWindows)
+        assumeTrue("端口 19421 被占用，跳过", isPortFree(19421))
         val scriptDir = copyRuntime()
         // 预置 .env：带 TOKEN 与未知键，验证 supervisor 覆盖端口/监听/变体但保留 TOKEN
         val envFile = File(scriptDir, "config/.env")
         envFile.parentFile?.mkdirs()
-        envFile.writeText("TOKEN=my-token\nDANMU_API_PORT=1234\nCUSTOM_KEY=keep\n")
+        envFile.writeText("TOKEN=my-token\nDANMU_API_PORT=19421\nCUSTOM_KEY=keep\n")
         val supervisor = WindowsNodeSupervisor()
         supervisors += supervisor
         val nodeExe = resolveNodeExe()
         assumeTrue("未提供 node.exe，跳过", nodeExe != null)
-        val running = supervisor.start(newConfig(scriptDir) { dir ->
-            if (!DesktopCoreInstaller.isCoreInstalled(dir)) DesktopCoreInstaller.ensureCoreInstalled(dir)
-        })
+        val running = supervisor.start(newConfig(
+            scriptDir,
+            ensureCore = { dir ->
+                if (!DesktopCoreInstaller.isCoreInstalled(dir)) DesktopCoreInstaller.ensureCoreInstalled(dir)
+            },
+            port = 19421,
+        ))
         assertEquals(DesktopRuntimeState.Running, running.state)
         val text = envFile.readText()
         assertTrue("TOKEN 应被保留", text.contains("TOKEN=my-token"))
         assertTrue("未知键应被保留", text.contains("CUSTOM_KEY=keep"))
         assertTrue(
-            "端口应写为核心默认 9321",
-            text.contains("DANMU_API_PORT=${StartConfig.DEFAULT_PORT}"),
+            "端口应写为用户传入的自定义端口",
+            text.contains("DANMU_API_PORT=19421"),
         )
         assertTrue("监听地址应写为 0.0.0.0", text.contains("DANMU_API_HOST=0.0.0.0"))
         assertTrue(text.contains("DANMU_API_VARIANT=stable"))

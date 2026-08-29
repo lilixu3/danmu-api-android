@@ -42,8 +42,10 @@ import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.desktop.node.GithubProxyCatalog
 import com.example.danmuapiapp.desktop.runtime.AutostartManager
 import com.example.danmuapiapp.desktop.runtime.DesktopPaths
+import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeConfigResolver
 import com.example.danmuapiapp.desktop.runtime.DesktopSettings
 import kotlinx.coroutines.Dispatchers
+import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -57,9 +59,18 @@ fun SettingsPage(
     paths: DesktopPaths,
     themePreference: ThemePreference,
     onThemeChange: (ThemePreference) -> Unit,
+    onRuntimeConfigChanged: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val configuredRuntime = remember(settings, paths.root.absolutePath) {
+        DesktopRuntimeConfigResolver.resolve(
+            settings,
+            File(paths.runtimeDir, "nodejs-project"),
+        )
+    }
     var runtimeRootText by remember { mutableStateOf(settings.runtimeRootOverride ?: "") }
+    var portText by remember { mutableStateOf(settings.portOverride?.toString() ?: configuredRuntime.port.toString()) }
+    var listenHostText by remember { mutableStateOf(settings.listenHostOverride ?: configuredRuntime.listenHost) }
     var savedHint by remember { mutableStateOf("") }
     var latencies by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var testing by remember { mutableStateOf(false) }
@@ -204,6 +215,53 @@ fun SettingsPage(
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
+                }
+            }
+        }
+
+        Card(shape = RoundedCornerShape(Dimens.CardCorner), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "服务配置",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = portText,
+                        onValueChange = { portText = it.filter(Char::isDigit).take(5) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("端口") },
+                        placeholder = { Text("9321") },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        supportingText = { Text("默认 9321；运行中修改将重启服务") },
+                    )
+                    OutlinedTextField(
+                        value = listenHostText,
+                        onValueChange = { listenHostText = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("监听地址") },
+                        placeholder = { Text("0.0.0.0") },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        supportingText = { Text("默认 0.0.0.0；运行中修改将重启服务") },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        settings.setPortOverride(portText.toIntOrNull()?.takeIf { it in 1..65535 })
+                        settings.setListenHostOverride(listenHostText.trim().ifBlank { null })
+                        onRuntimeConfigChanged()
+                        savedHint = "已保存。运行中会重启服务，未运行则下次启动生效。"
+                    }) { Text("保存服务配置") }
+                    Text(
+                        text = "配置优先级：设置值 → 运行目录 config/.env → 默认值",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
                 }
             }
         }

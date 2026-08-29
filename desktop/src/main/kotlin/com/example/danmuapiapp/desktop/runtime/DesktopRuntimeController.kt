@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.net.URI
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -22,6 +23,11 @@ data class ServiceUiState(
     val pid: Long? = null,
     val runtimeIdentity: String? = null,
 ) {
+    val isRunning: Boolean get() = phase == ServicePhase.Running
+    val isStopped: Boolean get() = phase == ServicePhase.Stopped
+    val isFailed: Boolean get() = phase == ServicePhase.Failed
+
+
     val isBusy: Boolean get() = phase == ServicePhase.Preparing || phase == ServicePhase.Starting || phase == ServicePhase.Stopping
     val canStart: Boolean get() = phase == ServicePhase.Stopped || phase == ServicePhase.Failed
     val canStop: Boolean get() = phase == ServicePhase.Running
@@ -36,9 +42,7 @@ class DesktopRuntimeController(
     val settings: DesktopSettings = DesktopSettings(DesktopSettings.defaultSettingsFile()),
     private val supervisorFactory: () -> WindowsNodeSupervisor = { WindowsNodeSupervisor() },
     private val coreInstaller: (File, String) -> Unit = { scriptDir, proxyId ->
-        val cacheDir = DesktopSettings.defaultSettingsFile().parentFile
-            ?.let { File(it, "core-cache") }
-            ?: File(System.getProperty("java.io.tmpdir"), "danmu-desktop-core-cache")
+        val cacheDir = DesktopPaths(settings.runtimeRootOverride?.let(::File)).coreCacheDir
         DesktopCoreInstaller.ensureCoreInstalled(scriptDir, cacheDir, proxyId)
     },
     private val runtimeExtractor: (File) -> Unit = { target ->
@@ -59,6 +63,10 @@ class DesktopRuntimeController(
 
     private var supervisor: WindowsNodeSupervisor? = null
 
+    /** 当前后台实例被认领时记录实际端口，停止时不能回退到固定默认端口。 */
+    @Volatile
+    private var externalPort: Int? = null
+
     fun start() {
         submit { doStart() }
     }
@@ -72,6 +80,26 @@ class DesktopRuntimeController(
             doStop("正在重启…")
             doStart()
         }
+    }
+
+    /** Android 端配置保存语义：端口/监听地址变更时，运行中服务必须完整重启。 */
+    fun applyRuntimeConfiguration() {
+        submit {
+            if (_state.value.phase == ServicePhase.Running) {
+                doStop("配置已保存，正在重启服务…")
+                doStart()
+            } else {
+                update { copy(message = "配置已保存，下次启动服务时生效") }
+            }
+        }
+    }
+
+    /** 端口/监听/变体当前显示值，供设置页展示“实际将使用”的配置。 */
+    fun configuredRuntime(): DesktopRuntimeConfig {
+        return DesktopRuntimeConfigResolver.resolve(
+            settings,
+            File(paths.runtimeDir, "nodejs-project"),
+        )
     }
 
     /** 关闭窗口时的兜底：确认 node.exe 不会残留（优雅关闭，必要时强杀）。 */
@@ -104,6 +132,7 @@ class DesktopRuntimeController(
         runtimeExtractor(runtimeDir)
         val scriptDir = File(runtimeDir, "nodejs-project")
         val nodeExe = File(runtimeDir, "node.exe")
+        val runtimeConfig = DesktopRuntimeConfigResolver.resolve(settings, scriptDir)
         if (!nodeExe.isFile) {
             update {
                 copy(
@@ -131,7 +160,9 @@ class DesktopRuntimeController(
             StartConfig(
                 nodeExe = nodeExe,
                 scriptDir = scriptDir,
-                port = StartConfig.DEFAULT_PORT,
+                port = runtimeConfig.port,
+                listenHost = runtimeConfig.listenHost,
+                variant = runtimeConfig.variant,
                 identityFile = File(settingsFile().parentFile, "instance-id"),
             )
         )
@@ -158,10 +189,18 @@ class DesktopRuntimeController(
     }
 
     private fun doStop(finishedMessage: String) {
-        val active = supervisor ?: return update { copy(phase = ServicePhase.Stopped, message = finishedMessage) }
+        if (supervisor == null) {
+            // 本进程没有自己的子进程：Running 状态来自后台实例（开机自启/headless），直接远端停止
+            if (externalInstance && _state.value.phase == ServicePhase.Running) {
+                stopExternalInstance()
+            } else {
+                update { copy(phase = ServicePhase.Stopped, message = finishedMessage) }
+            }
+            return
+        }
         if (_state.value.phase != ServicePhase.Running && _state.value.phase != ServicePhase.Failed) return
         update { copy(phase = ServicePhase.Stopping, message = "正在停止 Node 服务…") }
-        val snapshot = active.stop()
+        val snapshot = supervisor!!.stop()
         supervisor = null
         if (snapshot.state == DesktopRuntimeState.Stopped) {
             update {
@@ -188,5 +227,122 @@ class DesktopRuntimeController(
 
     private fun update(transform: ServiceUiState.() -> ServiceUiState) {
         _state.value = _state.value.transform()
+    }
+
+    // ---- 后台实例探测（headless 自启的服务由 UI 接管显示与控制）----
+
+    @Volatile
+    private var externalInstance = false
+
+    private val probeClient = java.net.http.HttpClient.newBuilder()
+        .connectTimeout(java.time.Duration.ofMillis(600))
+        .build()
+
+    init {
+        // 应用打开时探测：若同安装身份的服务已在后台运行（开机自启），直接显示为运行中
+        submit { detectExternalInstance() }
+    }
+
+    private fun detectExternalInstance() {
+        if (_state.value.phase != ServicePhase.Stopped) return
+        val identityFile = File(settingsFile().parentFile, "instance-id")
+        val myIdentity = if (identityFile.isFile) identityFile.readText(Charsets.UTF_8).trim() else return
+        if (myIdentity.isBlank()) return
+        val runtimeConfig = DesktopRuntimeConfigResolver.resolve(
+            settings,
+            File(paths.runtimeDir, "nodejs-project"),
+        )
+        val body = probeHealthBody(runtimeConfig.port) ?: return
+        val identity = jsonQuoted(body, "runtimeIdentity") ?: return
+        // 安全边界：身份 + 配置端口 + envHome + resolvedHome + cwd 全部匹配，
+        // 终端直接启动、其他目录实例、局域网设备和同端口外部服务都不会被认领。
+        val owned = RuntimeOwnership.isOwned(
+            expectedIdentity = myIdentity,
+            expectedPort = runtimeConfig.port,
+            expectedHome = File(paths.runtimeDir, "nodejs-project"),
+            health = RuntimeOwnership.Health(
+                runtimeIdentity = identity,
+                port = jsonInt(body, "main"),
+                envHome = jsonQuoted(body, "envHome")?.let(::jsonUnescape),
+                resolvedHome = jsonQuoted(body, "resolvedHome")?.let(::jsonUnescape),
+                cwd = jsonQuoted(body, "cwd")?.let(::jsonUnescape),
+            ),
+        )
+        if (!owned) return
+        externalInstance = true
+        externalPort = runtimeConfig.port
+        val pid = jsonInt(body, "pid")?.toLong()
+        update {
+            copy(
+                phase = ServicePhase.Running,
+                message = "服务运行中（后台实例，停止/重启可直接操作）",
+                port = runtimeConfig.port,
+                pid = pid,
+                runtimeIdentity = identity,
+            )
+        }
+    }
+
+    private fun stopExternalInstance() {
+        val port = externalPort ?: return update {
+            copy(phase = ServicePhase.Failed, message = "未找到可验证的后台实例，已取消停止")
+        }
+        update { copy(phase = ServicePhase.Stopping, message = "正在停止后台服务…") }
+        runCatching {
+            probeClient.send(
+                java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__shutdown"))
+                    .timeout(java.time.Duration.ofSeconds(3))
+                    .GET()
+                    .build(),
+                java.net.http.HttpResponse.BodyHandlers.discarding(),
+            )
+        }
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            if (probeHealthBody(port) == null) break
+            Thread.sleep(300)
+        }
+        externalInstance = false
+        externalPort = null
+        update {
+            copy(
+                phase = ServicePhase.Stopped,
+                message = "服务已停止",
+                port = null,
+                pid = null,
+                runtimeIdentity = null,
+            )
+        }
+    }
+
+    private fun probeHealthBody(port: Int): String? {
+        return runCatching {
+            val response = probeClient.send(
+                java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__health"))
+                    .timeout(java.time.Duration.ofMillis(800))
+                    .GET()
+                    .build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString(),
+            )
+            if (response.statusCode() != 200) null else response.body()
+        }.getOrNull()
+    }
+
+    private fun jsonQuoted(body: String, key: String): String? {
+        return Regex("\"$key\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+            .find(body)?.groupValues?.get(1)
+    }
+
+    private fun jsonInt(body: String, key: String): Int? {
+        return Regex("\"$key\"\\s*:\\s*(-?\\d+)")
+            .find(body)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    private fun jsonUnescape(raw: String): String {
+        return raw
+            .replace("\\\\", "\u0000")
+            .replace("\\\"", "\"")
+            .replace("\\/", "/")
+            .replace("\u0000", "\\")
     }
 }

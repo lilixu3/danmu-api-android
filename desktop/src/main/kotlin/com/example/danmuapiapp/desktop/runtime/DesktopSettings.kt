@@ -29,6 +29,25 @@ class DesktopSettings(private val settingsFile: File) {
     var githubToken: String
         private set
 
+    /** 用户显式设置的服务端口；null 表示按运行目录 .env，再回退 9321。 */
+    @Volatile
+    var portOverride: Int?
+        private set
+
+    /** 用户显式设置的监听地址；null 表示按 .env，再回退 0.0.0.0。 */
+    @Volatile
+    var listenHostOverride: String?
+        private set
+
+    /** 用户显式设置的核心变体；null 表示按 .env，再回退 stable。 */
+    @Volatile
+    var variantOverride: String?
+        private set
+
+    /** 是否已设置过端口/监听/变体，区分“未设置”与默认值。 */
+    val hasExplicitRuntimeConfig: Boolean
+        get() = portOverride != null || listenHostOverride != null || variantOverride != null
+
     init {
         if (settingsFile.isFile) {
             runCatching {
@@ -41,6 +60,24 @@ class DesktopSettings(private val settingsFile: File) {
         githubProxyId = values[GITHUB_PROXY]?.trim()?.takeIf { it.isNotBlank() } ?: PROXY_ORIGINAL
         theme = values[THEME]?.trim()?.takeIf { it in listOf("system", "light", "dark") } ?: "system"
         githubToken = values[GITHUB_TOKEN]?.trim().orEmpty()
+        portOverride = values[PORT]?.trim()?.toIntOrNull()?.takeIf { it in 1..65535 }
+        listenHostOverride = values[LISTEN_HOST]?.trim()?.takeIf { it.isNotBlank() }
+        variantOverride = values[VARIANT]?.trim()?.lowercase()?.takeIf { it in listOf("stable", "dev", "custom") }
+    }
+
+    fun setPortOverride(value: Int?) {
+        portOverride = value?.takeIf { it in 1..65535 }
+        persist(PORT, portOverride?.toString())
+    }
+
+    fun setListenHostOverride(value: String?) {
+        listenHostOverride = value?.trim()?.takeIf { it.isNotBlank() }
+        persist(LISTEN_HOST, listenHostOverride)
+    }
+
+    fun setVariantOverride(value: String?) {
+        variantOverride = value?.trim()?.lowercase()?.takeIf { it in listOf("stable", "dev", "custom") }
+        persist(VARIANT, variantOverride)
     }
 
     fun setRuntimeRoot(path: String?) {
@@ -90,6 +127,9 @@ class DesktopSettings(private val settingsFile: File) {
         private const val GITHUB_PROXY = "github_proxy"
         private const val THEME = "theme"
         private const val GITHUB_TOKEN = "github_token"
+        private const val PORT = "port"
+        private const val LISTEN_HOST = "listen_host"
+        private const val VARIANT = "variant"
 
         /** 与 Android GithubProxyService 的 PROXY_ID_ORIGINAL 一致。 */
         const val PROXY_ORIGINAL = "original"
