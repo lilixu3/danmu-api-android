@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -12,6 +13,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.example.danmuapiapp.desktop.app.DesktopShell
 import com.example.danmuapiapp.desktop.app.DesktopTray
 import com.example.danmuapiapp.desktop.app.ThemePreference
+import com.example.danmuapiapp.desktop.app.TrayMenuWindow
 import com.example.danmuapiapp.desktop.node.DesktopCoreInstaller
 import com.example.danmuapiapp.desktop.runtime.AppInstanceLock
 import com.example.danmuapiapp.desktop.runtime.AutostartManager
@@ -20,8 +22,11 @@ import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
 import com.example.danmuapiapp.desktop.runtime.ServicePhase
 import java.awt.Dimension
 import java.io.File
+import java.awt.Window
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
+import kotlinx.coroutines.delay
+import kotlin.system.exitProcess
 
 /** 与 Android 端对齐的应用显示名（app/src/main/res/values/strings.xml 的 app_name）。 */
 const val APP_NAME = "弹幕API"
@@ -51,30 +56,30 @@ fun main(args: Array<String>) {
     // 自愈：已开启自启时用当前路径刷新注册表（应用移动/重装后旧路径失效的场景），
     // 并清理历史版本键名；UI 与 headless 两条路径都执行
     runCatching { AutostartManager.refreshIfEnabled() }
-    // 单实例互斥：多实例会互相抢端口、托盘与服务状态全部失真（Android 靠单进程天然保证）
+    if (AutostartManager.isAutostartLaunch(args)) {
+        // 无感自启：后台模式。不持有应用锁——UI 必须能随时打开并接管显示/控制，
+        // headless 进程在自己的服务被 UI 接管（node 被关闭）后自动退出。
+        runHeadlessApp()
+        return
+    }
+    // 界面模式：单实例互斥（headless 不持锁，二者可并存；UI 会接管显示后台服务）
     val instanceLockFile = File(DesktopSettings.defaultSettingsFile().parentFile, "app.lock")
     if (!AppInstanceLock.tryAcquire(instanceLockFile)) {
-        if (AutostartManager.isAutostartLaunch(args)) {
-            // 开机自启撞上已运行实例：正常情况（服务已由在跑实例管理），静默退出
-            return
-        }
         javax.swing.JOptionPane.showMessageDialog(
             null,
-            "$APP_NAME 已在运行（可从右下角托盘图标打开）。",
+            "$APP_NAME 界面已在运行，请从任务栏或托盘打开。",
             APP_NAME,
             javax.swing.JOptionPane.INFORMATION_MESSAGE,
         )
-        return
-    }
-    // 无感自启：开机自启参数走无窗口后台模式，直接运行服务，不进入 UI
-    if (AutostartManager.isAutostartLaunch(args)) {
-        runHeadlessService()
         return
     }
     application {
         val controller = remember { DesktopRuntimeController() }
         var themePref by mutableStateOf(ThemePreference.fromKey(controller.settings.theme))
         var closing by mutableStateOf(false)
+        var trayMenuVisible by remember { mutableStateOf(false) }
+        var trayMenuPos by remember { mutableStateOf(IntOffset.Zero) }
+        var mainWindow: java.awt.Window? = null
 
         val windowState = rememberWindowState(width = 1280.dp, height = 800.dp)
         Window(
@@ -91,17 +96,24 @@ fun main(args: Array<String>) {
             state = windowState,
         ) {
             window.minimumSize = Dimension(960, 640)
+            mainWindow = window
             val icons = remember { loadWindowIcons() }
             if (icons.isNotEmpty()) {
                 window.iconImages = icons
             }
-            // 界面模式同样保留托盘；关闭窗口即退出应用
             LaunchedEffect(Unit) {
                 val error = runCatching {
-                    DesktopTray.install(controller) {
-                        window.isVisible = true
-                        window.toFront()
-                    }
+                    DesktopTray.install(
+                        controller,
+                        onOpenApp = {
+                            window.isVisible = true
+                            window.toFront()
+                        },
+                        onMenu = { x, y ->
+                            trayMenuPos = IntOffset(x, y)
+                            trayMenuVisible = true
+                        },
+                    )
                 }.exceptionOrNull()
                 if (error != null) {
                     runCatching {
@@ -117,69 +129,102 @@ fun main(args: Array<String>) {
                 onThemeChange = { themePref = it },
             )
         }
+        if (trayMenuVisible) {
+            TrayMenuWindow(
+                screenX = trayMenuPos.x,
+                screenY = trayMenuPos.y,
+                controller = controller,
+                onOpenApp = {
+                    mainWindow?.isVisible = true
+                    mainWindow?.toFront()
+                },
+                onExitApp = {
+                    DesktopTray.remove()
+                    controller.shutdown()
+                    exitProcess(0)
+                },
+                onClose = { trayMenuVisible = false },
+            )
+        }
     }
 }
 
 /**
- * 无感自启：无窗口后台运行 Node 服务。
- * - 服务被外部接管（UI 同身份 /__shutdown）或停止后，本进程自动退出；
- * - 注册 ShutdownHook 兜底，系统关机时同样不残留 node.exe；
- * - 全程写 headless.log（运行目录 logs 下），用于诊断"开机后服务没起来"。
+ * 无感自启：后台 Compose 应用（无主窗口），提供托盘与托盘菜单。
+ * - headless 不持有应用锁：UI 可随时打开并接管显示/控制；
+ * - 服务被 UI 接管（同身份 /__shutdown）或停止后，本进程自动退出；
+ * - ShutdownHook 兜底，系统关机同样不残留 node.exe。
  */
-private fun runHeadlessService() {
-    val controller = DesktopRuntimeController()
-    val logFile = File(controller.paths.logsDir, "headless.log")
+private fun runHeadlessApp() = application(exitProcessOnExit = false) {
+    val controller = remember { DesktopRuntimeController() }
+    val logFile = remember { File(controller.paths.logsDir, "headless.log") }
+    var trayMenuVisible by remember { mutableStateOf(false) }
+    var trayMenuPos by remember { mutableStateOf(IntOffset.Zero) }
+
     fun log(message: String) {
         runCatching {
             logFile.parentFile?.mkdirs()
-            logFile.appendText(
-                "${java.time.LocalDateTime.now()}  $message${System.lineSeparator()}",
-            )
+            logFile.appendText("${java.time.LocalDateTime.now()}  $message${System.lineSeparator()}")
         }
     }
-    log("headless 启动（--autostart），运行目录=${controller.paths.root.absolutePath}")
-    Runtime.getRuntime().addShutdownHook(Thread {
-        log("进程退出（ShutdownHook）")
-        runCatching { DesktopTray.remove() }
-        runCatching { controller.shutdown() }
-    })
-    // 后台模式同样提供托盘：左键打开应用，右键可启动/停止/重启/退出
-    runCatching {
-        val result = DesktopTray.install(controller) { launchAppWindow() }
-        if (result != null) log("托盘安装失败：$result") else log("托盘已安装")
-    }.onFailure { log("托盘安装异常：${it.message}") }
-    controller.start()
-    var lastPhase = controller.state.value.phase
-    log("首次状态：$lastPhase，message=${controller.state.value.message}")
-    while (true) {
-        val state = controller.state.value
-        if (state.phase != lastPhase) {
-            log("状态变化：$lastPhase -> ${state.phase}，message=${state.message}")
-            lastPhase = state.phase
-        }
-        when (state.phase) {
-            ServicePhase.Running -> {
-                if (!controller.isChildAlive()) {
-                    log("node 子进程已退出（可能被 UI 接管），headless 进程结束")
-                    DesktopTray.remove()
-                    return
-                }
+
+    LaunchedEffect(Unit) {
+        log("headless 启动（--autostart），运行目录=${controller.paths.root.absolutePath}")
+        Runtime.getRuntime().addShutdownHook(Thread {
+            log("进程退出（ShutdownHook）")
+            runCatching { DesktopTray.remove() }
+            runCatching { controller.shutdown() }
+        })
+        runCatching {
+            val error = DesktopTray.install(
+                controller,
+                onOpenApp = {
+                    val exe = AutostartManager.resolveExecutablePath()
+                    if (exe != null) ProcessBuilder(exe).start()
+                },
+                onMenu = { x, y ->
+                    trayMenuPos = IntOffset(x, y)
+                    trayMenuVisible = true
+                },
+            )
+            if (error != null) log("托盘安装失败：$error") else log("托盘已安装")
+        }.onFailure { log("托盘安装异常：${it.message}") }
+
+        controller.start()
+        while (true) {
+            val state = controller.state.value
+            if (state.phase == ServicePhase.Running && !controller.isChildAlive()) {
+                log("node 子进程已退出（可能被 UI 接管），headless 进程结束")
+                DesktopTray.remove()
+                exitProcess(0)
             }
-            ServicePhase.Stopped, ServicePhase.Failed -> {
+            if (state.phase == ServicePhase.Stopped || state.phase == ServicePhase.Failed) {
                 log("服务进入 ${state.phase}，headless 进程结束")
                 DesktopTray.remove()
-                return
+                exitProcess(0)
             }
-            else -> {}
+            delay(1500)
         }
-        Thread.sleep(1500)
     }
-}
 
-/** headless 托盘的「打开应用」：以正常模式启动一个新的应用进程。 */
-private fun launchAppWindow() {
-    val exe = AutostartManager.resolveExecutablePath() ?: return
-    runCatching {
-        ProcessBuilder(exe).start()
+    // 不可见窗口保活（Compose application 无可见窗口会直接退出）
+    Window(visible = false, onCloseRequest = {}) {}
+
+    if (trayMenuVisible) {
+        TrayMenuWindow(
+            screenX = trayMenuPos.x,
+            screenY = trayMenuPos.y,
+            controller = controller,
+            onOpenApp = {
+                val exe = AutostartManager.resolveExecutablePath()
+                if (exe != null) ProcessBuilder(exe).start()
+            },
+            onExitApp = {
+                DesktopTray.remove()
+                controller.shutdown()
+                exitProcess(0)
+            },
+            onClose = { trayMenuVisible = false },
+        )
     }
 }
