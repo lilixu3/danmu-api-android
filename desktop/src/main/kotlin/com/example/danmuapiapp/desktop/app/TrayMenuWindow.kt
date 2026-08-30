@@ -41,6 +41,7 @@ fun TrayMenuWindow(
     cursorY: Int,
     controller: DesktopRuntimeController,
     onOpenApp: () -> Unit,
+    onOpenCoreConfig: () -> Unit = onOpenApp,
     onOpenSettings: () -> Unit = onOpenApp,
     onExitApp: () -> Unit,
     onClose: () -> Unit,
@@ -112,6 +113,7 @@ fun TrayMenuWindow(
                                 onClose()
                                 when (item.action) {
                                     TrayMenuAction.OpenApp -> onOpenApp()
+                                    TrayMenuAction.OpenCoreConfig -> onOpenCoreConfig()
                                     TrayMenuAction.Start -> controller.start()
                                     TrayMenuAction.Stop -> controller.stop()
                                     TrayMenuAction.Restart -> controller.restart()

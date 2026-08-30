@@ -67,7 +67,6 @@ enum class DesktopPage(val label: String) {
     Core("核心"),
     Logs("日志"),
 
-    @Deprecated("Placeholder page kept for compatibility only")
     Configuration("配置"),
 
     @Deprecated("Placeholder page kept for compatibility only")
@@ -92,6 +91,7 @@ object DesktopPageRegistry {
     val visible: List<DesktopPageSpec> = listOf(
         DesktopPageSpec(DesktopPage.Overview, "概览", "运行状态与连接信息", DesktopIcons.Overview),
         DesktopPageSpec(DesktopPage.Core, "核心", "下载、更新与版本变更", DesktopIcons.Core),
+        DesktopPageSpec(DesktopPage.Configuration, "配置", "配置核心环境变量", DesktopIcons.Tools),
         DesktopPageSpec(DesktopPage.Logs, "日志", "查看、筛选、复制和导出运行日志", DesktopIcons.Activity),
         DesktopPageSpec(DesktopPage.Settings, "设置", "运行目录、网络与外观", DesktopIcons.Settings),
         DesktopPageSpec(DesktopPage.About, "关于", "版本与项目说明", DesktopIcons.About),
@@ -109,7 +109,8 @@ enum class ThemePreference(val key: String, val label: String) {
     }
 }
 
-/** Compatibility bridge for older desktop pages; the palette comes from DesktopTheme. */
+    /** Desktop page palette bridge retained for existing pages. */
+
 @Suppress("UNUSED_PARAMETER")
 @Composable
 fun statusColor(phase: ServicePhase, isDark: Boolean): Color =
@@ -557,6 +558,7 @@ private fun MainContent(
         title = when (page) {
             DesktopPage.Overview -> "服务控制台"
             DesktopPage.Core -> "核心"
+            DesktopPage.Configuration -> "配置"
             DesktopPage.Logs -> "日志"
             DesktopPage.Settings -> "设置"
             DesktopPage.About -> "关于"
@@ -565,6 +567,7 @@ private fun MainContent(
         subtitle = when (page) {
             DesktopPage.Overview -> "管理服务状态、访问入口与运行诊断"
             DesktopPage.Core -> "手动下载、更新、重装与版本管理"
+            DesktopPage.Configuration -> "管理当前核心支持的环境变量"
             DesktopPage.Logs -> "查看、筛选、复制和导出桌面端运行日志"
             DesktopPage.Settings -> "按分类管理运行、网络与应用偏好"
             DesktopPage.About -> "版本、运行时与项目说明"
@@ -576,6 +579,7 @@ private fun MainContent(
                 icon = when (page) {
                     DesktopPage.Overview -> DesktopIcons.Overview
                     DesktopPage.Core -> DesktopIcons.Core
+                    DesktopPage.Configuration -> DesktopIcons.Tools
                     DesktopPage.Logs -> DesktopIcons.Activity
                     DesktopPage.Settings -> DesktopIcons.Settings
                     DesktopPage.About -> DesktopIcons.About
@@ -613,6 +617,11 @@ private fun MainContent(
                 foregroundTick = foregroundTick,
                 initialUpdate = queuedCoreUpdate,
                 onInitialUpdateConsumed = onQueuedCoreUpdateConsumed,
+            )
+            DesktopPage.Configuration -> CoreEnvConfigPage(
+                controller = controller,
+                paths = controller.paths,
+                state = state,
             )
             DesktopPage.Logs -> LogsPage(
                 paths = controller.paths,

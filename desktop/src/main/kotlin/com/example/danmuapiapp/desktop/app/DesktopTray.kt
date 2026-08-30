@@ -3,22 +3,25 @@ package com.example.danmuapiapp.desktop.app
 import com.example.danmuapiapp.desktop.APP_NAME
 import com.example.danmuapiapp.desktop.runtime.DesktopRuntimeController
 import com.example.danmuapiapp.desktop.runtime.ServicePhase
+import com.example.danmuapiapp.desktop.runtime.ServiceUiState
 import java.awt.EventQueue
+import java.awt.MenuItem
+import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.TrayIcon
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 import java.io.File
-import javax.imageio.ImageIO
+import java.util.EnumMap
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * 系统托盘（右下角常驻图标）：
  * - 左键单击：打开同一应用进程中的主窗口（后台模式不会启动第二个 UI 进程）；
- * - 右键单击：弹出托盘菜单（由调用方提供的 onMenu 回调触发，菜单窗用 Compose 渲染，
- *   避免 AWT PopupMenu 在裁剪运行时下的中文乱码问题）；
+ * - 右键单击：使用 Windows/AWT 原生 PopupMenu，由系统负责菜单外观、边界和键盘导航；
  * - 状态转换时右下角弹气泡通知（自启成功提示由此实现；被系统专注助手屏蔽时
- *   可从托盘菜单首行查看状态）。
+ *   可从原生托盘菜单首行查看状态）。
  * UI 与 headless 两种模式共用；重复安装是幂等的。
  */
 object DesktopTray {
@@ -28,17 +31,21 @@ object DesktopTray {
 
     /** 轮询线程读取的状态源，install 时注入。 */
     @Volatile
-    private var controllerState: kotlinx.coroutines.flow.StateFlow<com.example.danmuapiapp.desktop.runtime.ServiceUiState>? = null
+    private var controllerState: StateFlow<ServiceUiState>? = null
 
     private var trayIcon: TrayIcon? = null
-    private var lastPhase: ServicePhase? = null
+    private var popupMenu: PopupMenu? = null
+    private var menuItems: EnumMap<TrayMenuAction, MenuItem> = EnumMap(TrayMenuAction::class.java)
+    private var statusItem: MenuItem? = null
     private var lastAnnouncedPhase: ServicePhase? = null
 
     /** 托盘安装诊断结果（null=成功），供调用方写入日志，失败必须暴露而不是静默。 */
     fun install(
         controller: DesktopRuntimeController,
         onOpenApp: () -> Unit,
-        onMenu: (screenX: Int, screenY: Int) -> Unit,
+        onOpenCoreConfig: () -> Unit,
+        onOpenSettings: () -> Unit,
+        onExitApp: () -> Unit,
     ): String? {
         if (installed) return null
         if (!SystemTray.isSupported()) return "系统不支持托盘（SystemTray.isSupported=false）"
@@ -47,15 +54,41 @@ object DesktopTray {
         installed = true
         controllerState = controller.state
 
-        // 托盘组件必须在 AWT EDT 创建。注意：Compose Desktop 的 UI 线程本身就是 EDT，
-        // 若当前已在 EDT 直接执行；否则 invokeAndWait 切换。此前 UI 模式在 EDT 上
-        // 调用 invokeAndWait 抛错且被 runCatching 吞掉，正是"手动打开无托盘图标"的根因。
         var error: String? = null
         val createOnEdt = Runnable {
             try {
                 val icon = TrayIcon(image, "$APP_NAME - 未运行")
                 icon.isImageAutoSize = true
-                // 左键单击打开应用（AWT 的 action 事件是双击语义，这里用鼠标监听实现单击）
+                val menu = PopupMenu()
+                val status = MenuItem("$APP_NAME - 未运行").apply { isEnabled = false }
+                menu.add(status)
+                menu.addSeparator()
+                statusItem = status
+
+                TrayMenuModel.groups(controller.state.value).forEachIndexed { groupIndex, group ->
+                    if (groupIndex > 0) menu.addSeparator()
+                    group.items.forEach { item ->
+                        val menuItem = MenuItem(item.label).apply {
+                            isEnabled = item.enabled
+                            addActionListener {
+                                runCatching {
+                                    when (item.action) {
+                                        TrayMenuAction.OpenApp -> EventQueue.invokeLater(onOpenApp)
+                                        TrayMenuAction.OpenCoreConfig -> EventQueue.invokeLater(onOpenCoreConfig)
+                                        TrayMenuAction.OpenSettings -> EventQueue.invokeLater(onOpenSettings)
+                                        TrayMenuAction.Start -> controller.start()
+                                        TrayMenuAction.Stop -> controller.stop()
+                                        TrayMenuAction.Restart -> controller.restart()
+                                        TrayMenuAction.Exit -> EventQueue.invokeLater(onExitApp)
+                                    }
+                                }.onFailure(::logError)
+                            }
+                        }
+                        menu.add(menuItem)
+                        menuItems[item.action] = menuItem
+                    }
+                }
+                icon.popupMenu = menu
                 icon.addMouseListener(object : MouseAdapter() {
                     override fun mousePressed(e: MouseEvent) {
                         if (e.button == MouseEvent.BUTTON1) {
@@ -63,22 +96,16 @@ object DesktopTray {
                                 .onFailure(::logError)
                         }
                     }
-
-                    override fun mouseReleased(e: MouseEvent) {
-                        if (e.button == MouseEvent.BUTTON3) {
-                            // 必须用事件自带的屏幕坐标：TrayIcon 非常规显示组件，
-                            // component.locationOnScreen 会抛 IllegalComponentStateException
-                            // （曾导致右键菜单完全不弹且异常被吞）。
-                            runCatching { onMenu(e.xOnScreen, e.yOnScreen) }
-                                .onFailure(::logError)
-                        }
-                    }
                 })
                 SystemTray.getSystemTray().add(icon)
+                popupMenu = menu
                 trayIcon = icon
             } catch (t: Throwable) {
                 error = t.message ?: t.toString()
                 installed = false
+                statusItem = null
+                popupMenu = null
+                menuItems.clear()
             }
         }
         if (EventQueue.isDispatchThread()) {
@@ -86,11 +113,11 @@ object DesktopTray {
         } else {
             EventQueue.invokeAndWait(createOnEdt)
         }
-        startPolling()
+        if (error == null) startPolling()
         return error
     }
 
-    /** 状态轮询：tooltip 每次轮询都刷新（任何漏更新 1 秒内自愈）；气泡仅在进入 Running/Failed 时弹一次。 */
+    /** 状态轮询：tooltip 和原生菜单每次轮询都刷新；气泡仅在进入目标状态时弹一次。 */
     private fun startPolling() {
         Thread({
             while (installed) {
@@ -108,6 +135,7 @@ object DesktopTray {
                     }
                     EventQueue.invokeLater {
                         trayIcon?.setToolTip(tooltip)
+                        updateMenu(state)
                     }
                     if (phase != lastAnnouncedPhase && (
                             phase == ServicePhase.Running ||
@@ -139,20 +167,33 @@ object DesktopTray {
                         }
                         EventQueue.invokeLater {
                             runCatching { trayIcon?.displayMessage(title, message, type) }
+                                .onFailure(::logError)
                         }
                     }
-                }
+                }.onFailure(::logError)
                 Thread.sleep(1000)
             }
         }, "danmu-desktop-tray").apply { isDaemon = true }.start()
     }
 
+    private fun updateMenu(state: ServiceUiState) {
+        statusItem?.label = "$APP_NAME - ${TrayMenuModel.statusText(state)}"
+        TrayMenuModel.groups(state)
+            .flatMap { it.items }
+            .forEach { item -> menuItems[item.action]?.isEnabled = item.enabled }
+    }
+
     fun remove() {
         runCatching {
             trayIcon?.let { SystemTray.getSystemTray().remove(it) }
-        }
+        }.onFailure(::logError)
         trayIcon = null
+        popupMenu = null
+        statusItem = null
+        menuItems.clear()
         installed = false
+        controllerState = null
+        lastAnnouncedPhase = null
     }
 
     /**
@@ -169,7 +210,7 @@ object DesktopTray {
                 } else if (!visible && trayIcon != null && tray.trayIcons.contains(trayIcon)) {
                     tray.remove(trayIcon)
                 }
-            }
+            }.onFailure(::logError)
         }
     }
 
@@ -191,7 +232,7 @@ object DesktopTray {
     private fun loadTrayImage(): BufferedImage? {
         val loader = Thread.currentThread().contextClassLoader
         return loader.getResourceAsStream("branding/app-icon-32.png")?.use { input ->
-            ImageIO.read(input)
+            javax.imageio.ImageIO.read(input)
         }?.takeIf { it.width > 0 }
     }
 

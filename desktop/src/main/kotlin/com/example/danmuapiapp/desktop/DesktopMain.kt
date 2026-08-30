@@ -8,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -40,7 +39,6 @@ import com.example.danmuapiapp.desktop.app.DesktopShell
 import com.example.danmuapiapp.desktop.app.DesktopTheme
 import com.example.danmuapiapp.desktop.app.DesktopTray
 import com.example.danmuapiapp.desktop.app.ThemePreference
-import com.example.danmuapiapp.desktop.app.TrayMenuWindow
 import com.example.danmuapiapp.desktop.node.DesktopCoreInstaller
 import com.example.danmuapiapp.desktop.runtime.AppInstanceLock
 import com.example.danmuapiapp.desktop.runtime.InstanceCommand
@@ -212,8 +210,6 @@ private fun runDesktopApplication(
         ThemePreference.Dark -> true
         ThemePreference.System -> isSystemInDarkTheme()
     }
-    var trayMenuVisible by remember { mutableStateOf(false) }
-    var trayMenuPos by remember { mutableStateOf(IntOffset.Zero) }
     var closeDialogVisible by remember { mutableStateOf(false) }
     var requestedPage by remember {
         mutableStateOf(if (args.contains("--settings")) DesktopPage.Settings else DesktopPage.Overview)
@@ -240,7 +236,6 @@ private fun runDesktopApplication(
     }
 
     fun showPage(page: DesktopPage) {
-        trayMenuVisible = false
         requestedPage = page
         restoreWindow()
     }
@@ -287,12 +282,11 @@ private fun runDesktopApplication(
         }
         val trayError = runCatching {
             DesktopTray.install(
-                controller,
+                controller = controller,
                 onOpenApp = { showPage(DesktopPage.Overview) },
-                onMenu = { x, y ->
-                    trayMenuPos = IntOffset(x, y)
-                    trayMenuVisible = !trayMenuVisible
-                },
+                onOpenCoreConfig = { showPage(DesktopPage.Configuration) },
+                onOpenSettings = { showPage(DesktopPage.Settings) },
+                onExitApp = ::exitCompletely,
             )
         }.getOrElse { error -> "托盘安装异常：${error.message ?: error::class.java.simpleName}" }
         if (trayError != null) {
@@ -437,17 +431,6 @@ private fun runDesktopApplication(
         Box(Modifier.size(1.dp))
     }
 
-    if (trayMenuVisible) {
-        TrayMenuWindow(
-            cursorX = trayMenuPos.x,
-            cursorY = trayMenuPos.y,
-            controller = controller,
-            onOpenApp = { showPage(DesktopPage.Overview) },
-            onOpenSettings = { showPage(DesktopPage.Settings) },
-            onExitApp = ::exitCompletely,
-            onClose = { trayMenuVisible = false },
-        )
-    }
     // ShutdownHook 只在 JVM 真正退出时兜底清理；隐藏到托盘不会触发它。
     LaunchedEffect(Unit) {
         Runtime.getRuntime().addShutdownHook(Thread {

@@ -156,6 +156,8 @@ class WindowsNodeSupervisorIntegrationTest {
             val stopped = supervisor.stop()
             assertEquals("第 ${index + 1} 轮停止应为 Stopped", DesktopRuntimeState.Stopped, stopped.state)
             assertTrue("端口 ${StartConfig.DEFAULT_PORT} 应已释放", isPortFree(StartConfig.DEFAULT_PORT))
+            val stopLog = File(scriptDir, "logs/node-stdout.log").readText(Charsets.UTF_8)
+            assertFalse("Desktop 用户停止不得调用核心 /__shutdown", stopLog.contains("Shutting down ..."))
             assertTrue("健康接口应不可达（旧 identity 消失）", healthUnreachable(StartConfig.DEFAULT_PORT))
             val lastPid = startedPids.last()
             assertFalse("node.exe (pid=$lastPid) 应已退出", isPidAlive(lastPid))
@@ -223,6 +225,39 @@ class WindowsNodeSupervisorIntegrationTest {
         } finally {
             blocker.close()
         }
+    }
+
+    @Test
+    fun sameIdentityPortConflictDoesNotStopExistingInstance() {
+        val nodeExe = resolveNodeExe()
+        assumeTrue("未提供 node.exe，跳过", nodeExe != null)
+        assumeTrue("仅 Windows 执行", isWindows)
+        val port = 19423
+        assumeTrue("端口 $port 被占用，跳过", isPortFree(port))
+        val scriptDir = copyRuntime()
+        val identityFile = File(temp.root, "shared-instance-id")
+        val first = WindowsNodeSupervisor()
+        val second = WindowsNodeSupervisor()
+        supervisors += first
+        supervisors += second
+        val firstSnapshot = first.start(
+            newConfig(
+                scriptDir = scriptDir,
+                ensureCore = { dir ->
+                    if (!DesktopCoreInstaller.isCoreInstalled(dir)) DesktopCoreInstaller.ensureCoreInstalled(dir)
+                },
+                port = port,
+            ).copy(identityFile = identityFile),
+        )
+        assertEquals(DesktopRuntimeState.Running, firstSnapshot.state)
+
+        val secondSnapshot = second.start(
+            newConfig(scriptDir, ensureCore = {}, port = port).copy(identityFile = identityFile),
+        )
+        assertEquals(DesktopRuntimeState.Failed, secondSnapshot.state)
+        assertTrue(secondSnapshot.failureReason.orEmpty().contains("请先在已有弹幕API窗口或托盘中停止服务"))
+        assertTrue("端口冲突预检不得停止现有实例", first.isChildAlive())
+        assertEquals(DesktopRuntimeState.Running, first.snapshot.state)
     }
 
     @Test

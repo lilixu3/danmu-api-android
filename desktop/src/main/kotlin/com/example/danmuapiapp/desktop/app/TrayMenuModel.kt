@@ -8,6 +8,7 @@ enum class TrayMenuAction {
     Start,
     Stop,
     Restart,
+    OpenCoreConfig,
     OpenSettings,
     Exit,
 }
@@ -40,6 +41,7 @@ object TrayMenuModel {
             title = "窗口",
             items = listOf(
                 TrayMenuItem(TrayMenuAction.OpenApp, "打开控制台", DesktopIcons.Overview),
+                TrayMenuItem(TrayMenuAction.OpenCoreConfig, "打开核心配置", DesktopIcons.Tools),
                 TrayMenuItem(TrayMenuAction.OpenSettings, "打开设置", DesktopIcons.Settings),
             ),
         ),
