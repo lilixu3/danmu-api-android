@@ -26,7 +26,7 @@ class DesktopUiModelTest {
     @Test
     fun productionNavigationOnlyExposesImplementedPages() {
         assertEquals(
-            listOf(DesktopPage.Overview, DesktopPage.Core, DesktopPage.Logs, DesktopPage.Settings, DesktopPage.About),
+            listOf(DesktopPage.Overview, DesktopPage.Core, DesktopPage.Configuration, DesktopPage.Logs, DesktopPage.Settings, DesktopPage.About),
             DesktopPageRegistry.visible.map { it.page },
         )
         val logs = DesktopPageRegistry.visible.first { it.page == DesktopPage.Logs }
@@ -121,6 +121,7 @@ class DesktopUiModelTest {
         ).flatMap { it.items }
         assertFalse(running.first { it.action == TrayMenuAction.Start }.enabled)
         assertTrue(running.first { it.action == TrayMenuAction.Stop }.enabled)
+        assertTrue(running.any { it.action == TrayMenuAction.OpenCoreConfig && it.label == "打开核心配置" })
         assertEquals("运行中 · 127.0.0.1:9321", TrayMenuModel.statusText(ServiceUiState(phase = ServicePhase.Running, port = 9321)))
     }
 }

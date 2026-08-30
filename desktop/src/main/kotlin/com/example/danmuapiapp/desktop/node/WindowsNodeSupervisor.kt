@@ -143,30 +143,41 @@ class WindowsNodeSupervisor {
         lifecycleLog("node.exe 已启动：pid=${proc.pid()}")
 
         val deadline = System.currentTimeMillis() + config.startupTimeoutMs
+        var lastHealthProbeError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             if (!proc.isAlive) {
                 val reason =
                     "node.exe 提前退出，exitCode=${proc.exitValue()}，stderr 尾部:\n" +
-                        tail(File(logsDir, "node-stderr.log"))
+                        tail(File(logsDir, "node-stderr.log"), "stderr")
+
                 lifecycleLog(reason)
                 return fail(reason)
             }
-            val ready = runCatching { probeHealth(config, proc) }.getOrDefault(false)
+            val ready = try {
+                probeHealth(config, proc)
+            } catch (error: Throwable) {
+                lastHealthProbeError = error
+                false
+            }
             if (ready) {
                 stateRef.set(DesktopRuntimeState.Running)
                 return snapshot
             }
             Thread.sleep(300)
         }
+        val probeError = lastHealthProbeError?.message?.takeIf { it.isNotBlank() }
+            ?.let { "，最近一次健康接口探测异常：$it" }
+            .orEmpty()
         return fail(
-            "健康检查超时（${config.startupTimeoutMs}ms），stderr 尾部:\n" +
-                tail(File(logsDir, "node-stderr.log"))
+            "健康检查超时（${config.startupTimeoutMs}ms）$probeError，stderr 尾部:\n" +
+                tail(File(logsDir, "node-stderr.log"), "stderr")
         )
     }
 
     /**
-     * 优雅关闭：loopback /__shutdown → 等待子进程退出 → 超时则 taskkill 强制终止。
-     * Stopped 的判定：子进程确认退出且端口已释放（旧 runtime identity 不可达）。
+     * 用户明确停止/重启时终止本监督器创建的 Node 进程树。
+     * 不调用共享核心的 /__shutdown：该接口同时服务 Android，且旧核心会把 loopback 请求直接视为管理员，
+     * 任何本机控制端误触都可能把长期运行的服务关闭。应用退出使用 forceStop()，同样只走 PID 控制。
      */
     @Synchronized
     fun stop(reason: String = "user"): RuntimeSnapshot {
@@ -174,31 +185,10 @@ class WindowsNodeSupervisor {
         val current = stateRef.get()
         if (current == DesktopRuntimeState.Stopped) return snapshot
         stateRef.set(DesktopRuntimeState.Stopping)
-        val cfg = config
         val proc = process
         if (proc != null && proc.isAlive) {
-            if (current == DesktopRuntimeState.Running) {
-                val shutdownResult = runCatching {
-                    client.send(
-                        HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__shutdown"))
-                            .timeout(Duration.ofSeconds(3))
-                            .GET()
-                            .build(),
-                        HttpResponse.BodyHandlers.discarding(),
-                    )
-                }
-                shutdownResult.onSuccess { response ->
-                    lifecycleLog("已发送 /__shutdown：status=${response.statusCode()}")
-                }.onFailure { error ->
-                    lifecycleLog("发送 /__shutdown 失败：${error.message ?: error::class.java.simpleName}")
-                }
-                val graceful = proc.waitFor(cfg?.shutdownTimeoutMs ?: 10_000, TimeUnit.MILLISECONDS)
-                if (!graceful) {
-                    forceKill(proc)
-                }
-            } else {
-                forceKill(proc)
-            }
+            lifecycleLog("Desktop 用户停止直接终止 node.exe 进程树：pid=${proc.pid()}，reason=$reason")
+            forceKill(proc)
         }
         if (proc != null && proc.isAlive) {
             return fail("停止超时：node.exe 仍存活（pid=${proc.pid()}）")
@@ -249,9 +239,11 @@ class WindowsNodeSupervisor {
         if (proc.isAlive) return null
         val code = runCatching { proc.exitValue() }.getOrNull()
         val cfg = config
-        val stderr = cfg?.let { tail(File(it.scriptDir, "logs/node-stderr.log")) }.orEmpty()
+        val stdout = cfg?.let { tail(File(it.scriptDir, "logs/node-stdout.log"), "stdout") }.orEmpty()
+        val stderr = cfg?.let { tail(File(it.scriptDir, "logs/node-stderr.log"), "stderr") }.orEmpty()
         val reason = buildString {
             append("Node 子进程已退出，exitCode=").append(code ?: "未知")
+            if (stdout.isNotBlank()) append("，stdout 尾部:\n").append(stdout)
             if (stderr.isNotBlank()) append("，stderr 尾部:\n").append(stderr)
         }
         lifecycleLog(reason)
@@ -261,35 +253,18 @@ class WindowsNodeSupervisor {
     }
 
     /**
-     * 端口占用预检（对齐 Android NormalStartPreflightPolicy 的对外语义）：
-     * - 端口空闲：直接通过；
-     * - 同身份实例占用（如开机自启的无窗口进程）：优雅接管——/__shutdown 远端实例并等待端口释放；
-     * - 其他实例占用：明确失败。
+     * 端口占用预检：只读探测，绝不主动关闭现有进程。
+     * 启动预检不是用户的停止动作；同身份实例也必须由用户先从已有 UI/托盘停止，避免后台轮询或
+     * 第二个进程启动竞态调用共享核心的 /__shutdown。
      */
     private fun preflightPort(config: StartConfig) {
-        while (!isPortFree(config.port)) {
-            val health = runCatching { healthBody(config.port) }.getOrNull()
-            val sameIdentity = health != null && jsonQuoted(health, "runtimeIdentity") == identity
-            if (!sameIdentity) {
-                throw IOException("端口 ${config.port} 已有其他实例在运行，请先停止外部进程后再启动")
-            }
-            runCatching {
-                client.send(
-                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:${config.port}/__shutdown"))
-                        .timeout(Duration.ofSeconds(3))
-                        .GET()
-                        .build(),
-                    HttpResponse.BodyHandlers.discarding(),
-                )
-            }
-            val deadline = System.currentTimeMillis() + 10_000
-            while (!isPortFree(config.port) && System.currentTimeMillis() < deadline) {
-                Thread.sleep(300)
-            }
-            if (!isPortFree(config.port)) {
-                throw IOException("端口 ${config.port} 被本应用实例占用且无法释放，请关闭该实例后重试")
-            }
+        if (isPortFree(config.port)) return
+        val health = runCatching { healthBody(config.port) }.getOrNull()
+        val sameIdentity = health != null && jsonQuoted(health, "runtimeIdentity") == identity
+        if (sameIdentity) {
+            throw IOException("端口 ${config.port} 已被本应用实例占用，请先在已有弹幕API窗口或托盘中停止服务")
         }
+        throw IOException("端口 ${config.port} 已有其他实例在运行，请先停止外部进程后再启动")
     }
 
     /** 无感自启模式用：node 子进程是否仍存活。 */
@@ -395,30 +370,48 @@ class WindowsNodeSupervisor {
         }
     }
 
-    private fun forceKill(proc: Process) {
-        runCatching {
-            ProcessBuilder("taskkill", "/PID", proc.pid().toString(), "/T", "/F")
+    private fun forceKill(proc: Process): Boolean {
+        return try {
+            val killer = ProcessBuilder("taskkill", "/PID", proc.pid().toString(), "/T", "/F")
+                .redirectErrorStream(true)
                 .start()
-                .waitFor(10, TimeUnit.SECONDS)
+            if (!killer.waitFor(10, TimeUnit.SECONDS)) {
+                killer.destroyForcibly()
+                lifecycleLog("taskkill 超时：pid=${proc.pid()}")
+                false
+            } else {
+                val output = killer.inputStream.bufferedReader().readText().trim()
+                if (killer.exitValue() != 0) {
+                    lifecycleLog("taskkill 失败：pid=${proc.pid()}，exitCode=${killer.exitValue()}${output.takeIf { it.isNotBlank() }?.let { "，$it" } ?: ""}")
+                    false
+                } else {
+                    proc.waitFor(5, TimeUnit.SECONDS)
+                    !proc.isAlive
+                }
+            }
+        } catch (error: Throwable) {
+            lifecycleLog("taskkill 执行异常：pid=${proc.pid()}，${error.message ?: error::class.java.simpleName}")
+            false
         }
-        proc.waitFor(5, TimeUnit.SECONDS)
     }
 
     private fun fail(reason: String): RuntimeSnapshot {
         failureReason = reason
         process?.let { proc ->
-            if (proc.isAlive) forceKill(proc)
+            if (proc.isAlive && !forceKill(proc)) {
+                lifecycleLog("失败清理未确认终止 node.exe：pid=${proc.pid()}")
+            }
         }
         stateRef.set(DesktopRuntimeState.Failed)
         return snapshot
     }
 
-    private fun tail(file: File, maxLines: Int = 40): String {
-        if (!file.isFile) return "(无 stderr 日志)"
+    private fun tail(file: File, label: String, maxLines: Int = 40): String {
+        if (!file.isFile) return "(无 $label 日志)"
         return try {
             file.readLines().takeLast(maxLines).joinToString("\n")
-        } catch (_: IOException) {
-            "(读取 stderr 日志失败)"
+        } catch (error: IOException) {
+            "(读取 $label 日志失败：${error.message ?: error::class.java.simpleName})"
         }
     }
 

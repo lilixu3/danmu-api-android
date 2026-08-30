@@ -205,6 +205,38 @@ Next task:
 见 [`docs/development-principles.md`](development-principles.md)。核心：**禁止兜底掩盖故障，必须先取证找到根因再修，修复必须可验证，诊断信息不得静默丢弃**。
 实例：托盘"手动打开无图标"的根因是 Compose UI 线程即 AWT EDT，在 EDT 上调 invokeAndWait 抛错被 runCatching 吞掉；正确修法是托盘内部自行处理 EDT 调度并把诊断返回调用方，而不是画兜底图标。
 
+## 2026-08-30 用户反馈修复（本地未提交）
+
+Task: 托盘原生菜单与核心配置工作台重构
+Status: completed（代码与打包完成；完整集成回归受本机既有后台实例阻塞）
+Files:
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/app/DesktopTray.kt`
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/app/TrayMenuModel.kt`
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/DesktopMain.kt`
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/app/CoreEnvConfigPage.kt`
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/core/CoreEnvFilter.kt`
+  - `desktop/src/test/kotlin/com/example/danmuapiapp/desktop/core/CoreEnvFilterTest.kt`
+  - `desktop/src/test/kotlin/com/example/danmuapiapp/desktop/app/DesktopUiModelTest.kt`
+  - `desktop/src/main/kotlin/com/example/danmuapiapp/desktop/app/TrayMenuWindow.kt`（仅同步枚举分支；运行时不再引用）
+Decision changes: none
+Root cause:
+  - 托盘原先通过固定 `280×360dp` 的 Compose 无边框窗口绘制，内容没有滚动容器，长菜单超出窗口后被裁剪。
+  - 核心配置页把摘要、搜索和硬编码 `quickKeys` 快速入口堆在完整变量列表之前，首屏占用过多空间；列表不是桌面工作台结构。
+Fix:
+  - 托盘改为 AWT `TrayIcon.setPopupMenu(PopupMenu)`，由 Windows/AWT 负责原生菜单外观、边界和键盘导航；保留状态、服务控制、打开控制台、打开核心配置、打开设置和退出。
+  - 核心配置继续唯一使用当前核心 `configs/envs.js` → `CoreEnvCatalog` → `DesktopCoreEnvRepository` 的动态快照；删除硬编码快速变量入口，新增搜索/分类/类型/配置状态筛选、稳定分组和动态详情。
+  - 宽窗口使用独立滚动的 `LazyColumn` 变量列表 + 详情面板；窄窗口使用变量详情对话框；敏感值继续脱敏，解析/读取失败继续显式展示诊断。
+Verification:
+  - `gradlew.bat :desktop:test -PdanmuNodeExe=C:\Tools\node-v24.19.0-win-x64\node.exe`: 编译通过；纯模型/仓库测试通过。完整任务有 1 个既有后台实例接管场景失败，原因是本机已运行的 `node.exe` 无法通过停止路径的命令行验证，未将其改写为通过。
+  - `gradlew.bat :desktop:test --tests com.example.danmuapiapp.desktop.core.CoreEnvFilterTest --tests com.example.danmuapiapp.desktop.app.DesktopUiModelTest --tests com.example.danmuapiapp.desktop.core.CoreEnvCatalogTest --tests com.example.danmuapiapp.desktop.runtime.DesktopCoreEnvRepositoryTest`: PASS
+  - `gradlew.bat :desktop:packageExe :desktop:packagePortableZip -PdanmuNodeExe=C:\Tools\node-v24.19.0-win-x64\node.exe --rerun-tasks`: PASS
+Windows evidence:
+  - 打包应用镜像已启动并显示动态读取的 64 个变量；首屏出现变量名、简短说明、状态和右侧详情，原快速配置大块已消失。
+  - 交互测试按用户要求停止，未继续执行托盘点击和滚轮操作。
+Known issues:
+  - `TrayMenuWindow.kt` 仍保留为未引用的兼容源码，后续可在确认无外部依赖后删除；生产入口已经不再创建该窗口。
+  - 当前本机已有 `%LOCALAPPDATA%\\DanmuApi\\runtime\\node.exe` 后台实例；未强杀用户服务，因此完整控制器停止集成用例需在服务停止后重跑。
+
 ## 当前下一任务
 
 设置页第二批基础功能（安卓端规格已完成调研，见下）：

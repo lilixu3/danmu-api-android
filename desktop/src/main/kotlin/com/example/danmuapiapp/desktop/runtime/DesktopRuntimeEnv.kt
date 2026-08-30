@@ -2,6 +2,7 @@ package com.example.danmuapiapp.desktop.runtime
 
 import java.io.File
 import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -63,7 +64,7 @@ object DesktopRuntimeEnv {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING,
                 )
-            } catch (_: Exception) {
+            } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(
                     temporary.toPath(),
                     envFile.toPath(),
@@ -81,15 +82,29 @@ object DesktopRuntimeEnv {
 
     internal fun readValue(envFile: File, key: String): String? {
         if (!envFile.isFile) return null
-        return envFile.readLines(Charsets.UTF_8).asSequence()
-            .mapNotNull { line ->
-                val equals = line.indexOf('=')
-                if (equals <= 0 || line.trimStart().startsWith('#')) return@mapNotNull null
-                val lineKey = line.substring(0, equals).trim()
-                if (!lineKey.equals(key, ignoreCase = true)) return@mapNotNull null
-                parseValue(line.substring(equals + 1).trim())
-            }
-            .firstOrNull()
+        return readValues(envFile)[key.uppercase()]
+    }
+
+    internal fun readValues(envFile: File): Map<String, String> {
+        if (!envFile.isFile) return emptyMap()
+        val values = linkedMapOf<String, String>()
+        envFile.readLines(Charsets.UTF_8).forEach { line ->
+            val clean = line.removePrefix("\uFEFF")
+            val equals = clean.indexOf('=')
+            if (equals <= 0 || clean.trimStart().startsWith('#')) return@forEach
+            val lineKey = clean.substring(0, equals).trim()
+            if (!lineKey.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) return@forEach
+            values[lineKey.uppercase()] = parseValue(clean.substring(equals + 1).trim())
+        }
+        return values
+    }
+
+    internal fun updateCoreValue(envFile: File, key: String, value: String) {
+        updateValue(envFile, key, value)
+    }
+
+    internal fun deleteValue(envFile: File, key: String) {
+        updateValue(envFile, key, "")
     }
 
     private fun formatValue(value: String): String {

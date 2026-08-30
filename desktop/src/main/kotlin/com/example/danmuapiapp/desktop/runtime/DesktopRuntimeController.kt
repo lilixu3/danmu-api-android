@@ -5,6 +5,7 @@ import com.example.danmuapiapp.desktop.node.DesktopRuntimeState
 import com.example.danmuapiapp.desktop.node.GithubProxyCatalog
 import com.example.danmuapiapp.desktop.node.StartConfig
 import com.example.danmuapiapp.desktop.node.WindowsNodeSupervisor
+import com.example.danmuapiapp.desktop.node.WindowsProcessTerminator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,12 +80,12 @@ class DesktopRuntimeController(
     }
 
     fun stop() {
-        submit { doStop("服务已停止") }
+        submit { doStop("服务已停止", reason = "user-stop") }
     }
 
     fun restart() {
         submit {
-            doStop("正在重启…")
+            doStop("正在重启…", reason = "user-restart")
             doStart()
         }
     }
@@ -93,7 +94,7 @@ class DesktopRuntimeController(
     fun applyRuntimeConfiguration() {
         submit {
             if (_state.value.phase == ServicePhase.Running) {
-                doStop("配置已保存，正在重启服务…")
+                doStop("配置已保存，正在重启服务…", reason = "runtime-config-restart")
                 doStart()
             } else {
                 update { copy(message = "配置已保存，下次启动服务时生效") }
@@ -263,7 +264,8 @@ class DesktopRuntimeController(
         }
     }
 
-    private fun doStop(finishedMessage: String) {
+    private fun doStop(finishedMessage: String, reason: String) {
+        appendLifecycleLog("Desktop 请求停止服务：reason=$reason，phase=${_state.value.phase}，pid=${_state.value.pid}")
         if (supervisor == null) {
             // 本进程没有自己的子进程：Running 状态来自后台实例（开机自启/headless），直接远端停止
             if (externalInstance && _state.value.phase == ServicePhase.Running) {
@@ -275,7 +277,7 @@ class DesktopRuntimeController(
         }
         if (_state.value.phase != ServicePhase.Running && _state.value.phase != ServicePhase.Failed) return
         update { copy(phase = ServicePhase.Stopping, message = "正在停止 Node 服务…") }
-        val snapshot = supervisor!!.stop()
+        val snapshot = supervisor!!.stop(reason = reason)
         supervisor = null
         if (snapshot.state == DesktopRuntimeState.Stopped) {
             update {
@@ -344,9 +346,9 @@ class DesktopRuntimeController(
             ),
         )
         if (!owned) return
+        val pid = jsonInt(body, "pid")?.toLong()?.takeIf { it > 0L } ?: return
         externalInstance = true
         externalPort = runtimeConfig.port
-        val pid = jsonInt(body, "pid")?.toLong()
         update {
             copy(
                 phase = ServicePhase.Running,
@@ -362,20 +364,33 @@ class DesktopRuntimeController(
         val port = externalPort ?: return update {
             copy(phase = ServicePhase.Failed, message = "未找到可验证的后台实例，已取消停止")
         }
+        val current = _state.value
+        val pid = current.pid ?: return update {
+            copy(phase = ServicePhase.Failed, message = "后台实例缺少可验证 PID，已取消停止")
+        }
+        val runtimeDir = File(paths.runtimeDir, "nodejs-project")
+        val nodeExe = File(paths.runtimeDir, "node.exe")
         update { copy(phase = ServicePhase.Stopping, message = "正在停止后台服务…") }
-        runCatching {
-            probeClient.send(
-                java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__shutdown"))
-                    .timeout(java.time.Duration.ofSeconds(3))
-                    .GET()
-                    .build(),
-                java.net.http.HttpResponse.BodyHandlers.discarding(),
-            )
+        val result = WindowsProcessTerminator.terminateNodeTree(pid, nodeExe, runtimeDir)
+        if (result.isFailure) {
+            externalInstance = false
+            externalPort = null
+            val reason = result.exceptionOrNull()?.message ?: "后台服务停止失败"
+            update { copy(phase = ServicePhase.Failed, message = reason) }
+            appendLifecycleLog("停止后台实例失败：$reason")
+            return
         }
         val deadline = System.currentTimeMillis() + 10_000
-        while (System.currentTimeMillis() < deadline) {
-            if (probeHealthBody(port) == null) break
+        while (System.currentTimeMillis() < deadline && !isPortFree(port)) {
             Thread.sleep(300)
+        }
+        if (!isPortFree(port)) {
+            externalInstance = false
+            externalPort = null
+            val reason = "后台 Node 已终止，但端口 $port 仍被占用，拒绝报告为已停止"
+            update { copy(phase = ServicePhase.Failed, message = reason) }
+            appendLifecycleLog(reason)
+            return
         }
         externalInstance = false
         externalPort = null
@@ -387,6 +402,19 @@ class DesktopRuntimeController(
                 pid = null,
                 runtimeIdentity = null,
             )
+        }
+        appendLifecycleLog("已按用户请求终止后台 Node：pid=$pid，port=$port")
+    }
+
+    private fun isPortFree(port: Int): Boolean {
+        return try {
+            java.net.ServerSocket().use { socket ->
+                socket.reuseAddress = false
+                socket.bind(java.net.InetSocketAddress("0.0.0.0", port))
+            }
+            true
+        } catch (_: java.io.IOException) {
+            false
         }
     }
 
