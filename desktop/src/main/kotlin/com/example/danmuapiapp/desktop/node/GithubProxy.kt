@@ -22,6 +22,25 @@ data class GithubProxyOption(
     val isOriginal: Boolean = false,
 )
 
+/** Raised only when the selected GitHub route cannot be reached, not for HTTP API errors. */
+class GithubRouteFailureException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+internal fun isGithubRouteUnavailable(error: Throwable): Boolean {
+    var current: Throwable? = error
+    val seen = mutableSetOf<Throwable>()
+    while (current != null && seen.add(current)) {
+        if (current is java.net.ConnectException ||
+            current is java.net.SocketTimeoutException ||
+            current is java.net.UnknownHostException ||
+            current is java.net.NoRouteToHostException ||
+            current is java.net.http.HttpTimeoutException ||
+            current is java.util.concurrent.TimeoutException
+        ) return true
+        current = current.cause
+    }
+    return false
+}
+
 /**
  * GitHub 代理线路与测速（对齐 Android GithubProxyService / GithubProxySpeedTester）：
  * - 线路候选与 Android 完全一致（直连 + 4 个 GH-Proxy 镜像）；
@@ -154,41 +173,79 @@ object GithubFileDownloader {
         targetFile: File,
         timeoutSeconds: Long = 150L,
         maxBytes: Long = 128L * 1024L * 1024L,
+        onProgress: (downloadedBytes: Long, totalBytes: Long?, routeLabel: String) -> Unit = { _, _, _ -> },
     ) {
         val candidates = GithubProxyCatalog.downloadCandidates(proxyId, originalUrl)
         var lastError: IOException? = null
         candidates.forEach { url ->
+            val routeLabel = GithubProxyCatalog.optionById(proxyId).label
             try {
-                val bytes = fetchBytes(url, timeoutSeconds, maxBytes)
                 targetFile.parentFile?.mkdirs()
                 val part = File(targetFile.parentFile, targetFile.name + ".part")
-                part.writeBytes(bytes)
+                part.delete()
+                fetchToFile(url, part, timeoutSeconds, maxBytes, routeLabel, onProgress)
                 if (!part.renameTo(targetFile)) {
                     part.copyTo(targetFile, overwrite = true)
                     part.delete()
                 }
                 return
             } catch (t: Throwable) {
+                File(targetFile.parentFile, targetFile.name + ".part").delete()
                 lastError = IOException("线路失败 $url: ${t.message}", t)
             }
         }
-        throw lastError ?: IOException("核心下载失败（所有线路均不可用）: $originalUrl")
+        val failure = lastError ?: IOException("核心下载失败（所有线路均不可用）: $originalUrl")
+        if (isGithubRouteUnavailable(failure)) {
+            throw GithubRouteFailureException(
+                "GitHub 下载线路不可达（已选线路：${GithubProxyCatalog.optionById(proxyId).label}）：${failure.message}",
+                failure,
+            )
+        }
+        throw failure
     }
 
-    private fun fetchBytes(url: String, timeoutSeconds: Long, maxBytes: Long): ByteArray {
-        val response = HttpClient.newHttpClient().sendAsync(
+    private fun fetchToFile(
+        url: String,
+        part: File,
+        timeoutSeconds: Long,
+        maxBytes: Long,
+        routeLabel: String,
+        onProgress: (Long, Long?, String) -> Unit,
+    ) {
+        val response = client.sendAsync(
             HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .GET()
                 .build(),
-            HttpResponse.BodyHandlers.ofByteArray(),
+            HttpResponse.BodyHandlers.ofInputStream(),
         ).orTimeout(timeoutSeconds, TimeUnit.SECONDS).join()
-        if (response.statusCode() != 200) {
+        if (response.statusCode() !in 200..299) {
+            response.body().close()
             throw IOException("HTTP ${response.statusCode()}")
         }
-        val bytes = response.body()
-        if (bytes.isEmpty()) throw IOException("响应为空")
-        if (bytes.size > maxBytes) throw IOException("超过大小上限")
-        return bytes
+        val total = response.headers().firstValue("Content-Length").orElse(null)?.toLongOrNull()
+        if (total != null && total > maxBytes) {
+            response.body().close()
+            throw IOException("超过大小上限")
+        }
+        var downloaded = 0L
+        response.body().use { input ->
+            java.io.FileOutputStream(part, false).use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    downloaded += read
+                    if (downloaded > maxBytes) throw IOException("超过大小上限")
+                    output.write(buffer, 0, read)
+                    onProgress(downloaded, total, routeLabel)
+                }
+            }
+        }
+        if (downloaded == 0L) throw IOException("响应为空")
+        if (total != null && downloaded != total) {
+            throw IOException("下载长度不完整：期望 $total 字节，实际 $downloaded 字节")
+        }
     }
 }

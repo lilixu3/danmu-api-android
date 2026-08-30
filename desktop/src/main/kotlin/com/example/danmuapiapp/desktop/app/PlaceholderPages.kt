@@ -73,6 +73,11 @@ private fun pagePlan(page: DesktopPage): PagePlan = when (page) {
         items = listOf("核心列表与版本", "在线更新与回退", "分支选择", "依赖包修复"),
         taskIds = "W-0402（P4）",
     )
+    DesktopPage.Logs -> PagePlan(
+        summary = "桌面宿主、Node 运行时与核心业务日志的统一查看、筛选和导出。",
+        items = listOf("关键字搜索", "来源与级别筛选", "当前结果复制", "当前结果导出"),
+        taskIds = "W-0404（P4）",
+    )
     DesktopPage.Configuration -> PagePlan(
         summary = "可视化分类配置、原始 .env 编辑、凭证管理与变更预览。",
         items = listOf("分类表单", "原始模式编辑器", "凭证编辑", "热更新与重启提示"),

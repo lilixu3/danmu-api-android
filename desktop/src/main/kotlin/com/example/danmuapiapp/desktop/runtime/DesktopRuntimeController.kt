@@ -14,7 +14,16 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** 概览页展示的服务阶段（与监督器状态机一一对应）。 */
-enum class ServicePhase { Stopped, Preparing, Starting, Running, Stopping, Failed }
+enum class ServicePhase {
+    Stopped,
+    Preparing,
+    Starting,
+    Running,
+    Stopping,
+    /** The service cannot start until the user manually installs a core from the Core page. */
+    CoreSetupRequired,
+    Failed,
+}
 
 data class ServiceUiState(
     val phase: ServicePhase = ServicePhase.Stopped,
@@ -26,25 +35,23 @@ data class ServiceUiState(
     val isRunning: Boolean get() = phase == ServicePhase.Running
     val isStopped: Boolean get() = phase == ServicePhase.Stopped
     val isFailed: Boolean get() = phase == ServicePhase.Failed
-
+    val needsCoreSetup: Boolean get() = phase == ServicePhase.CoreSetupRequired
 
     val isBusy: Boolean get() = phase == ServicePhase.Preparing || phase == ServicePhase.Starting || phase == ServicePhase.Stopping
-    val canStart: Boolean get() = phase == ServicePhase.Stopped || phase == ServicePhase.Failed
+    val canStart: Boolean get() = phase == ServicePhase.Stopped || phase == ServicePhase.CoreSetupRequired || phase == ServicePhase.Failed
     val canStop: Boolean get() = phase == ServicePhase.Running
 }
 
 /**
  * 概览页的运行时控制器：串行化 启动/停止/重启 操作，把监督器状态映射为 UI 状态。
- * 首启自动完成：内嵌运行时解压到运行目录 + 核心在线下载安装（走用户选择的 GitHub 线路）。
+ * 首启只解压内嵌运行时；核心不自动下载，缺失时发布 CoreSetupRequired，要求用户在核心页手动准备。
  * 端口/监听/变体等业务配置由监督器写入 config/.env，与 Android 端同一机制。
  */
 class DesktopRuntimeController(
     val settings: DesktopSettings = DesktopSettings(DesktopSettings.defaultSettingsFile()),
     private val supervisorFactory: () -> WindowsNodeSupervisor = { WindowsNodeSupervisor() },
-    private val coreInstaller: (File, String) -> Unit = { scriptDir, proxyId ->
-        val cacheDir = DesktopPaths(settings.runtimeRootOverride?.let(::File)).coreCacheDir
-        DesktopCoreInstaller.ensureCoreInstalled(scriptDir, cacheDir, proxyId)
-    },
+    /** Test-only/manual preparation hook. Production startup never downloads a core. */
+    private val coreInstaller: ((File, String) -> Unit)? = null,
     private val runtimeExtractor: (File) -> Unit = { target ->
         if (!ClasspathRuntimeExtractor.isRuntimeExtracted(target)) {
             ClasspathRuntimeExtractor.extract(target)
@@ -102,17 +109,71 @@ class DesktopRuntimeController(
         )
     }
 
-    /** 关闭窗口时的兜底：确认 node.exe 不会残留（优雅关闭，必要时强杀）。 */
+    /**
+     * 关闭窗口时的兜底：确认 node.exe 不会残留（优雅关闭，必要时强杀）。
+     * ShutdownHook 可能在 Compose 已开始退出后执行，因此这里不能依赖 worker；所有结果都写入
+     * 运行时生命周期日志，避免把真正的停止原因静默吞掉。
+     */
     fun shutdown() {
         worker.shutdown()
-        supervisor?.let { runCatching { it.stop() } }
+        val active = supervisor
+        if (active != null) {
+            val result = runCatching { active.forceStop(reason = "controller.shutdown") }
+            result.onFailure { error ->
+                appendLifecycleLog(
+                    "controller.shutdown 停止 Node 异常：${error.message ?: error::class.java.simpleName}",
+                )
+            }.onSuccess { snapshot ->
+                if (snapshot.state != DesktopRuntimeState.Stopped) {
+                    appendLifecycleLog(
+                        "controller.shutdown 停止 Node 未完成：${snapshot.failureReason ?: snapshot.state}",
+                    )
+                }
+            }
+        }
         supervisor = null
     }
 
     /** 无感自启模式用：node 子进程是否仍存活。 */
     fun isChildAlive(): Boolean = supervisor?.isChildAlive() ?: false
 
+    /**
+     * 将本地 Node 的真实进程状态同步到 UI 状态。健康轮询只负责展示诊断，不能替代这里的
+     * 进程监督；Node 消失后必须明确进入 Failed，且保留退出码与 stderr 尾部。
+     */
+    fun reconcileLiveness() {
+        submit { doReconcileLiveness() }
+    }
+
+    private fun doReconcileLiveness() {
+        if (_state.value.phase != ServicePhase.Running) return
+        val active = supervisor ?: return
+        val failure = active.livenessFailure() ?: return
+        val snapshot = active.snapshot
+        supervisor = null
+        update {
+            copy(
+                phase = ServicePhase.Failed,
+                message = failure,
+                port = null,
+                pid = snapshot.pid,
+                runtimeIdentity = null,
+            )
+        }
+        appendLifecycleLog("Node 子进程退出，服务状态已同步为 Failed：${failure.take(500)}")
+    }
+
     private fun settingsFile(): File = DesktopSettings.defaultSettingsFile()
+
+    private fun appendLifecycleLog(message: String) {
+        val line = "${java.time.LocalDateTime.now()}  $message${System.lineSeparator()}"
+        runCatching {
+            paths.logsDir.mkdirs()
+            File(paths.logsDir, "lifecycle.log").appendText(line, Charsets.UTF_8)
+        }.onFailure { error ->
+            System.err.println("Desktop 生命周期日志写入失败：${error.message ?: error::class.java.simpleName}；原消息=$message")
+        }
+    }
 
     private fun submit(block: () -> Unit) {
         worker.execute {
@@ -143,12 +204,24 @@ class DesktopRuntimeController(
             return
         }
         try {
-            coreInstaller(scriptDir, settings.githubProxyId)
+            // A non-null hook is reserved for tests/manual preparation. The production default is
+            // null, so starting a service can never initiate a remote download.
+            coreInstaller?.invoke(scriptDir, settings.githubProxyId)
         } catch (t: Throwable) {
             update {
                 copy(
                     phase = ServicePhase.Failed,
-                    message = "核心安装失败：${t.message}（可在 设置 → GitHub 线路 中选择加速镜像后重试）",
+                    message = "核心校验失败：${t.message}",
+                )
+            }
+            return
+        }
+        val variantDir = File(scriptDir, "danmu_api_${runtimeConfig.variant}")
+        if (!File(variantDir, "worker.js").isFile) {
+            update {
+                copy(
+                    phase = ServicePhase.CoreSetupRequired,
+                    message = "核心尚未准备：请先打开“核心”页面，选择 GitHub 线路并手动下载 ${runtimeConfig.variant} 核心",
                 )
             }
             return
@@ -163,7 +236,9 @@ class DesktopRuntimeController(
                 port = runtimeConfig.port,
                 listenHost = runtimeConfig.listenHost,
                 variant = runtimeConfig.variant,
+                adminToken = settings.adminTokenOverride,
                 identityFile = File(settingsFile().parentFile, "instance-id"),
+                lifecycleLog = ::appendLifecycleLog,
             )
         )
         when (snapshot.state) {

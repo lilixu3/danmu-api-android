@@ -84,7 +84,16 @@ val prepareDesktopAppResources = tasks.register<Sync>("prepareDesktopAppResource
         into("runtime/nodejs-project")
     }
     if (configuredNodeExe != null) {
-        from(configuredNodeExe) { into("runtime") }
+        require(configuredNodeExe.isFile) {
+            "-PdanmuNodeExe 必须指向存在的 node.exe：${configuredNodeExe.absolutePath}"
+        }
+        // Use an explicit file source with a fixed destination name. Passing the executable as a
+        // bare directory source lets Gradle's Sync normalization omit it on Windows in some
+        // incremental layouts, producing a manifest without runtime/node.exe.
+        from(configuredNodeExe) {
+            into("runtime")
+            rename { "node.exe" }
+        }
         val nodeLicense = configuredNodeExe.parentFile.resolve("LICENSE")
         if (nodeLicense.isFile) {
             from(nodeLicense) { into("runtime") }
@@ -97,16 +106,22 @@ val prepareDesktopAppResources = tasks.register<Sync>("prepareDesktopAppResource
             )
         }
     }
+}
+
+// Keep manifest generation separate from Sync: Sync can finish before a doLast-generated
+// manifest is visible to downstream incremental resource processing.
+val writeDesktopRuntimeManifest = tasks.register("writeDesktopRuntimeManifest") {
+    dependsOn(prepareDesktopAppResources)
+    inputs.dir(desktopRuntimeResources)
+    outputs.file(desktopRuntimeResources.map { it.file("runtime-manifest.txt") })
     doLast {
-        // 生成随包资源清单，供运行期 ClasspathRuntimeExtractor 首启解压
         val dest = desktopRuntimeResources.get().asFile
         val manifest = dest.walkTopDown()
-            .filter { it.isFile }
+            .filter { it.isFile && it.name != "runtime-manifest.txt" }
             .map { it.relativeTo(dest).invariantSeparatorsPath.replace('\\', '/') }
-            .filterNot { it == "runtime-manifest.txt" }
             .sorted()
             .joinToString("\n")
-        File(dest, "runtime-manifest.txt").writeText(manifest + "\n")
+        File(dest, "runtime-manifest.txt").writeText(manifest + "\n", Charsets.UTF_8)
     }
 }
 
@@ -115,7 +130,11 @@ sourceSets.named("main") {
 }
 
 tasks.matching { it.name == "processResources" }.configureEach {
-    dependsOn(prepareDesktopAppResources)
+    dependsOn(writeDesktopRuntimeManifest)
+    // The runtime directory is generated from -PdanmuNodeExe. Declare it explicitly so a
+    // changed packaged node.exe invalidates the processResources output instead of leaving an
+    // old classpath copy that makes runtime extraction tests fail.
+    inputs.dir(desktopRuntimeResources)
 }
 
 // 免安装版：压缩应用镜像目录，解压后直接运行 弹幕API.exe。
