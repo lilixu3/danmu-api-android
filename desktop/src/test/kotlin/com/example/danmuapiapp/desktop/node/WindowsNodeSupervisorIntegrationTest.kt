@@ -72,7 +72,10 @@ class WindowsNodeSupervisorIntegrationTest {
 
     private fun isPortFree(port: Int): Boolean {
         return try {
-            ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", port)) }
+            ServerSocket().use { socket ->
+                socket.reuseAddress = false
+                socket.bind(InetSocketAddress("0.0.0.0", port))
+            }
             true
         } catch (_: Exception) {
             false
@@ -176,6 +179,31 @@ class WindowsNodeSupervisorIntegrationTest {
             System.getProperty("danmu.desktop.longSmoke") == "true"
         )
         runCycles(20)
+    }
+
+    @Test
+    fun applicationExitCleanupDoesNotCallShutdownEndpoint() {
+        val nodeExe = resolveNodeExe()
+        assumeTrue("未提供 node.exe，跳过", nodeExe != null)
+        assumeTrue("仅 Windows 执行", isWindows)
+        assumeTrue("端口 19422 被占用，跳过", isPortFree(19422))
+        val scriptDir = copyRuntime()
+        val supervisor = WindowsNodeSupervisor()
+        supervisors += supervisor
+        val running = supervisor.start(newConfig(
+            scriptDir,
+            ensureCore = { dir ->
+                if (!DesktopCoreInstaller.isCoreInstalled(dir)) DesktopCoreInstaller.ensureCoreInstalled(dir)
+            },
+            port = 19422,
+        ))
+        assertEquals(DesktopRuntimeState.Running, running.state)
+
+        val stopped = supervisor.forceStop("application-exit-test")
+        assertEquals(DesktopRuntimeState.Stopped, stopped.state)
+        assertTrue("应用退出清理后端口应释放", isPortFree(19422))
+        val stdout = File(scriptDir, "logs/node-stdout.log").readText(Charsets.UTF_8)
+        assertFalse("应用退出清理不得调用核心 /__shutdown", stdout.contains("Shutting down ..."))
     }
 
     @Test

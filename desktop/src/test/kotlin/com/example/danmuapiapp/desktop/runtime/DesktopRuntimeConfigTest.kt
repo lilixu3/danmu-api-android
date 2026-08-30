@@ -22,7 +22,7 @@ class DesktopRuntimeConfigTest {
         )
         val settings = DesktopSettings(File(temp.root, "settings.properties"))
         assertEquals(
-            DesktopRuntimeConfig(19421, "127.0.0.1", "dev"),
+            DesktopRuntimeConfig(19421, "127.0.0.1", "dev", false),
             DesktopRuntimeConfigResolver.resolve(settings, script),
         )
     }
@@ -44,7 +44,42 @@ class DesktopRuntimeConfigTest {
         settings.setListenHostOverride("127.0.0.1")
         settings.setVariantOverride("custom")
         assertEquals(
-            DesktopRuntimeConfig(20123, "127.0.0.1", "custom"),
+            DesktopRuntimeConfig(20123, "127.0.0.1", "custom", false),
+            DesktopRuntimeConfigResolver.resolve(settings, script),
+        )
+    }
+
+    @Test
+    fun ipv6SettingForcesDualStackHostAndDisablesItAgain() {
+        val root = temp.newFolder("ipv6-runtime")
+        val script = File(root, "nodejs-project")
+        File(script, "config").mkdirs()
+        File(script, "config/.env").writeText("DANMU_API_HOST=127.0.0.1\n")
+        val settings = DesktopSettings(File(temp.root, "ipv6.properties"))
+
+        settings.setIpv6Enabled(true)
+        assertEquals(
+            DesktopRuntimeConfig(StartConfig.DEFAULT_PORT, "::", "stable", true),
+            DesktopRuntimeConfigResolver.resolve(settings, script),
+        )
+
+        settings.setIpv6Enabled(false)
+        assertEquals(
+            DesktopRuntimeConfig(StartConfig.DEFAULT_PORT, "127.0.0.1", "stable", false),
+            DesktopRuntimeConfigResolver.resolve(settings, script),
+        )
+    }
+
+    @Test
+    fun disabledIpv6DoesNotKeepEnvDualStackHost() {
+        val root = temp.newFolder("ipv6-env-runtime")
+        val script = File(root, "nodejs-project")
+        File(script, "config").mkdirs()
+        File(script, "config/.env").writeText("DANMU_API_HOST=::\n")
+        val settings = DesktopSettings(File(temp.root, "ipv6-env.properties"))
+
+        assertEquals(
+            DesktopRuntimeConfig(StartConfig.DEFAULT_PORT, StartConfig.DEFAULT_LISTEN_HOST, "stable", false),
             DesktopRuntimeConfigResolver.resolve(settings, script),
         )
     }

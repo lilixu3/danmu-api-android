@@ -12,6 +12,7 @@ data class DesktopRuntimeConfig(
     val port: Int = StartConfig.DEFAULT_PORT,
     val listenHost: String = StartConfig.DEFAULT_LISTEN_HOST,
     val variant: String = "stable",
+    val ipv6Enabled: Boolean = false,
 )
 
 object DesktopRuntimeConfigResolver {
@@ -21,14 +22,16 @@ object DesktopRuntimeConfigResolver {
         val port = settings.portOverride
             ?: values["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
             ?: StartConfig.DEFAULT_PORT
-        val listenHost = settings.listenHostOverride
+        val configuredHost = settings.listenHostOverride
             ?: values["DANMU_API_HOST"]?.trim()?.takeIf { it.isNotBlank() }
             ?: StartConfig.DEFAULT_LISTEN_HOST
+        val ipv6Enabled = settings.ipv6Enabled
+        val listenHost = if (ipv6Enabled) "::" else configuredHost.takeUnless { it == "::" } ?: StartConfig.DEFAULT_LISTEN_HOST
         val variant = settings.variantOverride
             ?: values["DANMU_API_VARIANT"]?.trim()?.lowercase()
                 ?.takeIf { it in VALID_VARIANTS }
             ?: "stable"
-        return DesktopRuntimeConfig(port, listenHost, variant)
+        return DesktopRuntimeConfig(port, listenHost, variant, ipv6Enabled)
     }
 
     fun readEnv(scriptDir: File): Map<String, String> {

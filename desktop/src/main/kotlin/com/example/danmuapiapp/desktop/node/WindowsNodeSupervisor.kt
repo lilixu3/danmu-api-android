@@ -26,14 +26,19 @@ data class StartConfig(
     val listenHost: String = DEFAULT_LISTEN_HOST,
     /** 核心变体：与 Android 默认一致。 */
     val variant: String = "stable",
+    /**
+     * Desktop 对核心 ADMIN_TOKEN 的显式覆盖。
+     * null 表示保留现有 .env 值；空字符串表示明确移除该配置。
+     */
+    val adminToken: String? = null,
     /** 安装身份文件（持久化，等价 Android RuntimeIdentityStore）。 */
     val identityFile: File,
     val startupTimeoutMs: Long = 30_000,
     val shutdownTimeoutMs: Long = 10_000,
-    /** 核心准备策略：默认在线下载（核心不随包内置）；测试可注入 no-op。 */
-    val ensureCore: (File) -> Unit = { scriptDir ->
-        DesktopCoreInstaller.ensureCoreInstalled(scriptDir)
-    },
+    /** 核心准备策略由上层核心管理流程显式注入；启动服务本身不得触发远程下载。 */
+    val ensureCore: (File) -> Unit = {},
+    /** Desktop 宿主生命周期诊断；默认不写日志，测试夹具可保持纯进程监督。 */
+    val lifecycleLog: (String) -> Unit = {},
     ) {
     companion object {
         /** 与 Android 端及核心默认端口一致（config/.env 的 DANMU_API_PORT）。 */
@@ -69,6 +74,7 @@ class WindowsNodeSupervisor {
     private var identity: String = ""
     private var config: StartConfig? = null
     private var failureReason: String? = null
+    private var lifecycleLog: (String) -> Unit = {}
 
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofMillis(600))
@@ -85,6 +91,8 @@ class WindowsNodeSupervisor {
 
     @Synchronized
     fun start(config: StartConfig): RuntimeSnapshot {
+        lifecycleLog = config.lifecycleLog
+        lifecycleLog("WindowsNodeSupervisor.start 请求：端口=${config.port}，变体=${config.variant}")
         val current = stateRef.get()
         check(current == DesktopRuntimeState.Stopped || current == DesktopRuntimeState.Failed) {
             "当前状态 $current 不允许启动，请先 stop()"
@@ -99,7 +107,7 @@ class WindowsNodeSupervisor {
             require(File(config.scriptDir, "main.js").isFile) {
                 "入口缺失: ${File(config.scriptDir, "main.js").absolutePath}"
             }
-            // 与 Android 端一致：核心不随包内置，缺失时在线下载安装到运行时目录
+            // 核心准备由显式注入的 hook 决定；生产控制器默认不联网下载核心。
             config.ensureCore(config.scriptDir)
             identity = ensureIdentity(config.identityFile)
             prepareRuntimeDirs(config)
@@ -132,14 +140,16 @@ class WindowsNodeSupervisor {
             return fail("node.exe 启动失败: ${t.message}")
         }
         process = proc
+        lifecycleLog("node.exe 已启动：pid=${proc.pid()}")
 
         val deadline = System.currentTimeMillis() + config.startupTimeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (!proc.isAlive) {
-                return fail(
+                val reason =
                     "node.exe 提前退出，exitCode=${proc.exitValue()}，stderr 尾部:\n" +
                         tail(File(logsDir, "node-stderr.log"))
-                )
+                lifecycleLog(reason)
+                return fail(reason)
             }
             val ready = runCatching { probeHealth(config, proc) }.getOrDefault(false)
             if (ready) {
@@ -159,7 +169,8 @@ class WindowsNodeSupervisor {
      * Stopped 的判定：子进程确认退出且端口已释放（旧 runtime identity 不可达）。
      */
     @Synchronized
-    fun stop(): RuntimeSnapshot {
+    fun stop(reason: String = "user"): RuntimeSnapshot {
+        lifecycleLog("WindowsNodeSupervisor.stop 请求：reason=$reason，state=${stateRef.get()}，pid=${process?.pid()}")
         val current = stateRef.get()
         if (current == DesktopRuntimeState.Stopped) return snapshot
         stateRef.set(DesktopRuntimeState.Stopping)
@@ -167,7 +178,7 @@ class WindowsNodeSupervisor {
         val proc = process
         if (proc != null && proc.isAlive) {
             if (current == DesktopRuntimeState.Running) {
-                runCatching {
+                val shutdownResult = runCatching {
                     client.send(
                         HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/__shutdown"))
                             .timeout(Duration.ofSeconds(3))
@@ -175,6 +186,11 @@ class WindowsNodeSupervisor {
                             .build(),
                         HttpResponse.BodyHandlers.discarding(),
                     )
+                }
+                shutdownResult.onSuccess { response ->
+                    lifecycleLog("已发送 /__shutdown：status=${response.statusCode()}")
+                }.onFailure { error ->
+                    lifecycleLog("发送 /__shutdown 失败：${error.message ?: error::class.java.simpleName}")
                 }
                 val graceful = proc.waitFor(cfg?.shutdownTimeoutMs ?: 10_000, TimeUnit.MILLISECONDS)
                 if (!graceful) {
@@ -190,9 +206,58 @@ class WindowsNodeSupervisor {
         if (port > 0 && !isPortFree(port)) {
             return fail("停止后端口 $port 仍被占用，旧 runtime identity 未确认消失")
         }
+        val exitCode = runCatching { proc?.exitValue() }.getOrNull()
+        lifecycleLog("node.exe 已退出：pid=${proc?.pid()}，exitCode=$exitCode，stopReason=$reason")
         process = null
         stateRef.set(DesktopRuntimeState.Stopped)
         return snapshot
+    }
+
+    /**
+     * 应用进程退出时的强制清理路径。
+     *
+     * 这里故意不请求 /__shutdown：应用退出不是用户的“停止服务”操作，不能再依赖 Node
+     * 业务 HTTP 处理器。只终止本监督器创建的子进程，避免退出时把“应用退出”误记成 API
+     * 触发的正常停止，也避免 Node 在 Desktop JVM 退出后变成孤儿进程。
+     */
+    @Synchronized
+    fun forceStop(reason: String = "application-exit"): RuntimeSnapshot {
+        lifecycleLog("WindowsNodeSupervisor.forceStop 请求：reason=$reason，state=${stateRef.get()}，pid=${process?.pid()}")
+        val proc = process
+        stateRef.set(DesktopRuntimeState.Stopping)
+        if (proc != null && proc.isAlive) {
+            lifecycleLog("应用退出清理不发送 /__shutdown，直接终止 node.exe：pid=${proc.pid()}")
+            forceKill(proc)
+        }
+        if (proc != null && proc.isAlive) {
+            return fail("应用退出时无法终止 node.exe（pid=${proc.pid()}）")
+        }
+        if (port > 0 && !isPortFree(port)) {
+            return fail("应用退出后端口 $port 仍被占用")
+        }
+        val exitCode = runCatching { proc?.exitValue() }.getOrNull()
+        lifecycleLog("应用退出清理完成：pid=${proc?.pid()}，exitCode=$exitCode")
+        process = null
+        stateRef.set(DesktopRuntimeState.Stopped)
+        return snapshot
+    }
+
+    /** 返回真实的子进程退出诊断；进程仍存活时返回 null。 */
+    @Synchronized
+    fun livenessFailure(): String? {
+        val proc = process ?: return "Node 子进程句柄不存在"
+        if (proc.isAlive) return null
+        val code = runCatching { proc.exitValue() }.getOrNull()
+        val cfg = config
+        val stderr = cfg?.let { tail(File(it.scriptDir, "logs/node-stderr.log")) }.orEmpty()
+        val reason = buildString {
+            append("Node 子进程已退出，exitCode=").append(code ?: "未知")
+            if (stderr.isNotBlank()) append("，stderr 尾部:\n").append(stderr)
+        }
+        lifecycleLog(reason)
+        failureReason = reason
+        stateRef.set(DesktopRuntimeState.Failed)
+        return reason
     }
 
     /**
@@ -271,7 +336,7 @@ class WindowsNodeSupervisor {
         } else {
             emptyList()
         }
-        val overrides = mapOf(
+        val overrides = linkedMapOf(
             "DANMU_API_PORT" to config.port.toString(),
             "DANMU_API_HOST" to config.listenHost,
             "DANMU_API_VARIANT" to config.variant,
@@ -280,6 +345,10 @@ class WindowsNodeSupervisor {
         val lines = existing.mapNotNull { rawLine ->
             val key = rawLine.substringBefore('=').trim().uppercase()
             when {
+                key == "ADMIN_TOKEN" && config.adminToken != null -> {
+                    seen += key
+                    config.adminToken.takeIf { it.isNotBlank() }?.let { "$key=$it" }
+                }
                 overrides.containsKey(key) -> {
                     seen += key
                     "${key}=${overrides.getValue(key)}"
@@ -290,6 +359,9 @@ class WindowsNodeSupervisor {
         }.toMutableList()
         overrides.forEach { (key, value) ->
             if (key !in seen) lines += "$key=$value"
+        }
+        if (config.adminToken != null && config.adminToken.isNotBlank() && "ADMIN_TOKEN" !in seen) {
+            lines += "ADMIN_TOKEN=${config.adminToken}"
         }
         envFile.parentFile?.mkdirs()
         envFile.writeText(lines.joinToString(System.lineSeparator()) + System.lineSeparator())
@@ -311,7 +383,12 @@ class WindowsNodeSupervisor {
 
     private fun isPortFree(target: Int): Boolean {
         return try {
-            ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", target)) }
+            // Bind the IPv4 wildcard address, not only loopback. A service listening on
+            // 0.0.0.0 must make the port unavailable to the supervisor as well.
+            ServerSocket().use { socket ->
+                socket.reuseAddress = false
+                socket.bind(InetSocketAddress("0.0.0.0", target))
+            }
             true
         } catch (_: IOException) {
             false
