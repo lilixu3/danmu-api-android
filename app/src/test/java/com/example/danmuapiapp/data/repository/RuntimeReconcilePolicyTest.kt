@@ -19,8 +19,8 @@ class RuntimeReconcilePolicyTest {
     }
 
     @Test
-    fun `普通模式运行中也应校准前台服务和通知`() {
-        assertTrue(
+    fun `普通模式运行中不应执行周期状态校准`() {
+        assertFalse(
             shouldRunPeriodicNormalStateReconcile(
                 runMode = RunMode.Normal,
                 status = ServiceStatus.Running
@@ -54,120 +54,4 @@ class RuntimeReconcilePolicyTest {
         )
     }
 
-    @Test
-    fun `接口可用但前台服务缺失时应重新挂接`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = false,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = false,
-                canDisplayNotification = true
-            ) == NormalRunningReconcileAction.RestoreForeground
-        )
-    }
-
-    @Test
-    fun `接口可用但通知消失时应重新发布通知`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = true,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = false,
-                canDisplayNotification = true,
-                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD
-            ) == NormalRunningReconcileAction.RestoreForeground
-        )
-    }
-
-    @Test
-    fun `通知仍在时服务查询抖动不应重发通知`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = false,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = true,
-                canDisplayNotification = true
-            ) == NormalRunningReconcileAction.Healthy
-        )
-    }
-
-    @Test
-    fun `通知单次查询缺失不应重发`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = true,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = false,
-                canDisplayNotification = true,
-                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD - 1
-            ) == NormalRunningReconcileAction.Healthy
-        )
-    }
-
-    @Test
-    fun `用户选择尊重关闭时不应自动恢复手动划掉的通知`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = true,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = false,
-                canDisplayNotification = true,
-                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD,
-                notificationManuallyHidden = true
-            ) == NormalRunningReconcileAction.RespectUserDismissal
-        )
-    }
-
-    @Test
-    fun `前台服务已销毁但接口仍可用时必须优先恢复服务`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 0,
-                serviceRunning = false,
-                processRunning = true,
-                portOpen = true,
-                notificationActive = false,
-                canDisplayNotification = true,
-                notificationManuallyHidden = true
-            ) == NormalRunningReconcileAction.RestoreForeground
-        )
-    }
-
-    @Test
-    fun `运行信号短暂缺失时不应立即判停`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = 1,
-                serviceRunning = false,
-                processRunning = false,
-                portOpen = false,
-                notificationActive = false,
-                canDisplayNotification = true
-            ) == NormalRunningReconcileAction.WaitForNextProbe
-        )
-    }
-
-    @Test
-    fun `运行信号连续缺失后才标记停止`() {
-        assertTrue(
-            decideNormalRunningReconcileAction(
-                consecutiveUnreachableCount = NORMAL_RUNNING_UNREACHABLE_THRESHOLD,
-                serviceRunning = false,
-                processRunning = false,
-                portOpen = false,
-                notificationActive = false,
-                canDisplayNotification = true
-            ) == NormalRunningReconcileAction.MarkStopped
-        )
-    }
 }
