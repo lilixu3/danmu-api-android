@@ -140,6 +140,7 @@ class CompatModeActivity : ComponentActivity() {
                         onDismissBranchPicker = compatViewModel::dismissBranchDialog,
                         onDeleteCore = compatViewModel::deleteCore,
                         onSaveCustomCore = compatViewModel::saveCustomCore,
+                        onToggleKeepAliveProfile = compatViewModel::toggleKeepAliveProfile,
                         onCheckAppUpdate = compatViewModel::checkAppUpdate,
                         onDownloadAppUpdate = compatViewModel::downloadAppUpdate,
                         onInstallAppUpdate = {

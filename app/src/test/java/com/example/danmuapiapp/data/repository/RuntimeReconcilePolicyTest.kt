@@ -77,8 +77,38 @@ class RuntimeReconcilePolicyTest {
                 processRunning = true,
                 portOpen = true,
                 notificationActive = false,
-                canDisplayNotification = true
+                canDisplayNotification = true,
+                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD
             ) == NormalRunningReconcileAction.RestoreForeground
+        )
+    }
+
+    @Test
+    fun `通知仍在时服务查询抖动不应重发通知`() {
+        assertTrue(
+            decideNormalRunningReconcileAction(
+                consecutiveUnreachableCount = 0,
+                serviceRunning = false,
+                processRunning = true,
+                portOpen = true,
+                notificationActive = true,
+                canDisplayNotification = true
+            ) == NormalRunningReconcileAction.Healthy
+        )
+    }
+
+    @Test
+    fun `通知单次查询缺失不应重发`() {
+        assertTrue(
+            decideNormalRunningReconcileAction(
+                consecutiveUnreachableCount = 0,
+                serviceRunning = true,
+                processRunning = true,
+                portOpen = true,
+                notificationActive = false,
+                canDisplayNotification = true,
+                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD - 1
+            ) == NormalRunningReconcileAction.Healthy
         )
     }
 
@@ -92,6 +122,7 @@ class RuntimeReconcilePolicyTest {
                 portOpen = true,
                 notificationActive = false,
                 canDisplayNotification = true,
+                consecutiveNotificationMisses = NORMAL_NOTIFICATION_MISS_CONFIRM_THRESHOLD,
                 notificationManuallyHidden = true
             ) == NormalRunningReconcileAction.RespectUserDismissal
         )

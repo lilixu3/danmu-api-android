@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.FileObserver
+import android.os.SystemClock
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
@@ -24,6 +25,7 @@ import com.example.danmuapiapp.data.service.RuntimeIdentityStore
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RootRuntimeController
+import com.example.danmuapiapp.data.service.RootRuntimeNotificationManager
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RootAutoStartModule
@@ -73,6 +75,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NORMAL_START_TIMEOUT_PRIMARY_MS = 15_000L
         private const val NORMAL_START_TIMEOUT_EXTEND_MS = 20_000L
         private const val NORMAL_STATE_RECONCILE_INTERVAL_MS = 8_000L
+        /** 通知缺失自动重发的最小间隔（冷却兜底，只约束"仅通知缺失"分支，不约束服务真丢失的恢复）。 */
+        private const val NOTIFICATION_RESTORE_MIN_INTERVAL_MS = 60_000L
         private const val NORMAL_START_STALE_TIMEOUT_MS =
             NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
         private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
@@ -261,6 +265,8 @@ class RuntimeRepositoryImpl @Inject constructor(
     private var appForeground = false
 
     private var reconcileConsecutiveDeadCount = 0
+    private var reconcileConsecutiveNotificationMissCount = 0
+    private var lastNotificationRestoreAtElapsedMs = 0L
     private var rootReconcileConsecutiveDeadCount = 0
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
@@ -493,20 +499,45 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (foreground) {
             refreshRuntimeState()
         } else {
-            val state = _runtimeState.value
-            if (state.runMode == RunMode.Normal &&
-                (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting)
-            ) {
-                if (settingsRepository.normalNotificationBehavior.value ==
-                    NormalNotificationBehavior.ForegroundRestore
-                ) {
-                    NormalNotificationBehaviorPrefs.clearManuallyHidden(context)
-                }
-                if (!NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)) {
-                    NodeService.ensureForegroundNotification(context)
-                }
-            }
+            restoreForegroundNotificationOnBackground()
         }
+    }
+
+    /**
+     * 离开应用时仅在通知确实不在位时才重发：
+     * 无条件重发会让每次切后台都把通知刷到顶部，表现为"通知明明还在却被刷新"。
+     */
+    private fun restoreForegroundNotificationOnBackground() {
+        val state = _runtimeState.value
+        if (state.runMode != RunMode.Normal ||
+            (state.status != ServiceStatus.Running && state.status != ServiceStatus.Starting)
+        ) {
+            return
+        }
+        val manuallyHidden = NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
+        if (manuallyHidden) {
+            // 只有"前台恢复"策略才在离开应用时补回被手动划掉的通知，
+            // "尊重关闭"需要保持隐藏，划掉即恢复早在划掉时就已补发。
+            if (settingsRepository.normalNotificationBehavior.value ==
+                NormalNotificationBehavior.ForegroundRestore
+            ) {
+                NormalNotificationBehaviorPrefs.clearManuallyHidden(context)
+                NodeService.ensureForegroundNotification(context)
+            }
+            return
+        }
+        val notificationPresent =
+            NodeService.canDisplayForegroundNotification(context) &&
+                NodeService.isForegroundNotificationActive(context)
+        if (notificationPresent) {
+            return
+        }
+        AppDiagnosticLogger.i(
+            context,
+            "RuntimeRepository",
+            "离开应用时通知不在位，补发前台服务通知"
+        )
+        NodeService.ensureForegroundNotification(context)
     }
 
     override fun refreshLogs() {
@@ -1401,12 +1432,28 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun updateStatusMessage(expectedStatus: ServiceStatus, message: String) {
+        val changed = _runtimeState.value.status == expectedStatus &&
+            _runtimeState.value.statusMessage != message
         _runtimeState.update { state ->
             if (state.status != expectedStatus) {
                 state
             } else {
                 state.copy(statusMessage = message)
             }
+        }
+        if (changed) syncRootNotification(expectedStatus, message)
+    }
+
+    /** Root 模式没有前台服务，通知完全跟随状态机，普通模式由 :node 进程的 NodeService 自行维护。 */
+    private fun syncRootNotification(status: ServiceStatus, message: String) {
+        if (_runtimeState.value.runMode != RunMode.Root) return
+        when (status) {
+            ServiceStatus.Running -> RootRuntimeNotificationManager.show(
+                context = context,
+                text = message,
+                endpoint = _runtimeState.value.lanUrl
+            )
+            else -> RootRuntimeNotificationManager.cancel(context)
         }
     }
 
@@ -1446,6 +1493,13 @@ class RuntimeRepositoryImpl @Inject constructor(
         // 运行态改为事件驱动刷新时，这里启动热更新监听。
         handleWorkDirHotReload(_runtimeState.value)
         scheduleCandidateConfirmation()
+        if (mode == RunMode.Root) {
+            RootRuntimeNotificationManager.show(
+                context = context,
+                text = _runtimeState.value.statusMessage.orEmpty(),
+                endpoint = _runtimeState.value.lanUrl
+            )
+        }
     }
 
     private fun markStopped(statusMessage: String? = null) {
@@ -1466,6 +1520,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
         uptimeJob?.cancel()
         stopWorkDirHotReload()
+        if (_runtimeState.value.runMode == RunMode.Root) {
+            RootRuntimeNotificationManager.cancel(context)
+        }
         if (failedAttempt != null) {
             triggerCandidateRecovery("候选核心启动后提前退出")
         }
@@ -1502,6 +1559,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         uptimeJob?.cancel()
         if (!stillRunning) {
             stopWorkDirHotReload()
+        }
+        if (state.runMode == RunMode.Root) {
+            RootRuntimeNotificationManager.cancel(context)
         }
         if (failedAttempt != null) {
             triggerCandidateRecovery(message)
@@ -1740,6 +1800,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 normalStartIssuedAtMs = 0L
             }
             reconcileConsecutiveDeadCount = 0
+            reconcileConsecutiveNotificationMissCount = 0
             return
         }
 
@@ -1749,6 +1810,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         when (state.status) {
             ServiceStatus.Starting -> {
                 reconcileConsecutiveDeadCount = 0
+                reconcileConsecutiveNotificationMissCount = 0
                 if (portOpen) {
                     markRunning(forceNewStart = normalPendingExplicitStart)
                     return
@@ -1792,6 +1854,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
             ServiceStatus.Stopping -> {
                 reconcileConsecutiveDeadCount = 0
+                reconcileConsecutiveNotificationMissCount = 0
                 if (!processRunning && !portOpen) {
                     markStopped()
                 }
@@ -1804,10 +1867,12 @@ class RuntimeRepositoryImpl @Inject constructor(
                 val canDisplayNotification = NodeService.canDisplayForegroundNotification(context)
                 val notificationManuallyHidden =
                     NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
-                val notificationActive = if (canDisplayNotification) {
+                val notificationActive = canDisplayNotification &&
                     NodeService.isForegroundNotificationActive(context)
+                reconcileConsecutiveNotificationMissCount = if (notificationActive) {
+                    0
                 } else {
-                    false
+                    reconcileConsecutiveNotificationMissCount + 1
                 }
                 val nextUnreachableCount = if (portOpen) {
                     0
@@ -1824,6 +1889,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                         portOpen = portOpen,
                         notificationActive = notificationActive,
                         canDisplayNotification = canDisplayNotification,
+                        consecutiveNotificationMisses = reconcileConsecutiveNotificationMissCount,
                         notificationManuallyHidden = notificationManuallyHidden
                     )
                 ) {
@@ -1846,29 +1912,51 @@ class RuntimeRepositoryImpl @Inject constructor(
                     }
 
                     NormalRunningReconcileAction.RestoreForeground -> {
-                        val requested = NodeService.ensureForegroundNotification(
-                            context = context,
-                            force = !serviceRunning
-                        )
-                        val repairMessage = if (requested) {
-                            "接口正常，正在重新挂接前台服务通知"
-                        } else {
-                            "接口正常，但前台服务通知恢复失败"
-                        }
-                        val shouldLogRepair = state.statusMessage != repairMessage
-                        updateStatusMessage(
-                            expectedStatus = ServiceStatus.Running,
-                            message = repairMessage
-                        )
-                        if (shouldLogRepair) {
-                            addLog(
-                                if (requested) LogLevel.Warn else LogLevel.Error,
-                                if (requested) {
-                                    "检测到 API 仍可用但前台服务或通知缺失，已请求重新挂接"
-                                } else {
-                                    "检测到 API 仍可用但前台服务或通知缺失，重新挂接失败"
-                                }
+                        // 仅"服务健在、通知查询缺失"的修复受冷却约束；服务真丢失必须立即挂接。
+                        val notificationOnlyRepair = serviceRunning
+                        val inNotificationRestoreCooldown =
+                            SystemClock.elapsedRealtime() - lastNotificationRestoreAtElapsedMs <
+                                NOTIFICATION_RESTORE_MIN_INTERVAL_MS
+                        if (notificationOnlyRepair && inNotificationRestoreCooldown) {
+                            val skipMessage = "接口正常；服务通知将在稍后自动恢复"
+                            updateStatusMessage(
+                                expectedStatus = ServiceStatus.Running,
+                                message = skipMessage
                             )
+                            if (state.statusMessage != skipMessage) {
+                                addLog(
+                                    LogLevel.Info,
+                                    "通知查询连续缺失但处于恢复冷却期，本轮跳过重发前台通知"
+                                )
+                            }
+                        } else {
+                            if (notificationOnlyRepair) {
+                                lastNotificationRestoreAtElapsedMs = SystemClock.elapsedRealtime()
+                            }
+                            val requested = NodeService.ensureForegroundNotification(
+                                context = context,
+                                force = !serviceRunning
+                            )
+                            val repairMessage = if (requested) {
+                                "接口正常，正在重新挂接前台服务通知"
+                            } else {
+                                "接口正常，但前台服务通知恢复失败"
+                            }
+                            val shouldLogRepair = state.statusMessage != repairMessage
+                            updateStatusMessage(
+                                expectedStatus = ServiceStatus.Running,
+                                message = repairMessage
+                            )
+                            if (shouldLogRepair) {
+                                addLog(
+                                    if (requested) LogLevel.Warn else LogLevel.Error,
+                                    if (requested) {
+                                        "检测到 API 仍可用但前台服务或通知缺失，已请求重新挂接"
+                                    } else {
+                                        "检测到 API 仍可用但前台服务或通知缺失，重新挂接失败"
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -2344,6 +2432,7 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private fun refreshRuntimeUrls(force: Boolean = false) {
         val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
+        var endpointChanged = false
         _runtimeState.update { state ->
             val localUrl = buildLocalUrl(state.port, state.token)
             val lanUrl = buildLanUrl(networkAddresses.ipv4, state.port, state.token)
@@ -2360,12 +2449,28 @@ class RuntimeRepositoryImpl @Inject constructor(
             ) {
                 state
             } else {
+                endpointChanged = force ||
+                    state.lanUrl != lanUrl ||
+                    state.lanIpv6Url != lanIpv6Url
                 state.copy(
                     localUrl = localUrl,
                     lanUrl = lanUrl,
                     lanIpv6Url = lanIpv6Url
                 )
             }
+        }
+        // 普通模式由 :node 前台服务自行监听网络事件；Root 模式没有前台服务，
+        // 因此在应用进程仍存活时用同一个系统网络事件同步一次通知。
+        val state = _runtimeState.value
+        if (endpointChanged &&
+            state.runMode == RunMode.Root &&
+            state.status == ServiceStatus.Running
+        ) {
+            RootRuntimeNotificationManager.show(
+                context = context,
+                text = state.statusMessage.orEmpty(),
+                endpoint = state.lanUrl
+            )
         }
     }
 

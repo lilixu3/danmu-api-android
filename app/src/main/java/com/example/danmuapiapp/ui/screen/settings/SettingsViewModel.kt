@@ -31,8 +31,10 @@ import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.NormalAutoStartPrefs
 import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
+import com.example.danmuapiapp.data.service.RootRuntimeNotificationManager
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.service.TvConfigSyncClient
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.data.service.WebDavService
@@ -48,6 +50,7 @@ import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.GlassTuningPreset
 import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.domain.model.isValidBackgroundImageUrl
+import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.NormalModeStabilityMode
@@ -107,9 +110,15 @@ class SettingsViewModel @Inject constructor(
     val githubAccountStatus = githubAccountService.status
     val customRepo = settingsRepo.customRepo
     val tokenVisible = settingsRepo.tokenVisible
+    val keepAlive = settingsRepo.keepAlive
+    val keepAliveHeartbeatEnabled = settingsRepo.keepAliveHeartbeatEnabled
+    val keepAliveHeartbeatMode = settingsRepo.keepAliveHeartbeatMode
+    val keepAliveHeartbeatIntervalMinutes = settingsRepo.keepAliveHeartbeatIntervalMinutes
     val coreUpdateCheckIntervalMinutes = settingsRepo.coreUpdateCheckIntervalMinutes
     val normalModeStabilityMode = settingsRepo.normalModeStabilityMode
     val normalNotificationBehavior = settingsRepo.normalNotificationBehavior
+    val serviceNotificationInfoEnabled = settingsRepo.serviceNotificationInfoEnabled
+    val rootNotificationEnabled = settingsRepo.rootNotificationEnabled
     val nightMode = settingsRepo.nightMode
     val glassMaterial = settingsRepo.glassMaterial
     val glassTuning = settingsRepo.glassTuning
@@ -133,6 +142,8 @@ class SettingsViewModel @Inject constructor(
     var isFullBackupOperating by mutableStateOf(false)
         private set
     var isRunModeSwitching by mutableStateOf(false)
+        private set
+    var a11yEnabled by mutableStateOf(NodeKeepAlivePrefs.isAccessibilityServiceEnabled(context))
         private set
     var appUpdateCurrentVersion by mutableStateOf(appUpdateService.currentVersionName())
         private set
@@ -307,6 +318,7 @@ class SettingsViewModel @Inject constructor(
                 runtimeRepo.updateRunMode(mode)
                 refreshRuntimeRelatedStates()
                 refreshWorkDirInfo()
+                SystemHeartbeatScheduler.refresh(context)
             } finally {
                 isRunModeSwitching = false
             }
@@ -323,6 +335,51 @@ class SettingsViewModel @Inject constructor(
         } else {
             "已关闭普通模式开机自启"
         }
+    }
+
+    fun setKeepAliveEnabled(enabled: Boolean) {
+        settingsRepo.setKeepAlive(enabled)
+        if (!enabled) {
+            NodeKeepAlivePrefs.requestDisableAccessibilityService(context)
+        }
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = if (enabled) {
+            "已开启无障碍保活，请在系统无障碍中启用服务"
+        } else {
+            "已关闭无障碍保活"
+        }
+    }
+
+    fun prepareAccessibilitySetup() {
+        if (settingsRepo.keepAlive.value) return
+        settingsRepo.setKeepAlive(true)
+        SystemHeartbeatScheduler.refresh(context)
+    }
+
+    fun setKeepAliveHeartbeatEnabled(enabled: Boolean) {
+        settingsRepo.setKeepAliveHeartbeatEnabled(enabled)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = if (enabled) {
+            "已开启心跳兜底检查"
+        } else {
+            "已关闭心跳兜底检查"
+        }
+    }
+
+    fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode) {
+        settingsRepo.setKeepAliveHeartbeatMode(mode)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = when (mode) {
+            KeepAliveHeartbeatMode.Accessibility -> "已切换为无障碍心跳"
+            KeepAliveHeartbeatMode.System -> "已切换为系统定时心跳（实验）"
+        }
+    }
+
+    fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int) {
+        val normalized = NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(minutes)
+        settingsRepo.setKeepAliveHeartbeatIntervalMinutes(normalized)
+        SystemHeartbeatScheduler.refresh(context)
+        operationMessage = "心跳间隔已更新为 ${normalized} 分钟"
     }
 
     fun setCoreUpdateCheckIntervalMinutes(minutes: Int) {
@@ -379,6 +436,56 @@ class SettingsViewModel @Inject constructor(
             NodeService.refreshForegroundNotification(context)
         }
         operationMessage = "普通模式通知行为已改为 ${behavior.label}"
+    }
+
+    fun setServiceNotificationInfoEnabled(enabled: Boolean) {
+        if (serviceNotificationInfoEnabled.value == enabled) {
+            operationMessage = if (enabled) "通知接口信息已开启" else "通知接口信息已关闭"
+            return
+        }
+        settingsRepo.setServiceNotificationInfoEnabled(enabled)
+        val state = runtimeState.value
+        if (state.runMode == RunMode.Normal &&
+            (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting)
+        ) {
+            NodeService.applyNotificationDisplayPreference(context)
+        } else if (state.runMode == RunMode.Root && state.status == ServiceStatus.Running) {
+            RootRuntimeNotificationManager.show(
+                context = context,
+                text = state.statusMessage.orEmpty(),
+                endpoint = state.lanUrl
+            )
+        }
+        operationMessage = if (enabled) {
+            "已开启通知接口信息，服务通知将显示接口地址"
+        } else {
+            "已关闭通知接口信息，服务通知仅显示运行状态"
+        }
+    }
+
+    fun setRootNotificationEnabled(enabled: Boolean) {
+        if (rootNotificationEnabled.value == enabled) {
+            operationMessage = if (enabled) "Root 模式通知已开启" else "Root 模式通知已关闭"
+            return
+        }
+        settingsRepo.setRootNotificationEnabled(enabled)
+        val state = runtimeState.value
+        if (state.runMode == RunMode.Root && state.status == ServiceStatus.Running) {
+            if (enabled) {
+                RootRuntimeNotificationManager.show(
+                    context = context,
+                    text = state.statusMessage.orEmpty(),
+                    endpoint = state.lanUrl
+                )
+            } else {
+                RootRuntimeNotificationManager.cancel(context)
+            }
+        }
+        operationMessage = if (enabled) {
+            "已开启 Root 模式通知，服务运行时显示常驻通知"
+        } else {
+            "已关闭 Root 模式通知"
+        }
     }
 
     fun setNightMode(mode: NightModePreference) {
@@ -620,6 +727,7 @@ class SettingsViewModel @Inject constructor(
     fun refreshRuntimeRelatedStates() {
         normalBootAutoStartEnabled = NormalAutoStartPrefs.isBootAutoStartEnabled(context)
         rootBootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
+        a11yEnabled = NodeKeepAlivePrefs.isAccessibilityServiceEnabled(context)
     }
 
     fun hasPostNotificationPermission(): Boolean {
@@ -984,6 +1092,7 @@ class SettingsViewModel @Inject constructor(
                     onSuccess = { restored ->
                         restored.mergedEnvironment?.let(::applyRuntimeFromEnv)
                         settingsRepo.reloadFromStorage()
+                        SystemHeartbeatScheduler.refresh(context)
                         coreRepo.refreshCoreInfo()
                         if (wasRunning) runtimeRepo.restartService()
                         val favoriteText = restored.favoriteCount?.let { "，$it 项收藏" }.orEmpty()

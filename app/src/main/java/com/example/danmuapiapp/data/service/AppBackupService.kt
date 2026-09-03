@@ -146,6 +146,9 @@ class AppBackupService @Inject constructor(
             "github_proxy_prefs" to { key: String -> key != "github_token" },
             "normal_autostart" to { _: String -> true },
             "danmu_root_autostart" to { _: String -> true },
+            "danmu_keep_alive_prefs" to { key: String ->
+                key !in setOf("desired_running")
+            },
             "danmu_node_run_mode" to { _: String -> true },
             "device_compat_mode" to { _: String -> true },
             "runtime" to { key: String -> key in setOf("port", "variant", "listen_mode") },
