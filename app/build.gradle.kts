@@ -20,8 +20,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.81"
-val defaultVersionCode = 167
+val defaultVersionName = "1.0.5.82"
+val defaultVersionCode = 168
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
@@ -990,14 +990,15 @@ fun assertElfLoadAlignment(file: File) {
         }
         fun u32At(offset: Long): Long {
             raf.seek(offset)
+            // ELF 字段为小端编码，低字节在前，读取顺序必须与 u16At 一致。
             var value = 0L
-            repeat(4) { value = (value shl 8) or u8().toLong() }
+            repeat(4) { value = value or (u8().toLong() shl (8 * it)) }
             return value
         }
         fun u64At(offset: Long): Long {
             raf.seek(offset)
             var value = 0L
-            repeat(8) { value = (value shl 8) or u8().toLong() }
+            repeat(8) { value = value or (u8().toLong() shl (8 * it)) }
             return value
         }
 
@@ -1013,7 +1014,10 @@ fun assertElfLoadAlignment(file: File) {
         val phentsize = u16At(if (is64) 0x36 else 0x2A).toLong()
         val phnum = u16At(if (is64) 0x38 else 0x2C)
         if (phnum <= 0 || phentsize <= 0L || phoff + phnum * phentsize > raf.length()) {
-            throw GradleException("ELF program header 非法或越界：${file.name}")
+            throw GradleException(
+                "ELF program header 非法或越界：${file.name} [path=${file.absolutePath} size=${raf.length()} " +
+                    "phoff=$phoff phentsize=$phentsize phnum=$phnum]"
+            )
         }
 
         val relativePath = file.relativeTo(preparedNativeRuntimeDir).invariantSeparatorsPath

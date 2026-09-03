@@ -91,6 +91,10 @@
             android:name="com.example.danmuapiapp.data.service.NotificationRuntimeActionService"
             android:exported="false" />
 
+        <receiver
+            android:name="com.example.danmuapiapp.data.service.NotificationActionReceiver"
+            android:exported="false" />
+
         <service
             android:name="com.example.danmuapiapp.data.service.NodeService"
             android:exported="false"
@@ -116,6 +120,19 @@
                 android:value="true" />
         </service>
 
+        <service
+            android:name="com.example.danmuapiapp.data.service.KeepAliveAccessibilityService"
+            android:label="@string/a11y_keepalive_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/a11y_keep_alive_config" />
+        </service>
+
         <receiver
             android:name="com.example.danmuapiapp.data.service.MyPackageReplacedReceiver"
             android:exported="false">
@@ -129,8 +146,13 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.USER_UNLOCKED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name="com.example.danmuapiapp.data.service.SystemHeartbeatReceiver"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

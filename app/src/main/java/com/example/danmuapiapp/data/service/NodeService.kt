@@ -2,19 +2,22 @@ package com.example.danmuapiapp.data.service
 
 import android.app.ActivityManager
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import java.io.File
-import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.example.danmuapiapp.MainActivity
 import com.example.danmuapiapp.NodeBridge
@@ -43,7 +46,7 @@ class NodeService : Service() {
 
     companion object {
         const val TAG = "NodeService"
-        const val CHANNEL_ID = "danmuapi_service"
+        const val CHANNEL_ID = ServiceNotificationChannels.CHANNEL_ID
         const val NOTIFICATION_ID = 1
         private val actionPrefix: String
             get() = BuildConfig.APPLICATION_ID
@@ -81,6 +84,7 @@ class NodeService : Service() {
         private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val SHUTDOWN_HTTP_TIMEOUT_MS = 450
         private const val UNEXPECTED_FOREGROUND_REATTACH_MIN_INTERVAL_MS = 30_000L
+        private const val NOTIFICATION_ENDPOINT_REFRESH_DEBOUNCE_MS = 300L
         /** 进程启动未满该时长时不允许判僵死，避免误杀慢机型的正常启动过程。 */
         private const val STALE_PROCESS_MIN_UPTIME_MS = 10_000L
         private val lastUnexpectedForegroundReattachAtMs = AtomicLong(0L)
@@ -93,6 +97,7 @@ class NodeService : Service() {
                 NormalNotificationBehaviorPrefs.clearManuallyHidden(appContext)
             }
             RuntimeIdentityStore.ensureInstanceId(appContext)
+            SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_EXPLICIT_START, userInitiated)
@@ -110,6 +115,7 @@ class NodeService : Service() {
             val appContext = context.applicationContext
             NodeKeepAlivePrefs.setDesiredRunning(appContext, false)
             NormalNotificationBehaviorPrefs.clearManuallyHidden(appContext)
+            SystemHeartbeatScheduler.refresh(appContext)
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_STOP
             }
@@ -187,8 +193,20 @@ class NodeService : Service() {
             return runCatching {
                 if (!manager.areNotificationsEnabled()) return@runCatching false
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
-                    manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+                    manager.getNotificationChannel(CHANNEL_ID)?.importance !=
+                        NotificationManager.IMPORTANCE_NONE
             }.getOrDefault(false)
+        }
+
+        /** 接口信息开关切换后重建通知，让显示内容立即生效。 */
+        fun applyNotificationDisplayPreference(context: Context): Boolean {
+            val appContext = context.applicationContext
+            ServiceNotificationChannels.ensureChannels(
+                context = appContext,
+                channelName = appContext.getString(R.string.notification_channel_name),
+                channelDescription = appContext.getString(R.string.notification_channel_desc)
+            )
+            return refreshForegroundNotification(appContext)
         }
 
         private fun claimUnexpectedForegroundReattach(): Boolean {
@@ -319,12 +337,17 @@ class NodeService : Service() {
     private var foregroundStarted = false
     @Volatile
     private var serviceStopRequested = false
+    @Volatile
+    private var displayedNotificationEndpoint: String? = null
+    private var notificationNetworkCallback: ConnectivityManager.NetworkCallback? = null
+    private var notificationEndpointRefreshJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        syncEndpointInfoNetworkMonitor()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -334,6 +357,7 @@ class NodeService : Service() {
             ACTION_STOP -> {
                 NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
                 NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
+                SystemHeartbeatScheduler.refresh(applicationContext)
                 stopNode()
                 return START_NOT_STICKY
             }
@@ -451,6 +475,7 @@ class NodeService : Service() {
     }
 
     private fun handleNotificationRefresh(startId: Int): Int {
+        syncEndpointInfoNetworkMonitor()
         if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
             cancelForegroundNotification()
             return START_STICKY
@@ -1316,22 +1341,11 @@ class NodeService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        createNotificationChannel26()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun createNotificationChannel26() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = getString(R.string.notification_channel_desc)
-            setShowBadge(false)
-        }
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-        nm.createNotificationChannel(channel)
+        ServiceNotificationChannels.ensureChannels(
+            context = this,
+            channelName = getString(R.string.notification_channel_name),
+            channelDescription = getString(R.string.notification_channel_desc)
+        )
     }
 
     private fun buildNotification(text: String): Notification {
@@ -1361,6 +1375,39 @@ class NodeService : Service() {
             setPackage(packageName)
         }
         val dismissPendingIntent = PendingIntent.getService(this, 3, dismissIntent, pendingFlags)
+
+        if (NotificationDisplayPrefs.isEndpointInfoEnabled(this)) {
+            val endpointText = notificationEndpointText()
+            displayedNotificationEndpoint = endpointText
+            return RuntimeSceneNotification.build(
+                context = this,
+                title = getString(R.string.app_name),
+                subtitle = text,
+                infoTitle = getString(R.string.notification_scene_info_title),
+                infoText = endpointText,
+                contentIntent = pendingIntent,
+                deleteIntent = dismissPendingIntent,
+                actions = listOf(
+                    RuntimeSceneNotification.Action(
+                        iconResId = android.R.drawable.ic_menu_close_clear_cancel,
+                        title = getString(R.string.notification_action_stop),
+                        intent = stopPendingIntent
+                    ),
+                    RuntimeSceneNotification.Action(
+                        iconResId = android.R.drawable.ic_popup_sync,
+                        title = getString(R.string.notification_action_restart),
+                        intent = restartPendingIntent
+                    ),
+                    RuntimeSceneNotification.Action(
+                        iconResId = android.R.drawable.ic_menu_share,
+                        title = getString(R.string.notification_action_copy_address),
+                        intent = copyLanPendingIntent
+                    )
+                )
+            )
+        }
+
+        displayedNotificationEndpoint = null
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
@@ -1390,6 +1437,18 @@ class NodeService : Service() {
             .build()
     }
 
+    private fun notificationEndpointText(): String {
+        val endpoint = resolveLanUrl()
+            .substringAfter("://", "")
+            .substringBefore('/')
+            .trim()
+        if (endpoint.isNotBlank() && !endpoint.startsWith("0.0.0.0:")) {
+            return endpoint
+        }
+        val port = readPortFromEnvFile().takeIf { it in 1..65535 } ?: 9321
+        return "端口 $port"
+    }
+
     private fun updateNotification(text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         if (NormalNotificationBehaviorPrefs.shouldSuppressNotification(this)) {
@@ -1397,6 +1456,99 @@ class NodeService : Service() {
             return
         }
         nm.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    /**
+     * 接口地址只依赖本机网络地址，使用 ConnectivityManager 的系统事件刷新，不发起网络请求。
+     * 300ms 防抖只用于合并 Wi-Fi/移动网络切换时连续到达的多个系统回调。
+     */
+    private fun syncEndpointInfoNetworkMonitor() {
+        if (NotificationDisplayPrefs.isEndpointInfoEnabled(applicationContext)) {
+            startEndpointInfoNetworkMonitor()
+        } else {
+            stopEndpointInfoNetworkMonitor()
+        }
+    }
+
+    private fun startEndpointInfoNetworkMonitor() {
+        if (notificationNetworkCallback != null) return
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                scheduleEndpointInfoRefresh()
+            }
+
+            override fun onLost(network: Network) {
+                scheduleEndpointInfoRefresh()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                scheduleEndpointInfoRefresh()
+            }
+
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                linkProperties: LinkProperties
+            ) {
+                scheduleEndpointInfoRefresh()
+            }
+        }
+
+        val registered = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                connectivityManager.registerDefaultNetworkCallback(callback)
+            } else {
+                connectivityManager.registerNetworkCallback(NetworkRequest.Builder().build(), callback)
+            }
+            true
+        }.onFailure {
+            AppDiagnosticLogger.w(
+                applicationContext,
+                TAG,
+                "注册接口信息网络监听失败：${it.message}",
+                it
+            )
+        }.getOrDefault(false)
+
+        if (registered) {
+            notificationNetworkCallback = callback
+            scheduleEndpointInfoRefresh()
+        }
+    }
+
+    private fun stopEndpointInfoNetworkMonitor() {
+        notificationEndpointRefreshJob?.cancel()
+        notificationEndpointRefreshJob = null
+        displayedNotificationEndpoint = null
+        val callback = notificationNetworkCallback ?: return
+        notificationNetworkCallback = null
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+    }
+
+    private fun scheduleEndpointInfoRefresh() {
+        notificationEndpointRefreshJob?.cancel()
+        notificationEndpointRefreshJob = scope.launch {
+            delay(NOTIFICATION_ENDPOINT_REFRESH_DEBOUNCE_MS)
+            val endpoint = notificationEndpointText()
+            if (
+                NotificationEndpointRefreshPolicy.shouldRefresh(
+                    endpointInfoEnabled = NotificationDisplayPrefs.isEndpointInfoEnabled(applicationContext),
+                    foregroundStarted = foregroundStarted,
+                    notificationSuppressed = NormalNotificationBehaviorPrefs.shouldSuppressNotification(this@NodeService),
+                    displayedEndpoint = displayedNotificationEndpoint,
+                    currentEndpoint = endpoint
+                )
+            ) {
+                updateNotification(currentForegroundMessage())
+            }
+        }
     }
 
     private fun cancelForegroundNotification() {
@@ -1470,6 +1622,7 @@ class NodeService : Service() {
             currentStartExplicit = false
             unexpected to threadToInterrupt
         }
+        stopEndpointInfoNetworkMonitor()
         scope.cancel()
         destroySnapshot.second?.interrupt()
         releaseRuntimeWakeLock()

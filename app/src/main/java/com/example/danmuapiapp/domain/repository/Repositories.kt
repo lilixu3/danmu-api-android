@@ -126,9 +126,15 @@ interface SettingsRepository {
     val githubProxy: StateFlow<String>
     val announcementBaseUrl: StateFlow<String>
     val autoStart: StateFlow<Boolean>
+    val keepAlive: StateFlow<Boolean>
+    val keepAliveHeartbeatEnabled: StateFlow<Boolean>
+    val keepAliveHeartbeatMode: StateFlow<KeepAliveHeartbeatMode>
+    val keepAliveHeartbeatIntervalMinutes: StateFlow<Int>
     val coreUpdateCheckIntervalMinutes: StateFlow<Int>
     val normalModeStabilityMode: StateFlow<NormalModeStabilityMode>
     val normalNotificationBehavior: StateFlow<NormalNotificationBehavior>
+    val serviceNotificationInfoEnabled: StateFlow<Boolean>
+    val rootNotificationEnabled: StateFlow<Boolean>
     val nightMode: StateFlow<NightModePreference>
     val glassMaterial: StateFlow<GlassMaterialPreference>
     val glassTuning: StateFlow<GlassTuningPreference>
@@ -149,9 +155,15 @@ interface SettingsRepository {
     fun setGithubProxy(proxy: String)
     fun setGithubToken(token: String)
     fun setAutoStart(enabled: Boolean)
+    fun setKeepAlive(enabled: Boolean)
+    fun setKeepAliveHeartbeatEnabled(enabled: Boolean)
+    fun setKeepAliveHeartbeatMode(mode: KeepAliveHeartbeatMode)
+    fun setKeepAliveHeartbeatIntervalMinutes(minutes: Int)
     fun setCoreUpdateCheckIntervalMinutes(minutes: Int)
     fun setNormalModeStabilityMode(mode: NormalModeStabilityMode)
     fun setNormalNotificationBehavior(behavior: NormalNotificationBehavior)
+    fun setServiceNotificationInfoEnabled(enabled: Boolean)
+    fun setRootNotificationEnabled(enabled: Boolean)
     fun setNightMode(mode: NightModePreference)
     fun setGlassMaterial(material: GlassMaterialPreference)
     fun setGlassTuning(tuning: GlassTuningPreference)

@@ -9,6 +9,14 @@ import org.junit.Test
 class NodeKeepAlivePrefsTest {
 
     @Test
+    fun `desired running mirror accepts only explicit values`() {
+        assertTrue(NodeKeepAlivePrefs.parseDesiredRunningMirror("1") == true)
+        assertTrue(NodeKeepAlivePrefs.parseDesiredRunningMirror("0") == false)
+        assertEquals(null, NodeKeepAlivePrefs.parseDesiredRunningMirror("true"))
+        assertEquals(null, NodeKeepAlivePrefs.parseDesiredRunningMirror(null))
+    }
+
+    @Test
     fun `setDesiredRunning should use commit for cross process visibility`() {
         val prefs = FakeSharedPreferences()
 
@@ -52,6 +60,22 @@ class NodeKeepAlivePrefsTest {
                 isRootMode = false,
                 serviceRunning = false
             )
+        )
+    }
+
+    @Test
+    fun `heartbeat interval is clamped to supported range`() {
+        assertEquals(
+            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_MIN_MINUTES,
+            NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(Int.MIN_VALUE)
+        )
+        assertEquals(
+            NodeKeepAlivePrefs.HEARTBEAT_INTERVAL_MAX_MINUTES,
+            NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(Int.MAX_VALUE)
+        )
+        assertEquals(
+            30,
+            NodeKeepAlivePrefs.normalizeHeartbeatIntervalMinutes(30)
         )
     }
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Throttle event dispatch a bit. The service does not need per-event precision,
+     and allowing a tiny timeout helps reduce wakeups on some OEM ROMs.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/a11y_keepalive_desc"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="1000"
+    android:canRetrieveWindowContent="false"
+    android:accessibilityFlags="flagDefault" />
