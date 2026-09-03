@@ -12,7 +12,6 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.FileObserver
-import android.os.SystemClock
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
@@ -75,8 +74,6 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NORMAL_START_TIMEOUT_PRIMARY_MS = 15_000L
         private const val NORMAL_START_TIMEOUT_EXTEND_MS = 20_000L
         private const val NORMAL_STATE_RECONCILE_INTERVAL_MS = 8_000L
-        /** 通知缺失自动重发的最小间隔（冷却兜底，只约束"仅通知缺失"分支，不约束服务真丢失的恢复）。 */
-        private const val NOTIFICATION_RESTORE_MIN_INTERVAL_MS = 60_000L
         private const val NORMAL_START_STALE_TIMEOUT_MS =
             NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
         private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
@@ -264,9 +261,6 @@ class RuntimeRepositoryImpl @Inject constructor(
     @Volatile
     private var appForeground = false
 
-    private var reconcileConsecutiveDeadCount = 0
-    private var reconcileConsecutiveNotificationMissCount = 0
-    private var lastNotificationRestoreAtElapsedMs = 0L
     private var rootReconcileConsecutiveDeadCount = 0
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
@@ -1799,8 +1793,6 @@ class RuntimeRepositoryImpl @Inject constructor(
             if (state.runMode != RunMode.Normal) {
                 normalStartIssuedAtMs = 0L
             }
-            reconcileConsecutiveDeadCount = 0
-            reconcileConsecutiveNotificationMissCount = 0
             return
         }
 
@@ -1809,8 +1801,6 @@ class RuntimeRepositoryImpl @Inject constructor(
         val portOpen = isPortOpen(state.port)
         when (state.status) {
             ServiceStatus.Starting -> {
-                reconcileConsecutiveDeadCount = 0
-                reconcileConsecutiveNotificationMissCount = 0
                 if (portOpen) {
                     markRunning(forceNewStart = normalPendingExplicitStart)
                     return
@@ -1853,126 +1843,14 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Stopping -> {
-                reconcileConsecutiveDeadCount = 0
-                reconcileConsecutiveNotificationMissCount = 0
                 if (!processRunning && !portOpen) {
                     markStopped()
                 }
             }
 
             ServiceStatus.Stopped,
-            ServiceStatus.Error -> Unit
-
-            ServiceStatus.Running -> {
-                val canDisplayNotification = NodeService.canDisplayForegroundNotification(context)
-                val notificationManuallyHidden =
-                    NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
-                val notificationActive = canDisplayNotification &&
-                    NodeService.isForegroundNotificationActive(context)
-                reconcileConsecutiveNotificationMissCount = if (notificationActive) {
-                    0
-                } else {
-                    reconcileConsecutiveNotificationMissCount + 1
-                }
-                val nextUnreachableCount = if (portOpen) {
-                    0
-                } else {
-                    reconcileConsecutiveDeadCount + 1
-                }
-                reconcileConsecutiveDeadCount = nextUnreachableCount
-
-                when (
-                    decideNormalRunningReconcileAction(
-                        consecutiveUnreachableCount = nextUnreachableCount,
-                        serviceRunning = serviceRunning,
-                        processRunning = processRunning,
-                        portOpen = portOpen,
-                        notificationActive = notificationActive,
-                        canDisplayNotification = canDisplayNotification,
-                        consecutiveNotificationMisses = reconcileConsecutiveNotificationMissCount,
-                        notificationManuallyHidden = notificationManuallyHidden
-                    )
-                ) {
-                    NormalRunningReconcileAction.Healthy -> {
-                        updateStatusMessage(
-                            expectedStatus = ServiceStatus.Running,
-                            message = if (canDisplayNotification) {
-                                "接口已就绪，可直接在局域网访问"
-                            } else {
-                                "接口正常；通知权限或服务通知渠道已关闭"
-                            }
-                        )
-                    }
-
-                    NormalRunningReconcileAction.RespectUserDismissal -> {
-                        updateStatusMessage(
-                            expectedStatus = ServiceStatus.Running,
-                            message = "接口正常；通知按设置保持隐藏"
-                        )
-                    }
-
-                    NormalRunningReconcileAction.RestoreForeground -> {
-                        // 仅"服务健在、通知查询缺失"的修复受冷却约束；服务真丢失必须立即挂接。
-                        val notificationOnlyRepair = serviceRunning
-                        val inNotificationRestoreCooldown =
-                            SystemClock.elapsedRealtime() - lastNotificationRestoreAtElapsedMs <
-                                NOTIFICATION_RESTORE_MIN_INTERVAL_MS
-                        if (notificationOnlyRepair && inNotificationRestoreCooldown) {
-                            val skipMessage = "接口正常；服务通知将在稍后自动恢复"
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Running,
-                                message = skipMessage
-                            )
-                            if (state.statusMessage != skipMessage) {
-                                addLog(
-                                    LogLevel.Info,
-                                    "通知查询连续缺失但处于恢复冷却期，本轮跳过重发前台通知"
-                                )
-                            }
-                        } else {
-                            if (notificationOnlyRepair) {
-                                lastNotificationRestoreAtElapsedMs = SystemClock.elapsedRealtime()
-                            }
-                            val requested = NodeService.ensureForegroundNotification(
-                                context = context,
-                                force = !serviceRunning
-                            )
-                            val repairMessage = if (requested) {
-                                "接口正常，正在重新挂接前台服务通知"
-                            } else {
-                                "接口正常，但前台服务通知恢复失败"
-                            }
-                            val shouldLogRepair = state.statusMessage != repairMessage
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Running,
-                                message = repairMessage
-                            )
-                            if (shouldLogRepair) {
-                                addLog(
-                                    if (requested) LogLevel.Warn else LogLevel.Error,
-                                    if (requested) {
-                                        "检测到 API 仍可用但前台服务或通知缺失，已请求重新挂接"
-                                    } else {
-                                        "检测到 API 仍可用但前台服务或通知缺失，重新挂接失败"
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    NormalRunningReconcileAction.WaitForNextProbe -> Unit
-
-                    NormalRunningReconcileAction.MarkStopped -> {
-                        markStopped("普通模式运行状态已失效，请重新启动")
-                        addLog(LogLevel.Warn, "连续检测到普通模式服务、进程和端口均已退出")
-                    }
-
-                    NormalRunningReconcileAction.MarkError -> {
-                        markError("普通模式进程仍在，但 API 接口已不可达，请重新启动")
-                        addLog(LogLevel.Error, "普通模式前台服务或进程残留，但 API 端口连续不可达")
-                    }
-                }
-            }
+            ServiceStatus.Error,
+            ServiceStatus.Running -> Unit
         }
     }
 
