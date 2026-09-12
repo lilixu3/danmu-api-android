@@ -5,8 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
-import java.net.InetSocketAddress
-import java.net.Socket
+import com.example.danmuapiapp.data.util.PortProbe
 
 /**
  * 系统定时心跳（实验）调度器。
@@ -102,16 +101,6 @@ object SystemHeartbeatScheduler {
     }
 
     private fun isNodeRunning(context: Context, port: Int): Boolean {
-        if (port !in 1..65535) return false
-        var socket: Socket? = null
-        return try {
-            socket = Socket()
-            socket.connect(InetSocketAddress("127.0.0.1", port), 220)
-            true
-        } catch (_: Throwable) {
-            false
-        } finally {
-            runCatching { socket?.close() }
-        }
+        return PortProbe.isOpen(port = port)
     }
 }

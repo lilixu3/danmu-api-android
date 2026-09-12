@@ -49,6 +49,7 @@ object LogTagClassifier {
         "hanjutv" to "韩剧TV",
         "iqiyi" to "爱奇艺",
         "leshi" to "乐视",
+        "local" to "本地弹幕",
         "maiduidui" to "埋堆堆",
         "mango" to "芒果TV",
         "migu" to "咪咕",
@@ -68,7 +69,8 @@ object LogTagClassifier {
         listOf(
             "360kan", "aiyifan", "animeko", "bahamut", "bilibili", "custom",
             "dandan", "douban", "hanjutv", "iqiyi", "leshi", "maiduidui", "mango",
-            "migu", "other", "renren", "sohu", "tencent", "tmdb", "vod", "xigua", "youku"
+            "migu", "other", "renren", "sohu", "tencent", "tmdb", "vod", "xigua", "youku",
+            "local"
         )
     ).flatMapIndexed { groupIndex, group ->
         group.mapIndexed { itemIndex, tag -> tag to (groupIndex * 1000 + itemIndex) }

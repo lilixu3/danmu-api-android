@@ -23,6 +23,7 @@ object ToolRoute {
     const val ApiTest = "tool_api_test"
     const val PushDanmu = "tool_push_danmu"
     const val DanmuDownload = "tool_danmu_download"
+    const val LocalDanmu = "tool_local_danmu"
     const val RequestRecords = "tool_request_records"
     const val Config = "tool_config"
     const val DeviceAccess = "tool_device_access"

@@ -12,6 +12,7 @@ internal sealed interface AdminModeRequiredTarget {
     data class ConfigItem(val key: String) : AdminModeRequiredTarget
     data object RawConfig : AdminModeRequiredTarget
     data object ClearCache : AdminModeRequiredTarget
+    data object LocalDanmu : AdminModeRequiredTarget
 }
 
 internal data class AdminModeRequiredPrompt(
@@ -37,6 +38,13 @@ internal fun adminModeRequiredPrompt(
                 "清理缓存属于管理员写操作，请先输入管理员密码开启管理员模式。"
             } else {
                 "清理缓存属于管理员写操作，请先配置管理员密码并开启管理员模式。"
+            }
+        }
+        AdminModeRequiredTarget.LocalDanmu -> {
+            if (hasAdminTokenConfigured) {
+                "上传和删除本地弹幕默认属于管理员写操作，请先输入管理员密码开启管理员模式。"
+            } else {
+                "上传和删除本地弹幕默认属于管理员写操作，请先配置管理员密码并开启管理员模式，或在核心配置中开启 LOCAL_DANMU_NOT_REQUIRE_ADMIN。"
             }
         }
     }

@@ -38,6 +38,7 @@ import com.example.danmuapiapp.ui.screen.deviceaccess.DeviceAccessScreen
 import com.example.danmuapiapp.ui.screen.diagnostics.DiagnosticsScreen
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadScreen
 import com.example.danmuapiapp.ui.screen.home.HomeScreen
+import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuScreen
 import com.example.danmuapiapp.ui.screen.push.PushDanmuScreen
 import com.example.danmuapiapp.ui.screen.records.RequestRecordsScreen
 import com.example.danmuapiapp.ui.screen.settings.AboutScreen
@@ -253,6 +254,7 @@ private fun DanmuApiMainContent() {
                     onOpenApiTest = { navController.navigate(ToolRoute.ApiTest) },
                     onOpenPushDanmu = { navController.navigate(ToolRoute.PushDanmu) },
                     onOpenDanmuDownload = { navController.navigate(ToolRoute.DanmuDownload) },
+                    onOpenLocalDanmu = { navController.navigate(ToolRoute.LocalDanmu) },
                     onOpenRequestRecords = { navController.navigate(ToolRoute.RequestRecords) },
                     onOpenConsole = { navController.navigate(ToolRoute.Console) },
                     onOpenConfig = { navController.navigate(ToolRoute.Config) },
@@ -331,6 +333,13 @@ private fun DanmuApiMainContent() {
                 DanmuDownloadScreen(
                     onBack = { navController.popBackStack() },
                     onOpenDownloadSettings = { navController.navigate(SettingsRoute.DanmuDownload) }
+                )
+            }
+            composable(ToolRoute.LocalDanmu) {
+                LocalDanmuScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
+                    onOpenConfig = { navController.navigate(ToolRoute.Config) }
                 )
             }
             composable(ToolRoute.RequestRecords) {

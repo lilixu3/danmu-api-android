@@ -464,6 +464,7 @@ data class DanmuPreviewItem(
 
 data class DanmuFilePreview(
     val format: DanmuDownloadFormat,
+    val formatLabelOverride: String = "",
     val fileName: String,
     val relativePath: String,
     val bytes: Long,
@@ -472,7 +473,10 @@ data class DanmuFilePreview(
     val truncated: Boolean,
     val items: List<DanmuPreviewItem>,
     val parseError: String? = null
-)
+) {
+    val displayFormatLabel: String
+        get() = formatLabelOverride.ifBlank { format.label }
+}
 
 enum class DanmuPreviewFilter(val label: String) {
     All("全部"), Scroll("滚动"), Top("顶部"), Bottom("底部")

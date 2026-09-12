@@ -11,8 +11,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
-import java.net.InetSocketAddress
-import java.net.Socket
+import com.example.danmuapiapp.data.util.PortProbe
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -208,17 +207,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     private fun isNodeRunning(): Boolean {
         val port = getSharedPreferences("runtime", Context.MODE_PRIVATE).getInt("port", 9321)
-        if (port !in 1..65535) return false
-        var socket: Socket? = null
-        return try {
-            socket = Socket()
-            socket.connect(InetSocketAddress("127.0.0.1", port), 220)
-            true
-        } catch (_: Throwable) {
-            false
-        } finally {
-            runCatching { socket?.close() }
-        }
+        return PortProbe.isOpen(port = port)
     }
 
     /**

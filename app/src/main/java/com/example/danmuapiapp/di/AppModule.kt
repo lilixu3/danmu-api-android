@@ -40,6 +40,9 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindDanmuDownloadRepository(impl: DanmuDownloadRepositoryImpl): DanmuDownloadRepository
+
+    @Binds @Singleton
+    abstract fun bindLocalDanmuRepository(impl: LocalDanmuRepositoryImpl): LocalDanmuRepository
 }
 
 @Module

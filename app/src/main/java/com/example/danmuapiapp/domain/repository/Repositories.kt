@@ -280,3 +280,22 @@ interface AdminSessionRepository {
     suspend fun setAdminTokenAndLogin(token: String): Result<Unit>
     fun currentAdminTokenOrNull(): String
 }
+
+interface LocalDanmuRepository {
+    val writePermission: StateFlow<LocalDanmuWritePermission>
+    val localSourceEnabled: StateFlow<Boolean>
+
+    /** @param force 为 true 时忽略内存快照与新鲜度窗口（手动刷新、导入/删除后用）。 */
+    suspend fun refresh(force: Boolean = false): Result<LocalDanmuSnapshot>
+    suspend fun loadDetail(resourceKey: String): Result<LocalDanmuResource>
+    suspend fun upload(
+        request: LocalDanmuUploadRequest,
+        onProgress: (Float) -> Unit = {}
+    ): Result<LocalDanmuResource>
+    suspend fun delete(resourceKey: String): Result<Unit>
+    suspend fun deleteMany(
+        resourceKeys: Collection<String>,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<Int>
+    suspend fun enableLocalSource(preferFirst: Boolean): Result<String>
+}

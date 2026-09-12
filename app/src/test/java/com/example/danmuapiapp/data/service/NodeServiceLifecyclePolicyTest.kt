@@ -7,6 +7,17 @@ import org.junit.Test
 class NodeServiceLifecyclePolicyTest {
 
     @Test
+    fun `copy address must preserve sticky restart while desired running`() {
+        assertTrue(shouldPreserveNodeServiceSticky(desiredRunning = true, stopRequested = false))
+    }
+
+    @Test
+    fun `auxiliary action must not undo user stop`() {
+        assertFalse(shouldPreserveNodeServiceSticky(desiredRunning = false, stopRequested = false))
+        assertFalse(shouldPreserveNodeServiceSticky(desiredRunning = true, stopRequested = true))
+    }
+
+    @Test
     fun `duplicate start while runtime is preparing must keep foreground service`() {
         assertFalse(
             shouldStopServiceAfterRejectedStart(
