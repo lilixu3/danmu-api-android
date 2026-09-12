@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Link
@@ -82,6 +83,7 @@ fun ToolsScreen(
     onOpenApiTest: () -> Unit,
     onOpenPushDanmu: () -> Unit,
     onOpenDanmuDownload: () -> Unit,
+    onOpenLocalDanmu: () -> Unit,
     onOpenRequestRecords: () -> Unit,
     onOpenConsole: () -> Unit,
     onOpenConfig: () -> Unit,
@@ -177,6 +179,14 @@ fun ToolsScreen(
             imageVector = Icons.Rounded.CloudDownload,
             accent = MaterialTheme.colorScheme.primary,
             onClick = onOpenDanmuDownload
+        )
+        ToolEntryCard(
+            title = "本地弹幕",
+            subtitle = "导入、维护本地弹幕文件，支持目录直读与批量导入",
+            imageVector = Icons.Rounded.FolderZip,
+            accent = MaterialTheme.colorScheme.secondary,
+            badge = "新",
+            onClick = onOpenLocalDanmu
         )
         ToolEntryCard(
             title = "弹幕推送",

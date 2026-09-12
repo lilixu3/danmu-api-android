@@ -44,7 +44,6 @@ object NodeProjectManager {
         "fetch-blob" to "3.2.0",
         "formdata-polyfill" to "4.0.10",
         "node-domexception" to "1.0.0",
-        "web-streams-polyfill" to "3.3.3",
         "node-fetch" to "3.3.2",
         "pako" to "2.1.0",
         "brotli" to "1.3.3",
@@ -61,7 +60,6 @@ object NodeProjectManager {
         "fetch-blob" to listOf("index.js"),
         "formdata-polyfill" to listOf("esm.min.js"),
         "node-domexception" to listOf("index.js"),
-        "web-streams-polyfill" to listOf("dist/ponyfill.es2018.js"),
         "node-fetch" to listOf("src/index.js"),
         "pako" to listOf("index.js"),
         "brotli" to listOf("decompress.js", "dec/dictionary-data.js"),
@@ -82,10 +80,26 @@ object NodeProjectManager {
         // 按 LOCAL_REDIS_URL 条件从 nodejs-optional 单独补齐。
         "redis"
     )
+    private val androidRuntimeExcludedDependencies = setOf(
+        // 与 app/build.gradle.kts 的 androidRuntimeExcludedNodeModules 保持一致。
+        "@electric-sql/pglite",
+        "@electric-sql/pglite-tools",
+        "drizzle-orm",
+        "web-streams-polyfill"
+    )
 
     private val json = Json { ignoreUnknownKeys = true }
 
     fun bundledRuntimeDependencyNames(): List<String> = runtimeBundledDependencyVersions.keys.toList()
+
+    internal fun bundledRuntimeDependencyManifest(): Map<String, String> =
+        runtimeBundledDependencyVersions.toMap()
+
+    internal fun bundledRuntimeDependencySentinels(): Map<String, List<String>> =
+        runtimeDependencySentinelFiles.toMap()
+
+    internal fun bundledRuntimeDependencyExclusions(): Set<String> =
+        androidRuntimeExcludedDependencies.toSet()
 
     private fun requiredRuntimeDependencyFiles(): List<String> = listOf(
         "data-uri-to-buffer/dist/index.js",
@@ -587,7 +601,8 @@ object NodeProjectManager {
 
     fun runtimeDependenciesForCore(coreDir: File): Map<String, String> =
         readCoreDependencies(coreDir).filterKeys { name ->
-            name !in coreDependenciesManagedOutsideBaseRuntime
+            name !in coreDependenciesManagedOutsideBaseRuntime &&
+                name !in androidRuntimeExcludedDependencies
         }
 
     fun runtimeDependencyRequirementForCore(coreDir: File, packageName: String?): String? {

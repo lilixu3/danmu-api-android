@@ -14,6 +14,8 @@ import android.os.Build
 import android.os.FileObserver
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.DotEnvCodec
+import com.example.danmuapiapp.data.util.PortProbe
+import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
@@ -45,8 +47,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.net.URL
 import java.time.Instant
 import java.time.LocalDateTime
@@ -79,6 +79,10 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
         private const val NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS = 4000L
         private const val NORMAL_STALE_PROCESS_RETRY_DELAY_MS = 220L
+        // 端口探测重试：系统冻结会让单次探测误判，重试期间进程通常已经解冻。
+        private const val PORT_PROBE_ATTEMPTS = 3
+        private const val PORT_PROBE_TIMEOUT_MS = 450
+        private const val PORT_PROBE_RETRY_DELAY_MS = 300L
         private const val NORMAL_RESTART_STOP_TIMEOUT_MS = 12_000L
         private const val NORMAL_STOP_TIMEOUT_MS = 8_000L
         private const val NORMAL_RESTART_START_TIMEOUT_MS = 15_000L
@@ -132,12 +136,22 @@ class RuntimeRepositoryImpl @Inject constructor(
     @Volatile
     private var clearedServiceLogCounts: Map<LogEntry, Int> = emptyMap()
 
+    private val normalRuntimeEventOrder = NormalRuntimeEventOrder()
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             // 仅普通模式处理 NodeService 广播，避免 Root 模式误更新。
             if (_runtimeState.value.runMode != RunMode.Normal) return
 
             val status = intent.getStringExtra(NodeService.EXTRA_STATUS) ?: return
+            if (!normalRuntimeEventOrder.accept(
+                    processStartedAt = intent.getLongExtra(NodeService.EXTRA_PROCESS_STARTED_ELAPSED_MS, -1L),
+                    generation = intent.getLongExtra(NodeService.EXTRA_RUNTIME_GENERATION, -1L),
+                    sequence = intent.getLongExtra(NodeService.EXTRA_EVENT_SEQUENCE, -1L)
+                )
+            ) {
+                AppDiagnosticLogger.i(context, "RuntimeRepo", "忽略旧 Node 实例或乱序的状态广播：$status")
+                return
+            }
             val message = intent.getStringExtra(NodeService.EXTRA_MESSAGE)
             val explicitStart = intent.getBooleanExtra(NodeService.EXTRA_EXPLICIT_START, false)
 
@@ -262,6 +276,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private var appForeground = false
 
     private var rootReconcileConsecutiveDeadCount = 0
+    private var normalReconcileConsecutivePortMisses = 0
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -443,12 +458,16 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override suspend fun restartServiceAndAwait() {
-        cancelCandidateObservation()
-        operationMutex.withLock {
-            runCatching {
-                restartServiceLocked()
-            }.onFailure {
-                handleRuntimeOperationFailure("重启服务", it)
+        // 端口探测 / 健康检查都是阻塞网络操作，必须离开主线程，
+        // 否则会被 BlockGuard 抛 NetworkOnMainThreadException，探测结果全部变成“关闭”。
+        withContext(Dispatchers.IO) {
+            cancelCandidateObservation()
+            operationMutex.withLock {
+                runCatching {
+                    restartServiceLocked()
+                }.onFailure {
+                    handleRuntimeOperationFailure("重启服务", it)
+                }
             }
         }
     }
@@ -471,7 +490,9 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override suspend fun refreshRuntimeStateAndAwait() {
-        refreshRuntimeStateNow()
+        withContext(Dispatchers.IO) {
+            refreshRuntimeStateNow()
+        }
     }
 
     private suspend fun refreshRuntimeStateNow() {
@@ -500,12 +521,44 @@ class RuntimeRepositoryImpl @Inject constructor(
     /**
      * 离开应用时仅在通知确实不在位时才重发：
      * 无条件重发会让每次切后台都把通知刷到顶部，表现为"通知明明还在却被刷新"。
+     *
+     * 端口探测放在 IO 线程并带少量重试：主线程做阻塞网络操作会被 BlockGuard
+     * 直接抛 NetworkOnMainThreadException（曾经把探测结果全部变成"端口已关闭"），
+     * 而刚启动/正忙的核心也可能偶尔吃满探测超时，重试可以避免误判。
      */
     private fun restoreForegroundNotificationOnBackground() {
         val state = _runtimeState.value
         if (state.runMode != RunMode.Normal ||
             (state.status != ServiceStatus.Running && state.status != ServiceStatus.Starting)
         ) {
+            return
+        }
+        scope.launch {
+            restoreForegroundNotificationOffMainThread(state)
+        }
+    }
+
+    private suspend fun restoreForegroundNotificationOffMainThread(state: RuntimeState) {
+        val probe = probeRuntimePort(state)
+        if (!probe.open) {
+            // 只有确认 Node 进程真的不在了才完整启动；进程还在就只补通知，
+            // 避免把后台冻结造成的探测失败当成运行时退出。
+            if (isNormalProcessRunning()) {
+                AppDiagnosticLogger.w(
+                    context,
+                    "RuntimeRepository",
+                    "后台恢复通知时端口探测失败（已重试 ${probe.attempts} 次，耗时 ${probe.elapsedMs} ms，" +
+                        "最后一次 ${probe.error ?: "未知错误"}），Node 进程仍在，仅补发通知"
+                )
+                runCatching { NodeService.ensureForegroundNotification(context) }
+                return
+            }
+            AppDiagnosticLogger.w(
+                context,
+                "RuntimeRepository",
+                "后台恢复通知时确认运行时已退出（重试 ${probe.attempts} 次，耗时 ${probe.elapsedMs} ms），改为完整启动 Node"
+            )
+            runCatching { NodeService.start(context, userInitiated = false) }
             return
         }
         val manuallyHidden = NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
@@ -532,6 +585,33 @@ class RuntimeRepositoryImpl @Inject constructor(
             "离开应用时通知不在位，补发前台服务通知"
         )
         NodeService.ensureForegroundNotification(context)
+    }
+
+    /**
+     * 带重试的端口探测：任何一次成功即视为存活，全部失败才返回 closed，
+     * 并带上最后一次的错误类型，便于区分"连接被拒"和"被冻结导致的超时"。
+     */
+    private suspend fun probeRuntimePort(
+        state: RuntimeState,
+        attempts: Int = PORT_PROBE_ATTEMPTS,
+        timeoutMs: Int = PORT_PROBE_TIMEOUT_MS,
+        retryDelayMs: Long = PORT_PROBE_RETRY_DELAY_MS
+    ): PortProbe.Result {
+        if (state.runMode == RunMode.Root) {
+            val open = RootRuntimeController.isRunning(context, state.port)
+            return PortProbe.Result(
+                open = open,
+                attempts = 1,
+                elapsedMs = 0L,
+                error = if (open) null else "Root 运行时未响应"
+            )
+        }
+        return PortProbe.probe(
+            port = state.port,
+            attempts = attempts,
+            timeoutMs = timeoutMs,
+            retryDelayMs = retryDelayMs
+        )
     }
 
     override fun refreshLogs() {
@@ -985,7 +1065,14 @@ class RuntimeRepositoryImpl @Inject constructor(
         dependenciesAlreadyChecked: Boolean = false
     ) {
         val state = _runtimeState.value
-        if (state.status == ServiceStatus.Running || state.status == ServiceStatus.Starting) return
+        if (state.status == ServiceStatus.Starting) return
+        if (state.status == ServiceStatus.Running) {
+            if (isRuntimePortActive(state)) return
+            // 状态仍记为运行中，但端口已经关闭：这是后台杀进程/异常退出后的
+            // 陈旧状态，继续往下走会直接返回，导致“重启服务”实际没有拉起 Node。
+            addLog(LogLevel.Warn, "检测到服务状态与实际端口不一致，准备重新启动")
+            markStopped()
+        }
         if (!dependenciesAlreadyChecked && !ensureRuntimeDependenciesBeforeStart(
                 state = state,
                 actionLabel = "启动",
@@ -1282,9 +1369,23 @@ class RuntimeRepositoryImpl @Inject constructor(
 
     private suspend fun restartServiceLocked() {
         val state = _runtimeState.value
-        if (state.status == ServiceStatus.Starting || state.status == ServiceStatus.Stopping) return
+        if (state.status == ServiceStatus.Starting) return
+        if (state.status == ServiceStatus.Stopping) {
+            if (!isRuntimePortActive(state)) {
+                markStopped()
+                startServiceLocked()
+            }
+            return
+        }
 
         if (state.status == ServiceStatus.Stopped || state.status == ServiceStatus.Error) {
+            startServiceLocked()
+            return
+        }
+        if (!isRuntimePortActive(state)) {
+            // 运行状态陈旧但服务已经不在，直接重新启动即可。
+            addLog(LogLevel.Warn, "重启时检测到旧实例已不在，直接启动新实例")
+            markStopped()
             startServiceLocked()
             return
         }
@@ -1792,6 +1893,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (!shouldRunPeriodicNormalStateReconcile(state.runMode, state.status)) {
             if (state.runMode != RunMode.Normal) {
                 normalStartIssuedAtMs = 0L
+                normalReconcileConsecutivePortMisses = 0
             }
             return
         }
@@ -1801,6 +1903,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         val portOpen = isPortOpen(state.port)
         when (state.status) {
             ServiceStatus.Starting -> {
+                normalReconcileConsecutivePortMisses = 0
                 if (portOpen) {
                     markRunning(forceNewStart = normalPendingExplicitStart)
                     return
@@ -1843,14 +1946,29 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             ServiceStatus.Stopping -> {
+                normalReconcileConsecutivePortMisses = 0
                 if (!processRunning && !portOpen) {
                     markStopped()
                 }
             }
 
+            ServiceStatus.Running -> {
+                if (portOpen) {
+                    normalReconcileConsecutivePortMisses = 0
+                } else {
+                    normalReconcileConsecutivePortMisses++
+                    if (normalReconcileConsecutivePortMisses >= 2) {
+                        normalReconcileConsecutivePortMisses = 0
+                        markStopped("服务端口已关闭，可重新启动")
+                        addLog(LogLevel.Warn, "检测到普通模式服务端口已关闭，运行状态已自动重置")
+                    }
+                }
+            }
+
             ServiceStatus.Stopped,
-            ServiceStatus.Error,
-            ServiceStatus.Running -> Unit
+            ServiceStatus.Error -> {
+                normalReconcileConsecutivePortMisses = 0
+            }
         }
     }
 
@@ -1982,7 +2100,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             .trim('/')
             .takeIf { it.isNotBlank() }
             ?: return null
-        return "http://127.0.0.1:${state.port}/$tokenPath"
+        return RuntimeApiUrls.local(state.port, tokenPath)
     }
 
     private fun clearServiceLogsOnce(): Boolean {
@@ -2666,7 +2784,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (port !in 1..65535) return null
         var connection: HttpURLConnection? = null
         return try {
-            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+            connection = (URL(RuntimeApiUrls.local(port, path = "__health")).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 450
                 readTimeout = 700
                 requestMethod = "GET"
@@ -2698,17 +2816,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private fun isPortOpen(port: Int): Boolean {
-        var socket: Socket? = null
-        return try {
-            socket = Socket()
-            socket.soTimeout = 450
-            socket.connect(InetSocketAddress("127.0.0.1", port), 450)
-            true
-        } catch (_: Exception) {
-            false
-        } finally {
-            runCatching { socket?.close() }
-        }
+        return PortProbe.isOpen(port = port, timeoutMs = 450)
     }
 
     private suspend fun waitForPort(port: Int, wantOpen: Boolean, timeoutMs: Long): Boolean {
@@ -2797,6 +2905,13 @@ class RuntimeRepositoryImpl @Inject constructor(
         return isPortOpen(port) && isRuntimeOwnedByApp(port, RunMode.Normal)
     }
 
+    private fun isRuntimePortActive(state: RuntimeState): Boolean {
+        return when (state.runMode) {
+            RunMode.Normal -> isPortOpen(state.port)
+            RunMode.Root -> RootRuntimeController.isRunning(context, state.port)
+        }
+    }
+
     private fun isRootRuntimeOwnedByApp(port: Int): Boolean {
         return RootRuntimeController.isRuntimeOwnedByAppPassive(context, port)
     }
@@ -2820,7 +2935,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     private fun readRuntimeHealthBody(port: Int): String? {
         var connection: HttpURLConnection? = null
         return try {
-            connection = (URL("http://127.0.0.1:$port/__health").openConnection() as HttpURLConnection).apply {
+            connection = (URL(RuntimeApiUrls.local(port, path = "__health")).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 450
                 readTimeout = 700
                 requestMethod = "GET"

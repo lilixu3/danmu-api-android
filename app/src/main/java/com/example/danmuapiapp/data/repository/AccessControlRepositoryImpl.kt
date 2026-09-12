@@ -5,6 +5,7 @@ import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.RuntimeApiAccess
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
+import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.DeviceAccessConfig
@@ -168,10 +169,11 @@ class AccessControlRepositoryImpl @Inject constructor(
         return RuntimeApiAccessResolver.resolve(context, prefs, DEFAULT_PORT)
     }
 
-    private fun controlUrl(port: Int): String = "http://127.0.0.1:$port/__access-control"
+    private fun controlUrl(port: Int): String =
+        RuntimeApiUrls.local(port = port, path = "__access-control")
 
     private fun controlUrlWithToken(port: Int, tokenPath: String): String {
-        return "http://127.0.0.1:$port$tokenPath/__access-control"
+        return RuntimeApiUrls.local(port, tokenPath, "__access-control")
     }
 
     private fun controlUrls(runtime: RuntimeApiAccess): List<String> {
@@ -184,7 +186,7 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private fun recordsUrl(port: Int, tokenPath: String): String {
-        return "http://127.0.0.1:$port$tokenPath/api/reqrecords"
+        return RuntimeApiUrls.local(port, tokenPath, "api/reqrecords")
     }
 
     private fun recordTokenPaths(runtime: RuntimeApiAccess): List<String> {

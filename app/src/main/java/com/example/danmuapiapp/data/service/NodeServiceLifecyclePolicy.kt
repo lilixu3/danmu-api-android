@@ -1,5 +1,9 @@
 package com.example.danmuapiapp.data.service
 
+internal fun shouldPreserveNodeServiceSticky(desiredRunning: Boolean, stopRequested: Boolean): Boolean {
+    return desiredRunning && !stopRequested
+}
+
 internal fun shouldStopServiceAfterRejectedStart(
     serviceStopRequested: Boolean,
     running: Boolean,

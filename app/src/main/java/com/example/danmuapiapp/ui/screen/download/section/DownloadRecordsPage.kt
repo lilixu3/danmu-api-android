@@ -482,7 +482,7 @@ private fun DanmuPreviewContent(preview: DanmuFilePreview) {
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            PreviewStatBadge(preview.format.label, preview.count, MaterialTheme.colorScheme.primary)
+            PreviewStatBadge(preview.displayFormatLabel, preview.count, MaterialTheme.colorScheme.primary)
             PreviewStatBadge("预览", displayedItems.size, MaterialTheme.colorScheme.tertiary)
             if (preview.truncated) {
                 PreviewStatBadge("文件", preview.items.size, MaterialTheme.colorScheme.secondary)

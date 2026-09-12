@@ -71,6 +71,7 @@ import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import androidx.compose.ui.graphics.Color
 import com.example.danmuapiapp.ui.component.SettingsValueItem
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
+import java.io.File
 
 @Composable
 fun WorkDirScreen(
@@ -191,6 +192,37 @@ fun WorkDirScreen(
             }
 
             if (state.runMode == RunMode.Normal) {
+                val localDanmuFileCount = remember(workDirInfo.currentBaseDir.absolutePath) {
+                    val dir = File(
+                        RuntimePaths.projectDir(context, RunMode.Normal),
+                        ".cache/local-danmu"
+                    )
+                    // 排除核心生成的元数据索引（index.json），只统计真正的弹幕资源文件。
+                    dir.listFiles { file ->
+                        file.isFile && file.name.endsWith(".json") && file.name != "index.json"
+                    }
+                        ?.size
+                        ?: 0
+                }
+                if (localDanmuFileCount > 0) {
+                    SettingsGroup(title = "本地弹幕数据") {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "当前工作目录包含 $localDanmuFileCount 个本地弹幕文件。",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                "这些文件保存在 nodejs-project/.cache/local-danmu 下。切换工作目录不会自动迁移；" +
+                                    "切换后如需继续使用，请重新选择原目录，或先保留原目录中的数据。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 SettingsGroup(title = "目录操作") {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Row(

@@ -1,7 +1,9 @@
 package com.example.danmuapiapp.data.service
 
+import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -131,6 +133,97 @@ class NodeProjectManagerRuntimeDependencyTest {
         assertTrue("缺少 base64-js", "base64-js" in names)
         assertTrue("缺少 @dan-uni/dan-any", "@dan-uni/dan-any" in names)
         assertTrue("缺少 opencc-js", "opencc-js" in names)
+    }
+
+    @Test
+    fun `web-streams-polyfill 不应再被视为内置依赖`() {
+        val names = NodeProjectManager.bundledRuntimeDependencyNames()
+        assertFalse("web-streams-polyfill 已从运行时排除，不能再列入期望清单", "web-streams-polyfill" in names)
+        assertEquals(
+            NodeProjectManager.bundledRuntimeDependencyManifest().keys,
+            NodeProjectManager.bundledRuntimeDependencySentinels().keys
+        )
+    }
+
+    @Test
+    fun `构建排除清单不能出现在内置依赖期望清单中`() {
+        val buildScript = resolveProjectFile("app/build.gradle.kts")
+        val text = buildScript.readText(Charsets.UTF_8)
+        val excluded = Regex(
+            """androidRuntimeExcludedNodeModules\s*=\s*setOf\(([\s\S]*?)\)"""
+        ).find(text)?.groupValues?.getOrNull(1)
+            ?.let { block ->
+                Regex("\"([^\"]+)\"").findAll(block)
+                    .map { it.groupValues[1] }
+                    .toSet()
+            }
+            .orEmpty()
+        assertTrue("未从 ${buildScript.path} 解析到 androidRuntimeExcludedNodeModules", excluded.isNotEmpty())
+        assertEquals(
+            "NodeProjectManager 的 Android 排除清单与 build.gradle.kts 不一致",
+            excluded,
+            NodeProjectManager.bundledRuntimeDependencyExclusions()
+        )
+        val conflicts = NodeProjectManager.bundledRuntimeDependencyManifest().keys.intersect(excluded)
+        assertTrue("内置依赖与构建排除清单冲突：$conflicts", conflicts.isEmpty())
+    }
+
+    @Test
+    fun `核心旧清单声明的 Android 排除依赖不应再要求修复`() {
+        val root = Files.createTempDirectory("core-runtime-deps-android-excluded").toFile()
+        try {
+            val coreDir = root.resolve("core").apply { mkdirs() }
+            val runtimeNodeModulesDir = root.resolve("node_modules").apply { mkdirs() }
+            coreDir.resolve("package.json").writeText(
+                """
+                {
+                  "dependencies": {
+                    "brotli": "^1.3.3",
+                    "web-streams-polyfill": "3.3.3"
+                  }
+                }
+                """.trimIndent()
+            )
+            runtimeNodeModulesDir.resolve("brotli").mkdirs()
+            runtimeNodeModulesDir.resolve("brotli/package.json").writeText(
+                """{"name":"brotli","version":"1.3.3"}"""
+            )
+            runtimeNodeModulesDir.resolve("brotli/decompress.js").writeText("module.exports = {}\n")
+            runtimeNodeModulesDir.resolve("brotli/dec").mkdirs()
+            runtimeNodeModulesDir.resolve("brotli/dec/dictionary-data.js").writeText("module.exports = {}\n")
+
+            assertEquals(
+                emptyList<String>(),
+                NodeProjectManager.collectMissingRuntimeDepsForCore(coreDir, runtimeNodeModulesDir)
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `内置依赖清单中的包和哨兵文件必须实际存在于运行时资产`() {
+        val nodeModulesDir = resolveProjectFile("app/src/main/assets/nodejs-project/node_modules")
+        assertTrue("缺少内置 node_modules：${nodeModulesDir.absolutePath}", nodeModulesDir.isDirectory)
+        val manifest = NodeProjectManager.bundledRuntimeDependencyManifest()
+        val sentinels = NodeProjectManager.bundledRuntimeDependencySentinels()
+        assertEquals(manifest.keys, sentinels.keys)
+        manifest.forEach { (name, version) ->
+            val packageDir = File(nodeModulesDir, name)
+            assertTrue("内置依赖缺失：$name@$version", File(packageDir, "package.json").isFile)
+            sentinels[name].orEmpty().forEach { relativePath ->
+                assertTrue(
+                    "内置依赖哨兵缺失：$name/$relativePath",
+                    File(packageDir, relativePath).isFile
+                )
+            }
+        }
+    }
+
+    private fun resolveProjectFile(relativePath: String): File {
+        return sequenceOf(File(relativePath), File("../$relativePath"))
+            .firstOrNull { it.exists() }
+            ?: File(relativePath)
     }
 
     @Test

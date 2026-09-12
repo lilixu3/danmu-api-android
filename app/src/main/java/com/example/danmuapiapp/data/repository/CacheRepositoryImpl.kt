@@ -5,6 +5,7 @@ import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.RuntimeApiAccess
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
+import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.data.service.RootShell
@@ -144,7 +145,7 @@ class CacheRepositoryImpl @Inject constructor(
             }
             val useSelective = support == CacheClearSupport.Selective
             val requestBody = if (useSelective) CacheClearProtocol.requestBody(items) else ""
-            val url = "http://127.0.0.1:${runtime.port}/$adminToken/api/cache/clear"
+            val url = RuntimeApiUrls.local(runtime.port, adminToken, "api/cache/clear")
             val request = Request.Builder()
                 .url(url)
                 .applyRuntimeApiAuth(runtime)
@@ -365,7 +366,7 @@ class CacheRepositoryImpl @Inject constructor(
 
     private fun fetchReqRecordStats(runtime: RuntimeApiAccess): CacheStats? {
         recordTokenPaths(runtime).forEach { tokenPath ->
-            val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/reqrecords"
+            val url = RuntimeApiUrls.local(runtime.port, tokenPath, "api/reqrecords")
             val result = runCatching {
                 val request = Request.Builder()
                     .url(url)
@@ -400,7 +401,7 @@ class CacheRepositoryImpl @Inject constructor(
 
     private fun fetchAnimeCacheSummary(runtime: RuntimeApiAccess): AnimeCacheSummary {
         recordTokenPaths(runtime).forEach { tokenPath ->
-            val url = "http://127.0.0.1:${runtime.port}$tokenPath/api/cache/animes"
+            val url = RuntimeApiUrls.local(runtime.port, tokenPath, "api/cache/animes")
             val summary = runCatching {
                 val request = Request.Builder()
                     .url(url)

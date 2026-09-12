@@ -9,9 +9,8 @@ import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Socket
 import com.example.danmuapiapp.data.repository.isRootPassiveLivenessLikely
+import com.example.danmuapiapp.data.util.PortProbe
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.net.URL
@@ -1380,17 +1379,7 @@ $indentedAction
     }
 
     private fun isPortOpen(host: String, port: Int, timeoutMs: Int): Boolean {
-        var socket: Socket? = null
-        return try {
-            socket = Socket()
-            socket.soTimeout = timeoutMs
-            socket.connect(InetSocketAddress(host, port), timeoutMs)
-            true
-        } catch (_: Throwable) {
-            false
-        } finally {
-            runCatching { socket?.close() }
-        }
+        return PortProbe.isOpen(port = port, host = host, timeoutMs = timeoutMs)
     }
 
     private fun waitForPort(host: String, port: Int, wantOpen: Boolean, timeoutMs: Long): Boolean {
