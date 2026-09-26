@@ -58,7 +58,6 @@ internal fun LocalDanmuDirectoryBrowserPanel(
     onBack: () -> Unit,
     onOpenParent: () -> Unit,
     onOpenDefaultDirectory: () -> Unit,
-    onUseSystemPicker: () -> Unit,
     onToggleSelectAll: () -> Unit,
     onSetDefaultDirectory: () -> Unit,
     onToggleSelection: (String) -> Unit,
@@ -146,14 +145,6 @@ internal fun LocalDanmuDirectoryBrowserPanel(
                         Spacer(Modifier.size(6.dp))
                         Text("设为默认")
                     }
-                }
-                AppGlassButton(
-                    onClick = onUseSystemPicker,
-                    enabled = !state.isLoading
-                ) {
-                    Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("系统选择器")
                 }
             }
 
@@ -247,15 +238,16 @@ internal fun LocalDanmuDirectoryBrowserPanel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 18.dp),
+                    .padding(bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "已选 ${state.selectedCount} 个",
+                    "已选 ${state.selectedCount} 个文件",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(Modifier.weight(1f))
                 AppGlassButton(
                     onClick = onToggleSelectAll,
                     enabled = !state.isLoading && state.selectablePaths.isNotEmpty()
@@ -268,15 +260,24 @@ internal fun LocalDanmuDirectoryBrowserPanel(
                     Spacer(Modifier.size(6.dp))
                     Text(if (state.allSelected) "取消全选" else "全选")
                 }
-                Spacer(Modifier.weight(1f))
-                AppGlassButton(
-                    onClick = onImportSelected,
-                    enabled = state.selectedCount > 0 && !state.isLoading
-                ) {
-                    Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("导入选中 ${state.selectedCount} 个")
-                }
+            }
+
+            AppGlassButton(
+                onClick = onImportSelected,
+                enabled = state.selectedCount > 0 && !state.isLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 18.dp)
+            ) {
+                Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    if (state.selectedCount > 0) {
+                        "导入选中的 ${state.selectedCount} 个文件"
+                    } else {
+                        "先在列表里勾选弹幕文件"
+                    }
+                )
             }
         }
     }

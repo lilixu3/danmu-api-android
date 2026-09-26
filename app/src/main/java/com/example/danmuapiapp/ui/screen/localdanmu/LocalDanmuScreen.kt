@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayCircleOutline
@@ -97,33 +98,6 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.screen.download.DanmuPreviewDialog
 
-/**
- * 与 ActivityResultContracts.OpenDocument 等价的系统文档选择器，但支持传入
- * EXTRA_INITIAL_URI（Android 8.0+），让选择器尽量停在上次选过文件的目录，
- * 减少每次导入都要重新翻目录的情况。
- */
-private class OpenDocumentAtFolderContract(
-    private val initialUri: Uri?
-) : ActivityResultContract<Array<String>, Uri?>() {
-
-    private companion object {
-        const val EXTRA_INITIAL_URI = "android.provider.extra.INITIAL_URI"
-    }
-
-    override fun createIntent(context: Context, input: Array<String>): Intent {
-        val types = input.filter { it.isNotBlank() }
-        val mimeTypes = if (types.isEmpty()) arrayOf("*/*") else types.toTypedArray()
-        return Intent(Intent.ACTION_OPEN_DOCUMENT)
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType(types.firstOrNull() ?: "*/*")
-            .putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-            .apply { initialUri?.let { putExtra(EXTRA_INITIAL_URI, it) } }
-    }
-
-    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
-        if (resultCode == Activity.RESULT_OK) intent?.data else null
-}
-
 @Composable
 fun LocalDanmuScreen(
     onBack: () -> Unit,
@@ -135,9 +109,9 @@ fun LocalDanmuScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var showUploadPanel by rememberSaveable { mutableStateOf(false) }
     var showAdminPrompt by remember { mutableStateOf(false) }
     var showAllFilesAccessPrompt by remember { mutableStateOf(false) }
+    var permissionPromptShown by rememberSaveable { mutableStateOf(false) }
 
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -148,55 +122,14 @@ fun LocalDanmuScreen(
         }
     }
 
-    val pickerContract = remember(state.recentUpload?.uri) {
-        OpenDocumentAtFolderContract(
-            initialUri = state.recentUpload?.uri?.let { runCatching { Uri.parse(it) }.getOrNull() }
-        )
-    }
-    val filePicker = rememberLauncherForActivityResult(
-        contract = pickerContract
-    ) { uri ->
-        if (uri != null) {
-            // 持久化读取授权，便于下次复用同一个文件，并作为选择器的初始目录提示。
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            viewModel.selectUploadFile(uri.toString())
-            showUploadPanel = true
-        }
-    }
-
-    val multiFilePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            uris.forEach { uri ->
-                runCatching {
-                    context.contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                }
-            }
-            viewModel.addBatchUris(uris.map { it.toString() })
-        }
-    }
-
-    val startMultiImport: () -> Unit = {
-        if (state.allFilesAccessGranted) {
-            // 目录浏览本身就是自由勾选，进目录即可。
+    // Android 10 及以下没有「所有文件访问」，用运行时权限兜底。
+    val legacyStoragePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        viewModel.refreshAllFilesAccess()
+        if (viewModel.uiState.value.allFilesAccessGranted) {
             viewModel.openDirectoryBrowser()
-        } else {
-            multiFilePicker.launch(arrayOf("*/*"))
         }
-    }
-
-    // 上传成功后收起表单回到列表，成功提示走列表页的 Snackbar，避免停留在空表单上。
-    LaunchedEffect(state.uploadSuccessTick) {
-        if (state.uploadSuccessTick > 0) showUploadPanel = false
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -208,6 +141,14 @@ fun LocalDanmuScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 进入页面先检查权限：没授权就直接弹一次授权提示，避免用户先看到空列表再去找入口。
+    LaunchedEffect(state.allFilesAccessGranted) {
+        if (!state.allFilesAccessGranted && !permissionPromptShown) {
+            permissionPromptShown = true
+            showAllFilesAccessPrompt = true
+        }
     }
 
     val requestAllFilesAccess: () -> Unit = {
@@ -222,8 +163,12 @@ fun LocalDanmuScreen(
                 }
             }
         } else {
-            viewModel.refreshAllFilesAccess()
-            viewModel.openDirectoryBrowser()
+            legacyStoragePermissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
         }
     }
 
@@ -242,22 +187,13 @@ fun LocalDanmuScreen(
         }
     }
 
-    // 有上次选择的文件时先进表单，让用户可以直接“重新使用”，不必每次重翻目录。
-    val openUploadFlow: () -> Unit = {
-        viewModel.clearUploadDraft()
-        when {
-            // 目录直读已开启：直接进目录挑文件，跳开系统文件选择器。
-            state.allFilesAccessGranted -> {
-                showUploadPanel = true
-                viewModel.openDirectoryBrowser()
-            }
-            // 未授权时先进表单：单文件、批量导入、上次文件、去开启都在这一页。
-            else -> showUploadPanel = true
+    // 唯一的导入入口：授权后进入文件列表勾选，未授权则弹授权提示。
+    val openImportFlow: () -> Unit = {
+        if (state.allFilesAccessGranted) {
+            viewModel.openDirectoryBrowser()
+        } else {
+            showAllFilesAccessPrompt = true
         }
-    }
-
-    BackHandler(enabled = showUploadPanel && !state.browser.visible) {
-        if (!state.upload.isUploading) showUploadPanel = false
     }
 
     // 对话框统一在最前面组合：目录面板/上传面板都会 early return，
@@ -305,11 +241,6 @@ fun LocalDanmuScreen(
             onBack = viewModel::closeDirectoryBrowser,
             onOpenParent = viewModel::browseParent,
             onOpenDefaultDirectory = viewModel::browseDefaultDirectory,
-            onUseSystemPicker = {
-                viewModel.closeDirectoryBrowser()
-                showUploadPanel = true
-                filePicker.launch(arrayOf("*/*"))
-            },
             onToggleSelectAll = viewModel::toggleBrowserSelectAll,
             onSetDefaultDirectory = viewModel::setBrowserDefaultDirectory,
             onToggleSelection = viewModel::toggleBrowserSelection,
@@ -325,7 +256,6 @@ fun LocalDanmuScreen(
             state = state.batch,
             errorMessage = state.errorMessage,
             onBack = {
-                showUploadPanel = false
                 viewModel.closeBatch()
             },
             onToggleSelected = viewModel::toggleBatchSelected,
@@ -335,29 +265,6 @@ fun LocalDanmuScreen(
             onCancel = viewModel::cancelBatchImport,
             onRetryFailed = viewModel::retryFailedBatch,
             onDismissError = viewModel::dismissError
-        )
-        return
-    }
-
-    if (showUploadPanel) {
-        LocalDanmuUploadPanel(
-            state = state.upload,
-            recentFile = state.recentUpload,
-            errorMessage = state.errorMessage,
-            allFilesAccessGranted = state.allFilesAccessGranted,
-            onPickFile = { filePicker.launch(arrayOf("*/*")) },
-            onReuseRecent = viewModel::reuseRecentUpload,
-            onOpenDirectoryBrowser = viewModel::openDirectoryBrowser,
-            onImportMultiple = startMultiImport,
-            onRequestAllFilesAccess = { showAllFilesAccessPrompt = true },
-            onDismissError = viewModel::dismissError,
-            onBack = { showUploadPanel = false },
-            onTitleChange = viewModel::updateUploadTitle,
-            onYearChange = viewModel::updateUploadYear,
-            onTypeChange = viewModel::updateUploadType,
-            onSeasonChange = viewModel::updateUploadSeason,
-            onEpisodeChange = viewModel::updateUploadEpisode,
-            onSubmit = viewModel::uploadCurrent
         )
         return
     }
@@ -410,16 +317,6 @@ fun LocalDanmuScreen(
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新", modifier = Modifier.size(18.dp))
                     }
                 }
-                AppGlassIconButton(
-                    onClick = { requireWrite(openUploadFlow) },
-                    size = 36.dp
-                ) {
-                    Icon(
-                        Icons.Rounded.UploadFile,
-                        contentDescription = "上传弹幕文件",
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
             }
 
             LazyColumn(
@@ -431,6 +328,14 @@ fun LocalDanmuScreen(
             ) {
                 // 只反映这次请求的结果：失败就显示原始原因 + 重试/重启服务，
                 // 不做任何能力判定，也不因为“未确认”而隐藏列表。
+                item(key = "import-action") {
+                    LocalDanmuImportCard(
+                        granted = state.allFilesAccessGranted,
+                        canWrite = state.writePermission == LocalDanmuWritePermission.Writable,
+                        onImport = { requireWrite(openImportFlow) },
+                        onGrant = requestAllFilesAccess
+                    )
+                }
                 state.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
                     item(key = "error") {
                         LocalDanmuErrorBanner(
@@ -472,7 +377,7 @@ fun LocalDanmuScreen(
                     item(key = "empty") {
                         LocalDanmuEmptyState(
                             hasAnyResource = state.snapshot.resources.isNotEmpty(),
-                            onUpload = { requireWrite(openUploadFlow) }
+                            onUpload = { requireWrite(openImportFlow) }
                         )
                     }
                 } else {
@@ -611,6 +516,89 @@ private fun LocalDanmuDialogHost(
                 AppGlassButton(onClick = onDismissAllFilesAccessPrompt) { Text("取消") }
             }
         )
+    }
+}
+
+/**
+ * 唯一的导入入口：授权后点「导入弹幕文件」进入文件列表；
+ * 未授权时直接给出授权说明和按钮，不再让用户在多个入口之间猜。
+ */
+@Composable
+private fun LocalDanmuImportCard(
+    granted: Boolean,
+    canWrite: Boolean,
+    onImport: () -> Unit,
+    onGrant: () -> Unit
+) {
+    AppGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    if (granted) Icons.Rounded.UploadFile else Icons.Rounded.FolderOpen,
+                    contentDescription = null,
+                    tint = if (granted) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    if (granted) "导入本地弹幕" else "需要「所有文件访问」权限",
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+            Text(
+                if (granted) {
+                    "在应用内的文件列表里挑选弹幕文件（XML / JSON / ASS / SSA / CSV / TXT），可多选后统一导入。"
+                } else {
+                    "开启后可以直接浏览本地目录挑选弹幕文件，不再经过系统文件选择器，重启应用也不会失效。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (granted) {
+                AppGlassButton(
+                    onClick = onImport,
+                    enabled = canWrite,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.UploadFile, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("导入弹幕文件")
+                }
+                if (!canWrite) {
+                    Text(
+                        "需要管理员模式才能上传（当前为只读）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else {
+                AppGlassButton(
+                    onClick = onGrant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.LockOpen, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("去授权")
+                }
+            }
+        }
     }
 }
 
