@@ -40,26 +40,6 @@ import java.io.File
 import java.util.Calendar
 import javax.inject.Inject
 
-data class LocalDanmuUploadUiState(
-    val sourceUri: String = "",
-    val displayName: String = "",
-    val sizeBytes: Long? = null,
-    val formatHint: String = "",
-    val mimeType: String = "",
-    val title: String = "",
-    val year: Int? = Calendar.getInstance().get(Calendar.YEAR),
-    val type: LocalDanmuType = LocalDanmuType.Tv,
-    val season: Int? = 1,
-    val episode: Int? = 1,
-    val confidence: LocalDanmuParseConfidence = LocalDanmuParseConfidence.Medium,
-    val notes: List<String> = emptyList(),
-    val isPreparing: Boolean = false,
-    val isUploading: Boolean = false,
-    val progress: Float = 0f
-) {
-    val hasFile: Boolean get() = sourceUri.isNotBlank()
-}
-
 /**
  * 元数据编辑弹窗状态。scope=Resource 时只有集数/文件名字段生效，
  * scope=Group 时只有标题/年份/类型/季数生效（对应核心 PATCH 的两档范围）。
@@ -90,10 +70,6 @@ data class LocalDanmuUiState(
     val expandedGroupKeys: Set<String> = emptySet(),
     val message: String? = null,
     val errorMessage: String? = null,
-    val upload: LocalDanmuUploadUiState = LocalDanmuUploadUiState(),
-    val recentUpload: LocalDanmuUploadHistoryStore.RecentFile? = null,
-    /** 上传成功的自增计数，界面据此收起上传表单并回到列表。 */
-    val uploadSuccessTick: Int = 0,
     val allFilesAccessGranted: Boolean = false,
     val browser: LocalDanmuBrowserState = LocalDanmuBrowserState(),
     val batch: LocalDanmuBatchState = LocalDanmuBatchState(),
@@ -207,7 +183,6 @@ class LocalDanmuViewModel @Inject constructor(
                 it.copy(
                     isLoading = true,
                     errorMessage = null,
-                    recentUpload = uploadHistoryStore.recent(),
                     allFilesAccessGranted = fileBrowser.isAllFilesAccessGranted()
                 )
             }
@@ -296,57 +271,6 @@ class LocalDanmuViewModel @Inject constructor(
 
     fun showError(message: String) {
         _uiState.update { it.copy(errorMessage = message) }
-    }
-
-    // ───────────────────────── 手动单文件上传 ─────────────────────────
-
-    fun selectUploadFile(uri: String) {
-        if (uri.isBlank()) return
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    upload = LocalDanmuUploadUiState(isPreparing = true),
-                    errorMessage = null
-                )
-            }
-            importManager.prepare(uri).fold(
-                onSuccess = { prepared -> applyPreparedFile(prepared) },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            upload = LocalDanmuUploadUiState(),
-                            errorMessage = userMessage(error)
-                        )
-                    }
-                }
-            )
-        }
-    }
-
-    /** 复用上一次选中的文件（授权已持久化），省去重新翻目录。 */
-    fun reuseRecentUpload() {
-        val recent = _uiState.value.recentUpload ?: return
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    upload = LocalDanmuUploadUiState(isPreparing = true),
-                    errorMessage = null
-                )
-            }
-            importManager.prepare(recent.uri).fold(
-                onSuccess = { prepared -> applyPreparedFile(prepared) },
-                onFailure = {
-                    uploadHistoryStore.clear()
-                    _uiState.update { state ->
-                        state.copy(
-                            upload = LocalDanmuUploadUiState(),
-                            recentUpload = null,
-                            errorMessage = "上次选择的文件已不可用，请重新选择"
-                        )
-                    }
-                }
-            )
-        }
     }
 
     // ───────────────────── 目录直读模式（所有文件访问） ─────────────────────
@@ -495,12 +419,6 @@ class LocalDanmuViewModel @Inject constructor(
     }
 
     // ───────────────────────────── 批量导入 ─────────────────────────────
-
-    fun addBatchUris(uris: List<String>) {
-        val distinct = uris.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-        if (distinct.isEmpty()) return
-        addBatchSources(sources = distinct) { uri -> importManager.prepare(uri) }
-    }
 
     private fun addBatchSources(
         sources: List<String>,
@@ -754,151 +672,6 @@ class LocalDanmuViewModel @Inject constructor(
         rows: List<LocalDanmuBrowserRow>,
         selectedPaths: Set<String>
     ): List<LocalDanmuBrowserRow> = rows.map { row -> toBrowserRow(row.entry, selectedPaths) }
-
-    private fun applyPreparedFile(prepared: LocalDanmuImportManager.PreparedFile) {
-        val parsed = LocalDanmuMetadataResolver.resolve(
-            fileName = prepared.displayName,
-            relativePath = prepared.displayName
-        )
-        val recent = LocalDanmuUploadHistoryStore.RecentFile(
-            uri = prepared.sourceUri,
-            displayName = prepared.displayName,
-            sizeBytes = prepared.sizeBytes ?: 0L,
-            formatHint = prepared.formatHint,
-            mimeType = prepared.mimeType
-        )
-        uploadHistoryStore.save(recent)
-        _uiState.update {
-            it.copy(
-                upload = LocalDanmuUploadUiState(
-                    sourceUri = prepared.sourceUri,
-                    displayName = prepared.displayName,
-                    sizeBytes = prepared.sizeBytes,
-                    formatHint = prepared.formatHint,
-                    mimeType = prepared.mimeType,
-                    title = parsed.title,
-                    year = parsed.year ?: Calendar.getInstance().get(Calendar.YEAR),
-                    type = LocalDanmuType.fromWire(parsed.type) ?: LocalDanmuType.Tv,
-                    season = parsed.season ?: 1,
-                    episode = parsed.episode ?: 1,
-                    confidence = parsed.confidence,
-                    notes = parsed.notes,
-                    isPreparing = false
-                ),
-                recentUpload = uploadHistoryStore.recent(),
-                errorMessage = null
-            )
-        }
-    }
-
-    fun updateUploadTitle(value: String) {
-        updateUpload { it.copy(title = value, confidence = LocalDanmuParseConfidence.Medium) }
-    }
-
-    fun updateUploadYear(value: String) {
-        updateUpload {
-            it.copy(
-                year = value.filter(Char::isDigit).take(4).toIntOrNull(),
-                confidence = LocalDanmuParseConfidence.Medium
-            )
-        }
-    }
-
-    fun updateUploadType(value: LocalDanmuType) {
-        updateUpload {
-            it.copy(
-                type = value,
-                season = if (value == LocalDanmuType.Movie) null else it.season ?: 1,
-                episode = if (value == LocalDanmuType.Movie) null else it.episode ?: 1,
-                confidence = LocalDanmuParseConfidence.Medium
-            )
-        }
-    }
-
-    fun updateUploadSeason(value: String) {
-        updateUpload {
-            it.copy(
-                season = value.filter(Char::isDigit).take(3).toIntOrNull(),
-                confidence = LocalDanmuParseConfidence.Medium
-            )
-        }
-    }
-
-    fun updateUploadEpisode(value: String) {
-        updateUpload {
-            it.copy(
-                episode = value.filter(Char::isDigit).take(4).toIntOrNull(),
-                confidence = LocalDanmuParseConfidence.Medium
-            )
-        }
-    }
-
-    fun clearUploadDraft() {
-        _uiState.update { it.copy(upload = LocalDanmuUploadUiState()) }
-    }
-
-    fun uploadCurrent() {
-        val state = _uiState.value
-        val upload = state.upload
-        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        val validation = LocalDanmuResourceKey.validateUpload(
-            title = upload.title,
-            year = upload.year,
-            type = upload.type,
-            season = upload.season,
-            episode = upload.episode,
-            currentYear = currentYear
-        )
-        if (validation != null) {
-            _uiState.update { it.copy(errorMessage = validation) }
-            return
-        }
-        if (!upload.hasFile) {
-            _uiState.update { it.copy(errorMessage = "请选择要上传的弹幕文件") }
-            return
-        }
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(upload = upload.copy(isUploading = true, progress = 0f), errorMessage = null)
-            }
-            val year = upload.year ?: return@launch
-            uploadPreparedFile(
-                sourceUri = upload.sourceUri,
-                displayName = upload.displayName,
-                year = year,
-                type = upload.type,
-                season = upload.season,
-                episode = upload.episode,
-                title = upload.title,
-                formatHint = upload.formatHint,
-                sizeBytes = upload.sizeBytes,
-                mimeType = upload.mimeType,
-                onProgress = { progress ->
-                    val previous = _uiState.value.upload.progress
-                    if (progress >= 1f || progress - previous >= 0.05f) {
-                        updateUpload { it.copy(progress = progress) }
-                    }
-                }
-            )
-                .fold(
-                onSuccess = { resource ->
-                    _uiState.update {
-                        it.copy(
-                            upload = LocalDanmuUploadUiState(),
-                            recentUpload = uploadHistoryStore.recent(),
-                            uploadSuccessTick = it.uploadSuccessTick + 1,
-                            message = uploadSuccessMessage(upload, resource)
-                        )
-                    }
-                    refreshNow()
-                },
-                onFailure = { error ->
-                    updateUpload { it.copy(isUploading = false, progress = 0f) }
-                    _uiState.update { it.copy(errorMessage = userMessage(error)) }
-                }
-            )
-        }
-    }
 
     // ───────────────────────── 详情/预览/删除 ─────────────────────────
 
@@ -1165,10 +938,6 @@ class LocalDanmuViewModel @Inject constructor(
         }
     }
 
-    private fun updateUpload(transform: (LocalDanmuUploadUiState) -> LocalDanmuUploadUiState) {
-        _uiState.update { it.copy(upload = transform(it.upload)) }
-    }
-
     private fun userMessage(error: Throwable): String {
         if (error is LocalDanmuApiException) {
             return when (error.kind) {
@@ -1200,21 +969,6 @@ class LocalDanmuViewModel @Inject constructor(
             raw.isBlank() -> "操作失败，请稍后重试"
             else -> raw
         }
-    }
-
-    private fun uploadSuccessMessage(
-        upload: LocalDanmuUploadUiState,
-        resource: LocalDanmuResource
-    ): String {
-        val title = upload.title.trim().ifBlank { resource.title }
-        val episodeLabel = when {
-            upload.type == LocalDanmuType.Movie -> "正片"
-            upload.episode != null && upload.season != null ->
-                "第${upload.season}季 第${upload.episode}集"
-            upload.episode != null -> "第${upload.episode}集"
-            else -> "全集"
-        }
-        return "上传成功：$title $episodeLabel · ${resource.count} 条弹幕"
     }
 
     /**

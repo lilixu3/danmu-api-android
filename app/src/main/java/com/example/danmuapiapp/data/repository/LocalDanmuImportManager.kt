@@ -2,8 +2,6 @@ package com.example.danmuapiapp.data.repository
 
 import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,8 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 本地弹幕来源准备：既支持 SAF 选中的单个文件（content://），
- * 也支持「目录直读」模式下的真实路径（file://，需要所有文件访问权限）。
+ * 本地弹幕来源准备：只处理「目录直读」模式下的真实路径（file://，需要所有文件访问权限）。
  * 压缩包导入不做（与核心一致，核心只接受单文件上传）。
  */
 @Singleton
@@ -35,32 +32,6 @@ class LocalDanmuImportManager @Inject constructor(
         val mimeType: String,
         val formatHint: String
     )
-
-    suspend fun prepare(uriText: String): Result<PreparedFile> = withContext(Dispatchers.IO) {
-        runLocalDanmuRequest {
-            val uri = Uri.parse(uriText)
-            val displayName = resolveDisplayName(uri) ?: "未命名文件"
-            val sizeBytes = resolveSize(uri)
-            val mimeType = runCatching { context.contentResolver.getType(uri) }
-                .getOrNull()
-                .orEmpty()
-            val extension = extensionOf(displayName)
-            val formatHint = when {
-                extension in supportedExtensions -> extension
-                else -> sniffTextFormat(uri)
-            } ?: error("不支持的文件格式，仅支持 XML/JSON/ASS/SSA/CSV/TXT")
-            if (sizeBytes != null && sizeBytes > CORE_MAX_UPLOAD_BYTES) {
-                error("单文件不能超过 10 MB")
-            }
-            PreparedFile(
-                sourceUri = uriText,
-                displayName = displayName,
-                sizeBytes = sizeBytes,
-                mimeType = mimeType,
-                formatHint = formatHint
-            )
-        }
-    }
 
     /**
      * 目录直读模式的入口：直接用文件路径准备上传（file:// URI），
@@ -99,43 +70,6 @@ class LocalDanmuImportManager @Inject constructor(
                 ?: error("无法读取源文件")
             input.use { source -> block(source) }
         }
-    }
-
-    private fun resolveDisplayName(uri: Uri): String? {
-        val fromDocument = runCatching { DocumentFile.fromSingleUri(context, uri)?.name }.getOrNull()
-        if (!fromDocument.isNullOrBlank()) return fromDocument
-        return runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { cursor ->
-                    if (!cursor.moveToFirst()) return@use null
-                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (index < 0) null else cursor.getString(index)
-                }
-        }.getOrNull()?.takeIf { it.isNotBlank() }
-            ?: uri.lastPathSegment?.substringAfterLast('/')
-    }
-
-    private fun resolveSize(uri: Uri): Long? {
-        val fromDocument = runCatching { DocumentFile.fromSingleUri(context, uri)?.length() }
-            .getOrNull()
-            ?.takeIf { it > 0L }
-        if (fromDocument != null) return fromDocument
-        return runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
-                ?.use { cursor ->
-                    if (!cursor.moveToFirst()) return@use null
-                    val index = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (index < 0 || cursor.isNull(index)) null else cursor.getLong(index)
-                }
-        }.getOrNull()?.takeIf { it > 0L }
-    }
-
-    private fun sniffTextFormat(uri: Uri): String? {
-        return runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                sniff(input)
-            }
-        }.getOrNull()
     }
 
     private fun sniffFileFormat(file: File): String? {
