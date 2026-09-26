@@ -157,6 +157,16 @@ fun LiquidBottomTabs(
                     currentIndex = index
                 }
         }
+        // 指示器只在「按压 / 拖动 / 换位动画进行中」才启用玻璃折射：
+        // 静止时 lens 位移恒为 0，纯色药丸与折射结果视觉一致，
+        // 但可以省掉整行隐藏层的记录 + 一次全宽 blur/lens pass。
+        val indicatorGlassActive by remember(dampedDragAnimation) {
+            derivedStateOf {
+                dampedDragAnimation.pressProgress > 0.01f ||
+                    dampedDragAnimation.velocity > 0.05f ||
+                    abs(dampedDragAnimation.value - dampedDragAnimation.targetValue) > 0.01f
+            }
+        }
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { currentIndex }
                 .drop(1)
@@ -228,7 +238,7 @@ fun LiquidBottomTabs(
             content = content
         )
 
-        if (spec.enabled && tabsBackdrop != null) {
+        if (spec.enabled && tabsBackdrop != null && indicatorGlassActive) {
             CompositionLocalProvider(
                 LocalLiquidBottomTabScale provides {
                     lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
@@ -290,7 +300,7 @@ fun LiquidBottomTabs(
                 }
                 .then(dampedDragAnimation.modifier)
                 .then(
-                    if (spec.enabled && tabsBackdrop != null) {
+                    if (spec.enabled && tabsBackdrop != null && indicatorGlassActive) {
                         Modifier.drawBackdrop(
                             backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
                             shape = { Capsule() },

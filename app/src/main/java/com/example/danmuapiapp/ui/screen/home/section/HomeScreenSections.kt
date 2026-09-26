@@ -150,6 +150,7 @@ import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
 import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.StatusIndicator
+import com.example.danmuapiapp.ui.component.rememberAmbientLoopState
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
 import com.example.danmuapiapp.ui.screen.download.DownloadQueueSummary
 import com.example.danmuapiapp.ui.screen.home.support.resolveCoreActionButtonText
@@ -310,15 +311,12 @@ internal fun MissionControlHero(
     onOpenVariantPicker: () -> Unit,
     onOpenRuntimeInfo: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "heroOrb")
-    val orbRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(6000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orbRotation"
+    // 装饰性旋转：前台可见时才跑，30fps 更新，并在绘制阶段读取进度，
+    // 避免逐帧重组合与整页 backdrop 重录（6 秒一圈，肉眼无差别）。
+    val orbRotationProgress = rememberAmbientLoopState(
+        durationMillis = 6000,
+        maxFps = 30,
+        active = isRunning
     )
     val showMissingCore = !isCoreInfoLoading && !isCoreInstalled
     val heroAccent = if (showMissingCore) {
@@ -401,7 +399,9 @@ internal fun MissionControlHero(
                     Box(
                         modifier = Modifier
                             .size(76.dp)
-                            .rotate(if (isRunning) orbRotation else 0f)
+                            .graphicsLayer {
+                                rotationZ = if (isRunning) orbRotationProgress.value * 360f else 0f
+                            }
                             .clip(CircleShape)
                             .background(
                                 Brush.sweepGradient(

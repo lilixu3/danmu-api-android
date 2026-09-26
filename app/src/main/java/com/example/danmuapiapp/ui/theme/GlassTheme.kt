@@ -375,11 +375,26 @@ fun ProvideGlassTheme(
         GlassMaterialPreference.Off
     }
     val tuning = LocalGlassMaterialTuning.current
-    val spec = resolveGlassMaterialSpec(
-        preference = effectivePreference,
-        darkTheme = darkTheme,
-        tuning = tuning
+    // 只在偏好/主题/调参真正变化时重建 spec：避免每次重组合都重新分配 8 个 GlassEffectStyle，
+    // 也避免 style 身份变化导致下游 RenderEffect 链被无谓重建。
+    val tuningKey = listOf(
+        tuning.adaptiveLuminance,
+        tuning.cardOverride,
+        tuning.dialogOverride,
+        tuning.buttonOverride,
+        tuning.dialogButtonOverride,
+        tuning.primaryButtonOverride,
+        tuning.dialogPrimaryButtonOverride,
+        tuning.selectedOverride,
+        tuning.bottomBarOverride
     )
+    val spec = remember(effectivePreference, darkTheme, tuningKey) {
+        resolveGlassMaterialSpec(
+            preference = effectivePreference,
+            darkTheme = darkTheme,
+            tuning = tuning
+        )
+    }
     CompositionLocalProvider(LocalGlassMaterial provides spec, content = content)
 }
 

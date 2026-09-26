@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -54,6 +55,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -236,7 +239,7 @@ fun HomeScreen(
         downloadViewModel?.queueTasks?.collectAsStateWithLifecycle()
             ?: emptyQueueState
         )
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     var activeOverlay by remember { mutableStateOf<HomeOverlay?>(null) }
     var pendingRunModeTarget by remember { mutableStateOf<RunMode?>(null) }
@@ -514,13 +517,13 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                item(key = "homeTopHeader") {
                 HomeTopHeader(
                     status = presentedStatus,
                     isRunning = isRunning,
@@ -537,7 +540,9 @@ fun HomeScreen(
                     },
                     onOpenUnreadAnnouncements = ::openUnreadAnnouncementsEntry
                 )
+                }
 
+                item(key = "missionControlHero") {
                 MissionControlHero(
                     status = presentedStatus,
                     statusMessage = runtimeTransition?.message ?: state.statusMessage,
@@ -564,7 +569,9 @@ fun HomeScreen(
                     onOpenVariantPicker = viewModel::openVariantPicker,
                     onOpenRuntimeInfo = { activeOverlay = HomeOverlay.RuntimeInfo }
                 )
+                }
 
+                item(key = "snapshotStrip") {
                 SnapshotStrip(
                     status = presentedStatus,
                     isDarkTheme = isDarkTheme,
@@ -599,7 +606,9 @@ fun HomeScreen(
                         activeOverlay = HomeOverlay.CoreUpdateConfirm
                     },
                 )
+                }
 
+                item(key = "runtimePermissionHint") {
                 AnimatedVisibility(
                     visible = shouldShowRuntimePermissionHint,
                     enter = expandVertically() + fadeIn(),
@@ -619,7 +628,9 @@ fun HomeScreen(
                         }
                     )
                 }
+                }
 
+                item(key = "actionDeck") {
                 ActionDeck(
                     status = presentedStatus,
                     isRunning = isRunning,
@@ -645,7 +656,9 @@ fun HomeScreen(
                         isUpdating = viewModel.isUpdatingCore
                     )
                 )
+                }
 
+                item(key = "accessGateway") {
                 AnimatedVisibility(
                     visible = isRunning,
                     enter = expandVertically() + fadeIn(),
@@ -681,7 +694,9 @@ fun HomeScreen(
                         }
                     )
                 }
+                }
 
+                item(key = "runtimeError") {
                 AnimatedVisibility(
                     visible = runtimeTransition == null && state.errorMessage != null,
                     enter = expandVertically() + fadeIn(),
@@ -710,8 +725,11 @@ fun HomeScreen(
                         }
                     }
                 }
+                }
 
+                item(key = "bottomBarSpacer") {
                 FloatingBottomBarContentSpacer()
+                }
             }
         }
     }

@@ -78,6 +78,11 @@ class RuntimeRepositoryImpl @Inject constructor(
             NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
         private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
         private const val NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS = 4000L
+        /**
+         * 运行时长刷新间隔。1 秒一次会让整个 RuntimeState 每秒变更一次，
+         * 从而导致首页（含大量液态玻璃节点）每秒重组合/重绘；10 秒一次把这份开销降到 1/10。
+         */
+        private const val UPTIME_REFRESH_INTERVAL_MS = 10_000L
         private const val NORMAL_STALE_PROCESS_RETRY_DELAY_MS = 220L
         // 端口探测重试：系统冻结会让单次探测误判，重试期间进程通常已经解冻。
         private const val PORT_PROBE_ATTEMPTS = 3
@@ -1815,7 +1820,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                         state
                     }
                 }
-                delay(1000)
+                delay(UPTIME_REFRESH_INTERVAL_MS)
             }
         }
     }

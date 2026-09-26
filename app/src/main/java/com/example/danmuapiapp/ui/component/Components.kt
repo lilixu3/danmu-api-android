@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -61,21 +62,27 @@ fun StatusIndicator(
         animationSpec = tween(400),
         label = "statusColor"
     )
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (status == ServiceStatus.Running) 0.4f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseInOutCubic),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
+    // 呼吸动画：前台可见时才跑，30fps 更新，并且只在绘制阶段读取进度，
+    // 避免每秒 60 次重组合与整页 backdrop 重录（观感与原来一致：1 → 0.4 → 1，2.4s 一轮）。
+    val pulseProgress = rememberAmbientLoopState(
+        durationMillis = 2400,
+        maxFps = 30,
+        active = status == ServiceStatus.Running
     )
     Box(
         modifier = modifier
             .size(12.dp)
             .clip(CircleShape)
-            .background(color.copy(alpha = if (status == ServiceStatus.Running) alpha else 1f))
+            .background(color)
+            .graphicsLayer {
+                if (status == ServiceStatus.Running) {
+                    val raw = pulseProgress.value
+                    val triangle = if (raw <= 0.5f) raw * 2f else (1f - raw) * 2f
+                    alpha = 1f - 0.6f * EaseInOutCubic.transform(triangle)
+                } else {
+                    alpha = 1f
+                }
+            }
     )
 }
 

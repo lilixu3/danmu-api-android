@@ -9,6 +9,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -21,7 +22,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.max
+
+/** 位置稳定多久之后才切换自适应亮度采样格（滚动中不追，停下再更新）。 */
+private const val ADAPTIVE_LUMINANCE_SAMPLE_SETTLE_MS = 100L
 
 private const val SOURCE_COLUMNS = 48
 private const val SOURCE_ROWS = 48
@@ -170,6 +177,8 @@ internal fun rememberGlassAdaptiveEffect(baseStyle: GlassEffectStyle): GlassAdap
     val grid = LocalGlassAdaptiveLuminance.current.grid
     val active = spec.enabled && tuning.adaptiveLuminance
     var sampledCell by remember { mutableStateOf(IntOffset(-1, -1)) }
+    val sampleScope = rememberCoroutineScope()
+    val sampleJob = remember { arrayOfNulls<Job>(1) }
     val targetLuminance = if (active) {
         grid.luminanceAt(sampledCell)
     } else {
@@ -189,9 +198,15 @@ internal fun rememberGlassAdaptiveEffect(baseStyle: GlassEffectStyle): GlassAdap
     }
     val positionModifier = if (active) {
         Modifier.onGloballyPositioned { coordinates ->
-            val center = coordinates.boundsInRoot().center
-            val cell = grid.cellAt(center)
-            if (cell != sampledCell) sampledCell = cell
+            val cell = grid.cellAt(coordinates.boundsInRoot().center)
+            if (cell == sampledCell) return@onGloballyPositioned
+            // 滚动时位置回调非常密集，节流/去抖到 100ms：位置稳定后再生效，
+            // 避免每个玻璃面都在滚动过程中反复启动 500ms 亮度补间（观感几乎无差别）。
+            sampleJob[0]?.cancel()
+            sampleJob[0] = sampleScope.launch {
+                delay(ADAPTIVE_LUMINANCE_SAMPLE_SETTLE_MS)
+                sampledCell = cell
+            }
         }
     } else {
         Modifier
