@@ -81,7 +81,7 @@ fun LiquidBottomTabs(
     val bottomBarStyle = adaptiveEffect.style
     val colors = MaterialTheme.colorScheme
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
-    val containerColor = if (!spec.enabled) {
+    val containerColor = if (!spec.glassAnywhere) {
         colors.surfaceContainerHigh
     } else {
         val glassBase = if (isLightTheme) {
@@ -93,7 +93,7 @@ fun LiquidBottomTabs(
     }
 
     // Do not allocate a recording layer when the user selected the solid path.
-    val tabsBackdrop = if (spec.enabled) rememberLayerBackdrop() else null
+    val tabsBackdrop = if (spec.glassAnywhere) rememberLayerBackdrop() else null
 
     BoxWithConstraints(
         modifier.then(adaptiveEffect.positionModifier),
@@ -181,7 +181,7 @@ fun LiquidBottomTabs(
                 translationX = panelOffset
             }
             .then(
-                if (spec.enabled) {
+                if (spec.glassAnywhere) {
                     Modifier.drawBackdrop(
                         backdrop = backdrop,
                         shape = { Capsule() },
@@ -238,7 +238,7 @@ fun LiquidBottomTabs(
             content = content
         )
 
-        if (spec.enabled && tabsBackdrop != null && indicatorGlassActive) {
+        if (spec.glassAnywhere && tabsBackdrop != null && indicatorGlassActive) {
             CompositionLocalProvider(
                 LocalLiquidBottomTabScale provides {
                     lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
@@ -300,7 +300,7 @@ fun LiquidBottomTabs(
                 }
                 .then(dampedDragAnimation.modifier)
                 .then(
-                    if (spec.enabled && tabsBackdrop != null && indicatorGlassActive) {
+                    if (spec.glassAnywhere && tabsBackdrop != null && indicatorGlassActive) {
                         Modifier.drawBackdrop(
                             backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
                             shape = { Capsule() },

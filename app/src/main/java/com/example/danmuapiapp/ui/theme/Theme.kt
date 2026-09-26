@@ -107,6 +107,7 @@ private val GlassLightColorScheme = LegacyLightColorScheme
 fun DanmuApiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     glassMaterial: GlassMaterialPreference = GlassMaterialPreference.Default,
+    glassBottomBar: Boolean = false,
     glassTuning: GlassTuningPreference = GlassTuningPreference(),
     appBackground: AppBackgroundPreference = AppBackgroundPreference(),
     content: @Composable () -> Unit
@@ -138,6 +139,7 @@ fun DanmuApiTheme(
         ) {
             ProvideGlassTheme(
                 preference = glassMaterial,
+                bottomBarEnabled = glassBottomBar,
                 darkTheme = darkTheme
             ) {
                 AppDialogHost(content = content)

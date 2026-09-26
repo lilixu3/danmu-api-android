@@ -236,6 +236,8 @@ private fun GlassEffectOverride.toPreferenceOverride(): GlassEffectOverridePrefe
 @Immutable
 data class GlassMaterialSpec(
     val enabled: Boolean,
+    /** 是否只让底部导航栏使用液态玻璃（「全部液态玻璃化」关闭时可单独开启）。 */
+    val bottomBarGlass: Boolean,
     val card: GlassEffectStyle,
     val dialog: GlassEffectStyle,
     val button: GlassEffectStyle,
@@ -245,6 +247,9 @@ data class GlassMaterialSpec(
     val selected: GlassEffectStyle,
     val bottomBar: GlassEffectStyle
 ) {
+    /** 任一玻璃效果处于开启状态：用于背景图/底栏 backdrop 等共享资源。 */
+    val glassAnywhere: Boolean get() = enabled || bottomBarGlass
+
     fun styleFor(role: GlassMaterialRole): GlassEffectStyle = when (role) {
         GlassMaterialRole.Card -> card
         GlassMaterialRole.Dialog -> dialog
@@ -266,6 +271,7 @@ data class GlassMaterialSpec(
     companion object {
         val Disabled = GlassMaterialSpec(
             enabled = false,
+            bottomBarGlass = false,
             card = GlassEffectStyle.Disabled,
             dialog = GlassEffectStyle.Disabled,
             button = GlassEffectStyle.Disabled,
@@ -297,9 +303,12 @@ internal fun isLiquidGlassSupported(sdkInt: Int = Build.VERSION.SDK_INT): Boolea
 internal fun resolveGlassMaterialSpec(
     preference: GlassMaterialPreference,
     darkTheme: Boolean,
-    tuning: GlassMaterialTuningState = GlassMaterialTuningState()
+    tuning: GlassMaterialTuningState = GlassMaterialTuningState(),
+    bottomBarEnabled: Boolean = false
 ): GlassMaterialSpec {
-    if (preference == GlassMaterialPreference.Off) {
+    val allGlass = preference == GlassMaterialPreference.LiquidGlass
+    // 两种模式都不开时才是完全的传统外观。
+    if (!allGlass && !bottomBarEnabled) {
         return GlassMaterialSpec.Disabled
     }
     val card = GlassEffectStyle(
@@ -351,7 +360,8 @@ internal fun resolveGlassMaterialSpec(
         return tuning.overrideFor(role)?.applyTo(fallback) ?: fallback.normalized()
     }
     return GlassMaterialSpec(
-        enabled = true,
+        enabled = allGlass,
+        bottomBarGlass = bottomBarEnabled,
         card = tuned(GlassMaterialRole.Card, card),
         dialog = tuned(GlassMaterialRole.Dialog, dialog),
         button = tuned(GlassMaterialRole.Button, button),
@@ -367,6 +377,7 @@ internal fun resolveGlassMaterialSpec(
 fun ProvideGlassTheme(
     preference: GlassMaterialPreference,
     darkTheme: Boolean,
+    bottomBarEnabled: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val effectivePreference = if (isLiquidGlassSupported()) {
@@ -388,11 +399,12 @@ fun ProvideGlassTheme(
         tuning.selectedOverride,
         tuning.bottomBarOverride
     )
-    val spec = remember(effectivePreference, darkTheme, tuningKey) {
+    val spec = remember(effectivePreference, darkTheme, bottomBarEnabled, tuningKey) {
         resolveGlassMaterialSpec(
             preference = effectivePreference,
             darkTheme = darkTheme,
-            tuning = tuning
+            tuning = tuning,
+            bottomBarEnabled = bottomBarEnabled
         )
     }
     CompositionLocalProvider(LocalGlassMaterial provides spec, content = content)
@@ -425,7 +437,8 @@ fun GlassAppBackground(
     val darkTheme = LocalAppDarkTheme.current
     val background = LocalAppBackground.current
     val foregroundKey = LocalAppBackgroundForegroundKey.current
-    val glassEnabled = LocalGlassMaterial.current.enabled
+    // 底栏单独开启玻璃时也要显示背景图（底栏要折射它）。
+    val glassEnabled = LocalGlassMaterial.current.glassAnywhere
     val adaptiveEnabled = glassEnabled && LocalGlassMaterialTuning.current.adaptiveLuminance
     val adaptiveLuminanceState = LocalGlassAdaptiveLuminance.current
     val solidColor = solidBackgroundColor ?: MaterialTheme.colorScheme.background

@@ -121,6 +121,7 @@ class SettingsViewModel @Inject constructor(
     val rootNotificationEnabled = settingsRepo.rootNotificationEnabled
     val nightMode = settingsRepo.nightMode
     val glassMaterial = settingsRepo.glassMaterial
+    val glassBottomBar = settingsRepo.glassBottomBar
     val glassTuning = settingsRepo.glassTuning
     val appBackground = settingsRepo.appBackground
     val appDpiOverride = settingsRepo.appDpiOverride
@@ -503,6 +504,11 @@ class SettingsViewModel @Inject constructor(
             GlassMaterialPreference.LiquidGlass -> "已启用液态玻璃"
             GlassMaterialPreference.Off -> "已关闭液态玻璃"
         }
+    }
+
+    fun setGlassBottomBar(enabled: Boolean) {
+        settingsRepo.setGlassBottomBar(enabled)
+        operationMessage = if (enabled) "已启用液态玻璃底栏" else "已关闭液态玻璃底栏"
     }
 
     fun setGlassTuning(tuning: GlassTuningPreference) {

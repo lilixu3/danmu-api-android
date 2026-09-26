@@ -156,7 +156,8 @@ private fun DanmuApiMainContent() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
-    val glassEnabled = LocalGlassMaterial.current.enabled
+    // 底栏单开玻璃时也需要记录页面 backdrop（底栏要折射页面内容）。
+    val glassEnabled = LocalGlassMaterial.current.glassAnywhere
     val legacyShellBackground = if (!glassEnabled && LocalAppDarkTheme.current) {
         MaterialTheme.colorScheme.surfaceContainerHigh
     } else {

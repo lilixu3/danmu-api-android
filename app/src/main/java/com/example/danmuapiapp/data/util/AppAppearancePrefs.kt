@@ -22,6 +22,8 @@ object AppAppearancePrefs {
     const val PREF_KEY_NIGHT_MODE = "night_mode_pref"
     const val PREF_KEY_GLASS_MATERIAL = "glass_material_pref"
     const val PREF_KEY_GLASS_TUNING = "glass_tuning_v1"
+    /** 液态玻璃底栏单独开关：只让底部导航栏使用玻璃效果。 */
+    const val PREF_KEY_GLASS_BOTTOM_BAR = "glass_bottom_bar_enabled"
     const val PREF_KEY_BACKGROUND_MODE = "background_mode"
     const val PREF_KEY_BACKGROUND_LOCAL_URI = "background_local_uri"
     const val PREF_KEY_BACKGROUND_ONLINE_URL = "background_online_url"
@@ -87,6 +89,14 @@ object AppAppearancePrefs {
         material: GlassMaterialPreference
     ) {
         prefs.edit { putInt(PREF_KEY_GLASS_MATERIAL, material.storageValue) }
+    }
+
+    fun readGlassBottomBar(prefs: SharedPreferences): Boolean {
+        return prefs.safeGetBoolean(PREF_KEY_GLASS_BOTTOM_BAR, false)
+    }
+
+    fun writeGlassBottomBar(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit { putBoolean(PREF_KEY_GLASS_BOTTOM_BAR, enabled) }
     }
 
     fun readGlassTuning(prefs: SharedPreferences): GlassTuningPreference {

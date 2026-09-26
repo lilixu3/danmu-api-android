@@ -137,6 +137,9 @@ class SettingsRepositoryImpl @Inject constructor(
     private val _glassMaterial = MutableStateFlow(AppAppearancePrefs.readGlassMaterial(uiPrefs))
     override val glassMaterial: StateFlow<GlassMaterialPreference> = _glassMaterial.asStateFlow()
 
+    private val _glassBottomBar = MutableStateFlow(AppAppearancePrefs.readGlassBottomBar(uiPrefs))
+    override val glassBottomBar: StateFlow<Boolean> = _glassBottomBar.asStateFlow()
+
     private val _glassTuning = MutableStateFlow(AppAppearancePrefs.readGlassTuning(uiPrefs))
     override val glassTuning: StateFlow<GlassTuningPreference> = _glassTuning.asStateFlow()
 
@@ -304,6 +307,11 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setGlassMaterial(material: GlassMaterialPreference) {
         AppAppearancePrefs.writeGlassMaterial(uiPrefs, material)
         _glassMaterial.value = material
+    }
+
+    override fun setGlassBottomBar(enabled: Boolean) {
+        AppAppearancePrefs.writeGlassBottomBar(uiPrefs, enabled)
+        _glassBottomBar.value = enabled
     }
 
     override fun setGlassTuning(tuning: GlassTuningPreference) {
@@ -507,6 +515,7 @@ class SettingsRepositoryImpl @Inject constructor(
         _rootNotificationEnabled.value = NotificationDisplayPrefs.isRootNotificationEnabled(context)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
         _glassMaterial.value = AppAppearancePrefs.readGlassMaterial(uiPrefs)
+        _glassBottomBar.value = AppAppearancePrefs.readGlassBottomBar(uiPrefs)
         _glassTuning.value = AppAppearancePrefs.readGlassTuning(uiPrefs)
         _appBackground.value = AppAppearancePrefs.readAppBackground(uiPrefs)
         _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)

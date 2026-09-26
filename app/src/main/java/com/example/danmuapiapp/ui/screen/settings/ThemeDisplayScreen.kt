@@ -1,6 +1,9 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.AppDialogTone
 
 import android.app.Activity
 import android.content.Context
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,11 +85,13 @@ fun ThemeDisplayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val glassMaterial by viewModel.glassMaterial.collectAsStateWithLifecycle()
+    val glassBottomBar by viewModel.glassBottomBar.collectAsStateWithLifecycle()
     val glassTuning by viewModel.glassTuning.collectAsStateWithLifecycle()
     val appBackground by viewModel.appBackground.collectAsStateWithLifecycle()
     val liquidGlassSupported = remember { isLiquidGlassSupported(Build.VERSION.SDK_INT) }
     val liquidGlassEnabled = liquidGlassSupported &&
         glassMaterial == GlassMaterialPreference.LiquidGlass
+    val liquidBottomBarEnabled = liquidGlassSupported && glassBottomBar
     val selectedGlassPreset = glassTuning.matchingPreset()
     val appDpiOverride by viewModel.appDpiOverride.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
@@ -125,6 +131,7 @@ fun ThemeDisplayScreen(
         mutableStateOf(appBackground.randomRefreshPolicy == AppBackgroundRefreshPolicy.Custom)
     }
     var showGlassAdvancedSettings by rememberSaveable { mutableStateOf(false) }
+    var showGlassExperimentalConfirm by rememberSaveable { mutableStateOf(false) }
     val localImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -190,26 +197,45 @@ fun ThemeDisplayScreen(
 
             SettingsGroup(title = "液态玻璃") {
                 SettingsSwitchItem(
-                    title = "启用液态玻璃",
+                    title = "液态玻璃底栏",
                     subtitle = if (liquidGlassSupported) {
-                        "背景模糊与半透明"
+                        "只让底部导航栏使用玻璃效果，其余界面保持传统外观"
                     } else {
                         "需要 Android 13 或更高版本"
                     },
                     icon = Icons.Rounded.BlurOn,
+                    checked = liquidBottomBarEnabled,
+                    enabled = liquidGlassSupported,
+                    disabledOnClick = {
+                        viewModel.postMessage("当前系统不支持完整液态玻璃效果")
+                    },
+                    onCheckedChange = { enabled ->
+                        viewModel.setGlassBottomBar(enabled)
+                    }
+                )
+                SettingsDivider()
+                SettingsSwitchItem(
+                    title = "全部液态玻璃化（实验性）",
+                    subtitle = if (liquidGlassSupported) {
+                        "所有卡片、按钮、弹窗都使用玻璃；部分设备可能卡顿"
+                    } else {
+                        "需要 Android 13 或更高版本"
+                    },
+                    icon = Icons.Rounded.Science,
                     checked = liquidGlassEnabled,
                     enabled = liquidGlassSupported,
                     disabledOnClick = {
                         viewModel.postMessage("当前系统不支持完整液态玻璃效果")
                     },
                     onCheckedChange = { enabled ->
-                        viewModel.setGlassMaterial(
-                            if (enabled) GlassMaterialPreference.LiquidGlass
-                            else GlassMaterialPreference.Off
-                        )
+                        if (enabled) {
+                            showGlassExperimentalConfirm = true
+                        } else {
+                            viewModel.setGlassMaterial(GlassMaterialPreference.Off)
+                        }
                     }
                 )
-                if (liquidGlassEnabled) {
+                if (liquidGlassEnabled || liquidBottomBarEnabled) {
                     SettingsDivider()
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -541,6 +567,47 @@ fun ThemeDisplayScreen(
         GlassAdvancedSettingsDialog(
             onDismissRequest = { showGlassAdvancedSettings = false },
             onSave = viewModel::setGlassTuning
+        )
+    }
+
+    if (showGlassExperimentalConfirm) {
+        AppDialog(
+            onDismissRequest = { showGlassExperimentalConfirm = false },
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Warning,
+            icon = { Icon(Icons.Rounded.Science, null) },
+            title = { Text("开启全部液态玻璃化？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "这是实验性效果：所有卡片、按钮和弹窗都会做实时模糊与折射，"
+                    )
+                    Text(
+                        "部分设备（尤其低端机）可能出现卡顿、掉帧或发热。" +
+                            "如果觉得不流畅，可以只保留「液态玻璃底栏」或关掉。"
+                    )
+                    Text(
+                        "是否继续开启？",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            confirmButton = {
+                AppGlassButton(
+                    onClick = {
+                        showGlassExperimentalConfirm = false
+                        viewModel.setGlassMaterial(GlassMaterialPreference.LiquidGlass)
+                    }
+                ) {
+                    Text("继续开启")
+                }
+            },
+            dismissButton = {
+                AppGlassButton(onClick = { showGlassExperimentalConfirm = false }) {
+                    Text("取消")
+                }
+            }
         )
     }
 

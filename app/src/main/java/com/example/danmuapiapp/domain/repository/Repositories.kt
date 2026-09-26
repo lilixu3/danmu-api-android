@@ -137,6 +137,7 @@ interface SettingsRepository {
     val rootNotificationEnabled: StateFlow<Boolean>
     val nightMode: StateFlow<NightModePreference>
     val glassMaterial: StateFlow<GlassMaterialPreference>
+    val glassBottomBar: StateFlow<Boolean>
     val glassTuning: StateFlow<GlassTuningPreference>
     val appBackground: StateFlow<AppBackgroundPreference>
     val appDpiOverride: StateFlow<Int>
@@ -166,6 +167,7 @@ interface SettingsRepository {
     fun setRootNotificationEnabled(enabled: Boolean)
     fun setNightMode(mode: NightModePreference)
     fun setGlassMaterial(material: GlassMaterialPreference)
+    fun setGlassBottomBar(enabled: Boolean)
     fun setGlassTuning(tuning: GlassTuningPreference)
     fun setAppBackground(background: AppBackgroundPreference)
     fun setAppDpiOverride(dpi: Int)
