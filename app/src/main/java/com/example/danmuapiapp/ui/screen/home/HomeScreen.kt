@@ -520,10 +520,12 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                // 间距放在每个 item 内部（HomeSectionSlot）：这样隐藏的
+                // AnimatedVisibility 段（权限提示/错误卡）不会在两侧各留一次间距。
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
             ) {
                 item(key = "homeTopHeader") {
+                    HomeSectionSlot {
                 HomeTopHeader(
                     status = presentedStatus,
                     isRunning = isRunning,
@@ -540,9 +542,11 @@ fun HomeScreen(
                     },
                     onOpenUnreadAnnouncements = ::openUnreadAnnouncementsEntry
                 )
+                    }
                 }
 
                 item(key = "missionControlHero") {
+                    HomeSectionSlot {
                 MissionControlHero(
                     status = presentedStatus,
                     statusMessage = runtimeTransition?.message ?: state.statusMessage,
@@ -569,9 +573,11 @@ fun HomeScreen(
                     onOpenVariantPicker = viewModel::openVariantPicker,
                     onOpenRuntimeInfo = { activeOverlay = HomeOverlay.RuntimeInfo }
                 )
+                    }
                 }
 
                 item(key = "snapshotStrip") {
+                    HomeSectionSlot {
                 SnapshotStrip(
                     status = presentedStatus,
                     isDarkTheme = isDarkTheme,
@@ -606,6 +612,7 @@ fun HomeScreen(
                         activeOverlay = HomeOverlay.CoreUpdateConfirm
                     },
                 )
+                    }
                 }
 
                 item(key = "runtimePermissionHint") {
@@ -614,6 +621,7 @@ fun HomeScreen(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
+                    HomeSectionSlot {
                     RuntimePermissionHintCard(
                         notificationReady = hasNotificationPermission,
                         batteryRequired = state.runMode == RunMode.Normal,
@@ -627,10 +635,12 @@ fun HomeScreen(
                             }
                         }
                     )
+                    }
                 }
                 }
 
                 item(key = "actionDeck") {
+                    HomeSectionSlot {
                 ActionDeck(
                     status = presentedStatus,
                     isRunning = isRunning,
@@ -656,6 +666,7 @@ fun HomeScreen(
                         isUpdating = viewModel.isUpdatingCore
                     )
                 )
+                    }
                 }
 
                 item(key = "accessGateway") {
@@ -664,6 +675,7 @@ fun HomeScreen(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
+                    HomeSectionSlot {
                     AccessGatewayPanel(
                         localUrl = state.localUrl,
                         lanUrl = state.lanUrl,
@@ -693,6 +705,7 @@ fun HomeScreen(
                             )
                         }
                     )
+                    }
                 }
                 }
 
@@ -702,6 +715,7 @@ fun HomeScreen(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
+                    HomeSectionSlot {
                     AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(18.dp),
@@ -724,11 +738,14 @@ fun HomeScreen(
                             )
                         }
                     }
+                    }
                 }
                 }
 
                 item(key = "bottomBarSpacer") {
+                    HomeSectionSlot {
                 FloatingBottomBarContentSpacer()
+                    }
                 }
             }
         }
@@ -1726,6 +1743,24 @@ private fun AnnouncementCenterDialog(
                 }
             }
         }
+    }
+}
+
+/**
+ * 首页每个分区的统一底间距（14dp）。
+ *
+ * 间距放在 item 内部而不是 LazyColumn 的 verticalArrangement，
+ * 这样「权限提示」「错误卡」这类隐藏的 AnimatedVisibility 段折叠后
+ * 不会在两侧各留一次间距（表现为卡片之间忽大忽小）。
+ */
+@Composable
+private fun HomeSectionSlot(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 14.dp)
+    ) {
+        content()
     }
 }
 
