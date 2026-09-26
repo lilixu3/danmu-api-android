@@ -55,6 +55,24 @@ class LocalDanmuSourceStore @Inject constructor(
         if (changed) writeAll(current)
     }
 
+    /**
+     * 编辑元数据会重算 resourceKey（核心会删掉旧 key 文件），这里把来源记录迁到新 key，
+     * 否则改完标题/集数后详情页预览会因为找不到 uri 而失效。
+     */
+    fun migrate(mappings: Map<String, String>) {
+        if (mappings.isEmpty()) return
+        val current = readAll().toMutableMap()
+        var changed = false
+        val now = System.currentTimeMillis()
+        mappings.forEach { (oldKey, newKey) ->
+            if (oldKey.isBlank() || newKey.isBlank() || oldKey == newKey) return@forEach
+            val ref = current.remove(oldKey) ?: return@forEach
+            current[newKey] = ref.copy(resourceKey = newKey, updatedAt = now)
+            changed = true
+        }
+        if (changed) writeAll(current)
+    }
+
     private fun readAll(): Map<String, LocalDanmuSourceRef> {
         val raw = prefs.getString(KEY_SOURCES, "").orEmpty()
         if (raw.isBlank()) return emptyMap()

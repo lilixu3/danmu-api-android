@@ -77,6 +77,12 @@ internal const val KEY_SOURCE_DETAIL_CONCURRENCY_BY_SOURCE = "SOURCE_DETAIL_CONC
 internal const val KEY_BLOCKED_WORDS = "BLOCKED_WORDS"
 internal const val KEY_IP_BLACKLIST = "IP_BLACKLIST"
 internal const val KEY_AI_API_KEY = "AI_API_KEY"
+internal const val KEY_DANDANPLAY_ACCOUNT = "DANDANPLAY_ACCOUNT"
+internal const val KEY_DANDANPLAY_PASSWORD = "DANDANPLAY_PASSWORD"
+internal const val KEY_COLOR_POOL = "COLOR_POOL"
+internal const val KEY_ANIME_TITLE_FILTER = "ANIME_TITLE_FILTER"
+internal const val KEY_EPISODE_TITLE_FILTER = "EPISODE_TITLE_FILTER"
+internal const val KEY_TITLE_NOISE_FILTER = "TITLE_NOISE_FILTER"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -127,6 +133,7 @@ fun ConfigScreen(
     val configuredCount = envVars.size
     val totalCount = filteredCatalog.size
     var adminRequiredPrompt by remember { mutableStateOf<AdminModeRequiredPrompt?>(null) }
+    var pendingDeleteVar by remember { mutableStateOf<EnvVarDef?>(null) }
 
     val categoryLabels = mapOf(
         "api" to "API 配置",
@@ -146,12 +153,9 @@ fun ConfigScreen(
         EnvVarEditDialog(
             def = editingVar!!,
             currentValue = envVars[editingVar!!.key] ?: "",
+            categoryLabel = categoryLabels[editingVar!!.category] ?: editingVar!!.category,
             onSave = { value ->
                 viewModel.setValue(editingVar!!.key, value)
-                viewModel.closeEditor()
-            },
-            onDelete = {
-                viewModel.deleteKey(editingVar!!.key)
                 viewModel.closeEditor()
             },
             onDismiss = { viewModel.closeEditor() },
@@ -159,6 +163,10 @@ fun ConfigScreen(
             onPollBiliQr = { key -> viewModel.pollBilibiliQr(key) },
             onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) },
             onVerifyAiConnectivity = { apiKey -> viewModel.verifyAiConnectivity(apiKey) },
+            dandanplayAccount = envVars[KEY_DANDANPLAY_ACCOUNT].orEmpty(),
+            onVerifyDandanplayAccount = { account, password ->
+                viewModel.verifyDandanplayAccount(account, password)
+            },
             onFetchRecentAnimeCache = { viewModel.fetchRecentAnimeCache() }
         )
     }
@@ -168,6 +176,30 @@ fun ConfigScreen(
             prompt = prompt,
             onOpenAdminMode = onOpenAdminMode,
             onDismiss = { adminRequiredPrompt = null }
+        )
+    }
+
+    pendingDeleteVar?.let { target ->
+        AppDialog(
+            onDismissRequest = { pendingDeleteVar = null },
+            style = AppDialogStyle.Confirm,
+            tone = AppDialogTone.Danger,
+            title = { Text("确认清除") },
+            text = { Text("确定要从 .env 中删除 ${target.key} 吗？") },
+            confirmButton = {
+                AppGlassButton(
+                    onClick = {
+                        viewModel.deleteKey(target.key)
+                        pendingDeleteVar = null
+                    },
+                    tint = MaterialTheme.colorScheme.error
+                ) {
+                    Text("清除")
+                }
+            },
+            dismissButton = {
+                AppGlassButton(onClick = { pendingDeleteVar = null }) { Text("取消") }
+            }
         )
     }
 
@@ -287,6 +319,16 @@ fun ConfigScreen(
                 onEditVar = { def ->
                     if (adminState.isAdminMode) {
                         viewModel.openEditor(def)
+                    } else {
+                        adminRequiredPrompt = adminModeRequiredPrompt(
+                            target = AdminModeRequiredTarget.ConfigItem(def.key),
+                            hasAdminTokenConfigured = adminState.hasAdminTokenConfigured
+                        )
+                    }
+                },
+                onDeleteVar = { def ->
+                    if (adminState.isAdminMode) {
+                        pendingDeleteVar = def
                     } else {
                         adminRequiredPrompt = adminModeRequiredPrompt(
                             target = AdminModeRequiredTarget.ConfigItem(def.key),

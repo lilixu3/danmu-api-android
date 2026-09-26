@@ -232,6 +232,31 @@ class ConfigViewModel @Inject constructor(
         }
     }
 
+    suspend fun verifyDandanplayAccount(
+        account: String,
+        password: String
+    ): Result<DandanplayVerifyResult> {
+        return runCatching {
+            val passwordValue = password.trim()
+            if (passwordValue.isBlank()) {
+                error("请先输入弹弹play密码")
+            }
+
+            val payload = JSONObject()
+                .put("dandanplayAccount", account.trim())
+                .put("dandanplayPassword", passwordValue)
+            val root = postJson("/api/nipaplay/verify", payload)
+            parseDandanplayVerifyResponse(root)
+        }.recoverCatching { error ->
+            // 旧核心没有 /api/nipaplay/verify 路由，404 会以 "Not found" 返回，这里换成可读提示。
+            val raw = error.message.orEmpty()
+            if (raw.contains("not found", ignoreCase = true)) {
+                throw IllegalStateException("当前核心不支持弹弹play账号连通性测试，请先更新核心")
+            }
+            throw error
+        }
+    }
+
     private suspend fun postJson(path: String, payload: JSONObject? = null): JSONObject {
         return withContext(Dispatchers.IO) {
             val bodyText = (payload ?: JSONObject()).toString()
@@ -498,3 +523,28 @@ data class AiConnectivityVerifyResult(
     val model: String?,
     val latencyMs: Long?,
 )
+
+data class DandanplayVerifyResult(
+    val isReachable: Boolean,
+    val message: String,
+)
+
+/**
+ * 解析核心 POST /api/nipaplay/verify 的响应：
+ * 成功返回 `{ok:true, message}`，失败同样以 200 返回 `{ok:false, message}`。
+ * 兼容旧格式（只有 `success` 字段）与包一层 `data` 的返回。
+ */
+internal fun parseDandanplayVerifyResponse(root: JSONObject): DandanplayVerifyResult {
+    val data = root.optJSONObject("data") ?: root
+    val reachable = if (data.has("ok")) {
+        data.optBoolean("ok", false)
+    } else {
+        data.optBoolean("success", false)
+    }
+    return DandanplayVerifyResult(
+        isReachable = reachable,
+        message = data.optString("message").trim()
+            .ifBlank { root.optString("message").trim() }
+            .ifBlank { if (reachable) "弹弹play账号连通正常" else "弹弹play账号连通测试失败" }
+    )
+}

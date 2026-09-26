@@ -176,6 +176,7 @@ internal fun DialogActionButton(
     text: String,
     icon: ImageVector,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = false,
     loading: Boolean = false
@@ -184,6 +185,7 @@ internal fun DialogActionButton(
     if (primary) {
         AppGlassPrimaryButton(
             onClick = onClick,
+            modifier = modifier,
             enabled = actualEnabled
         ) {
             if (loading) {
@@ -203,6 +205,7 @@ internal fun DialogActionButton(
         // Keep that contract when the material effect is disabled.
         OutlinedButton(
             onClick = onClick,
+            modifier = modifier,
             enabled = actualEnabled,
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -220,6 +223,7 @@ internal fun DialogActionButton(
     } else {
         AppGlassButton(
             onClick = onClick,
+            modifier = modifier,
             enabled = actualEnabled
         ) {
             if (loading) {
@@ -329,29 +333,43 @@ internal fun CacheQuickDialog(
             }
         },
         actions = {
-            DialogActionButton(
-                text = "取消",
-                icon = Icons.Rounded.Close,
-                onClick = onDismiss,
-                enabled = !isClearing
-            )
-            DialogActionButton(
-                text = "完整管理",
-                icon = Icons.AutoMirrored.Rounded.OpenInNew,
-                onClick = onOpenCacheManagement
-            )
-            DialogActionButton(
-                text = when {
-                    isClearing -> "清理中"
-                    capability.supportsSelective -> "清理 ${selectedItems.size} 项"
-                    else -> "全部清理"
-                },
-                icon = Icons.Rounded.DeleteSweep,
-                onClick = onClear,
-                enabled = cacheStats.isAvailable && selectedItems.isNotEmpty() && !isLoading,
-                loading = isClearing,
-                primary = true
-            )
+            // 三个操作改成两行：取消 / 完整管理 等宽一行，主操作整行，避免玻璃按钮自动换行错位。
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DialogActionButton(
+                        text = "取消",
+                        icon = Icons.Rounded.Close,
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        enabled = !isClearing
+                    )
+                    DialogActionButton(
+                        text = "完整管理",
+                        icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                        onClick = onOpenCacheManagement,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                DialogActionButton(
+                    text = when {
+                        isClearing -> "清理中"
+                        capability.supportsSelective -> "清理 ${selectedItems.size} 项"
+                        else -> "全部清理"
+                    },
+                    icon = Icons.Rounded.DeleteSweep,
+                    onClick = onClear,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = cacheStats.isAvailable && selectedItems.isNotEmpty() && !isLoading,
+                    loading = isClearing,
+                    primary = true
+                )
+            }
         }
     )
 }

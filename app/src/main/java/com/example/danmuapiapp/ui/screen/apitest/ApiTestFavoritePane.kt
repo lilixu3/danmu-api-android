@@ -607,20 +607,38 @@ private fun FavoriteScheduleDialog(
             }
         },
         actions = {
-            if (existing != null) {
-                AppGlassDangerButton(
-                    onClick = onDisable,
+            // 三个操作改两行：取消（+ 关闭定时）一行，保存整行主操作，避免玻璃按钮自动换行。
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("关闭定时")
+                    AppGlassButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("取消") }
+                    if (existing != null) {
+                        AppGlassDangerButton(
+                            onClick = onDisable,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("关闭定时")
+                        }
+                    }
+                }
+                AppGlassButton(
+                    onClick = {
+                        onSave(FavoriteScheduleDraft(frequency, normalizedTime, weekday))
+                    },
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("保存")
                 }
             }
-            AppGlassButton(onClick = onDismiss) { Text("取消") }
-            AppGlassButton(
-                onClick = {
-                onSave(FavoriteScheduleDraft(frequency, normalizedTime, weekday))
-                },
-                tint = MaterialTheme.colorScheme.primary
-            ) { Text("保存") }
         }
     )
 }

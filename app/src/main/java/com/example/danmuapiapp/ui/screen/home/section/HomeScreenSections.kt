@@ -997,7 +997,13 @@ internal fun ActionDeck(
                 val variantPickerContent: @Composable RowScope.() -> Unit = {
                     Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("切换核心")
+                    Text(
+                        "切换核心",
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
                 val dangerousCoreAction = !isCoreInfoLoading &&
                     (!isCoreInstalled || sourceMismatch || sourceUnknownLegacy || hasVersionUpdate)
@@ -1042,7 +1048,13 @@ internal fun ActionDeck(
                         )
                     }
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(coreActionText)
+                    Text(
+                        coreActionText,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
                 if (glassEnabled) {
                     AppLiquidButton(
@@ -1458,6 +1470,10 @@ internal fun InfoChip(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
                             alpha = if (enabled) 1f else 0.7f
                         )
@@ -1483,7 +1499,9 @@ internal fun InfoChip(
                         fontFamily = FontFamily.Monospace
                     ),
                     color = accent.copy(alpha = if (enabled) 1f else 0.72f),
-                    maxLines = 1
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

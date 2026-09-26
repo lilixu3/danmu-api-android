@@ -2,6 +2,7 @@ package com.example.danmuapiapp.ui.component.liquid
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
@@ -9,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -18,11 +20,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
@@ -71,11 +76,7 @@ fun AppGlassButton(
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
     borderColor: Color = Color.Unspecified,
-    contentColor: Color = if (enabled) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-    },
+    contentColor: Color = Color.Unspecified,
     contentPadding: PaddingValues = PaddingValues(
         horizontal = if (LocalAppDialogContext.current) 14.dp else 16.dp
     ),
@@ -87,54 +88,47 @@ fun AppGlassButton(
     val glassRequested = LocalGlassMaterial.current.enabled
     val dialogContext = LocalAppDialogContext.current
     val dialogDarkTheme = LocalAppDarkTheme.current
+    val resolvedContentColor = when {
+        contentColor.isSpecified -> contentColor
+        enabled -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    }
     if (!glassRequested) {
-        when {
-            surfaceColor.isSpecified -> OutlinedButton(
-                onClick = onClick,
-                modifier = modifier,
-                enabled = enabled,
-                shape = shape,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    // Liquid callers pass translucent fills for the glass path.
-                    // The legacy outlined control is intentionally transparent.
-                    containerColor = Color.Transparent,
-                    contentColor = contentColor,
-                    disabledContainerColor = Color.Transparent,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                ),
-                contentPadding = contentPadding,
-                content = content
-            )
-
-            tint.isSpecified -> Button(
-                onClick = onClick,
-                modifier = modifier,
-                enabled = enabled,
-                shape = shape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = tint,
-                    contentColor = contentColor,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                ),
-                contentPadding = contentPadding,
-                content = content
-            )
-
-            else -> TextButton(
-                onClick = onClick,
-                modifier = modifier,
-                enabled = enabled,
-                shape = shape,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = contentColor,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                ),
-                contentPadding = contentPadding,
-                content = content
-            )
+        // 关闭液态玻璃时恢复传统外观：所有按钮都有实底，并按底色自动选文字颜色，
+        // 避免出现“只有文字没有背景”或底色与文字太接近的情况。
+        val baseColor = when {
+            surfaceColor.isSpecified -> surfaceColor
+            tint.isSpecified -> tint
+            else -> null
         }
+        val container = baseColor?.compositeOver(MaterialTheme.colorScheme.surface)
+            ?: MaterialTheme.colorScheme.surfaceContainerHighest
+        val legacyContentColor = if (contentColor.isSpecified) {
+            contentColor
+        } else {
+            val schemeContent = baseColor?.let { contentColorFor(it) }
+            when {
+                schemeContent != null && schemeContent.isSpecified -> schemeContent
+                baseColor == null -> MaterialTheme.colorScheme.onSurface
+                container.luminance() > 0.5f -> Color.Black
+                else -> Color.White
+            }
+        }
+        FilledTonalButton(
+            onClick = onClick,
+            modifier = modifier.height(height),
+            enabled = enabled,
+            shape = shape,
+            border = if (borderColor.isSpecified) BorderStroke(1.dp, borderColor) else null,
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = container,
+                contentColor = legacyContentColor,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            ),
+            contentPadding = contentPadding,
+            content = content
+        )
         return
     }
 
@@ -168,7 +162,7 @@ fun AppGlassButton(
         } else {
             null
         },
-        contentColor = contentColor,
+        contentColor = resolvedContentColor,
         contentPadding = contentPadding,
         height = height,
         shape = shape,
@@ -340,27 +334,48 @@ fun AppGlassIconButton(
 ) {
     val glassRequested = LocalGlassMaterial.current.enabled
     if (!glassRequested) {
+        // 传统外观：带色图标按钮用实底，避免 0.3 透明度在浅色背景上看不见。
+        val container = if (surfaceColor.isSpecified) {
+            surfaceColor.compositeOver(MaterialTheme.colorScheme.surface)
+        } else {
+            Color.Unspecified
+        }
         if (LocalAppDialogContext.current) {
-            androidx.compose.runtime.CompositionLocalProvider(
-                LocalContentColor provides contentColor
-            ) {
-                IconButton(
+            if (container.isSpecified) {
+                FilledTonalIconButton(
                     onClick = onClick,
                     modifier = modifier.size(size),
                     enabled = enabled,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = container,
+                        contentColor = contentColor,
+                        disabledContainerColor = container.copy(alpha = 0.6f),
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    ),
                     content = content
                 )
+            } else {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalContentColor provides contentColor
+                ) {
+                    IconButton(
+                        onClick = onClick,
+                        modifier = modifier.size(size),
+                        enabled = enabled,
+                        content = content
+                    )
+                }
             }
         } else {
             FilledTonalIconButton(
                 onClick = onClick,
                 modifier = modifier.size(size),
                 enabled = enabled,
-                colors = if (surfaceColor.isSpecified) {
+                colors = if (container.isSpecified) {
                     IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = surfaceColor,
+                        containerColor = container,
                         contentColor = contentColor,
-                        disabledContainerColor = surfaceColor.copy(alpha = 0.6f),
+                        disabledContainerColor = container.copy(alpha = 0.6f),
                         disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                     )
                 } else {

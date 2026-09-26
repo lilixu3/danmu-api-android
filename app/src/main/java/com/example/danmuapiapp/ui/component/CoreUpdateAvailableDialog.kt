@@ -139,23 +139,47 @@ internal fun CoreUpdateAvailableDialog(
                 }
             }
         },
-        dismissButton = {
-            AppGlassButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        },
+        // 三个按钮改成两行有意的布局：取消 / 更新详情 等宽一行，立即更新整行主操作。
+        // 之前三个按钮分别落在 dismiss/confirm/actions 三个槽位，靠 FlowRow 自动换行，
+        // 液态玻璃按钮变宽后就会出现“两个一行 + 一个挤到下一行”的错位。
         confirmButton = {
-            AppGlassButton(onClick = onShowDetails) {
-                Icon(Icons.Rounded.Visibility, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("更新详情")
-            }
-        },
-        actions = {
-            AppGlassButton(onClick = onUpdateNow, tint = MaterialTheme.colorScheme.primary) {
-                Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("立即更新")
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AppGlassButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("取消")
+                    }
+                    AppGlassButton(
+                        onClick = onShowDetails,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.Visibility, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "更新详情",
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                AppGlassButton(
+                    onClick = onUpdateNow,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.SystemUpdate, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("立即更新")
+                }
             }
         }
     )

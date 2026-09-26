@@ -12,9 +12,11 @@ import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
 import com.example.danmuapiapp.domain.model.LocalDanmuGroup
+import com.example.danmuapiapp.domain.model.LocalDanmuMetadataPatch
 import com.example.danmuapiapp.domain.model.LocalDanmuResource
 import com.example.danmuapiapp.domain.model.LocalDanmuSnapshot
 import com.example.danmuapiapp.domain.model.LocalDanmuUploadRequest
+import com.example.danmuapiapp.domain.model.LocalDanmuUpdateResult
 import com.example.danmuapiapp.domain.model.LocalDanmuWritePermission
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
@@ -40,6 +42,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import okio.ForwardingSink
 import okio.buffer
@@ -55,6 +58,8 @@ internal enum class LocalDanmuErrorKind {
     Unauthorized,
     Forbidden,
     NotFound,
+    /** 目标 resourceKey 已存在（核心返回 409），需要用户改集数或文件名。 */
+    Conflict,
     FileTooLarge,
     InvalidRequest,
     Busy,
@@ -335,6 +340,68 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         }.onSuccess { invalidateCache() }
     }
 
+    override suspend fun updateMetadata(
+        resourceKey: String,
+        patch: LocalDanmuMetadataPatch
+    ): Result<LocalDanmuUpdateResult> {
+        if (resourceKey.isBlank()) {
+            return Result.failure(
+                LocalDanmuApiException(LocalDanmuErrorKind.InvalidRequest, "资源标识无效，请刷新列表")
+            )
+        }
+        val body = buildLocalDanmuPatchBody(patch)
+        return runLocalDanmuRequest {
+            val access = resolveRuntimeAccess()
+            val paths = tokenPaths(access)
+            withTokenPaths(paths) { tokenPath ->
+                val (code, responseBody) = executePatch(
+                    access = access,
+                    tokenPath = tokenPath,
+                    resourceKey = resourceKey,
+                    jsonBody = body
+                )
+                if (code == 404) {
+                    // 旧核心没有 PATCH 路由，统一落到 "Not found"；提示里带上"先更新核心"。
+                    throw LocalDanmuApiException(
+                        LocalDanmuErrorKind.NotFound,
+                        "资源不存在，或当前核心版本不支持元数据编辑（请先更新核心）",
+                        code
+                    )
+                }
+                if (code !in 200..299) {
+                    throw mapError(code, responseBody, notFoundKind = LocalDanmuErrorKind.NotFound)
+                }
+                val root = decodeObject(responseBody, "update")
+                if (!root.optBoolean("success", true)) {
+                    throw LocalDanmuApiException(
+                        LocalDanmuErrorKind.InvalidRequest,
+                        root.optString("errorMessage").ifBlank { "核心拒绝了修改请求" },
+                        code
+                    )
+                }
+                val resources = root.optJSONArray("resources")
+                    ?.let { array ->
+                        (0 until array.length()).mapNotNull { index ->
+                            array.optJSONObject(index)?.let(::parseResource)
+                        }
+                    }
+                    .orEmpty()
+                val single = root.optJSONObject("resource")?.let(::parseResource)
+                val updated = resources.ifEmpty { listOfNotNull(single) }
+                if (updated.isEmpty()) {
+                    throw LocalDanmuApiException(
+                        LocalDanmuErrorKind.Server,
+                        "核心未返回更新后的资源信息"
+                    )
+                }
+                LocalDanmuUpdateResult(
+                    scope = root.optString("scope").ifBlank { patch.scope.wire },
+                    resources = updated
+                )
+            }
+        }.onSuccess { invalidateCache() }
+    }
+
     override suspend fun deleteMany(
         resourceKeys: Collection<String>,
         onProgress: (completed: Int, total: Int) -> Unit
@@ -413,7 +480,9 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                 if (error.kind == LocalDanmuErrorKind.Unsupported ||
                     error.kind == LocalDanmuErrorKind.Busy ||
                     error.kind == LocalDanmuErrorKind.Network ||
-                    error.kind == LocalDanmuErrorKind.Server
+                    error.kind == LocalDanmuErrorKind.Server ||
+                    // 409 说明请求已经被核心处理过（只是目标已存在），换 token 路径重发没有意义。
+                    error.kind == LocalDanmuErrorKind.Conflict
                 ) {
                     throw error
                 }
@@ -520,6 +589,20 @@ class LocalDanmuRepositoryImpl @Inject constructor(
             .url(buildUrl(access, tokenPath, pathSegments))
             .applyRuntimeApiAuth(access)
             .delete()
+            .build()
+        return execute(request)
+    }
+
+    private suspend fun executePatch(
+        access: RuntimeApiAccess,
+        tokenPath: String,
+        resourceKey: String,
+        jsonBody: String
+    ): Pair<Int, String> {
+        val request = Request.Builder()
+            .url(buildUrl(access, tokenPath, listOf("api", "v2", "local-danmu", resourceKey)))
+            .applyRuntimeApiAuth(access)
+            .patch(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
             .build()
         return execute(request)
     }
@@ -649,6 +732,11 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                 } else {
                     message.ifBlank { "资源不存在" }
                 },
+                code
+            )
+            409 -> LocalDanmuApiException(
+                LocalDanmuErrorKind.Conflict,
+                message.ifBlank { "目标资源已存在，无法覆盖" },
                 code
             )
             413 -> LocalDanmuApiException(

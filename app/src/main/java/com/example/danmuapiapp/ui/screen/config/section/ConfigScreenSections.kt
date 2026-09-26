@@ -70,6 +70,7 @@ internal fun VisualEditMode(
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onEditVar: (EnvVarDef) -> Unit,
+    onDeleteVar: (EnvVarDef) -> Unit,
     editable: Boolean,
     isCatalogLoading: Boolean,
     catalogEmpty: Boolean,
@@ -164,7 +165,8 @@ internal fun VisualEditMode(
                     def = def,
                     currentValue = envVars[def.key],
                     enabled = editable,
-                    onClick = { onEditVar(def) }
+                    onClick = { onEditVar(def) },
+                    onDelete = { onDeleteVar(def) }
                 )
             }
         }
@@ -256,7 +258,8 @@ internal fun EnvVarCard(
     def: EnvVarDef,
     currentValue: String?,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     AppGlassSurface(
         modifier = Modifier
@@ -307,6 +310,17 @@ internal fun EnvVarCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+            if (enabled && currentValue != null) {
+                // 与核心前端一致：清除入口在列表项右侧（弹窗里只有保存/取消）。
+                AppGlassIconButton(onClick = onDelete, size = 34.dp) {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "清除",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }

@@ -20,6 +20,7 @@ class LocalDanmuRequestRetryPolicyTest {
             LocalDanmuErrorKind.Unauthorized,
             LocalDanmuErrorKind.Forbidden,
             LocalDanmuErrorKind.NotFound,
+            LocalDanmuErrorKind.Conflict,
             LocalDanmuErrorKind.FileTooLarge,
             LocalDanmuErrorKind.Unsupported,
             LocalDanmuErrorKind.Server

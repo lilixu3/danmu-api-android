@@ -12,7 +12,11 @@ import com.example.danmuapiapp.data.repository.LocalDanmuPreviewLoader
 import com.example.danmuapiapp.data.repository.LocalDanmuResourceKey
 import com.example.danmuapiapp.data.repository.LocalDanmuSourceStore
 import com.example.danmuapiapp.data.repository.LocalDanmuUploadHistoryStore
+import com.example.danmuapiapp.data.repository.matchMigratedResourceKeys
+import com.example.danmuapiapp.data.repository.validateLocalDanmuEdit
+import com.example.danmuapiapp.domain.model.LocalDanmuEditScope
 import com.example.danmuapiapp.domain.model.LocalDanmuGroup
+import com.example.danmuapiapp.domain.model.LocalDanmuMetadataPatch
 import com.example.danmuapiapp.domain.model.LocalDanmuParseConfidence
 import com.example.danmuapiapp.domain.model.LocalDanmuResource
 import com.example.danmuapiapp.domain.model.LocalDanmuSnapshot
@@ -56,6 +60,26 @@ data class LocalDanmuUploadUiState(
     val hasFile: Boolean get() = sourceUri.isNotBlank()
 }
 
+/**
+ * 元数据编辑弹窗状态。scope=Resource 时只有集数/文件名字段生效，
+ * scope=Group 时只有标题/年份/类型/季数生效（对应核心 PATCH 的两档范围）。
+ */
+data class LocalDanmuEditState(
+    val target: LocalDanmuResource? = null,
+    val scope: LocalDanmuEditScope = LocalDanmuEditScope.Resource,
+    val title: String = "",
+    val year: Int? = null,
+    val type: LocalDanmuType = LocalDanmuType.Tv,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val filename: String = "",
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null
+) {
+    val isVisible: Boolean get() = target != null
+    val isMovie: Boolean get() = type == LocalDanmuType.Movie
+}
+
 data class LocalDanmuUiState(
     val isLoading: Boolean = false,
     val snapshot: LocalDanmuSnapshot = LocalDanmuSnapshot(emptyList(), emptyList()),
@@ -74,6 +98,7 @@ data class LocalDanmuUiState(
     val browser: LocalDanmuBrowserState = LocalDanmuBrowserState(),
     val batch: LocalDanmuBatchState = LocalDanmuBatchState(),
     val detailResource: LocalDanmuResource? = null,
+    val editState: LocalDanmuEditState = LocalDanmuEditState(),
     val previewState: DanmuPreviewDialogState = DanmuPreviewDialogState(),
     val pendingDeleteResources: List<LocalDanmuResource> = emptyList(),
     val deleteInProgress: Boolean = false,
@@ -97,6 +122,24 @@ data class LocalDanmuUiState(
     val totalEpisodeFiles: Int get() = snapshot.resources.size
     val totalDanmuCount: Int get() = snapshot.resources.sumOf { it.count }
     val totalSizeBytes: Long get() = snapshot.resources.sumOf { it.sizeBytes }
+}
+
+/**
+ * 核心 PATCH scope=group 的作用范围：同标题、同年份、同类型、同季的全部资源。
+ * app 侧只用于展示「会改到几个文件」，核心仍是最终判定方。
+ */
+internal fun localDanmuGroupResources(
+    resources: List<LocalDanmuResource>,
+    target: LocalDanmuResource
+): List<LocalDanmuResource> {
+    val normalizedTitle = LocalDanmuResourceKey.normalizeKey(target.title)
+    val normalizedType = LocalDanmuResourceKey.normalizeType(target.type)
+    return resources.filter { resource ->
+        LocalDanmuResourceKey.normalizeKey(resource.title) == normalizedTitle &&
+            resource.year == target.year &&
+            LocalDanmuResourceKey.normalizeType(resource.type) == normalizedType &&
+            resource.season == target.season
+    }
 }
 
 data class LocalDanmuBrowserState(
@@ -878,6 +921,159 @@ class LocalDanmuViewModel @Inject constructor(
         _uiState.update { it.copy(detailResource = null) }
     }
 
+    // ───────────────────────── 元数据编辑 ─────────────────────────
+
+    fun startEdit(resource: LocalDanmuResource) {
+        _uiState.update {
+            it.copy(
+                editState = LocalDanmuEditState(
+                    target = resource,
+                    scope = LocalDanmuEditScope.Resource,
+                    title = resource.title,
+                    year = resource.year.takeIf { year -> year > 0 },
+                    type = LocalDanmuType.fromWire(resource.type) ?: LocalDanmuType.Tv,
+                    season = resource.season.takeIf { season -> season > 0 } ?: 1,
+                    episode = resource.episode,
+                    filename = resource.filename
+                ),
+                errorMessage = null
+            )
+        }
+    }
+
+    /** 从分组卡片直接改整季信息（标题/年份/类型/季数）。 */
+    fun startEditGroup(group: LocalDanmuGroup) {
+        val target = group.episodes.firstOrNull() ?: return
+        startEdit(target)
+        setEditScope(LocalDanmuEditScope.Group)
+    }
+
+    fun dismissEdit() {
+        if (_uiState.value.editState.isSaving) return
+        _uiState.update { it.copy(editState = LocalDanmuEditState()) }
+    }
+
+    fun setEditScope(scope: LocalDanmuEditScope) {
+        updateEdit { it.copy(scope = scope, errorMessage = null) }
+    }
+
+    fun updateEditTitle(value: String) {
+        updateEdit { it.copy(title = value, errorMessage = null) }
+    }
+
+    fun updateEditYear(value: String) {
+        updateEdit {
+            it.copy(
+                year = value.filter(Char::isDigit).take(4).toIntOrNull(),
+                errorMessage = null
+            )
+        }
+    }
+
+    fun updateEditType(value: LocalDanmuType) {
+        updateEdit { it.copy(type = value, errorMessage = null) }
+    }
+
+    fun updateEditSeason(value: String) {
+        updateEdit {
+            it.copy(
+                season = value.filter(Char::isDigit).take(3).toIntOrNull(),
+                errorMessage = null
+            )
+        }
+    }
+
+    fun updateEditEpisode(value: String) {
+        updateEdit {
+            it.copy(
+                episode = value.filter(Char::isDigit).take(4).toIntOrNull(),
+                errorMessage = null
+            )
+        }
+    }
+
+    fun updateEditFilename(value: String) {
+        updateEdit { it.copy(filename = value.take(240), errorMessage = null) }
+    }
+
+    fun submitEdit() {
+        val state = _uiState.value
+        val edit = state.editState
+        val target = edit.target ?: return
+        if (edit.isSaving) return
+        val validation = validateLocalDanmuEdit(
+            scope = edit.scope,
+            title = edit.title,
+            year = edit.year,
+            type = edit.type,
+            season = edit.season,
+            episode = edit.episode,
+            filename = edit.filename,
+            currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        )
+        if (validation != null) {
+            updateEdit { it.copy(errorMessage = validation) }
+            return
+        }
+        val scoped = edit.scope == LocalDanmuEditScope.Group
+        val patch = LocalDanmuMetadataPatch(
+            scope = edit.scope,
+            title = edit.title.trim().takeIf { scoped },
+            year = edit.year.takeIf { scoped },
+            type = edit.type.takeIf { scoped },
+            season = edit.season.takeIf { scoped },
+            episode = edit.episode.takeIf { !scoped },
+            filename = edit.filename.trim().takeIf { !scoped }
+        )
+        val affected = when (edit.scope) {
+            LocalDanmuEditScope.Resource -> listOf(target)
+            LocalDanmuEditScope.Group ->
+                localDanmuGroupResources(state.snapshot.resources, target).ifEmpty { listOf(target) }
+        }
+        viewModelScope.launch {
+            updateEdit { it.copy(isSaving = true, errorMessage = null) }
+            repository.updateMetadata(target.resourceKey, patch).fold(
+                onSuccess = { result ->
+                    // 编辑会重算 resourceKey，来源记录必须跟着迁移，否则预览失效。
+                    sourceStore.migrate(matchMigratedResourceKeys(affected, result.resources))
+                    _uiState.update {
+                        it.copy(
+                            editState = LocalDanmuEditState(),
+                            message = editSuccessMessage(edit, result.resources.size)
+                        )
+                    }
+                    refreshNow()
+                },
+                onFailure = { error ->
+                    updateEdit { it.copy(isSaving = false, errorMessage = userMessage(error)) }
+                }
+            )
+        }
+    }
+
+    private fun updateEdit(transform: (LocalDanmuEditState) -> LocalDanmuEditState) {
+        _uiState.update { state ->
+            if (state.editState.target == null) {
+                state
+            } else {
+                state.copy(editState = transform(state.editState))
+            }
+        }
+    }
+
+    private fun editSuccessMessage(edit: LocalDanmuEditState, updatedCount: Int): String {
+        val episodeLabel = when {
+            edit.isMovie -> "正片"
+            edit.episode != null -> "第${edit.episode}集"
+            else -> "全集"
+        }
+        return when (edit.scope) {
+            LocalDanmuEditScope.Resource -> "已保存：${edit.title} $episodeLabel"
+            LocalDanmuEditScope.Group ->
+                "已保存：${edit.title} 第${edit.season ?: 1}季（$updatedCount 个文件）"
+        }
+    }
+
     fun loadPreview(resourceKey: String) {
         _uiState.update {
             it.copy(previewState = DanmuPreviewDialogState(loadingRecordId = -1L))
@@ -982,7 +1178,10 @@ class LocalDanmuViewModel @Inject constructor(
                     "令牌校验失败，请检查 TOKEN/ADMIN_TOKEN 配置"
                 LocalDanmuErrorKind.Forbidden ->
                     "需要管理员权限：请开启管理员模式，或将 LOCAL_DANMU_NOT_REQUIRE_ADMIN 设为 true"
-                LocalDanmuErrorKind.NotFound -> "资源不存在，列表可能已变化"
+                LocalDanmuErrorKind.NotFound ->
+                    error.message.ifBlank { "资源不存在，列表可能已变化" }
+                LocalDanmuErrorKind.Conflict ->
+                    error.message.ifBlank { "目标资源已存在，无法覆盖，请改集数或文件名" }
                 LocalDanmuErrorKind.FileTooLarge -> "单文件不能超过核心 10 MB 上限"
                 LocalDanmuErrorKind.InvalidRequest ->
                     error.message.ifBlank { "请求参数或弹幕文件无效" }

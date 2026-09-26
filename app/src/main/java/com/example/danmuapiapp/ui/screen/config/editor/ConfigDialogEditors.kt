@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -27,8 +28,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -66,40 +73,19 @@ import java.util.Locale
 internal fun EnvVarEditDialog(
     def: EnvVarDef,
     currentValue: String,
+    categoryLabel: String,
     onSave: (String) -> Unit,
-    onDelete: () -> Unit,
     onDismiss: () -> Unit,
     onGenerateBiliQr: suspend () -> Result<BilibiliQrGenerateResult>,
     onPollBiliQr: suspend (String) -> Result<BilibiliQrPollResult>,
     onVerifyBiliCookie: suspend (String) -> Result<BilibiliCookieVerifyResult>,
     onVerifyAiConnectivity: suspend (String) -> Result<AiConnectivityVerifyResult>,
+    dandanplayAccount: String,
+    onVerifyDandanplayAccount: suspend (String, String) -> Result<DandanplayVerifyResult>,
     onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     var value by remember(def.key, currentValue) { mutableStateOf(currentValue) }
     var showPassword by remember(def.key) { mutableStateOf(false) }
-    var showDeleteConfirm by remember(def.key) { mutableStateOf(false) }
-
-    if (showDeleteConfirm) {
-        AppDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            style = AppDialogStyle.Confirm,
-            tone = AppDialogTone.Danger,
-            title = { Text("确认删除") },
-            text = { Text("确定要从 .env 中删除 ${def.key} 吗？") },
-            confirmButton = {
-                AppGlassButton(
-                    onClick = { showDeleteConfirm = false; onDelete() },
-                    tint = MaterialTheme.colorScheme.error
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                AppGlassButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
-            }
-        )
-        return
-    }
 
     val normalizedKey = remember(def.key) { def.key.trim().uppercase(Locale.getDefault()) }
     val autoMatchValidation = remember(normalizedKey, value, def.options) {
@@ -114,58 +100,21 @@ internal fun EnvVarEditDialog(
         onDismissRequest = onDismiss,
         style = AppDialogStyle.Form,
         tone = AppDialogTone.Brand,
-        title = {
-            Column {
-                Text(def.key, style = MaterialTheme.typography.titleMedium)
-                if (def.description != def.key) {
-                    Text(
-                        def.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        },
+        title = { Text("编辑配置项") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // 与核心自带前端一致：先列变量类别/变量名/值类型，再是值输入控件，最后是描述。
+                ReadonlyInfoRow("变量类别", categoryLabel)
+                ReadonlyInfoRow("变量名", def.key, monospace = true)
+                ReadonlyInfoRow("值类型", envTypeLabel(def.type))
+
                 val handledSpecial = when (normalizedKey) {
-                    KEY_SOURCE_ORDER -> {
-                        OrderedTokenEditor(
-                            value = value,
-                            onValueChange = { value = it },
-                            options = def.options,
-                            title = "来源排序",
-                            tokenLabel = "来源"
-                        )
-                        true
-                    }
-
-                    KEY_PLATFORM_ORDER -> {
-                        OrderedTokenEditor(
-                            value = value,
-                            onValueChange = { value = it },
-                            options = def.options,
-                            title = "平台排序",
-                            tokenLabel = "平台"
-                        )
-                        true
-                    }
-
-                    KEY_MERGE_SOURCE_PAIRS -> {
-                        CompactMergeSourcePairsEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            options = def.options,
-                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
-                        )
-                        true
-                    }
-
-                    KEY_TITLE_MAPPING_TABLE -> {
-                        CompactTitleMappingTableEditor(
+                    // 与核心自带前端一致：只对 COLOR_POOL 等少数变量做专用界面，
+                    // 其余变量一律按 type 走通用控件（来源/平台/映射表都不再特判）。
+                    KEY_COLOR_POOL -> {
+                        ColorPoolEditor(
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it }
@@ -173,33 +122,28 @@ internal fun EnvVarEditDialog(
                         true
                     }
 
-                    KEY_AUTO_MATCH_MAPPING_TABLE -> {
-                        AutoMatchMappingTableEditor(
-                            rememberKey = def.key,
+                    KEY_ANIME_TITLE_FILTER,
+                    KEY_EPISODE_TITLE_FILTER,
+                    KEY_TITLE_NOISE_FILTER -> {
+                        StableTextValueEditor(
+                            def = def,
                             value = value,
-                            onValueChange = { value = it },
-                            platformOptions = def.options
+                            showPassword = showPassword,
+                            onTogglePassword = { showPassword = !showPassword },
+                            onValueChange = { value = it }
                         )
-                        true
-                    }
-
-                    KEY_MATCH_PLATFORM_RULES -> {
-                        CompactMatchPlatformRulesEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            options = def.options
-                        )
-                        true
-                    }
-
-                    KEY_TITLE_PLATFORM_OFFSET_TABLE -> {
-                        CompactTitlePlatformOffsetTableEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            options = def.options
-                        )
+                        // 核心前端：过滤类变量在文本域下方右侧提供「查看最近数据」。
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            RecentDataToggle(
+                                rememberKey = def.key,
+                                currentKey = def.key,
+                                onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                                compact = true
+                            )
+                        }
                         true
                     }
 
@@ -225,45 +169,6 @@ internal fun EnvVarEditDialog(
                         true
                     }
 
-                    KEY_VOD_SERVERS -> {
-                        VodServersEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it }
-                        )
-                        true
-                    }
-
-                    KEY_SOURCE_DETAIL_CONCURRENCY_BY_SOURCE -> {
-                        SourceConcurrencyBySourceEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            sourceOptions = def.options
-                        )
-                        true
-                    }
-
-                    KEY_BLOCKED_WORDS -> {
-                        KeywordListEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            title = "屏蔽词列表",
-                            subtitle = "按关键词标签维护"
-                        )
-                        true
-                    }
-
-                    KEY_IP_BLACKLIST -> {
-                        IpBlacklistEditor(
-                            rememberKey = def.key,
-                            value = value,
-                            onValueChange = { value = it }
-                        )
-                        true
-                    }
-
                     KEY_BILIBILI_COOKIE -> {
                         BilibiliCookieEditor(
                             value = value,
@@ -284,12 +189,23 @@ internal fun EnvVarEditDialog(
                         true
                     }
 
+                    KEY_DANDANPLAY_PASSWORD -> {
+                        DandanplayPasswordEditor(
+                            value = value,
+                            account = dandanplayAccount,
+                            onValueChange = { value = it },
+                            onVerifyDandanplayAccount = onVerifyDandanplayAccount
+                        )
+                        true
+                    }
+
                     else -> false
                 }
 
                 if (!handledSpecial) {
                     when (def.type) {
                         EnvType.BOOLEAN -> StableBooleanValueEditor(
+                            def = def,
                             value = value,
                             onValueChange = { value = it }
                         )
@@ -307,14 +223,18 @@ internal fun EnvVarEditDialog(
                         )
 
                         EnvType.MULTI_SELECT -> StableMultiSelectValueEditor(
+                            envKey = def.key,
                             def = def,
                             value = value,
-                            onValueChange = { value = it }
+                            onValueChange = { value = it },
+                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
                         )
 
                         EnvType.MAP -> StableMapValueEditor(
+                            envKey = def.key,
                             value = value,
-                            onValueChange = { value = it }
+                            onValueChange = { value = it },
+                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
                         )
 
                         EnvType.COLOR_LIST -> ColorListEditor(
@@ -334,50 +254,82 @@ internal fun EnvVarEditDialog(
                         )
                     }
                 }
+                ReadonlyInfoRow("描述", def.description.ifBlank { "—" })
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (currentValue.isNotEmpty()) {
-                    AppGlassButton(onClick = { showDeleteConfirm = true }) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-                AppGlassButton(onClick = onDismiss) { Text("取消") }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 AppGlassButton(
                     onClick = { onSave(value) },
-                    enabled = autoMatchValidation.valid
+                    enabled = autoMatchValidation.valid,
+                    modifier = Modifier.weight(1f)
                 ) { Text("保存") }
+                AppGlassButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("取消") }
             }
         }
     )
 }
 
 @Composable
+private fun ReadonlyInfoRow(label: String, value: String, monospace: Boolean = false) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        AppGlassSurface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                value.ifBlank { "—" },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default
+                ),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+            )
+        }
+    }
+}
+
+/** 核心前端 getEnvTypeLabel 的同名映射。 */
+internal fun envTypeLabel(type: EnvType): String = when (type) {
+    EnvType.BOOLEAN -> "布尔"
+    EnvType.NUMBER -> "数字"
+    EnvType.SELECT -> "单选"
+    EnvType.MAP -> "映射"
+    EnvType.MULTI_SELECT -> "多选"
+    else -> "文本"
+}
+
+@Composable
 private fun StableBooleanValueEditor(
+    def: EnvVarDef,
     value: String,
     onValueChange: (String) -> Unit,
 ) {
-    val checked = value.lowercase(Locale.ROOT).let { it == "true" || it == "1" }
+    // 与核心前端一致：LIKE_SWITCH / REMEMBER_LAST_SELECT 未配置时视为开启。
+    val defaultValueOn = def.key == "LIKE_SWITCH" || def.key == "REMEMBER_LAST_SELECT"
+    val checked = value.lowercase(Locale.ROOT).let {
+        it == "true" || it == "1" || (defaultValueOn && it.isBlank())
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AppGlassSurface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(if (checked) "启用" else "禁用", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = checked,
-                    onCheckedChange = { onValueChange(if (it) "true" else "false") }
-                )
-            }
+            Switch(
+                checked = checked,
+                onCheckedChange = { onValueChange(if (it) "true" else "false") }
+            )
+            Text(if (checked) "启用" else "禁用", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -399,30 +351,33 @@ private fun StableNumberValueEditor(
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("值 (${minValue}-${maxValue})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AppGlassSurface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AppGlassIconButton(onClick = { setNumber(safeValue - 1) }, enabled = safeValue > minValue) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, "减少")
+            // 核心前端的数字滚轮：左侧上下两个按钮，右侧大字显示当前值。
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                AppGlassIconButton(
+                    onClick = { setNumber(safeValue + 1) },
+                    enabled = safeValue < maxValue,
+                    size = 30.dp
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, "增加", modifier = Modifier.size(18.dp))
                 }
-                Text(
-                    safeValue.toString(),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                )
-                AppGlassIconButton(onClick = { setNumber(safeValue + 1) }, enabled = safeValue < maxValue) {
-                    Icon(Icons.Rounded.KeyboardArrowUp, "增加")
+                AppGlassIconButton(
+                    onClick = { setNumber(safeValue - 1) },
+                    enabled = safeValue > minValue,
+                    size = 30.dp
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, "减少", modifier = Modifier.size(18.dp))
                 }
             }
+            Text(
+                safeValue.toString(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
         if (maxValue > minValue) {
             Slider(
@@ -432,15 +387,6 @@ private fun StableNumberValueEditor(
                 steps = (maxValue - minValue - 1).coerceAtLeast(0).coerceAtMost(200)
             )
         }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text("手动输入") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 
@@ -463,85 +409,349 @@ private fun StableSelectValueEditor(
                     )
                 }
             }
+        } else {
+            Text(
+                "未读取到可选项，请检查核心版本。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text("原始值") },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StableMultiSelectValueEditor(
+    envKey: String,
     def: EnvVarDef,
     value: String,
     onValueChange: (String) -> Unit,
+    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     val selected = remember(value) { parseCsvTokens(value) }
-    val available = remember(def.options, selected) {
-        def.options.map { it.trim() }.filter { it.isNotBlank() }.distinct().filterNot { it in selected }
+    val isMergePairs = envKey == KEY_MERGE_SOURCE_PAIRS
+    val supportsMerge = isMergePairs || envKey == KEY_PLATFORM_ORDER
+    var mergeMode by remember(envKey) { mutableStateOf(value.contains('&') || isMergePairs) }
+    var staging by remember(envKey) { mutableStateOf(emptyList<String>()) }
+    // MERGE_SOURCE_PAIRS 必须先开合并模式，否则完全不允许写入（与核心/Flutter 版一致）。
+    val writeBlocked = isMergePairs && !mergeMode
+    // 合并模式下只限制同一分组内重复；已用过的单源仍可再次参与分组（与核心前端一致）。
+    val usedSources = selected.flatMap { it.split('&') }.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    val available = remember(def.options, selected, staging, mergeMode, supportsMerge) {
+        def.options.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            .filter { option ->
+                if (supportsMerge && mergeMode) !staging.contains(option) else option !in usedSources
+            }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("已选择（按顺序保存）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("已选（长按标签拖动即可调整顺序）", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         AppGlassSurface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
-            if (selected.isEmpty()) {
-                Text(
-                    "点击下方选项添加…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(12.dp)
+            // 输入框形态：框内是标签，点 × 删除，长按拖动换位（与核心前端一致）。
+            DraggableTagFlow(
+                tags = selected,
+                emptyHint = "尚未选择",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp, max = 220.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                onDelete = { index ->
+                    onValueChange(selected.filterIndexed { i, _ -> i != index }.joinToString(","))
+                },
+                onMove = { from, to ->
+                    val next = selected.toMutableList()
+                    val item = next.removeAt(from)
+                    next.add(to.coerceIn(0, next.size), item)
+                    onValueChange(next.joinToString(","))
+                }
+            )
+        }
+
+        if (supportsMerge) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Switch(
+                    checked = mergeMode,
+                    onCheckedChange = {
+                        mergeMode = it
+                        staging = emptyList()
+                    }
                 )
-            } else {
-                FlowRow(
-                    modifier = Modifier.padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                Text(
+                    when {
+                        mergeMode && isMergePairs ->
+                            "合并模式：点选多个源进暂存组，点 ✓ 加入输入框（组内第一个为主源）"
+                        mergeMode ->
+                            "合并模式：可组合成 a&b 这样的合并组一起返回"
+                        isMergePairs ->
+                            "未开启合并模式：该变量必须先开启合并模式才能配置"
+                        else ->
+                            "单源模式：只写入单个源"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (writeBlocked) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
+
+        if (supportsMerge && mergeMode) {
+            Text(
+                "暂存组（点下方可选源加入，长按可拖动调序）",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            AppGlassSurface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    selected.forEach { token ->
-                        AppGlassFilterChip(
-                            selected = true,
-                            onClick = { onValueChange(selected.filterNot { it == token }.joinToString(",")) },
-                            label = { Text("$token ×") }
-                        )
+                    DraggableTagFlow(
+                        tags = staging,
+                        emptyHint = "点下方可选源加入暂存组，再点右侧 ✓ 加入输入框",
+                        showSeparator = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp, max = 180.dp),
+                        onDelete = { index ->
+                            staging = staging.filterIndexed { i, _ -> i != index }
+                        },
+                        onMove = { from, to ->
+                            val next = staging.toMutableList()
+                            val item = next.removeAt(from)
+                            next.add(to.coerceIn(0, next.size), item)
+                            staging = next
+                        }
+                    )
+                    AppGlassIconButton(
+                        onClick = {
+                            if (staging.isNotEmpty()) {
+                                val group = staging.joinToString("&")
+                                if (group !in selected) {
+                                    onValueChange((selected + group).joinToString(","))
+                                }
+                                staging = emptyList()
+                            }
+                        },
+                        enabled = staging.isNotEmpty(),
+                        size = 34.dp
+                    ) {
+                        Icon(Icons.Rounded.Check, "加入输入框", modifier = Modifier.size(18.dp))
                     }
                 }
             }
         }
 
-        if (available.isNotEmpty()) {
-            Text("可选项（点击添加）", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                available.forEach { option ->
-                    AppGlassAssistChip(
-                        onClick = { onValueChange((selected + option).joinToString(",")) },
-                        label = { Text(option) }
-                    )
-                }
+        Text("可选源", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            def.options.map { it.trim() }.filter { it.isNotBlank() }.distinct().forEach { option ->
+                val staged = staging.contains(option)
+                // 合并模式下只允许组内不重复；MERGE_SOURCE_PAIRS 未开合并模式时全部禁用。
+                val optionEnabled = !writeBlocked && option in available
+                AppGlassAssistChip(
+                    onClick = {
+                        if (supportsMerge && mergeMode) {
+                            staging = if (staged) {
+                                staging.filterNot { it == option }
+                            } else {
+                                staging + option
+                            }
+                        } else if (option !in selected) {
+                            onValueChange((selected + option).joinToString(","))
+                        }
+                    },
+                    enabled = optionEnabled,
+                    label = { Text(option) }
+                )
             }
         }
 
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text("原始值（逗号分隔）") },
-            singleLine = false,
-            minLines = 1,
-            maxLines = 4,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (writeBlocked) {
+            Text(
+                "开启合并模式后才能配置 MERGE_SOURCE_PAIRS。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        if (isMergePairs) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                RecentDataToggle(
+                    rememberKey = envKey,
+                    currentKey = envKey,
+                    onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                    onAddSourcePair = { source ->
+                        val clean = source.trim()
+                        if (clean.isNotBlank()) {
+                            // 与手动点选同规则：合并模式进暂存组，未开合并模式时 MERGE_SOURCE_PAIRS 不允许写入。
+                            if (supportsMerge && mergeMode) {
+                                if (clean !in staging) staging = staging + clean
+                            } else if (!writeBlocked && clean !in selected) {
+                                onValueChange((selected + clean).joinToString(","))
+                            }
+                        }
+                    },
+                    compact = true
+                )
+            }
+        }
     }
+}
+
+/**
+ * 标签输入框：框内标签点 × 删除、长按拖动换位（对齐核心前端 multi-select 的交互）。
+ * 暂存组用 & 分隔展示。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DraggableTagFlow(
+    tags: List<String>,
+    onDelete: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier,
+    emptyHint: String = "",
+    showSeparator: Boolean = false
+) {
+    val bounds = remember { mutableStateMapOf<Int, Rect>() }
+    var dragIndex by remember { mutableStateOf<Int?>(null) }
+    var targetIndex by remember { mutableStateOf<Int?>(null) }
+    var pointerStart by remember { mutableStateOf(Offset.Zero) }
+    var dragDelta by remember { mutableStateOf(Offset.Zero) }
+
+    Box(modifier = modifier) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (tags.isEmpty() && emptyHint.isNotBlank()) {
+                Text(
+                    emptyHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                )
+            }
+            tags.forEachIndexed { index, tag ->
+                if (showSeparator && index > 0) {
+                    Text(
+                        "&",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                }
+                val dragging = dragIndex == index
+                val targeted = targetIndex == index && dragIndex != null && dragIndex != index
+                val isGroup = tag.contains('&')
+                AppGlassSurface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isGroup) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        when {
+                            targeted -> MaterialTheme.colorScheme.primary
+                            isGroup -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            else -> MaterialTheme.colorScheme.outlineVariant
+                        }
+                    ),
+                    modifier = Modifier
+                        .alpha(if (dragging) 0.6f else 1f)
+                        .onGloballyPositioned { bounds[index] = it.boundsInRoot() }
+                        .pointerInput(tags.size, index) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset ->
+                                    dragIndex = index
+                                    targetIndex = index
+                                    dragDelta = Offset.Zero
+                                    pointerStart = (bounds[index]?.topLeft ?: Offset.Zero) + offset
+                                },
+                                onDrag = { change, delta ->
+                                    change.consume()
+                                    dragDelta += delta
+                                    nearestTagIndex(pointerStart + dragDelta, bounds, dragIndex)?.let {
+                                        targetIndex = it
+                                    }
+                                },
+                                onDragEnd = {
+                                    val from = dragIndex
+                                    val to = targetIndex
+                                    if (from != null && to != null && from != to) onMove(from, to)
+                                    dragIndex = null
+                                    targetIndex = null
+                                    dragDelta = Offset.Zero
+                                },
+                                onDragCancel = {
+                                    dragIndex = null
+                                    targetIndex = null
+                                    dragDelta = Offset.Zero
+                                }
+                            )
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            tag,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = if (isGroup) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                        AppGlassIconButton(onClick = { onDelete(index) }, size = 24.dp) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                "删除",
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun nearestTagIndex(pointer: Offset, bounds: Map<Int, Rect>, exclude: Int?): Int? {
+    var best: Int? = null
+    var bestDistance = Float.MAX_VALUE
+    bounds.forEach { (index, rect) ->
+        if (index == exclude) return@forEach
+        val distance = (rect.center - pointer).getDistance()
+        if (distance < bestDistance) {
+            bestDistance = distance
+            best = index
+        }
+    }
+    return best
 }
 
 private data class StableMapRow(
@@ -580,18 +790,36 @@ private fun serializeStableMapRows(rows: List<StableMapRow>): String {
 
 @Composable
 private fun StableMapValueEditor(
+    envKey: String,
     value: String,
     onValueChange: (String) -> Unit,
+    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
-    var rows by remember(value) { mutableStateOf(parseStableMapRows(value).ifEmpty { listOf(StableMapRow()) }) }
+    var rows by remember(value) { mutableStateOf(parseStableMapRows(value)) }
+    var bulkText by remember(value) { mutableStateOf(value) }
 
-    fun syncRows(next: List<StableMapRow>) {
+    fun syncRows(next: List<StableMapRow>, updateBulk: Boolean = true) {
         rows = next
-        onValueChange(serializeStableMapRows(next))
+        val text = serializeStableMapRows(next)
+        if (updateBulk) bulkText = text
+        onValueChange(text)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("映射配置", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(
+            value = bulkText,
+            onValueChange = { bulkText = it },
+            placeholder = { Text("原值->映射值;原值2->映射值2") },
+            singleLine = false,
+            minLines = 4,
+            maxLines = 6,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+        AppGlassButton(onClick = { syncRows(parseStableMapRows(bulkText)) }) {
+            Text("解析并更新列表")
+        }
         rows.forEachIndexed { index, row ->
             AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
@@ -626,17 +854,20 @@ private fun StableMapValueEditor(
                 }
             }
         }
-        AppGlassButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text("原始值") },
-            singleLine = false,
-            minLines = 2,
-            maxLines = 6,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppGlassButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
+            // 与核心前端一致：「查看最近数据」放在「添加映射项」同一行的右侧。
+            RecentDataToggle(
+                rememberKey = envKey,
+                currentKey = envKey,
+                onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                compact = true
+            )
+        }
     }
 }
 

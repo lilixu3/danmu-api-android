@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -280,6 +281,24 @@ fun LocalDanmuScreen(
         onDismissPreview = viewModel::dismissPreview
     )
 
+    if (state.editState.isVisible) {
+        LocalDanmuEditDialog(
+            state = state.editState,
+            groupFileCount = state.editState.target?.let { target ->
+                localDanmuGroupResources(state.snapshot.resources, target).size.coerceAtLeast(1)
+            } ?: 1,
+            onDismiss = viewModel::dismissEdit,
+            onScopeChange = viewModel::setEditScope,
+            onTitleChange = viewModel::updateEditTitle,
+            onYearChange = viewModel::updateEditYear,
+            onTypeChange = viewModel::updateEditType,
+            onSeasonChange = viewModel::updateEditSeason,
+            onEpisodeChange = viewModel::updateEditEpisode,
+            onFilenameChange = viewModel::updateEditFilename,
+            onSubmit = viewModel::submitEdit
+        )
+    }
+
     if (state.browser.visible) {
         LocalDanmuDirectoryBrowserPanel(
             state = state.browser,
@@ -467,7 +486,9 @@ fun LocalDanmuScreen(
                             canWrite = state.writePermission == LocalDanmuWritePermission.Writable,
                             onToggle = { viewModel.toggleGroup(group.groupKey) },
                             onOpenDetail = viewModel::loadDetail,
+                            onEditEpisode = viewModel::startEdit,
                             onDeleteEpisode = viewModel::requestDelete,
+                            onEditSeason = { viewModel.startEditGroup(group) },
                             onDeleteSeason = { viewModel.requestDeleteGroup(group) },
                             onDeleteSeries = { viewModel.requestDeleteSeries(group) }
                         )
@@ -874,7 +895,9 @@ private fun LocalDanmuGroupCard(
     canWrite: Boolean,
     onToggle: () -> Unit,
     onOpenDetail: (String) -> Unit,
+    onEditEpisode: (LocalDanmuResource) -> Unit,
     onDeleteEpisode: (LocalDanmuResource) -> Unit,
+    onEditSeason: () -> Unit,
     onDeleteSeason: () -> Unit,
     onDeleteSeries: () -> Unit
 ) {
@@ -947,6 +970,13 @@ private fun LocalDanmuGroupCard(
                             onDismissRequest = { menuExpanded = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("编辑本季信息（标题/年份/类型/季）") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onEditSeason()
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("删除本季（${group.episodes.size} 集）") },
                                 onClick = {
                                     menuExpanded = false
@@ -978,6 +1008,7 @@ private fun LocalDanmuGroupCard(
                         resource = resource,
                         canWrite = canWrite,
                         onOpenDetail = { onOpenDetail(resource.resourceKey) },
+                        onEdit = { onEditEpisode(resource) },
                         onDelete = { onDeleteEpisode(resource) }
                     )
                 }
@@ -991,6 +1022,7 @@ private fun LocalDanmuEpisodeRow(
     resource: LocalDanmuResource,
     canWrite: Boolean,
     onOpenDetail: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Row(
@@ -1028,6 +1060,13 @@ private fun LocalDanmuEpisodeRow(
             )
         }
         if (canWrite) {
+            AppGlassIconButton(onClick = onEdit, size = 34.dp) {
+                Icon(
+                    Icons.Rounded.Edit,
+                    contentDescription = "编辑",
+                    modifier = Modifier.size(17.dp)
+                )
+            }
             AppGlassIconButton(onClick = onDelete, size = 34.dp) {
                 Icon(
                     Icons.Rounded.DeleteOutline,

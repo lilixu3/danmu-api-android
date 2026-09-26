@@ -118,6 +118,35 @@ internal fun AiApiKeyEditor(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    onValueChange(it)
+                    verifyError = null
+                    verifyResult = null
+                },
+                label = { Text("API Key 值") },
+                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    AppGlassIconButton(onClick = { showKey = !showKey }) {
+                        Icon(
+                            if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            "显示/隐藏"
+                        )
+                    }
+                },
+                singleLine = false,
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(
+                "支持 OpenAI 兼容的 API，需配合 AI_BASE_URL 和 AI_MODEL 配置使用；测试使用当前输入值，不必先保存配置。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             AppGlassSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = when {
@@ -190,6 +219,84 @@ internal fun AiApiKeyEditor(
                 }
             }
 
+            if (!verifyError.isNullOrBlank()) {
+                Text(
+                    verifyError!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DandanplayPasswordEditor(
+    value: String,
+    account: String,
+    onValueChange: (String) -> Unit,
+    onVerifyDandanplayAccount: suspend (String, String) -> Result<DandanplayVerifyResult>,
+) {
+    val scope = rememberCoroutineScope()
+    var showPassword by remember { mutableStateOf(false) }
+    var verifyLoading by remember { mutableStateOf(false) }
+    var verifyResult by remember { mutableStateOf<DandanplayVerifyResult?>(null) }
+    var verifyError by remember { mutableStateOf<String?>(null) }
+
+    val statusTitle = when {
+        value.isBlank() -> "未配置"
+        verifyLoading -> "检测中"
+        verifyResult?.isReachable == true -> "连通正常"
+        verifyResult != null -> "连通失败"
+        else -> "待测试"
+    }
+    val statusSubtitle = when {
+        value.isBlank() -> "请输入弹弹play密码后测试连通性"
+        account.isBlank() -> "账号未配置：请先在 DANDANPLAY_ACCOUNT 中填写弹弹play账号"
+        verifyLoading -> "正在校验弹弹play账号连通性..."
+        verifyResult?.isReachable == true -> verifyResult?.message.ifNullOrBlank("弹弹play账号可用")
+        verifyResult != null -> verifyResult?.message.ifNullOrBlank("弹弹play账号不可用")
+        else -> "点击“连通性测试”快速验证"
+    }
+
+    fun verifyNow(targetValue: String = value) {
+        val password = targetValue.trim()
+        if (password.isBlank()) {
+            verifyResult = null
+            verifyError = "请先输入弹弹play密码"
+            return
+        }
+        if (account.isBlank()) {
+            verifyResult = null
+            verifyError = "请先在 DANDANPLAY_ACCOUNT 中配置弹弹play账号"
+            return
+        }
+        verifyLoading = true
+        verifyError = null
+        scope.launch {
+            val result = onVerifyDandanplayAccount(account, password)
+            verifyLoading = false
+            result.onSuccess {
+                verifyResult = it
+                if (!it.isReachable) {
+                    verifyError = it.message.ifBlank { "连通性测试失败" }
+                }
+            }.onFailure {
+                verifyResult = null
+                verifyError = it.message ?: "连通性测试失败"
+            }
+        }
+    }
+
+    AppGlassSurface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             OutlinedTextField(
                 value = value,
                 onValueChange = {
@@ -197,27 +304,87 @@ internal fun AiApiKeyEditor(
                     verifyError = null
                     verifyResult = null
                 },
-                label = { Text("AI API Key") },
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                label = { Text("弹弹play 密码") },
+                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    AppGlassIconButton(onClick = { showKey = !showKey }) {
+                    AppGlassIconButton(onClick = { showPassword = !showPassword }) {
                         Icon(
-                            if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
                             "显示/隐藏"
                         )
                     }
                 },
                 singleLine = false,
-                minLines = 2,
-                maxLines = 4,
+                minLines = 1,
+                maxLines = 3,
                 modifier = Modifier.fillMaxWidth()
             )
 
             Text(
-                "测试使用当前输入值，不必先保存配置。",
+                "账号在 DANDANPLAY_ACCOUNT 中配置，两者同时填写后 dandan 源经 NipaPlay 中转弹弹play服务端获取弹幕。测试使用当前输入值，不必先保存配置。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            AppGlassSurface(
+                shape = RoundedCornerShape(12.dp),
+                color = when {
+                    value.isBlank() -> MaterialTheme.colorScheme.surfaceVariant
+                    verifyLoading -> MaterialTheme.colorScheme.secondaryContainer
+                    verifyResult?.isReachable == true -> MaterialTheme.colorScheme.primaryContainer
+                    verifyResult != null -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        statusTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = when {
+                            value.isBlank() -> MaterialTheme.colorScheme.onSurfaceVariant
+                            verifyLoading -> MaterialTheme.colorScheme.onSecondaryContainer
+                            verifyResult?.isReachable == true -> MaterialTheme.colorScheme.onPrimaryContainer
+                            verifyResult != null -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                    Text(
+                        statusSubtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            value.isBlank() -> MaterialTheme.colorScheme.onSurfaceVariant
+                            verifyLoading -> MaterialTheme.colorScheme.onSecondaryContainer
+                            verifyResult?.isReachable == true -> MaterialTheme.colorScheme.onPrimaryContainer
+                            verifyResult != null -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppGlassButton(
+                    onClick = { verifyNow(value) },
+                    enabled = value.isNotBlank() && account.isNotBlank() && !verifyLoading
+                ) {
+                    if (verifyLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else {
+                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text("连通性测试")
+                }
+            }
 
             if (!verifyError.isNullOrBlank()) {
                 Text(
@@ -446,17 +613,11 @@ internal fun BilibiliCookieEditor(
                 }
             }
 
-            Text(
-                "检测到的字段：${cookieSnapshot.keys.joinToString("、").ifBlank { "无" }}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AppGlassButton(onClick = { startQrFlow() }) {
                     Icon(Icons.Rounded.QrCode2, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("扫码获取")
+                    Text("扫码登录")
                 }
                 AppGlassButton(
                     onClick = { verifyNow(value) },
@@ -479,7 +640,7 @@ internal fun BilibiliCookieEditor(
                     onValueChange(it)
                     verifyError = null
                 },
-                label = { Text("Bilibili Cookie") },
+                label = { Text("Cookie 值") },
                 visualTransformation = if (showCookie) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     AppGlassIconButton(onClick = { showCookie = !showCookie }) {
@@ -496,7 +657,7 @@ internal fun BilibiliCookieEditor(
             )
 
             Text(
-                "建议使用扫码登录自动获取。手动粘贴时请确保至少包含 SESSDATA 与 bili_jct。",
+                "推荐使用扫码登录自动获取，或手动粘贴包含 SESSDATA 和 bili_jct 的完整 Cookie。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

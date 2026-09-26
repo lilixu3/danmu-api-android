@@ -20,8 +20,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.101"
-val defaultVersionCode = 189
+val defaultVersionName = "1.0.5.102"
+val defaultVersionCode = 190
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
@@ -51,7 +51,10 @@ if (unsupportedAbiFilters.isNotEmpty()) {
     )
 }
 val configuredAbiFilters = if (rawAbiFilters.isEmpty()) defaultReleaseAbis else rawAbiFilters
+
 val preparedNativeRuntimeDir = layout.buildDirectory.dir("prepared-native-runtime").get().asFile
+val nativeRuntimeChecksumFile = file("native-runtime.sha256")
+val nativeRuntimeSourcesFile = file("native-runtime-sources.properties")
 val requestedTaskNames = gradle.startParameter.taskNames.map { it.lowercase() }
 val isBundleTaskRequested = requestedTaskNames.any { it.contains("bundle") }
 
@@ -292,6 +295,7 @@ android {
             jniLibs.directories.addAll(jniDirs)
         }
     }
+
 }
 
 kotlin {
@@ -769,7 +773,7 @@ tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
     commandLine("node", "node-tests/core-runtime-dependencies-smoke.mjs")
 }
 
-val embeddedNodeVersion = "24.19.0"
+val embeddedNodeVersion = "24.21.0"
 val targetNodeExecutable = (findProperty("targetNodeExecutable") as? String)
     ?.trim()
     ?.takeIf { it.isNotBlank() }
@@ -954,9 +958,6 @@ val testBundledBrotliRuntimeTask = tasks.named("testBundledBrotliRuntime")
 val testBundledNodeLockClosureTask = tasks.named("testBundledNodeLockClosure")
 val testBundledCoreRuntimeDependenciesTask = tasks.named("testBundledCoreRuntimeDependencies")
 val verifyEmbeddedNodeCompatibilityTask = tasks.named("verifyEmbeddedNodeCompatibility")
-val nativeRuntimeChecksumFile = file("native-runtime.sha256")
-val nativeRuntimeSourcesFile = file("native-runtime-sources.properties")
-
 fun sha256(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
@@ -1099,23 +1100,232 @@ fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeRel
     return releaseVersion to sources
 }
 
-val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
+val nativeRuntimeLayoutDanmuPack = "danmu-pack"
+val nativeRuntimeLayoutNodejsMobile = "nodejs-mobile"
+
+// 运行时资产的布局：
+// - danmu-pack（默认）：历史布局，zip 内带三件套（libnode.so / libnative-lib.so / libc++_shared.so）
+// - nodejs-mobile：上游配方产物布局，zip 内只有每个 ABI 的 libnode.so 与头文件目录；
+//   这种布局下 JNI 桥由本次构建用本地 NDK 依据同一份头文件现编，
+//   libc++_shared.so 取同一 NDK 的 sysroot，保证与桥库同源。
+fun readNativeRuntimeLayout(sourcesFile: File): String {
+    if (!sourcesFile.isFile) return nativeRuntimeLayoutDanmuPack
+    val props = Properties().apply { sourcesFile.inputStream().use { load(it) } }
+    val raw = props.getProperty("layout")?.trim().orEmpty()
+    return when {
+        raw.isEmpty() -> nativeRuntimeLayoutDanmuPack
+        raw == nativeRuntimeLayoutNodejsMobile -> raw
+        else -> throw GradleException("原生运行时来源清单里的 layout 非法：$raw")
+    }
+}
+
+// 选择与当前主机匹配的 NDK 预编译目录名（Termux/arm64 上是 linux-aarch64，PC 上是 linux-x86_64 / darwin-*）。
+fun resolveNdkHostTag(ndkDir: File): String? {
+    val prebuilt = File(ndkDir, "toolchains/llvm/prebuilt")
+    if (!prebuilt.isDirectory) return null
+    val available = prebuilt.listFiles()?.filter { it.isDirectory }?.map { it.name }?.sorted().orEmpty()
+    if (available.isEmpty()) return null
+    val arch = System.getProperty("os.arch").orEmpty().lowercase()
+    val os = System.getProperty("os.name").orEmpty().lowercase()
+    val preferred = when {
+        os.contains("mac") && (arch.contains("aarch64") || arch.contains("arm64")) -> "darwin-arm64"
+        os.contains("mac") -> "darwin-x86_64"
+        os.contains("windows") -> "windows-x86_64"
+        arch.contains("aarch64") || arch.contains("arm64") -> "linux-aarch64"
+        else -> "linux-x86_64"
+    }
+    // 只接受与当前主机匹配的预编译目录：在 Termux(aarch64) 上误选 linux-x86_64
+    // 会得到一个无法执行的编译器，宁可让上层继续找下一个候选 NDK。
+    return preferred.takeIf { it in available }
+}
+
+fun resolveLocalNdkDir(candidates: List<File>): File {
+    val usable = candidates.filter { it.isDirectory && resolveNdkHostTag(it) != null }
+    return usable.firstOrNull() ?: throw GradleException(
+        "找不到可用于本地编译 JNI 桥的 NDK。请用 -PndkDir=、local.properties 的 ndk.dir 或 ANDROID_NDK_HOME 指定。" +
+            "候选：${candidates.joinToString { it.absolutePath }}"
+    )
+}
+
+fun nativeAbiTriples(abi: String): Pair<String, String> = when (abi) {
+    "arm64-v8a" -> "aarch64-linux-android" to "aarch64-linux-android"
+    "armeabi-v7a" -> "armv7a-linux-androideabi" to "arm-linux-androideabi"
+    "x86_64" -> "x86_64-linux-android" to "x86_64-linux-android"
+    else -> throw GradleException("不支持的 ABI：$abi")
+}
+
+// 用本地 NDK 依据上游头文件现编 JNI 桥，等价于 CMakeLists.txt 里的 native-lib 目标。
+fun compileJniBridge(
+    ndkDir: File,
+    abi: String,
+    apiLevel: Int,
+    bridgeSource: File,
+    includeDir: File,
+    libnodeSo: File,
+    outFile: File
+) {
+    val hostTag = resolveNdkHostTag(ndkDir)
+        ?: throw GradleException("NDK 缺少可用预编译工具链：${ndkDir.absolutePath}")
+    val (clangTriple, _) = nativeAbiTriples(abi)
+    val exeSuffix = if (hostTag.startsWith("windows")) ".cmd" else ""
+    val clang = File(
+        ndkDir,
+        "toolchains/llvm/prebuilt/$hostTag/bin/${clangTriple}${apiLevel}-clang++$exeSuffix"
+    )
+    if (!clang.isFile) throw GradleException("NDK 缺少编译器：${clang.absolutePath}")
+    if (!bridgeSource.isFile) throw GradleException("缺少 JNI 桥源码：${bridgeSource.absolutePath}")
+    if (!includeDir.isDirectory) throw GradleException("缺少 Node 头文件目录：${includeDir.absolutePath}")
+    outFile.parentFile.mkdirs()
+    val command = listOf(
+        clang.absolutePath,
+        "-std=c++20", "-O2", "-fPIC", "-shared",
+        "-I", includeDir.absolutePath,
+        "-Wl,-z,max-page-size=16384",
+        "-Wl,-soname,libnative-lib.so",
+        "-o", outFile.absolutePath,
+        bridgeSource.absolutePath,
+        libnodeSo.absolutePath
+    )
+    val process = ProcessBuilder(command).redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+    val exit = process.waitFor()
+    if (exit != 0) {
+        throw GradleException("编译 JNI 桥失败（$abi，exit=$exit）：\n${output.trim()}")
+    }
+    println("JNI 桥现编完成：$abi -> ${outFile.name}（${outFile.length()} 字节）")
+}
+
+fun copyNdkLibcxxShared(ndkDir: File, abi: String, target: File) {
+    val hostTag = resolveNdkHostTag(ndkDir)
+        ?: throw GradleException("NDK 缺少可用预编译工具链：${ndkDir.absolutePath}")
+    val (_, sysrootTriple) = nativeAbiTriples(abi)
+    val source = File(
+        ndkDir,
+        "toolchains/llvm/prebuilt/$hostTag/sysroot/usr/lib/$sysrootTriple/libc++_shared.so"
+    )
+    if (!source.isFile) throw GradleException("NDK 缺少 libc++_shared.so：${source.absolutePath}")
+    target.parentFile.mkdirs()
+    source.copyTo(target, overwrite = true)
+}
+
+// 解析（必要时下载）原生运行时资产 zip，本地 dist 与 Gradle 缓存都按 SHA-256 校验。
+fun resolveNativeRuntimeZip(
+    source: NativeRuntimeReleaseSource,
+    releaseVersion: String,
+    projectDir: File,
+    gradleUserHomeDir: File,
+    offline: Boolean
+): File {
+    val localReleaseApk = File(projectDir, "dist/$releaseVersion/${source.assetName}")
+    val cacheApk = File(
+        gradleUserHomeDir,
+        "caches/danmu-native-runtime/$releaseVersion/${source.assetName}"
+    )
+    fun isValid(candidate: File): Boolean =
+        candidate.isFile && candidate.length() == source.size && sha256(candidate) == source.sha256
+
+    if (isValid(localReleaseApk)) return localReleaseApk
+    if (isValid(cacheApk)) return cacheApk
+    if (offline) throw GradleException("离线构建缺少原生运行时缓存：${source.assetName}")
+
+    cacheApk.parentFile.mkdirs()
+    val partFile = File(cacheApk.parentFile, "${cacheApk.name}.part")
+    partFile.delete()
+    try {
+        val connection = (URI(source.url).toURL().openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            requestMethod = "GET"
+            setRequestProperty("User-Agent", "DanmuApiApp-Gradle")
+        }
+        try {
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                throw GradleException("下载 ${source.assetName} 失败：HTTP $responseCode")
+            }
+            connection.inputStream.use { input ->
+                partFile.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 128L * 1024L * 1024L) {
+                            throw GradleException("下载的 ${source.assetName} 超过大小上限")
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+        if (!isValid(partFile)) {
+            throw GradleException("下载的 ${source.assetName} 大小或 SHA-256 不匹配")
+        }
+        try {
+            Files.move(
+                partFile.toPath(),
+                cacheApk.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (_: Exception) {
+            Files.move(partFile.toPath(), cacheApk.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        return cacheApk
+    } finally {
+        partFile.delete()
+    }
+}
+
+fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
+    val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
     inputs.files(nativeRuntimeChecksumFile, nativeRuntimeSourcesFile)
     inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
     outputs.dir(preparedNativeRuntimeDir)
     doLast {
         val checksums = readNativeRuntimeChecksums()
         val (releaseVersion, allSources) = readNativeRuntimeReleaseSources()
+        val nativeRuntimeLayout = readNativeRuntimeLayout(nativeRuntimeSourcesFile)
+        val localNdkDir = if (nativeRuntimeLayout == nativeRuntimeLayoutNodejsMobile) {
+            val sdkDirValue = localProps.getProperty("sdk.dir")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: System.getenv("ANDROID_SDK_ROOT")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: System.getenv("ANDROID_HOME")?.trim()?.takeIf { it.isNotEmpty() }
+            val explicit = sequenceOf(
+                (findProperty("ndkDir") as? String)?.trim()?.takeIf { it.isNotEmpty() },
+                localProps.getProperty("ndk.dir")?.trim()?.takeIf { it.isNotEmpty() },
+                System.getenv("ANDROID_NDK_HOME")?.trim()?.takeIf { it.isNotEmpty() },
+                System.getenv("ANDROID_NDK_ROOT")?.trim()?.takeIf { it.isNotEmpty() }
+            ).filterNotNull().map { File(it) }.toList()
+            val fromSdk = sdkDirValue?.let { File(it, "ndk") }
+                ?.takeIf { it.isDirectory }
+                ?.listFiles()
+                ?.sortedBy { it.name }
+                ?.reversed()
+                .orEmpty()
+            resolveLocalNdkDir((explicit + fromSdk).distinct())
+        } else {
+            null
+        }
         val selectedChecksums = checksums.filterKeys { path ->
             configuredAbiFilters.any { abi -> "/$abi/" in "/$path" }
         }
-        val missingManifestEntries = configuredAbiFilters.flatMap { abi ->
-            listOf(
-                "libnode/bin/$abi/libnode.so",
-                "jni-current/$abi/libc++_shared.so",
-                "jni-current/$abi/libnative-lib.so"
-            )
-        }.filterNot(selectedChecksums::containsKey)
+        val requiredManifestEntries = if (nativeRuntimeLayout == nativeRuntimeLayoutNodejsMobile) {
+            // 上游布局只提供 libnode.so；桥库与 libc++_shared.so 由本次构建现编/取用，不做清单钉死
+            configuredAbiFilters.map { abi -> "libnode/bin/$abi/libnode.so" }
+        } else {
+            configuredAbiFilters.flatMap { abi ->
+                listOf(
+                    "libnode/bin/$abi/libnode.so",
+                    "jni-current/$abi/libc++_shared.so",
+                    "jni-current/$abi/libnative-lib.so"
+                )
+            }
+        }
+        val missingManifestEntries = requiredManifestEntries.filterNot(selectedChecksums::containsKey)
         if (missingManifestEntries.isNotEmpty()) {
             throw GradleException(
                 "原生运行时校验清单缺少：${missingManifestEntries.joinToString(", ")}"
@@ -1126,6 +1336,55 @@ val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
         preparedNativeRuntimeDir.mkdirs()
 
         configuredAbiFilters.forEach { abi ->
+            if (nativeRuntimeLayout == nativeRuntimeLayoutNodejsMobile) {
+                val ndkDir = localNdkDir!!
+                val source = allSources.getValue(abi)
+                val zipFile = resolveNativeRuntimeZip(
+                    source = source,
+                    releaseVersion = releaseVersion,
+                    projectDir = rootProject.projectDir,
+                    gradleUserHomeDir = gradle.gradleUserHomeDir,
+                    offline = gradle.startParameter.isOffline
+                )
+                val libnodeTarget = File(preparedNativeRuntimeDir, "libnode/bin/$abi/libnode.so")
+                libnodeTarget.parentFile.mkdirs()
+                val includeDir = File(preparedNativeRuntimeDir, "include/node")
+                ZipFile(zipFile).use { zip ->
+                    val libnodeEntry = zip.getEntry("bin/$abi/libnode.so")
+                        ?: throw GradleException("${source.assetName} 缺少 bin/$abi/libnode.so")
+                    zip.getInputStream(libnodeEntry).use { input ->
+                        libnodeTarget.outputStream().use(input::copyTo)
+                    }
+                    zip.entries().asSequence()
+                        .filter { !it.isDirectory && it.name.startsWith("include/node/") }
+                        .forEach { headerEntry ->
+                            val target = File(
+                                includeDir,
+                                headerEntry.name.removePrefix("include/node/")
+                            )
+                            target.parentFile.mkdirs()
+                            zip.getInputStream(headerEntry).use { input ->
+                                target.outputStream().use(input::copyTo)
+                            }
+                        }
+                }
+                val expectedLibnode = checksums.getValue("libnode/bin/$abi/libnode.so")
+                if (sha256(libnodeTarget) != expectedLibnode) {
+                    throw GradleException("提取的 libnode.so SHA-256 不匹配：$abi")
+                }
+                val jniDir = File(preparedNativeRuntimeDir, "jni-current/$abi").apply { mkdirs() }
+                compileJniBridge(
+                    ndkDir = ndkDir,
+                    abi = abi,
+                    apiLevel = 24,
+                    bridgeSource = file("src/main/cpp/native-lib.cpp"),
+                    includeDir = includeDir,
+                    libnodeSo = libnodeTarget,
+                    outFile = File(jniDir, "libnative-lib.so")
+                )
+                copyNdkLibcxxShared(ndkDir, abi, File(jniDir, "libc++_shared.so"))
+                return@forEach
+            }
             val abiEntries = selectedChecksums.filterKeys { "/$abi/" in "/$it" }
             val canUseLegacyFiles = abiEntries.all { (relativePath, expectedHash) ->
                 val legacyFile = file(relativePath)
@@ -1269,7 +1528,12 @@ val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") 
             )
         }
     }
+    }
+    return prepareNativeRuntimeTask to verifyNativeRuntimeInputsTask
 }
+
+val (prepareNativeRuntimeTask, verifyNativeRuntimeInputsTask) = registerNativeRuntimeTasks()
+
 tasks.named("preBuild").configure {
     dependsOn(verifyNativeRuntimeInputsTask)
     dependsOn(verifyBundledNodeModulesTask)
@@ -1309,6 +1573,7 @@ tasks.matching { it.name == "assembleRelease" }.configureEach {
 verifyPackagedNodeModulesReleaseTask.configure {
     mustRunAfter("assembleRelease")
 }
+
 tasks.register("releaseCheck") {
     dependsOn("assembleRelease")
     dependsOn(verifyEmbeddedNodeCompatibilityTask)

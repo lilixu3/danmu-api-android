@@ -179,7 +179,8 @@ object EnvVarConfigLoader {
 
     private fun inferSensitive(key: String): Boolean {
         val u = key.uppercase()
-        return u.contains("TOKEN") || u.contains("COOKIE") || u.contains("API_KEY") || u.endsWith("_KEY")
+        return u.contains("TOKEN") || u.contains("COOKIE") || u.contains("API_KEY") ||
+            u.endsWith("_KEY") || u.contains("PASSWORD") || u.contains("SECRET")
     }
 
     private fun resolveOptionsByKey(

@@ -297,5 +297,10 @@ interface LocalDanmuRepository {
         resourceKeys: Collection<String>,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): Result<Int>
+    /** 编辑元数据（核心 PATCH）：resource 只改集数/文件名，group 改同剧同季的标题/年份/类型/季数。 */
+    suspend fun updateMetadata(
+        resourceKey: String,
+        patch: LocalDanmuMetadataPatch
+    ): Result<LocalDanmuUpdateResult>
     suspend fun enableLocalSource(preferFirst: Boolean): Result<String>
 }

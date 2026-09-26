@@ -66,6 +66,33 @@ enum class LocalDanmuWritePermission {
     Writable
 }
 
+/**
+ * 元数据编辑范围，对应核心 PATCH /api/v2/local-danmu/:resourceKey 的 scope 字段。
+ * - [Resource]：只改当前这一个文件（集数、文件名）
+ * - [Group]：改同剧同季的一组文件（标题、年份、类型、季数）
+ */
+enum class LocalDanmuEditScope(val wire: String, val label: String) {
+    Resource("resource", "仅此文件"),
+    Group("group", "整个分组")
+}
+
+/** 元数据编辑请求体；只带当前范围需要的字段，其余为 null 表示不改。 */
+data class LocalDanmuMetadataPatch(
+    val scope: LocalDanmuEditScope,
+    val title: String? = null,
+    val year: Int? = null,
+    val type: LocalDanmuType? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val filename: String? = null
+)
+
+/** 核心 PATCH 的响应：更新后的资源（分组范围会返回整组）。 */
+data class LocalDanmuUpdateResult(
+    val scope: String = LocalDanmuEditScope.Resource.wire,
+    val resources: List<LocalDanmuResource> = emptyList()
+)
+
 data class LocalDanmuUploadRequest(
     val title: String,
     val year: Int,
