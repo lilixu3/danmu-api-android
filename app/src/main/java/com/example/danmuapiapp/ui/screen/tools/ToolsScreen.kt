@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
@@ -91,6 +92,7 @@ fun ToolsScreen(
     onOpenAdminMode: () -> Unit,
     onOpenCacheManagement: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenTunnel: () -> Unit,
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -99,6 +101,7 @@ fun ToolsScreen(
     val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
     val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
+    val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val recentLogs = logs.takeLast(6).reversed()
     val errorCount = logs.count { it.level == LogLevel.Error }
@@ -109,6 +112,7 @@ fun ToolsScreen(
             if (event == Lifecycle.Event.ON_START) {
                 viewModel.refreshLogs()
                 viewModel.refreshAdminState()
+                viewModel.refreshTunnel()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -157,6 +161,14 @@ fun ToolsScreen(
         )
 
         SectionHeader(title = "高频操作")
+        ToolEntryCard(
+            title = "内网穿透",
+            subtitle = "frpc ${tunnelState.kernelVersion} · 管理远程连接与公网访问",
+            imageVector = Icons.Rounded.Public,
+            accent = MaterialTheme.colorScheme.primary,
+            badge = tunnelStatus(tunnelState).badge,
+            onClick = onOpenTunnel
+        )
         ToolEntryCard(
             title = "配置管理",
             subtitle = "修改 .env、端口与服务行为，适合先从这里开始",

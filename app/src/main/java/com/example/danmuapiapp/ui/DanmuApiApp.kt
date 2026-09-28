@@ -55,6 +55,8 @@ import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.VideoShellInjectionSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
 import com.example.danmuapiapp.ui.screen.tools.ToolsScreen
+import com.example.danmuapiapp.ui.screen.tools.TunnelScreen
+import com.example.danmuapiapp.ui.screen.tools.TunnelSettingsScreen
 import com.example.danmuapiapp.ui.startup.StartupPermissionGateHost
 import com.example.danmuapiapp.ui.theme.GlassBackdropScene
 import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
@@ -262,7 +264,8 @@ private fun DanmuApiMainContent() {
                     onOpenDeviceAccess = { navController.navigate(ToolRoute.DeviceAccess) },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
                     onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
-                    onOpenDiagnostics = { navController.navigate(ToolRoute.Diagnostics) }
+                    onOpenDiagnostics = { navController.navigate(ToolRoute.Diagnostics) },
+                    onOpenTunnel = { navController.navigate(ToolRoute.Tunnel) }
                 )
             }
             composable(Screen.Settings.route) {
@@ -366,6 +369,15 @@ private fun DanmuApiMainContent() {
             }
             composable(ToolRoute.Diagnostics) {
                 DiagnosticsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(ToolRoute.Tunnel) {
+                TunnelScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenSettings = { navController.navigate(ToolRoute.TunnelSettings) }
+                )
+            }
+            composable(ToolRoute.TunnelSettings) {
+                TunnelSettingsScreen(onBack = { navController.popBackStack() })
             }
                     }
                 }

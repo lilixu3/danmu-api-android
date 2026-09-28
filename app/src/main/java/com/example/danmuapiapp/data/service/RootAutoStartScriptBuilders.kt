@@ -8,7 +8,10 @@ object RootAutoStartScriptBuilders {
         flagDir: String,
         flagFile: String,
         modeFile: String,
-        mainClass: String
+        mainClass: String,
+        frpDir: String = "",
+        nativeLibDir: String = "",
+        packageName: String = ""
     ): String {
         return RootAutoStartServiceScriptPartA.build(
             moduleId = moduleId,
@@ -16,7 +19,10 @@ object RootAutoStartScriptBuilders {
             flagDir = flagDir,
             flagFile = flagFile,
             modeFile = modeFile,
-            mainClass = mainClass
+            mainClass = mainClass,
+            frpDir = frpDir,
+            nativeLibDir = nativeLibDir,
+            packageName = packageName
         )
     }
 

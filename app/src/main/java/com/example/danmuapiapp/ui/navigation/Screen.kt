@@ -29,6 +29,8 @@ object ToolRoute {
     const val DeviceAccess = "tool_device_access"
     const val CacheManagement = "tool_cache_management"
     const val Diagnostics = "tool_diagnostics"
+    const val Tunnel = "tool_tunnel"
+    const val TunnelSettings = "tool_tunnel_settings"
 }
 
 object CoreRoute {

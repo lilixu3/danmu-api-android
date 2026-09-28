@@ -26,6 +26,8 @@ import com.example.danmuapiapp.data.util.DeviceCompatMode
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.PortProbe
 import com.example.danmuapiapp.data.service.RuntimeIdentityStore
+import com.example.danmuapiapp.data.tunnel.TunnelStore
+import com.example.danmuapiapp.data.tunnel.TunnelSupervisor
 import com.example.danmuapiapp.domain.model.ErrorHandler
 import com.example.danmuapiapp.domain.model.NormalNotificationBehavior
 import kotlinx.coroutines.*
@@ -58,6 +60,10 @@ class NodeService : Service() {
             get() = "$actionPrefix.NODE_NOTIFICATION_DISMISSED"
         val ACTION_STATUS: String
             get() = "$actionPrefix.NODE_STATUS"
+        val ACTION_TUNNEL_START: String
+            get() = "$actionPrefix.TUNNEL_START"
+        val ACTION_TUNNEL_STOP: String
+            get() = "$actionPrefix.TUNNEL_STOP"
         const val EXTRA_STATUS = "status"
         const val EXTRA_MESSAGE = "status_message"
         const val EXTRA_EXPLICIT_START = "explicit_start"
@@ -330,6 +336,9 @@ class NodeService : Service() {
     private var foregroundStarted = false
     @Volatile
     private var serviceStopRequested = false
+
+    /** 内网穿透进程监管：只在普通模式下由本服务持有 */
+    private var tunnelSupervisor: TunnelSupervisor? = null
     @Volatile
     private var displayedNotificationEndpoint: String? = null
     private var notificationNetworkCallback: ConnectivityManager.NetworkCallback? = null
@@ -359,11 +368,32 @@ class NodeService : Service() {
                 NodeKeepAlivePrefs.setDesiredRunning(applicationContext, false)
                 NormalNotificationBehaviorPrefs.clearManuallyHidden(applicationContext)
                 SystemHeartbeatScheduler.refresh(applicationContext)
+                stopTunnel()
                 runtime.stopNode()
                 return START_NOT_STICKY
             }
             ACTION_COPY_LAN_ADDRESS -> {
                 copyLanAddressToClipboard()
+                return if (shouldPreserveNodeServiceSticky(
+                        desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(this),
+                        stopRequested = serviceStopRequested
+                    )
+                ) START_STICKY else START_NOT_STICKY
+            }
+            ACTION_TUNNEL_START -> {
+                if (!foregroundStarted && !NodeKeepAlivePrefs.isDesiredRunning(applicationContext)) {
+                    TunnelStore.writeStatus(
+                        applicationContext, "error", "normal", 0L, 0L, 0, "服务未启动"
+                    )
+                    serviceStopRequested = true
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+                startTunnel()
+                return START_STICKY
+            }
+            ACTION_TUNNEL_STOP -> {
+                stopTunnel()
                 return if (shouldPreserveNodeServiceSticky(
                         desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(this),
                         stopRequested = serviceStopRequested
@@ -430,7 +460,24 @@ class NodeService : Service() {
             explicitStart = explicitStart,
             notificationOnly = action == ACTION_ENSURE_FOREGROUND
         )
+        startTunnelIfAuto()
         return START_STICKY
+    }
+
+    private fun startTunnel() {
+        val supervisor = tunnelSupervisor ?: TunnelSupervisor(this).also { tunnelSupervisor = it }
+        val result = supervisor.start()
+        AppDiagnosticLogger.i(this, TAG, "穿透启动：${result.message}")
+    }
+
+    private fun startTunnelIfAuto() {
+        val settings = TunnelStore.readSettings(this)
+        if (settings.enabled && settings.autoStart) startTunnel()
+    }
+
+    private fun stopTunnel() {
+        tunnelSupervisor?.stop()
+        tunnelSupervisor = null
     }
 
     private fun handleNotificationDismissed(startId: Int): Int {
@@ -878,6 +925,7 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
+        stopTunnel()
         val appContext = applicationContext
         val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(appContext)
         val unexpected = runtime.isUnexpectedServiceDestroy(serviceStopRequested, desiredRunning)

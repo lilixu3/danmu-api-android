@@ -13,6 +13,7 @@ import com.example.danmuapiapp.data.repository.isRootPassiveLivenessLikely
 import com.example.danmuapiapp.data.util.PortProbe
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
+import com.example.danmuapiapp.data.tunnel.RootTunnel
 import java.net.URL
 import java.security.MessageDigest
 
@@ -473,6 +474,7 @@ object RootRuntimeController {
         skipSync: Boolean = false
     ): OpResult {
         if (isRuntimeOwnedByAppPassive(context, port)) {
+            RootTunnel.startIfEnabled(context)
             return OpResult(
                 ok = true,
                 message = "Root 模式已在运行",
@@ -640,6 +642,7 @@ object RootRuntimeController {
 
         if (quickMode) {
             AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已触发启动")
+            RootTunnel.startIfEnabled(context)
             return OpResult(
                 ok = true,
                 message = "Root 模式已触发启动",
@@ -650,6 +653,7 @@ object RootRuntimeController {
         val startupWait = waitForReadyOrFailure(context, port, timeoutMs = 12_000L)
         return if (startupWait.ready) {
             AppDiagnosticLogger.i(context, "RootRuntimeController", "Root 模式已启动，端口=$port")
+            RootTunnel.startIfEnabled(context)
             OpResult(
                 ok = true,
                 message = "Root 模式已启动",
@@ -667,6 +671,7 @@ object RootRuntimeController {
     }
 
     fun stop(context: Context, port: Int): OpResult {
+        RootTunnel.stop(context)
         requestShutdown(port)
 
         if (waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 4000L)) {

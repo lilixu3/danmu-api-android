@@ -27,6 +27,7 @@ local.properties
 # JNI 预编译库（体积大，需自行准备）
 /app/libnode/
 /app/jni-current/
+/runtime/
 
 # 构建工具链（非源码）
 /tools/

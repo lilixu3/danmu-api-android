@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import java.io.File
 import com.example.danmuapiapp.domain.model.RunMode
 
 /**
@@ -56,6 +57,9 @@ object RootAutoStartModule {
                 flagFile = FLAG_FILE,
                 modeFile = MODE_FILE,
                 mainClass = RootNodeEntry::class.java.name,
+                frpDir = File(context.filesDir, "frp").absolutePath,
+                nativeLibDir = context.applicationInfo.nativeLibraryDir ?: "",
+                packageName = context.packageName,
             )
         )
 

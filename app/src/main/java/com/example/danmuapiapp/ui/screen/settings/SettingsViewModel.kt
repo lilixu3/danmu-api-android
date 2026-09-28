@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.tunnel.TunnelRepository
 import com.example.danmuapiapp.data.service.AppBackupPreview
 import com.example.danmuapiapp.data.service.AppBackupSection
 import com.example.danmuapiapp.data.service.AppBackupService
@@ -98,7 +99,8 @@ class SettingsViewModel @Inject constructor(
     private val webDavService: WebDavService,
     private val appBackupService: AppBackupService,
     private val appUpdateService: AppUpdateService,
-    private val tvConfigSyncClient: TvConfigSyncClient
+    private val tvConfigSyncClient: TvConfigSyncClient,
+    private val tunnelRepository: TunnelRepository
 ) : ViewModel() {
 
     private val envConfigRepo: EnvConfigRepository
@@ -279,6 +281,10 @@ class SettingsViewModel @Inject constructor(
             restartIfRunning = true,
             listenMode = listenMode
         )
+        // 端口变化后让内网穿透跟随（重写 frpc 配置的 localPort，运行中则重启穿透）
+        if (old.port != port) {
+            viewModelScope.launch { tunnelRepository.syncServicePort(port) }
+        }
         operationMessage = if (old.status == ServiceStatus.Running || old.status == ServiceStatus.Starting) {
             "配置已保存，服务正在应用新的监听设置"
         } else {

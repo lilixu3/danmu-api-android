@@ -8,7 +8,10 @@ object RootAutoStartServiceScriptPartA {
         flagDir: String,
         flagFile: String,
         modeFile: String,
-        mainClass: String
+        mainClass: String,
+        frpDir: String = "",
+        nativeLibDir: String = "",
+        packageName: String = ""
     ): String {
         return """
             #!/system/bin/sh
@@ -22,6 +25,9 @@ object RootAutoStartServiceScriptPartA {
             FLAGFILE='$flagFile'
             MODEFILE='$modeFile'
             MAIN_CLASS='$mainClass'
+            FRP_DIR='$frpDir'
+            FRP_LIB_FALLBACK='$nativeLibDir/libfrpc.so'
+            FRP_PKG='$packageName'
             LOGFILE="${'$'}FLAGDIR/boot.log"
             umask 022
 
@@ -36,6 +42,48 @@ object RootAutoStartServiceScriptPartA {
             log() {
               TS=$(date '+%F %T' 2>/dev/null || echo 'boot')
               echo "[danmuapi_boot] ${'$'}TS ${'$'}*" >> "${'$'}LOGFILE" 2>/dev/null || true
+            }
+
+            # 内网穿透：只有 App 写过 autostart 标记才跟随开机启动
+            start_frpc() {
+              [ -n "${'$'}FRP_DIR" ] || return 0
+              [ -f "${'$'}FRP_DIR/autostart" ] || return 0
+              [ -f "${'$'}FRP_DIR/frpc.toml" ] || return 0
+              FRP_LIB="${'$'}FRP_LIB_FALLBACK"
+              if [ -n "${'$'}FRP_PKG" ]; then
+                APK=$(pm path "${'$'}FRP_PKG" 2>/dev/null | head -n 1 | cut -d: -f2)
+                if [ -n "${'$'}APK" ]; then
+                  NEWLIB=$(ls -d "$(dirname "${'$'}APK")"/lib/*/ 2>/dev/null | head -n 1)
+                  [ -n "${'$'}NEWLIB" ] && [ -x "${'$'}NEWLIB/libfrpc.so" ] && FRP_LIB="${'$'}NEWLIB/libfrpc.so"
+                fi
+              fi
+              [ -x "${'$'}FRP_LIB" ] || { log "frpc kernel missing"; return 0; }
+              FRP_PIDFILE="${'$'}FRP_DIR/frpc-root.pid"
+              FRP_LOG="${'$'}FRP_DIR/frpc.log"
+              OLD=$(cat "${'$'}FRP_PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
+              if [ -n "${'$'}OLD" ] && [ -d "/proc/${'$'}OLD" ] && tr '\0' ' ' < "/proc/${'$'}OLD/cmdline" 2>/dev/null | grep -q 'libfrpc.so'; then
+                logd "frpc already running pid=${'$'}OLD"
+                return 0
+              fi
+              rm -f "${'$'}FRP_PIDFILE" 2>/dev/null || true
+              if command -v setsid >/dev/null 2>&1; then
+                setsid "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+              elif command -v nohup >/dev/null 2>&1; then
+                nohup "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+              else
+                "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+              fi
+              FPID=$!
+              echo "${'$'}FPID" > "${'$'}FRP_PIDFILE"
+              sleep 2
+              if [ -d "/proc/${'$'}FPID" ]; then
+                chmod 0644 "${'$'}FRP_PIDFILE" "${'$'}FRP_LOG" 2>/dev/null || true
+                logd "frpc started pid=${'$'}FPID"
+              else
+                log "frpc exited early"
+                rm -f "${'$'}FRP_PIDFILE" 2>/dev/null || true
+              fi
+              return 0
             }
 
             logd() {
@@ -408,6 +456,7 @@ object RootAutoStartServiceScriptPartA {
             }
 
             if start_try; then
+              start_frpc
               exit 0
             fi
 
@@ -415,6 +464,7 @@ object RootAutoStartServiceScriptPartA {
               log "retry in ${'$'}{D}s"
               sleep "${'$'}D"
               if start_try; then
+                start_frpc
                 exit 0
               fi
             done

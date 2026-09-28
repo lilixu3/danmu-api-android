@@ -719,6 +719,7 @@ internal fun ServiceRuntimeInfoDialog(
     localUrl: String,
     lanUrl: String,
     lanIpv6Url: String,
+    tunnelUrl: String,
     listenMode: RuntimeListenMode,
     token: String,
     maskedToken: String,
@@ -728,6 +729,7 @@ internal fun ServiceRuntimeInfoDialog(
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
     val displayLanIpv6 = maskRuntimeUrl(lanIpv6Url, token, maskedToken, tokenVisible)
+    val displayTunnel = maskRuntimeUrl(tunnelUrl, token, maskedToken, tokenVisible)
 
     AppDialog(
         onDismissRequest = onDismiss,
@@ -768,6 +770,9 @@ internal fun ServiceRuntimeInfoDialog(
                 RuntimeInfoItem(label = "监听网络", value = listenMode.label)
                 if (pid != null) {
                     RuntimeInfoItem(label = "进程 PID", value = pid.toString())
+                }
+                if (tunnelUrl.isNotBlank()) {
+                    RuntimeInfoItem(label = "内网穿透", value = displayTunnel, mono = true)
                 }
                 RuntimeInfoItem(label = "本机地址", value = displayLocal, mono = true)
                 RuntimeInfoItem(label = "IPv4 地址", value = displayLan, mono = true)
@@ -1113,6 +1118,7 @@ internal fun AccessGatewayPanel(
     localUrl: String,
     lanUrl: String,
     lanIpv6Url: String,
+    tunnelUrl: String,
     token: String,
     maskedToken: String,
     tokenVisible: Boolean,
@@ -1121,11 +1127,13 @@ internal fun AccessGatewayPanel(
     onToggleTokenVisible: () -> Unit,
     onCopyLocal: () -> Unit,
     onCopyLan: () -> Unit,
-    onCopyLanIpv6: () -> Unit
+    onCopyLanIpv6: () -> Unit,
+    onCopyTunnel: () -> Unit
 ) {
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
     val displayLanIpv6 = maskRuntimeUrl(lanIpv6Url, token, maskedToken, tokenVisible)
+    val displayTunnel = maskRuntimeUrl(tunnelUrl, token, maskedToken, tokenVisible)
 
     AppGlassSurface(
         modifier = Modifier.fillMaxWidth(),
@@ -1166,6 +1174,15 @@ internal fun AccessGatewayPanel(
             AnimatedVisibility(visible = showLocalNetworkPermissionHint) {
                 LocalNetworkAddressPermissionHint(
                     onClick = onOpenLocalNetworkPermission
+                )
+            }
+            if (tunnelUrl.isNotBlank()) {
+                GatewayItem(
+                    title = "内网穿透",
+                    subtitle = "经 frp 服务器转发的公网地址",
+                    value = displayTunnel,
+                    onCopy = onCopyTunnel,
+                    emphasize = true
                 )
             }
             GatewayItem(

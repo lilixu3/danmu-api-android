@@ -291,6 +291,12 @@ android {
                 // 使用当前包名重新编译的 JNI 桥接库，避免旧符号导致 UnsatisfiedLinkError。
                 jniDirs += File(preparedNativeRuntimeDir, "jni-current").absolutePath
             }
+            // 内网穿透内核：普通模式要从 nativeLibraryDir 直接 exec libfrpc.so
+            // （useLegacyPackaging=true 会在安装时解压到 lib 目录）。
+            val frpDir = File(project.rootDir, "runtime/frp")
+            if (frpDir.isDirectory) {
+                jniDirs += frpDir.absolutePath
+            }
             jniLibs.directories.clear()
             jniLibs.directories.addAll(jniDirs)
         }

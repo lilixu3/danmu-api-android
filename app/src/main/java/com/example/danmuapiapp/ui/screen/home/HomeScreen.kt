@@ -211,6 +211,15 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
+    val tunnelUrl = if (tunnelState.running) {
+        com.example.danmuapiapp.data.tunnel.buildPublicApiUrl(
+            tunnelState.publicBase,
+            state.token
+        )
+    } else {
+        ""
+    }
     val coreList by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val isCoreInfoLoading by viewModel.isCoreInfoLoading.collectAsStateWithLifecycle()
     val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
@@ -404,6 +413,7 @@ fun HomeScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshRuntimeState()
+                viewModel.refreshTunnel()
                 hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
                 localNetworkPermissionState = readHomeLocalNetworkPermissionState(context)
                 if (state.runMode == RunMode.Normal) {
@@ -680,6 +690,7 @@ fun HomeScreen(
                         localUrl = state.localUrl,
                         lanUrl = state.lanUrl,
                         lanIpv6Url = state.lanIpv6Url,
+                        tunnelUrl = tunnelUrl,
                         token = state.token,
                         maskedToken = maskedToken,
                         tokenVisible = tokenVisible,
@@ -702,6 +713,11 @@ fun HomeScreen(
                                     "IPv6 局域网地址",
                                     state.lanIpv6Url
                                 )
+                            )
+                        },
+                        onCopyTunnel = {
+                            clipboardManager.nativeClipboard.setPrimaryClip(
+                                android.content.ClipData.newPlainText("内网穿透地址", tunnelUrl)
                             )
                         }
                     )
@@ -801,6 +817,7 @@ fun HomeScreen(
             localUrl = state.localUrl,
             lanUrl = state.lanUrl,
             lanIpv6Url = state.lanIpv6Url,
+            tunnelUrl = tunnelUrl,
             listenMode = state.listenMode,
             token = state.token,
             maskedToken = maskedToken,

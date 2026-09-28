@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppForegroundUpdateChecker
 import com.example.danmuapiapp.data.service.AppForegroundAnnouncementChecker
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.data.tunnel.TunnelRepository
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
@@ -62,7 +63,8 @@ class HomeViewModel @Inject constructor(
     private val appForegroundAnnouncementChecker: AppForegroundAnnouncementChecker,
     private val appUpdateService: AppUpdateService,
     private val cacheRepo: CacheRepository,
-    private val adminSessionRepository: AdminSessionRepository
+    private val adminSessionRepository: AdminSessionRepository,
+    private val tunnelRepository: TunnelRepository
 ) : ViewModel() {
     companion object {
         private const val CACHE_FILE_REFRESH_DEBOUNCE_MS = 420L
@@ -77,6 +79,11 @@ class HomeViewModel @Inject constructor(
     }
 
     val runtimeState = runtimeRepo.runtimeState
+    val tunnelState = tunnelRepository.state
+
+    fun refreshTunnel() {
+        viewModelScope.launch { tunnelRepository.refresh() }
+    }
     val coreInfoList = coreRepo.coreInfoList
     val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
