@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import android.net.Uri
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
@@ -659,7 +661,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         // 于是表现为「核心返回了空响应 / 本地接口请求失败」。
         try {
             val client = if (longRunning) localHttpClient else requestHttpClient
-            client.newCall(request).executeCancellable().use { response ->
+            client.newOutboundCall(request).executeCancellable().use { response ->
                 val read = runCatching { response.body.string() }
                 if (read.isFailure) {
                     val failure = read.exceptionOrNull()

@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import android.app.Activity
 import android.content.Context
 import android.os.Build
@@ -90,6 +91,8 @@ class HomeViewModel @Inject constructor(
     val coreDisplayNames = settingsRepo.coreDisplayNames
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
+    val accessEntryDefaultTab = settingsRepo.accessEntryDefaultTab
+    val accessEntryLayout = settingsRepo.accessEntryLayout
     val tokenVisible = settingsRepo.tokenVisible
     val proxyOptions = githubProxyService.proxyOptions()
     val cacheStats = cacheRepo.cacheStats
@@ -810,28 +813,38 @@ class HomeViewModel @Inject constructor(
         doUpdateCurrentVariant(variant)
     }
 
+    val coreUpdateChoice = CoreUpdateChoiceController()
+
     private fun doUpdateCurrentVariant(variant: ApiVariant) {
         isUpdatingCore = true
         viewModelScope.launch {
-            runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
-            coreRepo.updateCore(variant).fold(
-                onSuccess = {
-                    pendingRepairContinuation = null
-                    completeCoreUpdate(variant)
-                    isUpdatingCore = false
-                },
-                onFailure = { error ->
-                    runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
-                    isUpdatingCore = false
-                    if (error is CoreDependencyRepairRequiredException) {
-                        pendingRepairContinuation = PendingRepairContinuation.Update(variant)
-                        appUpdateMessage = "${variantLabel(variant)}更新已暂停，等待修复依赖"
-                    } else if (githubProxyService.isUsingProxy()) {
-                        pendingProxyAction = PendingProxyAction.Update(variant)
-                        openProxyPickerDialog()
+            try {
+                val request = coreUpdateChoice.prepare(coreRepo, variant).getOrElse {
+                    appUpdateMessage = "无法准备更新：${it.message}"
+                    return@launch
+                } ?: return@launch
+                runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
+                coreRepo.updateCore(request).fold(
+                    onSuccess = {
+                        pendingRepairContinuation = null
+                        completeCoreUpdate(variant)
+                        isUpdatingCore = false
+                    },
+                    onFailure = { error ->
+                        runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
+                        isUpdatingCore = false
+                        if (error is CoreDependencyRepairRequiredException) {
+                            pendingRepairContinuation = PendingRepairContinuation.Update(variant)
+                            appUpdateMessage = "${variantLabel(variant)}更新已暂停，等待修复依赖"
+                        } else if (githubProxyService.isUsingProxy()) {
+                            pendingProxyAction = PendingProxyAction.Update(variant)
+                            openProxyPickerDialog()
+                        }
                     }
-                }
-            )
+                )
+            } finally {
+                isUpdatingCore = false
+            }
         }
     }
 

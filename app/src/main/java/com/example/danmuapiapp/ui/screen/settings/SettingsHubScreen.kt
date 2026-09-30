@@ -230,13 +230,13 @@ fun SettingsHubScreen(
 
             SettingsGroup(title = "网络与数据") {
                 SettingsItem(
-                    title = "GitHub 代理",
-                    subtitle = "当前使用 $proxyLabel，用于检查更新与下载核心",
+                    title = "网络设置",
+                    subtitle = "增强直连、GitHub 下载线路与更新检查",
                     icon = Icons.Rounded.Public,
                     onClick = onOpenNetwork,
                     trailing = {
                         SettingsStatusBadge(
-                            text = if (proxyLabel.contains("直连")) "直连" else "已配置",
+                            text = if (proxyLabel.contains("直连")) "GitHub 直连" else "GitHub 已配置",
                             accent = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -300,7 +300,7 @@ fun SettingsHubScreen(
             SettingsGroup(title = "偏好与信息") {
                 SettingsItem(
                     title = "主题与显示",
-                    subtitle = "主题模式、液态玻璃与界面缩放",
+                    subtitle = "主题模式、访问入口形式与界面缩放",
                     icon = Icons.Rounded.Palette,
                     onClick = onOpenThemeDisplay
                 )

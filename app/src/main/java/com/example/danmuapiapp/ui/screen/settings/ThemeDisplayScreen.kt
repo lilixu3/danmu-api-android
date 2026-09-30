@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -83,6 +85,8 @@ fun ThemeDisplayScreen(
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val snackbarHostState = remember { SnackbarHostState() }
+    val accessEntryDefaultTab by viewModel.accessEntryDefaultTab.collectAsStateWithLifecycle()
+    val accessEntryLayout by viewModel.accessEntryLayout.collectAsStateWithLifecycle()
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
     val glassMaterial by viewModel.glassMaterial.collectAsStateWithLifecycle()
     val glassBottomBar by viewModel.glassBottomBar.collectAsStateWithLifecycle()
@@ -191,6 +195,53 @@ fun ThemeDisplayScreen(
                                 Text(nightModeLabel(mode))
                             }
                         }
+                    }
+                }
+            }
+
+            SettingsGroup(title = "访问入口形式") {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("首页访问入口的展示方式", style = MaterialTheme.typography.bodyMedium)
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        AccessEntryLayout.entries.forEachIndexed { index, layout ->
+                            SegmentedButton(
+                                selected = accessEntryLayout == layout,
+                                onClick = { viewModel.setAccessEntryLayout(layout) },
+                                shape = SegmentedButtonDefaults.itemShape(index, AccessEntryLayout.entries.size)
+                            ) { Text(if (layout == AccessEntryLayout.Tabs) "标签（默认）" else "平铺") }
+                        }
+                    }
+                    Text(
+                        if (accessEntryLayout == AccessEntryLayout.Expanded) "同时展示所有可用地址，方便直接查看和复制。"
+                        else "按穿透、IPv4、IPv6、本机切换，每次只展示所选地址。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (accessEntryLayout == AccessEntryLayout.Tabs) {
+                SettingsGroup(title = "默认选中标签") {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            AccessEntryTab.entries.forEachIndexed { index, tab ->
+                                SegmentedButton(
+                                    selected = accessEntryDefaultTab == tab,
+                                    onClick = { viewModel.setAccessEntryDefaultTab(tab) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, AccessEntryTab.entries.size),
+                                    icon = {}
+                                ) { Text(tab.label) }
+                            }
+                        }
+                        Text("打开首页时优先显示所选地址；地址暂不可用时显示 IPv4，设置仍会保留。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

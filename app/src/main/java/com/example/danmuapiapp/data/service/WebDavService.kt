@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.SecureStringStore
@@ -199,7 +201,7 @@ class WebDavService @Inject constructor(
                 else -> builder.method(method, null)
             }
 
-            httpClient.newCall(builder.build()).execute().use { response ->
+            httpClient.newOutboundCall(builder.build()).execute().use { response ->
                 HttpResult(
                     code = response.code,
                     body = response.body.string()

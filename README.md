@@ -88,7 +88,7 @@
 
 1. **核心管理**：在「设置」页面可以切换稳定版/开发版核心
 2. **服务配置**：在「配置」页面可以修改服务参数
-3. **网络设置**：在「设置」页面可以配置 GitHub 代理
+3. **网络设置**：在「设置」页面可以配置 GitHub 下载线路和增强直连
 
 ---
 
@@ -151,7 +151,7 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 24.19.0（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 24.21.0（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -163,8 +163,14 @@ git clone https://github.com/lilixu3/danmu-api-android
 # 进入项目目录
 cd danmu-api-android
 
+# 准备 frpc 内核（默认三个 ABI，校验仓库记录的 SHA-256）
+./scripts/prepare_frp_kernel.sh
+
+# 准备 App 增强直连组件（需要 Go 和 Android NDK，默认三个 ABI）
+./scripts/prepare_outbound_kernel.sh
+
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v24.19.0
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v24.21.0
 ```
 
 正式构建只读取仓库内的 Node 运行时资产，不会隐式读取相邻的 `danmu_api`
@@ -206,3 +212,7 @@ cd danmu-api-android
 **如果你觉得这个项目对你有帮助，欢迎给个 ⭐️ 支持一下！**
 
 </div>
+
+### App 独立增强直连
+
+设置 → 网络设置 → 增强直连，默认关闭。App 内置 Go DNS/ECH/H2/H3 组件，普通模式和 Root 模式均可接入，无需核心实现相关开关；支持巴哈姆特、TMDB、弹弹play与 Animeko，新增来源在设置中勾选，已有代理优先。构建前运行 `scripts/prepare_outbound_kernel.sh`。详细兼容范围、构建和诊断见 [runtime/outbound/README.md](runtime/outbound/README.md)。

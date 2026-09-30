@@ -109,7 +109,7 @@ fun TunnelScreen(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: Tunn
             }) },
             confirmButton = { TextButton(onClick = {
                 confirmAction = null
-                if (action == "clear") viewModel.clearLog() else runAction(action)
+                if (action == "clear") viewModel.clearLog { notify(it.message) } else runAction(action)
             }) { Text("确认") } },
             dismissButton = { TextButton(onClick = { confirmAction = null }) { Text("取消") } }
         )
@@ -139,6 +139,7 @@ private fun TunnelAddressCard(state: TunnelUiState, onSettings: () -> Unit, onCo
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             Text(when {
                 !state.running -> "连接隧道后可用，点击右上角复制完整地址。"
+                state.linkState == TunnelLinkState.Conflict -> "同名隧道已被占用；此地址可能仍由已有实例提供服务。"
                 state.linkState != TunnelLinkState.Connected -> "地址已生成，等待远程链路确认。"
                 !state.serviceRunning -> "远程链路已连接，请启动本机弹幕服务。"
                 else -> "复制完整地址，填入播放器弹幕接口。"
@@ -173,4 +174,3 @@ private fun TunnelRouteCard(state: TunnelUiState, onSettings: () -> Unit) {
         )
     }
 }
-

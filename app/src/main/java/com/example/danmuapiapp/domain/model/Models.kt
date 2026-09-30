@@ -77,6 +77,7 @@ data class CoreInfo(
     val desiredSource: String? = null,
     val pullRequestNumbers: List<Int> = emptyList(),
     val sourceCommitSha: String = "",
+    val updatedPullRequestHeads: Map<Int, String> = emptyMap(),
     val remoteVersion: String? = null,
     val remoteBranch: String? = null,
     val remoteCommit: CoreRemoteCommit? = null,

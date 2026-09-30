@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -393,20 +394,32 @@ class CoreViewModel @Inject constructor(
         requireProxyAndRun(PendingProxyAction.DoUpdate(variant))
     }
 
+    val coreUpdateChoice = CoreUpdateChoiceController()
+
     private fun doUpdateCore(variant: ApiVariant) {
+        if (isOperating || isCheckingUpdate) return
         val label = variantLabel(variant)
         showUpdateDialog = false
         dismissUpdateDetails()
         viewModelScope.launch {
-            performCoreMutation(
-                variant = variant,
-                actionMessage = "正在更新 $label...",
-                successMessage = "$label 更新成功",
-                stopTimeoutMessage = "$label 更新前停止服务超时，请稍后重试",
-                failurePrefix = "更新失败",
-                pendingAction = PendingProxyAction.DoUpdate(variant),
-                applyBlock = { coreRepo.updateCore(variant) }
-            )
+            isCheckingUpdate = true
+            try {
+                val request = coreUpdateChoice.prepare(coreRepo, variant).getOrElse {
+                    operationMessage = "无法准备更新：${it.message}"
+                    return@launch
+                } ?: return@launch
+                performCoreMutation(
+                    variant = variant,
+                    actionMessage = "正在更新 $label...",
+                    successMessage = "$label 更新成功",
+                    stopTimeoutMessage = "$label 更新前停止服务超时，请稍后重试",
+                    failurePrefix = "更新失败",
+                    pendingAction = PendingProxyAction.DoUpdate(variant),
+                    applyBlock = { coreRepo.updateCore(request) }
+                )
+            } finally {
+                isCheckingUpdate = false
+            }
         }
     }
 

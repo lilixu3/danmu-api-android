@@ -92,6 +92,61 @@ class JGitPullRequestMergerTest {
         }
     }
 
+    @Test
+    fun `reapply updated PR onto newer main retains changes from both`() {
+        createRepository().use { git ->
+            val baseBranch = git.repository.branch
+            val base = commitFile(git, "worker.js", "module.exports = {};\n", "base")
+            val initialPr = createPullRequestCommit(git, baseBranch, base, "feature", "feature.js", "old PR\n")
+            JGitPullRequestMerger.merge(git, listOf(PullRequestCommit(492, initialPr)))
+            val oldLocalMerge = git.repository.resolve("HEAD")
+            git.checkout().setName("feature").call()
+            val updatedPr = commitFile(git, "feature.js", "new PR\n", "PR new commit")
+            git.checkout().setName(base.name).call()
+            val newMain = commitFile(git, "main-update.js", "main new commit\n", "main updated")
+            PullRequestUpdateMergeGuard.verify(git, newMain.name,
+                listOf(PullRequestCommit(492, updatedPr)), mapOf(492 to initialPr.name))
+            val merged = JGitPullRequestMerger.merge(git, listOf(PullRequestCommit(492, updatedPr)))
+            assertNotEquals(oldLocalMerge.name, merged)
+            assertEquals("new PR\n", File(git.repository.workTree, "feature.js").readText())
+            assertEquals("main new commit\n", File(git.repository.workTree, "main-update.js").readText())
+            assertTrue(git.log().call().any { it.name == newMain.name })
+        }
+    }
+
+    @Test
+    fun `update guard refuses rewritten PR history without modifying target`() {
+        createRepository().use { git ->
+            val branch = git.repository.branch
+            val base = commitFile(git, "worker.js", "base\n", "base")
+            val old = createPullRequestCommit(git, branch, base, "old", "feature.js", "old change\n")
+            val fresh = createPullRequestCommit(git, branch, base, "new", "replacement.js", "new change\n")
+            val error = runCatching {
+                PullRequestUpdateMergeGuard.verify(git, base.name, listOf(PullRequestCommit(492, fresh)), mapOf(492 to old.name))
+            }.exceptionOrNull()
+            assertTrue(error?.message.orEmpty().contains("历史已改写"))
+            assertEquals(base.name, git.repository.resolve("HEAD").name)
+            assertEquals("base\n", File(git.repository.workTree, "worker.js").readText())
+        }
+    }
+
+    @Test
+    fun `update guard refuses no-op remerge of a reverted PR`() {
+        createRepository().use { git ->
+            val branch = git.repository.branch
+            val base = commitFile(git, "worker.js", "base\n", "base")
+            val pr = createPullRequestCommit(git, branch, base, "pr", "worker.js", "PR change\n")
+            JGitPullRequestMerger.merge(git, listOf(PullRequestCommit(492, pr)))
+            val reverted = commitFile(git, "worker.js", "base\n", "revert PR")
+            val error = runCatching {
+                PullRequestUpdateMergeGuard.verify(git, reverted.name, listOf(PullRequestCommit(492, pr)), mapOf(492 to pr.name))
+            }.exceptionOrNull()
+            assertTrue(error?.message.orEmpty().contains("不能恢复回退"))
+            assertEquals(reverted.name, git.repository.resolve("HEAD").name)
+            assertEquals("base\n", File(git.repository.workTree, "worker.js").readText())
+        }
+    }
+
     private fun createRepository(): Git {
         val git = Git.init().setDirectory(temporaryFolder.newFolder()).call()
         git.repository.config.apply {

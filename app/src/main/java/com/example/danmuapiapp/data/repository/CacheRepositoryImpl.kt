@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
@@ -152,7 +154,7 @@ class CacheRepositoryImpl @Inject constructor(
                 .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val result = httpClient.newCall(request).executeCancellable().use { response ->
+            val result = httpClient.newOutboundCall(request).executeCancellable().use { response ->
                 val body = runCatching { response.body.string() }.getOrDefault("")
                 response.code to body
             }
@@ -373,7 +375,7 @@ class CacheRepositoryImpl @Inject constructor(
                     .applyRuntimeApiAuth(runtime)
                     .get()
                     .build()
-                httpClient.newCall(request).execute().use { response ->
+                httpClient.newOutboundCall(request).execute().use { response ->
                     if (response.code !in 200..299) return@use null
                     parseReqRecordsResponse(response.body.string())
                 }
@@ -408,7 +410,7 @@ class CacheRepositoryImpl @Inject constructor(
                     .applyRuntimeApiAuth(runtime)
                     .get()
                     .build()
-                httpClient.newCall(request).execute().use { response ->
+                httpClient.newOutboundCall(request).execute().use { response ->
                     if (response.code !in 200..299) return@use null
                     parseAnimeCacheSummary(response.body.string())
                 }

@@ -147,7 +147,7 @@ data class TunnelCheck(
     val ok: Boolean get() = errors.isEmpty()
 }
 
-enum class TunnelLinkState { Unknown, Connecting, Connected, Error }
+enum class TunnelLinkState { Unknown, Connecting, Connected, Conflict, Error }
 
 data class ServerInput(val host: String, val port: Int?)
 
@@ -162,9 +162,13 @@ fun splitDomains(raw: String): List<String> =
 fun parseServerInput(raw: String): ServerInput {
     val value = raw.trim()
     if (value.isEmpty()) return ServerInput("", null)
-    val match = Regex("^\\[?([^\\]]+?)\\]?:(\\d{1,5})$").find(value)
+    val match = if (value.startsWith('[')) {
+        Regex("^\\[([^]]+)](?::(\\d+))?$").matchEntire(value)
+    } else if (value.count { it == ':' } == 1) {
+        Regex("^([^:]+):(\\d+)$").matchEntire(value)
+    } else null
     if (match != null) {
-        return ServerInput(match.groupValues[1].trim(), match.groupValues[2].toIntOrNull())
+        return ServerInput(match.groupValues[1].trim(), match.groupValues[2].takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: 0 })
     }
     return ServerInput(value, null)
 }
@@ -172,9 +176,10 @@ fun parseServerInput(raw: String): ServerInput {
 /** 表单模式 → frpc.toml（官方 0.71 配置格式）。 */
 fun buildFrpcToml(form: TunnelFormSettings, targetPort: Int): String {
     val name = form.proxyName.trim().ifEmpty { "danmu-api" }
+    val server = parseServerInput(form.serverAddr)
     val builder = StringBuilder()
-        .appendLine("serverAddr = ${tomlString(form.serverAddr.trim())}")
-        .appendLine("serverPort = ${form.serverPort}")
+        .appendLine("serverAddr = ${tomlString(server.host)}")
+        .appendLine("serverPort = ${server.port ?: form.serverPort}")
         .appendLine("loginFailExit = false")
     if (form.authToken.trim().isNotEmpty()) {
         builder.appendLine("auth.token = ${tomlString(form.authToken.trim())}")
@@ -235,9 +240,6 @@ private fun collectValues(text: String, keys: List<String>): List<String> {
     return pattern.findAll(text).map { cleanValue(it.groupValues[1]) }.toList()
 }
 
-private fun collectNumbers(text: String, keys: List<String>): List<Int> =
-    collectValues(text, keys).mapNotNull { it.replace(Regex("[^0-9]"), "").toIntOrNull() }
-
 private fun pick(text: String, tomlKey: String, iniKey: String): String {
     val pattern = Regex(
         "^\\s*(?:$tomlKey|$iniKey)\\s*[:=]\\s*(.+?)\\s*$",
@@ -251,33 +253,7 @@ fun parseFrpcConfig(text: String): FrpcConfigSummary {
     val format = detectFormat(text)
     if (format == "json") return parseFrpcJson(text)
 
-    val localPorts = collectNumbers(text, listOf("localPort", "local_port"))
-    val remotePorts = collectNumbers(text, listOf("remotePort", "remote_port"))
-    val localIps = collectValues(text, listOf("localIP", "local_ip"))
-    val names = collectValues(text, listOf("name"))
-    val types = collectValues(text, listOf("type"))
-    val domains = collectValues(text, listOf("customDomains", "custom_domains", "subdomain"))
-
-    val proxies = localPorts.mapIndexed { index, port ->
-        FrpcProxySummary(
-            name = names.getOrElse(index) { "" },
-            type = types.getOrElse(index) { "tcp" },
-            localIp = localIps.getOrElse(index) { "" },
-            localPort = port,
-            remotePort = remotePorts.getOrNull(index),
-            customDomains = domains
-        )
-    }.toMutableList()
-    if (localPorts.isEmpty() && domains.isNotEmpty()) {
-        proxies += FrpcProxySummary(
-            name = names.firstOrNull() ?: "",
-            type = "http",
-            localIp = "",
-            localPort = null,
-            remotePort = null,
-            customDomains = domains
-        )
-    }
+    val proxies = parseTextProxies(text, format)
 
     return FrpcConfigSummary(
         format = format,
@@ -289,6 +265,39 @@ fun parseFrpcConfig(text: String): FrpcConfigSummary {
         hasLoginFailExit = pick(text, "loginFailExit", "login_fail_exit").isNotEmpty(),
         proxies = proxies
     )
+}
+
+/** 按代理分段，避免 HTTP 域名或 TCP 端口串到另一条映射。 */
+private fun parseTextProxies(text: String, format: String): List<FrpcProxySummary> {
+    val boundaries = when (format) {
+        "toml" -> Regex("(?m)^[ \\t]*\\[\\[(?:proxies|visitors)]]")
+        "ini" -> Regex("(?m)^[ \\t]*\\[[^]\\r\\n]+]")
+        "yaml" -> Regex("(?m)^[ \\t]*-[ \\t]+name[ \\t]*:")
+        else -> return emptyList()
+    }.findAll(text).toList()
+    return boundaries.mapIndexedNotNull { index, match ->
+        val block = text.substring(match.range.first, boundaries.getOrNull(index + 1)?.range?.first ?: text.length)
+        if (format == "toml" && !match.value.contains("[[proxies]]")) return@mapIndexedNotNull null
+        if (format == "ini" && match.value.trim() == "[common]") return@mapIndexedNotNull null
+        val normalized = if (format == "yaml") block.replaceFirst(Regex("^[ \\t]*-[ \\t]+"), "") else block
+        val domainArray = Regex("(?ms)^[ \\t]*customDomains[ \\t]*[:=][ \\t]*(\\[.*?])").find(normalized)
+        val domains = if (domainArray != null) {
+            runCatching {
+                val array = JSONArray(domainArray.groupValues[1])
+                (0 until array.length()).map { array.getString(it).trim() }.filter { it.isNotEmpty() }
+            }.getOrDefault(emptyList())
+        } else {
+            collectValues(normalized, listOf("customDomains", "custom_domains")).flatMap(::splitDomains)
+        }
+        FrpcProxySummary(
+            name = pick(normalized, "name", "name").ifBlank { if (format == "ini") match.value.trim().removeSurrounding("[", "]") else "" },
+            type = pick(normalized, "type", "type").ifBlank { "tcp" },
+            localIp = pick(normalized, "localIP", "local_ip"),
+            localPort = pick(normalized, "localPort", "local_port").toIntOrNull(),
+            remotePort = pick(normalized, "remotePort", "remote_port").toIntOrNull(),
+            customDomains = domains
+        )
+    }
 }
 
 private fun parseFrpcJson(text: String): FrpcConfigSummary {
@@ -352,7 +361,7 @@ fun validateForm(form: TunnelFormSettings, targetPort: Int): List<String> {
     if (server.host.isNotEmpty() && !Regex("^[A-Za-z0-9._:-]+$").matches(server.host)) {
         errors += "服务器地址格式不正确（只填域名或 IP，不要带 http://）"
     }
-    if (form.serverPort !in 1..65535) errors += "frps 端口需在 1-65535"
+    if ((server.port ?: form.serverPort) !in 1..65535) errors += "frps 端口需在 1-65535"
     if (targetPort !in 1..65535) errors += "本机 API 端口不合法"
     if (targetPort == 5321) errors += "禁止把正向代理端口 5321 暴露到公网"
     if (form.proxyType == TunnelProxyType.Tcp) {
@@ -441,10 +450,28 @@ fun injectFrpcDefaults(
         return text.substring(0, insertAt) + "\n" + additions.joinToString("\n") + text.substring(insertAt)
     }
 
-    // TOML/YAML 的顶层键必须写在任何表/嵌套结构之前。
-    val firstTable = Regex("^\\s*\\[", RegexOption.MULTILINE).find(text)
-    val cut = firstTable?.range?.first ?: text.length
-    return text.substring(0, cut) + additions.joinToString("\n") + "\n" + text.substring(cut)
+    // TOML 顶层键放在表之前；YAML 放在文档标记之后、映射之前。
+    val documentStart = if (format == "yaml") {
+        Regex("(?m)^---[ \\t]*(?:#.*)?(?:\\r?\\n|$)").find(text)?.range?.last?.plus(1) ?: 0
+    } else 0
+    val prefix = text.substring(0, documentStart).let {
+        if (it.isNotEmpty() && !it.endsWith('\n')) "$it\n" else it
+    }
+    return prefix + additions.joinToString("\n", postfix = "\n") + text.substring(documentStart)
+}
+
+/** 保存、预览、端口跟随必须使用同一套补全规则，原始粘贴文本仍保留供编辑。 */
+fun buildEffectiveFrpcConfig(settings: TunnelSettings, port: Int): String {
+    if (settings.mode == TunnelMode.Form) return buildFrpcToml(settings.form, port)
+    val text = if (settings.form.autoFillDefaults) {
+        injectFrpcDefaults(settings.configText, settings.form.dnsServer.trim().ifBlank { DEFAULT_DNS_SERVER })
+    } else settings.configText
+    return syncPastedLocalPort(text, port)
+}
+
+private fun publicHost(host: String): String {
+    val unwrapped = host.trim().removeSurrounding("[", "]")
+    return if (':' in unwrapped) "[$unwrapped]" else unwrapped
 }
 
 /** 把粘贴配置里所有 localPort 改成 targetPort（用户改了 API 端口时自动跟随）。 */
@@ -483,7 +510,7 @@ fun derivePublicAddress(settings: TunnelSettings): String {
         val host = parseServerInput(form.serverAddr).host
         if (host.isEmpty()) return ""
         if (form.proxyType == TunnelProxyType.Tcp) {
-            return if (form.remotePort > 0) "$host:${form.remotePort}" else ""
+            return if (form.remotePort > 0) "${publicHost(host)}:${form.remotePort}" else ""
         }
         val domains = splitDomains(form.customDomains)
         if (domains.isNotEmpty()) return domains.first()
@@ -494,7 +521,7 @@ fun derivePublicAddress(settings: TunnelSettings): String {
     summary.proxies.firstOrNull { it.type == "http" && it.customDomains.isNotEmpty() }
         ?.let { return it.customDomains.first() }
     summary.proxies.firstOrNull { (it.remotePort ?: 0) > 0 }
-        ?.let { return "${summary.serverAddr}:${it.remotePort}" }
+        ?.let { return "${publicHost(summary.serverAddr)}:${it.remotePort}" }
     return ""
 }
 
@@ -519,49 +546,6 @@ fun compareVersions(a: String, b: String): Int {
     return 0
 }
 
-/** 从 frp 官方 tar.gz 里取出 frpc 二进制（最小 tar 解析）。 */
-fun extractFrpcFromTarGz(gz: ByteArray): ByteArray? {
-    return try {
-        java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(gz)).use { input ->
-            val header = ByteArray(512)
-            var result: ByteArray? = null
-            while (result == null) {
-                var read = 0
-                while (read < 512) {
-                    val count = input.read(header, read, 512 - read)
-                    if (count < 0) return@use null
-                    read += count
-                }
-                if (header.all { it == 0.toByte() }) return@use null
-                val name = String(header, 0, 100, Charsets.UTF_8).trimEnd('\u0000', ' ')
-                val sizeText = String(header, 124, 12, Charsets.UTF_8)
-                    .trim().trimEnd('\u0000').trim()
-                val size = sizeText.toLongOrNull(8) ?: 0L
-                if (name.endsWith("/frpc") || name == "frpc") {
-                    val data = ByteArray(size.toInt().coerceAtLeast(0))
-                    var offset = 0
-                    while (offset < data.size) {
-                        val count = input.read(data, offset, data.size - offset)
-                        if (count < 0) break
-                        offset += count
-                    }
-                    result = data
-                } else {
-                    var skip = size + ((512 - (size % 512)) % 512)
-                    while (skip > 0) {
-                        val skipped = input.skip(skip)
-                        if (skipped <= 0) break
-                        skip -= skipped
-                    }
-                }
-            }
-            result
-        }
-    } catch (_: Exception) {
-        null
-    }
-}
-
 /** 从 frpc 日志尾部判断链路状态（后出现的日志优先）。 */
 fun parseFrpcLogLinkState(logTail: String): TunnelLinkState {
     var state = TunnelLinkState.Unknown
@@ -571,10 +555,13 @@ fun parseFrpcLogLinkState(logTail: String): TunnelLinkState {
         // 不代表 frpc 启动/链路失败，不能改链路状态。
         if (lower.contains("local service")) return@forEach
         when {
+            lower.contains("start frpc service for config file") || lower.contains("[app] frpc process adopted") ->
+                state = TunnelLinkState.Unknown
+            lower.contains("start error") && lower.contains("already exists") -> state = TunnelLinkState.Conflict
             lower.contains("start proxy success") -> state = TunnelLinkState.Connected
             lower.contains("login to server success") || lower.contains("try to connect to server") ->
-                if (state != TunnelLinkState.Connected) state = TunnelLinkState.Connecting
-            lower.contains("login to server failed") ||
+                state = TunnelLinkState.Connecting
+            lower.contains("login to server failed") || lower.contains("heartbeat timeout") ||
                 lower.contains("connect to server error") ||
                 lower.contains("start error") ||
                 lower.contains("i/o timeout") ||

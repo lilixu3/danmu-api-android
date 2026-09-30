@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import com.example.danmuapiapp.ui.component.CorePullRequestUpdateChoiceHost
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -110,6 +111,7 @@ class CompatModeActivity : ComponentActivity() {
                     }
                 }
 
+                CorePullRequestUpdateChoiceHost(compatViewModel.coreUpdateChoice)
                 CompatModeScreen(
                     uiState = uiState,
                     proxyPickerState = CompatProxyPickerState(

@@ -51,6 +51,7 @@ internal fun TunnelConnectionCard(
     }
     val serverLabel = when {
         connected -> "已连接"
+        state.running && state.linkState == TunnelLinkState.Conflict -> "名称冲突"
         state.running && state.linkState == TunnelLinkState.Unknown -> "待确认"
         status.tone == TunnelTone.Error -> "连接异常"
         state.state == "retrying" -> "重连中"
@@ -61,6 +62,7 @@ internal fun TunnelConnectionCard(
     val publicLabel = when {
         connected && state.serviceRunning -> "隧道就绪"
         connected -> "等待服务"
+        state.running && state.linkState == TunnelLinkState.Conflict -> "已有实例占用"
         active -> "等待链路"
         else -> "未连接"
     }

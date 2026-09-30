@@ -1,6 +1,10 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
+import com.example.danmuapiapp.data.network.GithubOutboundNetwork
+import com.example.danmuapiapp.data.network.GithubConnectionPoolCleanup
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.data.util.safeGetBoolean
@@ -41,6 +45,8 @@ class GithubProxyService @Inject constructor(
         private const val SLOW_FALLBACK_CANDIDATE_LIMIT = 1
     }
 
+    private val poolCleanup = GithubConnectionPoolCleanup { httpClient.connectionPool.evictAll() }
+
     private val prefs = context.getSharedPreferences("github_proxy_prefs", Context.MODE_PRIVATE)
     private val githubAuthPrefs = context.getSharedPreferences("github_auth_prefs", Context.MODE_PRIVATE)
     private val githubTokenStore = SecureStringStore(
@@ -50,6 +56,7 @@ class GithubProxyService @Inject constructor(
     )
     private val allOptions = listOf(
         GithubProxyOption(PROXY_ID_ORIGINAL, "GitHub 官方（直连）", "", isOriginal = true),
+        GithubProxyOption(GithubOutboundNetwork.OPTION_ID, "GitHub 官方（增强直连）", "", isOriginal = true),
         GithubProxyOption("gh_proxy_org", "GH-Proxy.org", "https://gh-proxy.org"),
         GithubProxyOption("hk_gh_proxy", "HK GH-Proxy", "https://hk.gh-proxy.org"),
         GithubProxyOption("cdn_gh_proxy", "CDN GH-Proxy", "https://cdn.gh-proxy.org"),
@@ -83,9 +90,12 @@ class GithubProxyService @Inject constructor(
 
     fun setSelectedProxy(proxyId: String) {
         persistSelection(proxyId, markSelected = true)
+        // Closing TLS connections may perform network I/O; keep it off UI callbacks.
+        poolCleanup.schedule()
     }
 
     fun clearUserSelection() {
+        poolCleanup.schedule()
         prefs.edit {
             putBoolean(KEY_HAS_USER_SELECTED, false)
             putString(KEY_SELECTED_PROXY_ID, PROXY_ID_ORIGINAL)
@@ -137,18 +147,18 @@ class GithubProxyService @Inject constructor(
             buildProxyCandidates(option.baseUrl, targetUrl)
         }
 
-        val fastLatency = probeLatency(buildLatencyClient(fast = true), candidates)
+        val fastLatency = probeLatency(buildLatencyClient(fast = true, option = option), candidates)
         if (fastLatency >= 0L) return@withContext fastLatency
 
         // 慢测只作为兜底，并限制候选数量，避免黑洞代理把整轮测速拖得过久。
         probeLatency(
-            buildLatencyClient(fast = false),
+            buildLatencyClient(fast = false, option = option),
             candidates.distinct().take(SLOW_FALLBACK_CANDIDATE_LIMIT)
         )
     }
 
-    private fun buildLatencyClient(fast: Boolean): OkHttpClient {
-        return httpClient.newBuilder()
+    private fun buildLatencyClient(fast: Boolean, option: GithubProxyOption): OkHttpClient {
+        return GithubOutboundNetwork.forOption(context, httpClient, option.id == GithubOutboundNetwork.OPTION_ID).newBuilder()
             .connectTimeout(
                 if (fast) FAST_LATENCY_CONNECT_TIMEOUT_MS else SLOW_LATENCY_CONNECT_TIMEOUT_MS,
                 TimeUnit.MILLISECONDS
@@ -173,7 +183,7 @@ class GithubProxyService @Inject constructor(
                 .build()
 
             val latency = runCatching {
-                client.newCall(request).execute().use { response ->
+                client.newOutboundCall(request).execute().use { response ->
                     if (response.code !in 200..399) return@use -1L
                     runCatching { response.body.byteStream().use { it.read() } }
                     (System.currentTimeMillis() - start).coerceAtLeast(1L)

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.push
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -217,7 +219,7 @@ object PushLanScanner {
                 .get()
                 .header("Accept", "*/*")
                 .build()
-            fastClient.newCall(request).execute().use { response ->
+            fastClient.newOutboundCall(request).execute().use { response ->
                 response.code in 200..299
             }
         }.getOrDefault(false)

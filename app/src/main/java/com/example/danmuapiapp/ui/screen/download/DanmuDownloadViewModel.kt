@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -1493,7 +1495,7 @@ class DanmuDownloadViewModel @Inject constructor(
                 .url(buildLocalControlApiUrl("/api/config"))
                 .get()
                 .build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 val raw = response.body.string()
                 if (!response.isSuccessful) {
                     val fallback = "读取 $RATE_LIMIT_ENV_KEY 失败：HTTP ${response.code}"
@@ -1521,7 +1523,7 @@ class DanmuDownloadViewModel @Inject constructor(
                 .url(buildLocalControlApiUrl("/api/env/set"))
                 .post(payload)
                 .build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 val raw = response.body.string()
                 val fallback = "设置 $RATE_LIMIT_ENV_KEY 失败：HTTP ${response.code}"
                 if (!response.isSuccessful) {
@@ -1686,7 +1688,7 @@ class DanmuDownloadViewModel @Inject constructor(
     private fun requestGet(url: String): Result<Pair<Int, String>> {
         return runCatching {
             val request = Request.Builder().url(url).get().build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 response.code to response.body.string()
             }
         }

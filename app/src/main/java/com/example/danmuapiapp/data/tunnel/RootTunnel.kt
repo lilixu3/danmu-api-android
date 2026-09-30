@@ -1,7 +1,9 @@
 package com.example.danmuapiapp.data.tunnel
 
 import android.content.Context
+import java.io.File
 import com.example.danmuapiapp.data.service.RootShell
+import com.example.danmuapiapp.data.service.RootAutoStartModule
 
 /**
  * Root 模式下的 frpc 进程：su + setsid 拉起，PID 文件判活。
@@ -11,6 +13,7 @@ import com.example.danmuapiapp.data.service.RootShell
  */
 object RootTunnel {
 
+    @Synchronized
     fun start(context: Context): TunnelActionResult {
         if (!TunnelStore.kernelReady(context, rootMode = true)) {
             val message = "缺少 frpc 内核（libfrpc.so），请更新 App"
@@ -25,53 +28,62 @@ object RootTunnel {
             TunnelStore.broadcastStatus(context)
             return TunnelActionResult(false, message)
         }
-        if (isRunning(context)) {
-            return TunnelActionResult(true, "穿透已在运行", readPid(context))
-        }
+        val bootScript = RootAutoStartModule.refreshInstalledServiceScript(context)
+        if (!bootScript.ok) return TunnelActionResult(false, bootScript.message)
 
         val dir = TunnelStore.dir(context)
         val script = buildString {
-            appendLine("FRP_BIN=${shellQuote(TunnelStore.execKernelFile(context).absolutePath)}")
+            appendLine("FRP_DIR=${shellQuote(dir.absolutePath)}")
+            appendLine("FRP_LIB=${shellQuote(TunnelStore.kernelFile(context).absolutePath)}")
+            appendLine(RootTunnelScripts.selectKernel())
+            appendLine("FRP_BIN=\"\$FRP_LIB\"")
             appendLine("FRP_CFG=${shellQuote(config.absolutePath)}")
             appendLine("FRP_PID=${shellQuote(TunnelStore.rootPidFile(context).absolutePath)}")
             appendLine("FRP_LOG=${shellQuote(TunnelStore.logFile(context).absolutePath)}")
+            appendLine("FRP_PIDFILE=\"\$FRP_PID\"")
+            appendLine(RootTunnelScripts.lock())
+            appendLine(RootTunnelScripts.identityFunctions())
             appendLine("APP_UID=${android.os.Process.myUid()}")
             appendLine("umask 022")
             appendLine("mkdir -p ${shellQuote(dir.absolutePath)} 2>/dev/null || true")
             appendLine("[ -x \"\$FRP_BIN\" ] || { echo 'kernel not executable'; exit 2; }")
             appendLine("[ -f \"\$FRP_CFG\" ] || { echo 'config missing'; exit 3; }")
-            appendLine("if [ -f \"\$FRP_PID\" ]; then")
-            appendLine("  OLD=\$(cat \"\$FRP_PID\" 2>/dev/null | tr -d '\\r\\n')")
-            appendLine("  if [ -n \"\$OLD\" ] && kill -0 \"\$OLD\" 2>/dev/null && tr '\\0' ' ' < \"/proc/\$OLD/cmdline\" 2>/dev/null | grep -q 'libfrpc.so'; then")
-            appendLine("    echo \"already:\$OLD\"; exit 0;")
-            appendLine("  fi")
+            appendLine("PIDS=\$(frpc_pids)")
+            appendLine("set -- \$PIDS")
+            appendLine("if [ \"\$#\" -gt 1 ]; then echo '检测到重复穿透进程，请点击重启清理' >&2; exit 5; fi")
+            appendLine("if [ \"\$#\" -eq 1 ]; then")
+            appendLine("  OLD=\$(cat \"\$FRP_PID\" 2>/dev/null)")
+            appendLine("  if [ \"\$OLD\" != \"\$1\" ]; then echo '[app] frpc process adopted' >> \"\$FRP_LOG\"; fi")
+            appendLine("  remember_frpc \"\$1\"")
+            appendLine("  echo \"already:\$1\"; exit 0")
             appendLine("fi")
-            appendLine("rm -f \"\$FRP_PID\" 2>/dev/null || true")
-            appendLine("if [ -f \"\$FRP_LOG\" ]; then")
-            appendLine("  SZ=\$(wc -c < \"\$FRP_LOG\" 2>/dev/null)")
-            appendLine("  if [ -n \"\$SZ\" ] && [ \"\$SZ\" -gt 1048576 ]; then")
-            appendLine("    tail -c 262144 \"\$FRP_LOG\" > \"\$FRP_LOG.tmp\" 2>/dev/null && mv \"\$FRP_LOG.tmp\" \"\$FRP_LOG\" 2>/dev/null || true")
-            appendLine("  fi")
-            appendLine("fi")
+            appendLine("rm -f \"\$FRP_PID\" \"\$FRP_PID.start\" \"\$FRP_PID.version\" 2>/dev/null || true")
+            appendLine("FRP_LOG_HELPER=${shellQuote(File(context.applicationInfo.nativeLibraryDir, "libdanmu_outbound.so").absolutePath)}")
+            appendLine(RootTunnelScripts.logSink())
             appendLine("if command -v setsid >/dev/null 2>&1; then")
-            appendLine("  setsid \"\$FRP_BIN\" -c \"\$FRP_CFG\" >> \"\$FRP_LOG\" 2>&1 < /dev/null &")
+            appendLine("  setsid \"\$FRP_BIN\" -c \"\$FRP_CFG\" > \"\$FRP_PIPE\" 2>&1 < /dev/null 9>&- &")
             appendLine("elif command -v nohup >/dev/null 2>&1; then")
-            appendLine("  nohup \"\$FRP_BIN\" -c \"\$FRP_CFG\" >> \"\$FRP_LOG\" 2>&1 < /dev/null &")
+            appendLine("  nohup \"\$FRP_BIN\" -c \"\$FRP_CFG\" > \"\$FRP_PIPE\" 2>&1 < /dev/null 9>&- &")
             appendLine("else")
-            appendLine("  \"\$FRP_BIN\" -c \"\$FRP_CFG\" >> \"\$FRP_LOG\" 2>&1 < /dev/null &")
+            appendLine("  \"\$FRP_BIN\" -c \"\$FRP_CFG\" > \"\$FRP_PIPE\" 2>&1 < /dev/null 9>&- &")
             appendLine("fi")
             appendLine("PID=\$!")
             appendLine("echo \"\$PID\" > \"\$FRP_PID\"")
+            appendLine("frpc_ticks \"\$PID\" > \"\$FRP_PID.start\"")
+            appendLine("\"\$FRP_BIN\" --version > \"\$FRP_PID.version\" 2>/dev/null")
             appendLine("sleep 2")
-            appendLine("if kill -0 \"\$PID\" 2>/dev/null; then")
-            appendLine("  chmod 0644 \"\$FRP_PID\" \"\$FRP_LOG\" 2>/dev/null || true")
-            appendLine("  chown \"\$APP_UID:\$APP_UID\" \"\$FRP_PID\" \"\$FRP_LOG\" 2>/dev/null || true")
+            appendLine("rm -f \"\$FRP_PIPE\"")
+            appendLine("if owns_frpc \"\$PID\"; then")
+            appendLine("  chmod 0644 \"\$FRP_PID\" \"\$FRP_PID.start\" \"\$FRP_PID.version\" \"\$FRP_LOG\" 2>/dev/null || true")
+            appendLine("  chown \"\$APP_UID:\$APP_UID\" \"\$FRP_PID\" \"\$FRP_PID.start\" \"\$FRP_PID.version\" \"\$FRP_LOG\" 2>/dev/null || true")
             appendLine("  echo \"started:\$PID\"")
             appendLine("  exit 0")
             appendLine("fi")
+            appendLine("if [ -n \"\$(cat \"\$FRP_PID.start\" 2>/dev/null)\" ] && [ \"\$(frpc_ticks \"\$PID\")\" = \"\$(cat \"\$FRP_PID.start\" 2>/dev/null)\" ]; then kill \"\$PID\" 2>/dev/null || true; fi")
+            appendLine("kill \"\$FRP_LOG_PID\" 2>/dev/null || true")
             appendLine("echo 'frpc exited early'")
             appendLine("tail -n 20 \"\$FRP_LOG\" 2>/dev/null")
-            appendLine("rm -f \"\$FRP_PID\" 2>/dev/null || true")
+            appendLine("rm -f \"\$FRP_PID\" \"\$FRP_PID.start\" \"\$FRP_PID.version\" 2>/dev/null || true")
             appendLine("exit 4")
         }
 
@@ -89,40 +101,38 @@ object RootTunnel {
         return TunnelActionResult(true, "已以 Root 身份启动穿透", pid)
     }
 
+    @Synchronized
     fun stop(context: Context): TunnelActionResult {
         if (!RootShell.hasRoot(3000L)) {
             return TunnelActionResult(false, "未获得 Root 权限")
         }
-        val pidFile = TunnelStore.rootPidFile(context)
-        val script = buildString {
-            appendLine("PID=\$(cat ${shellQuote(pidFile.absolutePath)} 2>/dev/null)")
-            appendLine("if [ -n \"\$PID\" ]; then")
-            appendLine("  kill \"\$PID\" 2>/dev/null || true")
-            appendLine("  I=0")
-            appendLine("  while [ \"\$I\" -lt 10 ] && kill -0 \"\$PID\" 2>/dev/null; do I=\$((I + 1)); sleep 0.3; done")
-            appendLine("  kill -0 \"\$PID\" 2>/dev/null && kill -9 \"\$PID\" 2>/dev/null || true")
-            appendLine("fi")
-            appendLine("rm -f ${shellQuote(pidFile.absolutePath)} 2>/dev/null || true")
+        val script = RootTunnelScripts.stop(
+            TunnelStore.dir(context).absolutePath,
+            TunnelStore.kernelFile(context).absolutePath
+        )
+        val result = RootShell.exec(script, 30000L)
+        if (!result.ok) {
+            return TunnelActionResult(false, "停止 Root 穿透失败：${result.stderr.takeLast(200)}")
         }
-        val result = RootShell.exec(script, 12000L)
-        pidFile.delete()
         TunnelStore.writeStatus(context, "stopped", "root", 0L, 0L, 0, "")
         TunnelStore.broadcastStatus(context)
-        return if (result.ok) {
-            TunnelActionResult(true, "已停止 Root 穿透")
-        } else {
-            TunnelActionResult(false, "停止 Root 穿透失败：${result.stderr.takeLast(200)}")
-        }
+        return TunnelActionResult(true, "已停止 Root 穿透")
     }
 
-    fun isRunning(context: Context): Boolean {
-        if (readPid(context) <= 0) return false
-        val pidFile = TunnelStore.rootPidFile(context)
+    fun isRunning(context: Context): Boolean = runningPid(context) > 0L
+
+    /** 不依赖状态 JSON；升级遗留进程和丢失 PID 文件也必须显示为运行中。 */
+    fun runningPid(context: Context): Long {
         val script = buildString {
-            appendLine("PID=\$(cat ${shellQuote(pidFile.absolutePath)} 2>/dev/null)")
-            appendLine("[ -n \"\$PID\" ] && kill -0 \"\$PID\" 2>/dev/null && tr '\\0' ' ' < \"/proc/\$PID/cmdline\" 2>/dev/null | grep -q 'libfrpc.so'")
+            appendLine("FRP_DIR=${shellQuote(TunnelStore.dir(context).absolutePath)}")
+            appendLine("FRP_LIB=${shellQuote(TunnelStore.kernelFile(context).absolutePath)}")
+            appendLine("FRP_PIDFILE=${shellQuote(TunnelStore.rootPidFile(context).absolutePath)}")
+            appendLine(RootTunnelScripts.identityFunctions())
+            appendLine("PID=\$(cat \"\$FRP_PIDFILE\" 2>/dev/null)")
+            appendLine("if owns_frpc \"\$PID\"; then echo \"\$PID\"; else frpc_pids | head -n 1; fi")
         }
-        return RootShell.exec(script, 6000L).ok
+        val result = RootShell.exec(script, 10000L)
+        return if (result.ok) result.stdout.trim().toLongOrNull() ?: 0L else 0L
     }
 
     /** 服务/开机启动时按开关拉起（RootRuntimeController 启动流程调用）。 */

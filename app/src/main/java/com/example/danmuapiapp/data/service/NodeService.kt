@@ -460,24 +460,49 @@ class NodeService : Service() {
             explicitStart = explicitStart,
             notificationOnly = action == ACTION_ENSURE_FOREGROUND
         )
-        startTunnelIfAuto()
+        autoStartTunnelIfEnabled()
         return START_STICKY
     }
 
+    private val tunnelCommands = com.example.danmuapiapp.data.tunnel.TunnelCommandQueue(onFailure = { error ->
+        AppDiagnosticLogger.e(applicationContext, TAG, "穿透控制任务失败", error)
+        TunnelStore.writeStatus(applicationContext, "error", "normal", 0L, 0L, 0, "穿透控制失败，请查看日志")
+        TunnelStore.broadcastStatus(applicationContext)
+    })
+    @Volatile private var tunnelCommandsClosed = false
+
     private fun startTunnel() {
-        val supervisor = tunnelSupervisor ?: TunnelSupervisor(this).also { tunnelSupervisor = it }
-        val result = supervisor.start()
-        AppDiagnosticLogger.i(this, TAG, "穿透启动：${result.message}")
+        if (tunnelCommandsClosed) return
+        tunnelCommands.execute {
+            if (!tunnelCommandsClosed) {
+                val supervisor = tunnelSupervisor ?: TunnelSupervisor(applicationContext).also { tunnelSupervisor = it }
+                val result = supervisor.start()
+                AppDiagnosticLogger.i(applicationContext, TAG, "穿透启动：${result.message}")
+            }
+        }
     }
 
-    private fun startTunnelIfAuto() {
-        val settings = TunnelStore.readSettings(this)
-        if (settings.enabled && settings.autoStart) startTunnel()
+    private fun autoStartTunnelIfEnabled() {
+        if (tunnelCommandsClosed) return
+        tunnelCommands.execute {
+            if (!tunnelCommandsClosed) {
+                val settings = TunnelStore.readSettings(applicationContext)
+                if (settings.enabled && settings.autoStart) {
+                    val supervisor = tunnelSupervisor ?: TunnelSupervisor(applicationContext).also { tunnelSupervisor = it }
+                    supervisor.start()
+                }
+            }
+        }
     }
 
     private fun stopTunnel() {
-        tunnelSupervisor?.stop()
-        tunnelSupervisor = null
+        if (tunnelCommandsClosed) return
+        tunnelCommands.execute { tunnelSupervisor?.stop(); tunnelSupervisor = null }
+    }
+
+    private fun closeTunnelCommands() {
+        tunnelCommandsClosed = true
+        tunnelCommands.close { tunnelSupervisor?.stop(); tunnelSupervisor = null }
     }
 
     private fun handleNotificationDismissed(startId: Int): Int {
@@ -925,7 +950,7 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
-        stopTunnel()
+        closeTunnelCommands()
         val appContext = applicationContext
         val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(appContext)
         val unexpected = runtime.isUnexpectedServiceDestroy(serviceStopRequested, desiredRunning)

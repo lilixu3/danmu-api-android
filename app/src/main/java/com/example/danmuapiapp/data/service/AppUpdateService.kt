@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.ClipData
@@ -22,6 +24,8 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.example.danmuapiapp.data.repository.runCatchingCancellable
+import com.example.danmuapiapp.data.repository.useCancellableResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -151,7 +155,7 @@ class AppUpdateService @Inject constructor(
         version: String,
         onProgress: (Long, Long) -> Unit
     ): Result<DownloadedApk> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val target = prepareDownloadTarget(version) ?: error("无法创建下载目录")
             clearPendingInstall(context)
 
@@ -159,22 +163,27 @@ class AppUpdateService @Inject constructor(
             val candidates = urls.distinct()
             if (candidates.isEmpty()) error("下载地址为空")
 
-            for (url in candidates) {
-                val ok = downloadOnce(url, target, onProgress)
-                downloadFailed = downloadFailed || !ok
-                if (ok) {
-                    target.finalizeWrite(context)
-                    val uri = target.toInstallUri(context)
-                        ?: error("下载完成，但无法生成安装地址")
-                    val size = resolveTargetSize(target)
-                    return@runCatching DownloadedApk(
-                        uri = uri,
-                        displayName = target.displayName,
-                        displayPath = target.displayPath,
-                        version = version,
-                        sizeBytes = size
-                    )
+            try {
+                for (url in candidates) {
+                    val ok = downloadOnce(url, target, onProgress)
+                    downloadFailed = downloadFailed || !ok
+                    if (ok) {
+                        target.finalizeWrite(context)
+                        val uri = target.toInstallUri(context)
+                            ?: error("下载完成，但无法生成安装地址")
+                        val size = resolveTargetSize(target)
+                        return@runCatchingCancellable DownloadedApk(
+                            uri = uri,
+                            displayName = target.displayName,
+                            displayPath = target.displayPath,
+                            version = version,
+                            sizeBytes = size
+                        )
+                    }
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                target.cleanup(context)
+                throw cancelled
             }
 
             target.cleanup(context)
@@ -672,7 +681,7 @@ class AppUpdateService @Inject constructor(
         return "danmu-api-$safe.apk"
     }
 
-    private fun downloadOnce(
+    private suspend fun downloadOnce(
         url: String,
         target: DownloadTarget,
         onProgress: (Long, Long) -> Unit
@@ -684,16 +693,15 @@ class AppUpdateService @Inject constructor(
 
         val output = target.openOutputStream(context) ?: return false
         output.use { out ->
-            return runCatching {
+            return runCatchingCancellable {
                 httpClient.newBuilder()
                     .connectTimeout(APK_DOWNLOAD_CONNECT_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(APK_DOWNLOAD_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
                     .callTimeout(APK_DOWNLOAD_CALL_TIMEOUT_MIN, java.util.concurrent.TimeUnit.MINUTES)
                     .build()
-                    .newCall(request)
-                    .execute()
-                    .use { response ->
-                        if (!response.isSuccessful) return@use false
+                    .newOutboundCall(request)
+                    .useCancellableResponse { response ->
+                        if (!response.isSuccessful) return@useCancellableResponse false
                         val body = response.body
                         val total = body.contentLength().coerceAtLeast(-1L)
                         body.byteStream().use { input ->

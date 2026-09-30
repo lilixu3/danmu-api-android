@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.push
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -482,7 +484,7 @@ class PushDanmuViewModel @Inject constructor(
                 .url(url)
                 .get()
                 .build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 response.code to response.body.string()
             }
         }

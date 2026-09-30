@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.ui.component.CorePullRequestUpdateChoiceHost
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
 
 import com.example.danmuapiapp.ui.component.AppDialog
@@ -226,6 +227,12 @@ fun HomeScreen(
     val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val customRepo by viewModel.customRepo.collectAsStateWithLifecycle()
     val customRepoBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
+    val accessEntryDefaultTab by viewModel.accessEntryDefaultTab.collectAsStateWithLifecycle()
+    var accessEntrySession by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        accessEntrySession += 1
+    }
+    val accessEntryLayout by viewModel.accessEntryLayout.collectAsStateWithLifecycle()
     val tokenVisible by viewModel.tokenVisible.collectAsStateWithLifecycle()
     val cacheStats by viewModel.cacheStats.collectAsStateWithLifecycle()
     val isCacheLoading by viewModel.isCacheLoading.collectAsStateWithLifecycle()
@@ -687,6 +694,9 @@ fun HomeScreen(
                 ) {
                     HomeSectionSlot {
                     AccessGatewayPanel(
+                        layout = accessEntryLayout,
+                        defaultTab = accessEntryDefaultTab,
+                        selectionSession = accessEntrySession,
                         localUrl = state.localUrl,
                         lanUrl = state.lanUrl,
                         lanIpv6Url = state.lanIpv6Url,
@@ -794,6 +804,7 @@ fun HomeScreen(
         )
     }
 
+    CorePullRequestUpdateChoiceHost(viewModel.coreUpdateChoice)
     CoreDependencyRepairHost(
         request = pendingDependencyRepair,
         showRequiredPrompt = viewModel.showDependencyRequiredPrompt,
@@ -927,6 +938,8 @@ fun HomeScreen(
             remoteCommit = viewModel.updatePromptVariant?.let { variant ->
                 coreList.firstOrNull { it.variant == variant }?.remoteCommit
             },
+            pullRequestNumbers = coreList.firstOrNull { it.variant == viewModel.updatePromptVariant }?.pullRequestNumbers.orEmpty(),
+            updatedPullRequestNumbers = coreList.firstOrNull { it.variant == viewModel.updatePromptVariant }?.updatedPullRequestHeads?.keys?.toList().orEmpty(),
             sourceMismatch = viewModel.updatePromptSourceMismatch,
             sourceUnknownLegacy = viewModel.updatePromptSourceUnknownLegacy,
             desiredSource = viewModel.updatePromptDesiredSource,

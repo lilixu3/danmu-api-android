@@ -1,0 +1,4 @@
+source=lilixu3/danmu_api
+commit=af73f09b9a2d3bbf575d9461ab1317d6072e9c43
+app_protocol=1
+app_local_changes=per-host dandan/animeko policies; coalesced DoH; TLS12 ordinary H2; mobile idle optimizations; authenticated app proxy

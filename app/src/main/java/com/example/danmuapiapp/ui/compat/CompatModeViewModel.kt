@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import android.app.Activity
 import android.content.Context
 import android.os.Build
@@ -497,9 +498,15 @@ class CompatModeViewModel(
         doUpdateCore(variant)
     }
 
+    val coreUpdateChoice = CoreUpdateChoiceController()
+
     private fun doUpdateCore(variant: ApiVariant) {
         performCoreOperation("正在更新 ${resolveVariantLabel(variant)}") {
-            graph.coreRepository.updateCore(variant).fold(
+            val request = coreUpdateChoice.prepare(graph.coreRepository, variant).getOrElse {
+                emitEvent("无法准备更新：${it.message}")
+                return@performCoreOperation
+            } ?: return@performCoreOperation
+            graph.coreRepository.updateCore(request).fold(
                 onSuccess = {
                     graph.coreRepository.refreshCoreInfo()
                     val state = _uiState.value.runtimeState

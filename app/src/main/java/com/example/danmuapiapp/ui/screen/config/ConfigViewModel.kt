@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.config
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
@@ -266,7 +268,7 @@ class ConfigViewModel @Inject constructor(
                 .post(requestBody)
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 val raw = response.body.string()
                 if (!response.isSuccessful) {
                     val msg = runCatching {
@@ -289,7 +291,7 @@ class ConfigViewModel @Inject constructor(
                 .get()
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 val raw = response.body.string()
                 if (!response.isSuccessful) {
                     val msg = runCatching {

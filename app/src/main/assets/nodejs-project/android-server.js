@@ -6,6 +6,8 @@ const path = require('path');
 const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
+const { createAppOutboundRuntime } = require('./app-outbound-runtime.js');
+const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG, helperPath:process.env.DANMU_APP_OUTBOUND_HELPER};
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -62,11 +64,13 @@ function _getVariant() {
   return 'stable';
 }
 
+let _appOutbound = null;
 function _getEnvSnapshot() {
   const out = {};
   for (const [k, v] of Object.entries(process.env)) {
     out[k] = String(v);
   }
+  if (_appOutbound?.snapshot().config.enabled) out.OUTBOUND_MODE = 'off';
   return out;
 }
 
@@ -213,6 +217,7 @@ async function _spawnWorkerForVariant(variantKey, info) {
       variantDir: info.dir,
       projectDir: __dirname,
       env: envSnapshot,
+      outbound: _appOutbound?.snapshot(),
     },
   });
 
@@ -370,6 +375,7 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
 
     await Promise.allSettled([
       _terminateWorkerImmediately(workerState),
+      _appOutbound?.stop(),
       _closeServer(proxyServer),
       _closeServer(mainServer),
       _closeLogStreamAsync(logStream),
@@ -410,7 +416,7 @@ function _postToWorker(state, msg) {
 function _syncEnvToWorker() {
   if (!_activeWorkerState) return;
   const snapshot = _getEnvSnapshot();
-  _postToWorker(_activeWorkerState, { type: 'setEnv', env: snapshot });
+  _postToWorker(_activeWorkerState, { type: 'setEnv', env: snapshot, outbound: _appOutbound?.snapshot() });
 }
 
 function _stopDirectFavoriteScheduler() {
@@ -427,7 +433,7 @@ async function _scheduleDirectFavoriteScheduler(variantKey, info) {
     const result = await startFavoriteSchedulerHost({
       projectDir: __dirname,
       variantDir: info.dir,
-      env: process.env,
+      env: _getEnvSnapshot(),
       port: PORT,
       log,
     });
@@ -771,7 +777,7 @@ const METRICS = {
 };
 
 const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist']);
-const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control']);
+const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control', '/__outbound']);
 const _ACCESS_TRACK_MAX_DEVICES = 240;
 
 let _accessControl = {
@@ -2176,7 +2182,7 @@ async function _loadPreparedDanmaku(target, requestHeaders, clientIp) {
   const coreResponse = await handleRequest(new Request(cleanUrl.toString(), {
     method: 'GET',
     headers,
-  }), process.env, 'node', clientIp);
+  }), _getEnvSnapshot(), 'node', clientIp);
   const contentType = String(coreResponse.headers.get('content-type') || '');
   const rawText = await coreResponse.text();
   if (coreResponse.status < 200 || coreResponse.status > 299) {
@@ -2318,6 +2324,45 @@ function createMainServer() {
 
       maybeReloadConfigOnTraffic();
       _maybeReloadCoreOnTraffic();
+
+      // App-owned diagnostic; independent of the selected core version.
+      if (strippedPathname === '/__outbound') {
+        if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
+          res.writeHead(403); res.end('Forbidden'); return;
+        }
+        const current = _appOutbound?.snapshot() || {};
+        if (method !== 'POST') {
+          const {status, reason, config} = current;
+          res.writeHead(200, {'content-type':'application/json'});
+          res.end(JSON.stringify({status, reason, config})); return;
+        }
+        const source = fullUrl.searchParams.get('source');
+        if (!['bahamut','tmdb','dandan','animeko'].includes(source)) { res.writeHead(400); res.end('Invalid source'); return; }
+        if (current.status !== 'ready' || !current.config?.enabled || !current.config.sources.includes(source)) {
+          res.writeHead(409, {'content-type':'application/json'});
+          res.end(JSON.stringify({ok:false,reason:current.reason || '请先启用对应来源并等待组件就绪'})); return;
+        }
+        const {diagnoseSource} = require('./app-outbound-diagnostics.js');
+        const controller = new AbortController();
+        const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+        res.once('close', disconnect);
+        try {
+          const result = await diagnoseSource(source, current, _getEnvSnapshot(), {signal:controller.signal});
+          if (!res.destroyed) {
+            const {httpStatus = 200, ...publicResult} = result;
+            res.writeHead(httpStatus, {'content-type':'application/json'});
+            res.end(JSON.stringify(publicResult));
+          }
+        } catch (error) {
+          if (!res.destroyed) {
+            res.writeHead(200, {'content-type':'application/json'});
+            res.end(JSON.stringify({ok:false,reason:'连接失败或取消'}));
+          }
+        } finally {
+          res.removeListener('close', disconnect);
+        }
+        return;
+      }
 
       // Health endpoint (used by the Android app for status/diagnostics)
       if (strippedPathname === '/__health') {
@@ -2488,7 +2533,7 @@ function createMainServer() {
 
         let coreRes;
         try {
-          coreRes = await handleRequest(coreReq, process.env, 'node', clientIp);
+          coreRes = await handleRequest(coreReq, _getEnvSnapshot(), 'node', clientIp);
         } finally {
           if (shouldQuietCoreLogs) {
             _removeQuietCoreLogNoise(quietLogStart);
@@ -2524,7 +2569,7 @@ function createMainServer() {
 
       let webRes;
       try {
-        webRes = await handleRequest(webReq, process.env, 'node', clientIp);
+        webRes = await handleRequest(webReq, _getEnvSnapshot(), 'node', clientIp);
       } finally {
         if (shouldQuietCoreLogs) {
           _removeQuietCoreLogNoise(quietLogStart);
@@ -2695,6 +2740,8 @@ async function main() {
   log(`[runtime] cwd=${process.cwd()} envHome=${String(process.env.DANMU_API_HOME || '')} home=${HOME} cacheDir=${startupCacheDir}`);
   // Enable file logging after .env has been loaded (LOG_LEVEL takes effect)
   setupFileLogging();
+  _appOutbound = createAppOutboundRuntime({..._appOutboundPaths, log, onSnapshot: () => _syncEnvToWorker()});
+  await _appOutbound.start();
   await _loadHandleRequestForVariant();
   _syncEnvToWorker();
   watchConfigs();

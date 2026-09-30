@@ -271,6 +271,7 @@ internal class NodeRuntimeController private constructor(private val context: Co
                     startupStartedAtMs = startupIssuedAtMs
                 ) ?: return@launch
                 RuntimeIdentityStore.exportToEnv(context)
+                AppOutboundSettingsStore.installEnvironment(context)
                 // Node 24 运行时要求：启动前显式提供 TMPDIR/HOME，
                 // 并可选启用 V8 编译缓存加快二次启动。
                 NodeRuntimeEnv.install(

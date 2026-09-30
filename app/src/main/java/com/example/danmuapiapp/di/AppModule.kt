@@ -8,7 +8,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import com.example.danmuapiapp.data.network.GithubOutboundNetwork
 import javax.inject.Singleton
 
 @Module
@@ -49,11 +51,7 @@ abstract class RepositoryModule {
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
     @Provides @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
-        return OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .build()
+    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
+        return GithubOutboundNetwork.createClient(context)
     }
 }

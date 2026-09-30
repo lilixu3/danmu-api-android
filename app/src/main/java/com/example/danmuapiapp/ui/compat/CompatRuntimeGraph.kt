@@ -19,7 +19,7 @@ import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
+import com.example.danmuapiapp.data.network.GithubOutboundNetwork
 
 @SuppressLint("StaticFieldLeak") // Holder 持有的是 applicationContext，不会泄漏 Activity
 object CompatRuntimeGraph {
@@ -36,11 +36,7 @@ object CompatRuntimeGraph {
     private fun buildHolder(context: Context): Holder {
         val settingsRepository = SettingsRepositoryImpl(context)
         val adminSessionRepository = NoOpAdminSessionRepository()
-        val httpClient = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .build()
+        val httpClient = GithubOutboundNetwork.createClient(context)
         val githubProxyService = GithubProxyService(context, httpClient)
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)

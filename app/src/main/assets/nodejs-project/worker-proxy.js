@@ -3,6 +3,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const util = require('util');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
+const { installBridge } = require('./app-outbound-bridge.js');
 
 if (!parentPort) {
   throw new Error('worker missing parentPort');
@@ -64,6 +65,7 @@ function applyEnvSnapshot(snapshot) {
 }
 
 applyEnvSnapshot(initialEnv);
+const appOutboundBridge = installBridge({snapshot:data.outbound});
 
 let handleRequest = null;
 let coreGlobals = null;
@@ -246,6 +248,7 @@ async function handleMessage(msg) {
 
   if (msg.type === 'setEnv') {
     applyEnvSnapshot(msg.env || {});
+    appOutboundBridge.update(msg.outbound);
     return;
   }
 
@@ -316,6 +319,7 @@ async function main() {
   parentPort.on('message', handleMessage);
   parentPort.on('close', () => {
     try { favoriteSchedulerStop(); } catch {}
+    appOutboundBridge.stop();
   });
 }
 

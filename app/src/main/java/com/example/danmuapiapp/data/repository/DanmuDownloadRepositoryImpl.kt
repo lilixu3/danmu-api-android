@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -864,7 +866,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             .url(url)
             .get()
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newOutboundCall(request).execute().use { response ->
             val code = response.code
             val body = response.body
             if (code !in 200..299) {

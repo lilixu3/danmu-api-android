@@ -24,6 +24,10 @@ class DanmuApiApplication : Application() {
 
         // 标准做法：未解锁阶段不访问 CE 存储，避免 Direct Boot 期间崩溃。
         if (!isUserUnlockedSafe()) return
+        val currentProcess = if (Build.VERSION.SDK_INT >= 28) getProcessName() else runCatching {
+            java.io.File("/proc/self/cmdline").readText().substringBefore('\u0000')
+        }.getOrDefault("")
+        if (currentProcess == packageName) com.example.danmuapiapp.data.service.RootAutoStartModule.scheduleInstalledScriptMigration(this)
 
         // The injected process cannot read this app's runtime preferences directly.
         // Publish port/token as soon as libxposed binds, independent of the settings UI.

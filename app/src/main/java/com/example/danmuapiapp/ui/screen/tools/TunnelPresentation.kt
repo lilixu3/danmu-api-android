@@ -17,6 +17,9 @@ internal fun tunnelStatus(state: TunnelUiState): TunnelStatusPresentation = when
             if (state.serviceRunning) "远程链路已建立，弹幕服务触手可及。" else "远程链路已建立，等待本机弹幕服务启动。",
             "已连接", TunnelTone.Active)
         TunnelLinkState.Connecting -> TunnelStatusPresentation("正在建立连接", "frpc 已启动，正在连接你的服务器。", "连接中", TunnelTone.Pending)
+        TunnelLinkState.Conflict -> TunnelStatusPresentation("同名隧道冲突",
+            "当前实例未能注册同名隧道；已有实例可能仍在转发。点击重启可清理本应用的残留进程。若仍冲突，请检查其他设备上的相同配置。",
+            "名称冲突", TunnelTone.Error)
         TunnelLinkState.Error -> TunnelStatusPresentation("连接需要关注", "frpc 仍在运行，请查看日志确认链路状态。", "链路异常", TunnelTone.Error)
         TunnelLinkState.Unknown -> TunnelStatusPresentation("隧道运行中", "frpc 已启动，等待链路状态确认。", "待确认", TunnelTone.Pending)
     }
@@ -61,13 +64,7 @@ internal data class TunnelDraft(
         dnsServer = dnsServer.trim(), autoFillDefaults = autoFill
     )
 
-    fun effectiveConfig(port: Int): String {
-        if (mode == TunnelMode.Form) return buildFrpcToml(form(), port)
-        val text = if (autoFill) injectFrpcDefaults(
-            pasteText, dnsServer.trim().ifBlank { DEFAULT_DNS_SERVER }
-        ) else pasteText
-        return syncPastedLocalPort(text, port)
-    }
+    fun effectiveConfig(port: Int): String = buildEffectiveFrpcConfig(settings(), port)
 
     fun check(port: Int): TunnelCheck = if (mode == TunnelMode.Form) {
         TunnelCheck(errors = validateForm(form(), port))

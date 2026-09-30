@@ -166,7 +166,9 @@ internal fun UpdatePromptDialog(
     desiredSource: String?,
     onShowDetails: () -> Unit,
     onUpdate: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    pullRequestNumbers: List<Int> = emptyList(),
+    updatedPullRequestNumbers: List<Int> = emptyList()
 ) {
     if (variantLabel.isNullOrBlank()) return
     if (!sourceMismatch && !sourceUnknownLegacy && latestVersion.isNullOrBlank()) return
@@ -182,6 +184,8 @@ internal fun UpdatePromptDialog(
             currentVersion = currentVersion,
             latestVersion = latestVersion,
             remoteCommit = remoteCommit,
+            pullRequestNumbers = pullRequestNumbers,
+            updatedPullRequestNumbers = updatedPullRequestNumbers,
             onDismiss = onDismiss,
             onShowDetails = onShowDetails,
             onUpdateNow = onUpdate

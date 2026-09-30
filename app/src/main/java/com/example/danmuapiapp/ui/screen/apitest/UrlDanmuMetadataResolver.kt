@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -284,7 +286,7 @@ internal class UrlDanmuMetadataResolver(
                 }
                 .get()
                 .build()
-            metadataClient.newCall(request).execute().use { response ->
+            metadataClient.newOutboundCall(request).execute().use { response ->
                 if (response.code !in 200..299) return@use null
                 val contentLength = response.body.contentLength()
                 if (contentLength > maxBytes) return@use null

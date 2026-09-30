@@ -20,7 +20,7 @@ class TunnelSupervisor(private val context: Context) {
         private const val HEARTBEAT_MS = 10_000L
     }
 
-    private var process: Process? = null
+    @Volatile private var process: Process? = null
     private var watchdog: Thread? = null
     private var heartbeat: Thread? = null
 
@@ -128,21 +128,23 @@ class TunnelSupervisor(private val context: Context) {
     }
 
     private fun startWatchdog(target: Process) {
-        watchdog?.interrupt()
+        watchdog?.takeUnless { it === Thread.currentThread() }?.interrupt()
         watchdog = Thread {
-            try {
+            runInterruptibleTunnelTask {
                 target.waitFor()
-            } catch (_: InterruptedException) {
-                return@Thread
-            }
-            if (stopping || process !== target) return@Thread
-            restarts += 1
-            lastError = summarizeLog()
-            markStatus("retrying", lastError = lastError)
-            Thread.sleep(RESTART_DELAY_MS)
-            synchronized(this) {
-                if (stopping || !TunnelStore.readSettings(context).enabled) return@Thread
-                spawn()
+                if (stopping || process !== target) return@runInterruptibleTunnelTask
+                while (!stopping) {
+                    restarts += 1
+                    lastError = summarizeLog()
+                    markStatus("retrying", lastError = lastError)
+                    Thread.sleep(RESTART_DELAY_MS)
+                    synchronized(this) {
+                        if (stopping || Thread.currentThread().isInterrupted ||
+                            !TunnelStore.readSettings(context).enabled
+                        ) return@runInterruptibleTunnelTask
+                        if (spawn()) return@runInterruptibleTunnelTask
+                    }
+                }
             }
         }.also { it.name = "danmu-frpc-watchdog"; it.start() }
     }
@@ -174,6 +176,7 @@ class TunnelSupervisor(private val context: Context) {
                             if (read <= 0) break
                             output.write(buffer, 0, read)
                             output.flush()
+                            TunnelStore.rotateLogIfNeeded(context)
                         }
                     }
                 }

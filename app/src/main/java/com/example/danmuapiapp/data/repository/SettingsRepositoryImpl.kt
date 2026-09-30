@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
@@ -130,6 +132,12 @@ class SettingsRepositoryImpl @Inject constructor(
         MutableStateFlow(NotificationDisplayPrefs.isRootNotificationEnabled(context))
     override val rootNotificationEnabled: StateFlow<Boolean> =
         _rootNotificationEnabled.asStateFlow()
+
+    private val _accessEntryDefaultTab = MutableStateFlow(AppAppearancePrefs.readAccessEntryDefaultTab(uiPrefs))
+    override val accessEntryDefaultTab: StateFlow<AccessEntryTab> = _accessEntryDefaultTab.asStateFlow()
+
+    private val _accessEntryLayout = MutableStateFlow(AppAppearancePrefs.readAccessEntryLayout(uiPrefs))
+    override val accessEntryLayout: StateFlow<AccessEntryLayout> = _accessEntryLayout.asStateFlow()
 
     private val _nightMode = MutableStateFlow(AppAppearancePrefs.readNightMode(uiPrefs))
     override val nightMode: StateFlow<NightModePreference> = _nightMode.asStateFlow()
@@ -296,6 +304,16 @@ class SettingsRepositoryImpl @Inject constructor(
     override fun setRootNotificationEnabled(enabled: Boolean) {
         NotificationDisplayPrefs.setRootNotificationEnabled(context, enabled)
         _rootNotificationEnabled.value = enabled
+    }
+
+    override fun setAccessEntryDefaultTab(tab: AccessEntryTab) {
+        AppAppearancePrefs.writeAccessEntryDefaultTab(uiPrefs, tab)
+        _accessEntryDefaultTab.value = tab
+    }
+
+    override fun setAccessEntryLayout(layout: AccessEntryLayout) {
+        AppAppearancePrefs.writeAccessEntryLayout(uiPrefs, layout)
+        _accessEntryLayout.value = layout
     }
 
     override fun setNightMode(mode: NightModePreference) {
@@ -513,6 +531,8 @@ class SettingsRepositoryImpl @Inject constructor(
         _serviceNotificationInfoEnabled.value =
             NotificationDisplayPrefs.reloadEndpointInfoFromSettings(context)
         _rootNotificationEnabled.value = NotificationDisplayPrefs.isRootNotificationEnabled(context)
+        _accessEntryDefaultTab.value = AppAppearancePrefs.readAccessEntryDefaultTab(uiPrefs)
+        _accessEntryLayout.value = AppAppearancePrefs.readAccessEntryLayout(uiPrefs)
         _nightMode.value = AppAppearancePrefs.readNightMode(uiPrefs)
         _glassMaterial.value = AppAppearancePrefs.readGlassMaterial(uiPrefs)
         _glassBottomBar.value = AppAppearancePrefs.readGlassBottomBar(uiPrefs)

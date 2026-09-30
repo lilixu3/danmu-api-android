@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -1271,7 +1273,7 @@ class ApiTestViewModel @Inject constructor(
     private suspend fun executeBytesGet(url: String): Result<ApiByteResponse> {
         return withContext(Dispatchers.IO) {
             runCatching {
-                httpClient.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                httpClient.newOutboundCall(Request.Builder().url(url).get().build()).execute().use { response ->
                     val contentType = response.body.contentType()?.toString().orEmpty()
                     val bytes = response.body.bytes()
                     ApiByteResponse(
@@ -1287,7 +1289,7 @@ class ApiTestViewModel @Inject constructor(
     private suspend fun executeRequest(request: Request): Result<ApiRawResponse> {
         return withContext(Dispatchers.IO) {
             runCatching {
-                httpClient.newCall(request).execute().use { response ->
+                httpClient.newOutboundCall(request).execute().use { response ->
                     val mediaType = response.body.contentType()
                     val bytes = response.body.bytes()
                     val isBinary = mediaType?.type == "application" && mediaType.subtype == "octet-stream"

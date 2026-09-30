@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import android.app.Activity
 import android.app.StatusBarManager
 import android.content.ComponentName
@@ -121,6 +123,8 @@ class SettingsViewModel @Inject constructor(
     val normalNotificationBehavior = settingsRepo.normalNotificationBehavior
     val serviceNotificationInfoEnabled = settingsRepo.serviceNotificationInfoEnabled
     val rootNotificationEnabled = settingsRepo.rootNotificationEnabled
+    val accessEntryDefaultTab = settingsRepo.accessEntryDefaultTab
+    val accessEntryLayout = settingsRepo.accessEntryLayout
     val nightMode = settingsRepo.nightMode
     val glassMaterial = settingsRepo.glassMaterial
     val glassBottomBar = settingsRepo.glassBottomBar
@@ -493,6 +497,16 @@ class SettingsViewModel @Inject constructor(
         } else {
             "已关闭 Root 模式通知"
         }
+    }
+
+    fun setAccessEntryDefaultTab(tab: AccessEntryTab) {
+        settingsRepo.setAccessEntryDefaultTab(tab)
+        operationMessage = "默认访问标签已设为${tab.label}"
+    }
+
+    fun setAccessEntryLayout(layout: AccessEntryLayout) {
+        settingsRepo.setAccessEntryLayout(layout)
+        operationMessage = "访问入口已改为${layout.label}形式"
     }
 
     fun setNightMode(mode: NightModePreference) {

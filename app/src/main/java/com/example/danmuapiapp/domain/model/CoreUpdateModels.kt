@@ -47,3 +47,29 @@ data class CoreUpdateComparison(
     val summary: CoreUpdateSummary,
     val isTruncated: Boolean = false
 )
+
+/** 更新确认和实际安装使用同一提交，避免确认后分支移动导致 PR 被意外丢弃。 */
+data class CoreUpdatePlan(
+    val variant: ApiVariant,
+    val runMode: RunMode,
+    val repo: String,
+    val branch: String,
+    val targetCommitSha: String,
+    val versionLabel: String,
+    val release: GithubRelease,
+    val installedSourceFingerprint: String,
+    val pullRequestNumbers: List<Int>,
+    val notIncludedPullRequestNumbers: List<Int>,
+    val unknownPullRequestNumbers: List<Int>,
+    val confirmedPullRequestHeads: Map<Int, String> = emptyMap(),
+    val installedPullRequestHeads: Map<Int, String> = emptyMap(),
+    val pullRequestNotes: Map<Int, String> = emptyMap()
+) {
+    val requiresPullRequestChoice: Boolean
+        get() = notIncludedPullRequestNumbers.isNotEmpty() || unknownPullRequestNumbers.isNotEmpty()
+
+    val pullRequestsToReapply: List<Int>
+        get() = pullRequestNumbers.filter { it in notIncludedPullRequestNumbers || it in unknownPullRequestNumbers }
+}
+
+data class CoreUpdateRequest(val plan: CoreUpdatePlan, val keepPullRequests: Boolean)

@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.component.CorePullRequestUpdateChoiceHost
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 
@@ -206,6 +207,7 @@ fun CoreScreen(
         onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
     )
 
+    CorePullRequestUpdateChoiceHost(viewModel.coreUpdateChoice)
     if (viewModel.showUpdateDialog) UpdateResultDialog(viewModel, displayNames)
     if (viewModel.showUpdateDetails) CoreUpdateDetailsPanel(viewModel, displayNames)
     if (viewModel.showRevisionHistory) CoreRevisionHistoryPanel(viewModel)
@@ -858,6 +860,8 @@ private fun CoreCommitSummary(
     val headline = when {
         isCheckingUpdate -> "正在读取远程版本与提交信息"
         hasCheckError -> "上次检查失败：${info.updateCheckError}"
+        info.updatedPullRequestHeads.isNotEmpty() ->
+            "已合并的 PR 有新提交：${info.updatedPullRequestHeads.keys.joinToString("、") { "#$it" }}"
         !info.remoteCommit?.title.isNullOrBlank() -> info.remoteCommit.title
         info.pullRequestNumbers.isNotEmpty() ->
             "本地 PR 组合：${info.pullRequestNumbers.joinToString(" + ") { "#$it" }}"
@@ -1062,6 +1066,8 @@ private fun UpdateResultDialog(vm: CoreViewModel, names: CoreVariantDisplayNames
             currentVersion = info.version,
             latestVersion = info.availableVersion ?: info.remoteVersion,
             remoteCommit = info.remoteCommit,
+            pullRequestNumbers = info.pullRequestNumbers,
+            updatedPullRequestNumbers = info.updatedPullRequestHeads.keys.toList(),
             onDismiss = vm::dismissUpdateDialog,
             onShowDetails = { vm.openUpdateDetails(variant) },
             onUpdateNow = { vm.doUpdate(variant) }

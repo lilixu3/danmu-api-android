@@ -1,6 +1,10 @@
 package com.example.danmuapiapp.data.service
 
 import android.content.Context
+import com.example.danmuapiapp.data.network.GithubJGitTransport
+import com.example.danmuapiapp.data.network.GithubOutboundNetwork
+import org.eclipse.jgit.api.TransportConfigCallback
+import org.eclipse.jgit.transport.TransportHttp
 import android.system.Os
 import android.system.OsConstants
 import com.example.danmuapiapp.domain.model.CorePullRequest
@@ -18,6 +22,7 @@ import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.ProgressMonitor
 import org.eclipse.jgit.merge.MergeStrategy
+import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.transport.RefSpec
 import org.eclipse.jgit.transport.TagOpt
 import java.io.File
@@ -40,6 +45,9 @@ class PullRequestMergeService @Inject constructor(
         pullRequestNumbers: List<Int>,
         destination: File,
         preferredBaseCommitSha: String = "",
+        expectedHeadShas: Map<Int, String> = emptyMap(),
+        requiredPreviousHeads: Map<Int, String> = emptyMap(),
+        verifyUpdatePreservation: Boolean = false,
         onProgress: (stage: String, progress: Float?) -> Unit
     ): PullRequestStackResult = withContext(Dispatchers.IO) {
         val numbers = pullRequestNumbers.distinct()
@@ -47,8 +55,17 @@ class PullRequestMergeService @Inject constructor(
         if (numbers.any { it <= 0 }) throw IOException("PR 编号无效")
 
         onProgress("正在确认所选 PR", null)
-        val pullRequests = numbers.map { number -> pullRequestService.get(repository, number) }
-        validatePlan(repository, baseBranch, pullRequests)
+        val pullRequests = numbers.map { number -> pullRequestService.get(repository, number, forceRefresh = verifyUpdatePreservation) }
+        if (verifyUpdatePreservation) {
+            pullRequests.forEach { pr ->
+                val expected = expectedHeadShas[pr.number].orEmpty()
+                if (expected.isBlank() || !expected.equals(pr.headSha, true)) {
+                    throw IOException("PR #${pr.number} 的提交信息已变化或尚未确认，请重新检查更新")
+                }
+            }
+        }
+        validatePlan(repository, baseBranch, pullRequests,
+            if (verifyUpdatePreservation) requiredPreviousHeads.keys else emptySet())
         currentCoroutineContext().ensureActive()
         val remoteCandidates = gitRemoteCandidates(repository)
 
@@ -56,7 +73,13 @@ class PullRequestMergeService @Inject constructor(
         val workTree = File(workRoot, "merge-${UUID.randomUUID()}")
         workRoot.mkdirs()
         val coroutineJob = currentCoroutineContext()[Job]
-        val monitor = GitProgressMonitor(coroutineJob, onProgress)
+        val githubNetwork = GithubJGitTransport(GithubOutboundNetwork.createClient(context), context.cacheDir, coroutineJob)
+        val transportConfig = TransportConfigCallback { transport ->
+            if (transport is TransportHttp && GithubOutboundNetwork.isSelected(context)) {
+                transport.setHttpConnectionFactory(githubNetwork)
+            }
+        }
+        val monitor = GitProgressMonitor(coroutineJob, onProgress, transportConfig)
         var git: Git? = null
         try {
             onProgress("正在获取 $baseBranch 基线", null)
@@ -117,6 +140,9 @@ class PullRequestMergeService @Inject constructor(
                 PullRequestCommit(pullRequest.number, commitId)
             }
 
+            if (verifyUpdatePreservation) {
+                PullRequestUpdateMergeGuard.verify(git, baseCommitSha, refs, requiredPreviousHeads)
+            }
             onProgress("正在按所选顺序合并", null)
             val localMergeSha = JGitPullRequestMerger.merge(git, refs) { index, total, number ->
                 onProgress(
@@ -147,6 +173,7 @@ class PullRequestMergeService @Inject constructor(
                 error
             )
         } finally {
+            githubNetwork.close()
             runCatching { git?.close() }
             runCatching { workTree.deleteRecursively() }
         }
@@ -155,11 +182,12 @@ class PullRequestMergeService @Inject constructor(
     private fun validatePlan(
         repository: String,
         baseBranch: String,
-        pullRequests: List<CorePullRequest>
+        pullRequests: List<CorePullRequest>,
+        previouslyAppliedNumbers: Set<Int> = emptySet()
     ) {
         pullRequests.forEach { pullRequest ->
             val canMergeLocally = pullRequest.state.equals("open", ignoreCase = true) ||
-                !pullRequest.mergedAt.isNullOrBlank()
+                !pullRequest.mergedAt.isNullOrBlank() || pullRequest.number in previouslyAppliedNumbers
             if (!canMergeLocally) {
                 throw IOException("PR #${pullRequest.number} 已关闭，请刷新列表")
             }
@@ -186,7 +214,7 @@ class PullRequestMergeService @Inject constructor(
         remoteCandidates: List<String>,
         baseBranch: String,
         workTree: File,
-        monitor: ProgressMonitor,
+        monitor: GitProgressMonitor,
         onProgress: (stage: String, progress: Float?) -> Unit
     ): ClonedBase {
         var lastFailure: Exception? = null
@@ -196,6 +224,7 @@ class PullRequestMergeService @Inject constructor(
             runCatching { workTree.deleteRecursively() }
             try {
                 val cloned = Git.cloneRepository()
+                    .setTransportConfigCallback(monitor.transportConfig)
                     .setURI(remote)
                     .setDirectory(workTree)
                     .setBranch("refs/heads/$baseBranch")
@@ -223,13 +252,14 @@ class PullRequestMergeService @Inject constructor(
         remoteCandidates: List<String>,
         pullRequestNumber: Int,
         localRef: String,
-        monitor: ProgressMonitor
+        monitor: GitProgressMonitor
     ): ObjectId {
         var lastFailure: Exception? = null
         remoteCandidates.forEach { remote ->
             currentCoroutineContext().ensureActive()
             try {
                 git.fetch()
+                    .setTransportConfigCallback(monitor.transportConfig)
                     .setRemote(remote)
                     .setRefSpecs(RefSpec("+refs/pull/$pullRequestNumber/head:$localRef"))
                     .setTagOpt(TagOpt.NO_TAGS)
@@ -254,7 +284,7 @@ class PullRequestMergeService @Inject constructor(
         preferredCommitSha: String,
         baseBranch: String,
         remoteCandidates: List<String>,
-        monitor: ProgressMonitor,
+        monitor: GitProgressMonitor,
         onProgress: (stage: String, progress: Float?) -> Unit
     ): String {
         val requested = preferredCommitSha.trim()
@@ -285,7 +315,7 @@ class PullRequestMergeService @Inject constructor(
         pullRequests: List<CorePullRequest>,
         baseBranch: String,
         remoteCandidates: List<String>,
-        monitor: ProgressMonitor,
+        monitor: GitProgressMonitor,
         onProgress: (stage: String, progress: Float?) -> Unit
     ) {
         if (!isShallowRepository(git)) return
@@ -302,13 +332,14 @@ class PullRequestMergeService @Inject constructor(
         git: Git,
         baseBranch: String,
         remoteCandidates: List<String>,
-        monitor: ProgressMonitor
+        monitor: GitProgressMonitor
     ) {
         var lastFailure: Exception? = null
         remoteCandidates.forEach { remote ->
             currentCoroutineContext().ensureActive()
             try {
                 git.fetch()
+                    .setTransportConfigCallback(monitor.transportConfig)
                     .setRemote(remote)
                     .setRefSpecs(
                         RefSpec("+refs/heads/$baseBranch:refs/remotes/origin/$baseBranch")
@@ -414,6 +445,25 @@ internal data class PullRequestCommit(
     val commitId: ObjectId
 )
 
+internal object PullRequestUpdateMergeGuard {
+    fun verify(git: Git, baseSha: String, heads: List<PullRequestCommit>, previousHeads: Map<Int, String>) {
+        RevWalk(git.repository).use { walk ->
+            val base = walk.parseCommit(ObjectId.fromString(baseSha))
+            heads.forEach { head ->
+                val fresh = walk.parseCommit(head.commitId)
+                val old = runCatching { walk.parseCommit(ObjectId.fromString(previousHeads[head.number].orEmpty())) }
+                    .getOrElse { throw IOException("PR #${head.number} 的原始提交不可核验，已保留当前核心；请重新检查或选择直接更新", it) }
+                if (walk.isMergedInto(fresh, base)) {
+                    throw IOException("PR #${head.number} 已在目标历史中，但无法确认改动仍完整保留；重复 Git 合并不能恢复回退，已保留当前核心")
+                }
+                if (old.id != fresh.id && !walk.isMergedInto(old, fresh) && !walk.isMergedInto(old, base)) {
+                    throw IOException("PR #${head.number} 的历史已改写，无法安全保留原来并入的提交，已保留当前核心")
+                }
+            }
+        }
+    }
+}
+
 internal object JGitPullRequestMerger {
     fun merge(
         git: Git,
@@ -444,7 +494,8 @@ internal object JGitPullRequestMerger {
 
 private class GitProgressMonitor(
     private val job: Job?,
-    private val onProgress: (String, Float?) -> Unit
+    private val onProgress: (String, Float?) -> Unit,
+    val transportConfig: TransportConfigCallback
 ) : ProgressMonitor {
     private var title: String = "正在处理 Git 数据"
     private var totalWork: Int = ProgressMonitor.UNKNOWN

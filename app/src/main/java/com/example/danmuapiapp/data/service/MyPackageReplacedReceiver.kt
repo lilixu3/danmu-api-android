@@ -21,6 +21,7 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 runCatching {
+                    RootAutoStartModule.scheduleInstalledScriptMigration(appContext)
                     val shouldAutoStart = RuntimeModePrefs.get(appContext) == RunMode.Normal &&
                         NodeKeepAlivePrefs.isDesiredRunning(appContext)
 

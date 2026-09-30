@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
@@ -7,6 +8,7 @@ import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppLiquidButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import com.example.danmuapiapp.domain.model.RuntimeListenMode
 
 import android.app.Activity
@@ -1128,7 +1130,10 @@ internal fun AccessGatewayPanel(
     onCopyLocal: () -> Unit,
     onCopyLan: () -> Unit,
     onCopyLanIpv6: () -> Unit,
-    onCopyTunnel: () -> Unit
+    onCopyTunnel: () -> Unit,
+    defaultTab: AccessEntryTab = AccessEntryTab.Ipv4,
+    selectionSession: Int = 0,
+    layout: AccessEntryLayout = AccessEntryLayout.Tabs
 ) {
     val displayLocal = maskRuntimeUrl(localUrl, token, maskedToken, tokenVisible)
     val displayLan = maskRuntimeUrl(lanUrl, token, maskedToken, tokenVisible)
@@ -1176,38 +1181,45 @@ internal fun AccessGatewayPanel(
                     onClick = onOpenLocalNetworkPermission
                 )
             }
-            if (tunnelUrl.isNotBlank()) {
+            if (layout == AccessEntryLayout.Tabs) {
+                AccessGatewayTabs(
+                    displayLocal, displayLan, displayLanIpv6, displayTunnel,
+                    onCopyLocal, onCopyLan, onCopyLanIpv6, onCopyTunnel, defaultTab, selectionSession
+                )
+            } else {
+                if (tunnelUrl.isNotBlank()) {
+                    GatewayItem(
+                        title = "内网穿透",
+                        subtitle = "经 frp 服务器转发的公网地址",
+                        value = displayTunnel,
+                        onCopy = onCopyTunnel,
+                        emphasize = true
+                    )
+                }
                 GatewayItem(
-                    title = "内网穿透",
-                    subtitle = "经 frp 服务器转发的公网地址",
-                    value = displayTunnel,
-                    onCopy = onCopyTunnel,
+                    title = "局域网 IPv4",
+                    subtitle = "兼容性最佳，推荐在同一 Wi-Fi 下使用",
+                    value = displayLan,
+                    onCopy = onCopyLan,
                     emphasize = true
                 )
-            }
-            GatewayItem(
-                title = "局域网 IPv4",
-                subtitle = "兼容性最佳，推荐在同一 Wi-Fi 下使用",
-                value = displayLan,
-                onCopy = onCopyLan,
-                emphasize = true
-            )
-            if (lanIpv6Url.isNotBlank()) {
+                if (lanIpv6Url.isNotBlank()) {
+                    GatewayItem(
+                        title = "局域网 IPv6",
+                        subtitle = "适用于已分配 IPv6 地址的双栈网络",
+                        value = displayLanIpv6,
+                        onCopy = onCopyLanIpv6,
+                        emphasize = false
+                    )
+                }
                 GatewayItem(
-                    title = "局域网 IPv6",
-                    subtitle = "适用于已分配 IPv6 地址的双栈网络",
-                    value = displayLanIpv6,
-                    onCopy = onCopyLanIpv6,
+                    title = "本机",
+                    subtitle = "仅当前设备可访问",
+                    value = displayLocal,
+                    onCopy = onCopyLocal,
                     emphasize = false
                 )
             }
-            GatewayItem(
-                title = "本机",
-                subtitle = "仅当前设备可访问",
-                value = displayLocal,
-                onCopy = onCopyLocal,
-                emphasize = false
-            )
         }
     }
 }

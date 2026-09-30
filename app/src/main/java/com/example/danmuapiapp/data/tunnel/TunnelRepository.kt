@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.tunnel
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import android.content.Intent
 import android.content.BroadcastReceiver
@@ -9,6 +11,10 @@ import androidx.core.content.ContextCompat
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
+import com.example.danmuapiapp.data.service.GithubProxyService
+import com.example.danmuapiapp.data.remote.github.GithubRemoteService
+import com.example.danmuapiapp.data.repository.runCatchingCancellable
+import com.example.danmuapiapp.data.repository.useCancellableResponse
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -20,10 +26,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import com.example.danmuapiapp.data.service.RootShell
+import com.example.danmuapiapp.data.service.RootAutoStartModule
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -70,8 +85,12 @@ class TunnelRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val runtimeRepository: RuntimeRepository,
     private val envConfigRepository: EnvConfigRepository,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val githubProxyService: GithubProxyService,
+    private val githubRemoteService: GithubRemoteService
 ) {
+
+    private val kernelUpdateMutex = Mutex()
 
     private val _state = MutableStateFlow(TunnelUiState())
     val state: StateFlow<TunnelUiState> = _state.asStateFlow()
@@ -99,28 +118,31 @@ class TunnelRepository @Inject constructor(
 
     suspend fun refresh() = withContext(Dispatchers.IO) { refreshInternal() }
 
-    suspend fun save(settings: TunnelSettings, configText: String): TunnelActionResult =
+    suspend fun save(settings: TunnelSettings): TunnelActionResult =
         withContext(Dispatchers.IO) {
             // localPort 以 .env 里的真实端口为准（runtimeState.port 可能是旧缓存）
             val realPort = currentServicePort()
-            val normalized = if (settings.mode == TunnelMode.Form) {
-                buildFrpcToml(settings.form, realPort)
-            } else {
-                syncPastedLocalPort(configText, realPort)
-            }
+            val normalized = buildEffectiveFrpcConfig(settings, realPort)
             if (!TunnelStore.writeText(TunnelStore.configFile(context), normalized)) {
                 return@withContext TunnelActionResult(false, "配置写入失败")
             }
             if (!TunnelStore.writeSettings(context, settings)) {
                 return@withContext TunnelActionResult(false, "开关写入失败")
             }
+            if (settings.autoStart && NodeKeepAlivePrefs.isRootMode(context)) {
+                val bootScript = RootAutoStartModule.refreshInstalledServiceScript(context)
+                if (!bootScript.ok) return@withContext TunnelActionResult(false, bootScript.message)
+            }
             val wasRunning = _state.value.running
             if (!settings.enabled && wasRunning) {
-                stopBlocking()
+                val stopped = stopBlocking()
+                if (!stopped.ok) return@withContext stopped
             } else if (settings.enabled && wasRunning) {
                 if (NodeKeepAlivePrefs.isRootMode(context)) {
-                    RootTunnel.stop(context)
-                    RootTunnel.start(context)
+                    val stopped = RootTunnel.stop(context)
+                    if (!stopped.ok) return@withContext stopped
+                    val started = RootTunnel.start(context)
+                    if (!started.ok) return@withContext started
                 } else {
                     sendTunnelAction(NodeService.ACTION_TUNNEL_STOP)
                     sendTunnelAction(NodeService.ACTION_TUNNEL_START)
@@ -137,16 +159,16 @@ class TunnelRepository @Inject constructor(
     suspend fun syncServicePort(port: Int): TunnelActionResult = withContext(Dispatchers.IO) {
         val settings = TunnelStore.readSettings(context)
         if (!settings.enabled) return@withContext TunnelActionResult(true, "")
-        val text = if (settings.mode == TunnelMode.Form) {
-            buildFrpcToml(settings.form, port)
-        } else {
-            syncPastedLocalPort(settings.configText, port)
+        val text = buildEffectiveFrpcConfig(settings, port)
+        if (!TunnelStore.writeText(TunnelStore.configFile(context), text)) {
+            return@withContext TunnelActionResult(false, "穿透端口配置写入失败")
         }
-        TunnelStore.writeText(TunnelStore.configFile(context), text)
         if (_state.value.running) {
             if (NodeKeepAlivePrefs.isRootMode(context)) {
-                RootTunnel.stop(context)
-                RootTunnel.start(context)
+                val stopped = RootTunnel.stop(context)
+                if (!stopped.ok) return@withContext stopped
+                val started = RootTunnel.start(context)
+                if (!started.ok) return@withContext started
             } else if (runtimeRepository.runtimeState.value.status == ServiceStatus.Running) {
                 sendTunnelAction(NodeService.ACTION_TUNNEL_STOP)
                 sendTunnelAction(NodeService.ACTION_TUNNEL_START)
@@ -167,8 +189,10 @@ class TunnelRepository @Inject constructor(
 
     /** 重启穿透：先等停止收敛，再启动。 */
     suspend fun restart(): TunnelActionResult = withContext(Dispatchers.IO) {
+        refreshInternal()
         if (_state.value.running) {
-            stopBlocking()
+            val stopped = stopBlocking()
+            if (!stopped.ok) return@withContext stopped
             var waited = 0L
             while (waited < 8000L && _state.value.running) {
                 Thread.sleep(300L)
@@ -182,9 +206,14 @@ class TunnelRepository @Inject constructor(
     suspend fun readLog(lines: Int = 200): String =
         withContext(Dispatchers.IO) { TunnelStore.readLogTail(context, lines) }
 
-    suspend fun clearLog() = withContext(Dispatchers.IO) {
-        TunnelStore.clearLog(context)
+    suspend fun clearLog(): TunnelActionResult = withContext(Dispatchers.IO) {
+        // 兼容旧开机脚本创建的 root:root 0644 日志，仍然必须原地截断。
+        val cleared = TunnelStore.clearLog(context) ||
+            (NodeKeepAlivePrefs.isRootMode(context) && RootShell.exec(
+                ": > ${shellQuote(TunnelStore.logFile(context).absolutePath)}", 6000L
+            ).ok)
         refreshInternal()
+        TunnelActionResult(cleared, if (cleared) "日志已清空" else "日志清空失败，请检查文件权限")
     }
 
     private fun startBlocking(): TunnelActionResult {
@@ -230,24 +259,30 @@ class TunnelRepository @Inject constructor(
         val log = TunnelStore.readLogTail(context, 60)
         val rootMode = NodeKeepAlivePrefs.isRootMode(context)
         val heartbeat = status.optLong("heartbeat", 0L)
+        val rootPid = if (rootMode) RootTunnel.runningPid(context) else 0L
         val running = when {
-            !settings.enabled -> false
-            rootMode -> RootTunnel.isRunning(context)
+            rootMode -> rootPid > 0L
             else -> status.optString("state") == "running" &&
                 System.currentTimeMillis() - heartbeat < 30_000L
         }
         _state.value = TunnelUiState(
             settings = settings,
             running = running,
-            state = status.optString("state", "stopped"),
-            pid = status.optLong("pid", 0L),
+            state = if (running) "running" else status.optString("state", "stopped"),
+            pid = if (rootMode) rootPid else status.optLong("pid", 0L),
             since = status.optLong("since", 0L),
             restarts = status.optInt("restarts", 0),
             // 只用监管进程写入的启动错误；运行期日志（如本机目标端口拒绝）不算启动失败
             lastError = status.optString("lastError", ""),
             kernelReady = TunnelStore.kernelReady(context, rootMode),
-            kernelVersion = TunnelStore.kernelVersion(context),
-            linkState = parseFrpcLogLinkState(log),
+            kernelVersion = if (rootMode && running) {
+                TunnelStore.readText(File(TunnelStore.dir(context), "frpc-root.pid.version"), 64)
+                    .trim().ifBlank { TunnelStore.kernelVersion(context, true) }
+            } else TunnelStore.kernelVersion(context, rootMode),
+            // 丢失记录后发现的旧进程不能借用另一实例留下的成功/失败日志。
+            linkState = if (rootMode && rootPid != status.optLong("pid", 0L)) {
+                TunnelLinkState.Unknown
+            } else parseFrpcLogLinkState(log),
             serviceRunning = runtimeRepository.runtimeState.value.status == ServiceStatus.Running,
             rootMode = rootMode,
             servicePort = currentServicePort(),
@@ -277,15 +312,12 @@ class TunnelRepository @Inject constructor(
 
     /** 查 GitHub 上 fatedier/frp 的最新 Release，并挑出本机架构对应的资源。 */
     suspend fun checkFrpcUpdate(): Result<FrpcRelease> = withContext(Dispatchers.IO) {
-        runCatching {
-            val request = Request.Builder()
-                .url("https://api.github.com/repos/fatedier/frp/releases/latest")
-                .header("Accept", "application/vnd.github+json")
-                .build()
-            val json = okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) error("GitHub 返回 ${response.code}")
-                JSONObject(response.body?.string().orEmpty())
-            }
+        runCatchingCancellable {
+            val payload = githubRemoteService.requestTextResponseCancellable(
+                githubRemoteService.apiUrlCandidates("repos/fatedier/frp/releases/latest"),
+                mapOf("Accept" to "application/vnd.github+json", "User-Agent" to "DanmuApiApp")
+            ) ?: error("无法读取 GitHub 内核版本")
+            val json = JSONObject(payload.body)
             val version = json.optString("tag_name").removePrefix("v").trim()
             if (version.isEmpty()) error("没有读取到版本号")
             val suffix = "linux_${frpcPlatform()}.tar.gz"
@@ -313,26 +345,70 @@ class TunnelRepository @Inject constructor(
                     "普通模式的内核随 App 包内置，请在应用更新里升级；Root 模式可直接更新内核"
                 )
             }
-            runCatching {
-                val request = Request.Builder().url(release.downloadUrl).build()
-                val bytes = okHttpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) error("下载失败 ${response.code}")
-                    response.body?.bytes() ?: error("下载内容为空")
+            kernelUpdateMutex.withLock {
+                runCatchingCancellable {
+                    val version = release.version.removePrefix("v")
+                    require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?").matches(version)) { "无效的内核版本" }
+                    val platform = frpcPlatform()
+                    // The digest must come from the official TLS-authenticated API.
+                    // Reverse proxies may supply archive bytes, never the trust anchor.
+                    val trustedClient = okHttpClient.newBuilder().callTimeout(20, TimeUnit.SECONDS).build()
+                    val metadataRequest = Request.Builder().url("https://api.github.com/repos/fatedier/frp/releases/tags/v$version")
+                        .header("Accept", "application/vnd.github+json").header("User-Agent", "DanmuApiApp")
+                    githubProxyService.applyGithubAuth(metadataRequest, metadataRequest.build().url.toString())
+                    val official = trustedClient.newOutboundCall(metadataRequest.build()).useCancellableResponse { response ->
+                        check(response.isSuccessful && response.request.url.host == "api.github.com") { "无法核验官方发布摘要，已停止更新" }
+                        val bytes = response.body.byteStream().readBytesLimited(1024 * 1024)
+                        bytes.toString(Charsets.UTF_8)
+                    }
+                    val asset = verifiedFrpcAsset(official, version, platform)
+                    check(release.downloadUrl == asset.url) { "待更新资产与官方发布不一致" }
+                    val archive = File.createTempFile("frpc-download-", ".tar.gz", context.cacheDir)
+                    val kernel = File.createTempFile("frpc-extract-", ".pending", context.cacheDir)
+                    try {
+                        var downloaded = false
+                        val job = currentCoroutineContext()
+                        for (url in githubProxyService.buildUrlCandidates(asset.url).plus(asset.url).distinct()) {
+                            job.ensureActive()
+                            downloaded = runCatchingCancellable {
+                                val request = Request.Builder().url(url).header("User-Agent", "DanmuApiApp").build()
+                                okHttpClient.newBuilder().callTimeout(5, TimeUnit.MINUTES).build().newOutboundCall(request).useCancellableResponse { response ->
+                                    check(response.isSuccessful) { "下载失败 ${response.code}" }
+                                    val declared = response.body.contentLength()
+                                    check(declared == -1L || declared == asset.size) { "下载大小与官方发布不匹配" }
+                                    FileOutputStream(archive).use { output ->
+                                        copyVerifiedFrpcArchive(response.body.byteStream(), output, asset) { job.ensureActive() }
+                                    }
+                                }
+                                true
+                            }.getOrDefault(false)
+                            if (downloaded) break
+                        }
+                        check(downloaded) { "内核下载失败或摘要不匹配，未执行下载文件" }
+                        FileOutputStream(kernel).use { output ->
+                            archive.inputStream().use { extractFrpcArchive(it, output) { job.ensureActive() } }
+                        }
+                        verifyFrpcElf(kernel, platform)
+                        job.ensureActive()
+                        val result = synchronized(RootTunnel) {
+                            installFrpcKernel(
+                                kernel = kernel, version = version,
+                                target = TunnelStore.customKernelFile(context),
+                                versionFile = TunnelStore.customKernelVersionFile(context),
+                                wasRunning = RootTunnel.isRunning(context),
+                                verify = { candidate ->
+                                    verifyFrpcElf(candidate, platform)
+                                    val checked = RootShell.exec("${shellQuote(candidate.absolutePath)} --version", 10_000L)
+                                    check(checked.ok && checked.stdout.trim().removePrefix("v") == version) { "下载内核无法执行或版本不匹配" }
+                                }, stop = { RootTunnel.stop(context) }, start = { RootTunnel.start(context) }
+                            )
+                        }
+                        refreshInternal()
+                        result
+                    } finally { archive.delete(); kernel.delete() }
+                }.getOrElse { error ->
+                    TunnelActionResult(false, "更新失败：${error.message}")
                 }
-                val kernel = extractFrpcFromTarGz(bytes) ?: error("压缩包里没有找到 frpc")
-                val target = TunnelStore.customKernelFile(context)
-                target.parentFile?.mkdirs()
-                target.writeBytes(kernel)
-                target.setExecutable(true, false)
-                TunnelStore.writeText(TunnelStore.customKernelVersionFile(context), release.version)
-                if (_state.value.running) {
-                    RootTunnel.stop(context)
-                    RootTunnel.start(context)
-                }
-                refreshInternal()
-                TunnelActionResult(true, "内核已更新到 ${release.version}")
-            }.getOrElse { error ->
-                TunnelActionResult(false, "更新失败：${error.message}")
             }
         }
 
@@ -341,4 +417,16 @@ class TunnelRepository @Inject constructor(
         Build.SUPPORTED_ABIS.any { it == "armeabi-v7a" } -> "arm"
         else -> "amd64"
     }
+}
+
+private fun java.io.InputStream.readBytesLimited(limit: Int): ByteArray {
+    val output = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        check(output.size() + count <= limit) { "发布信息超过大小限制" }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
 }

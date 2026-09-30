@@ -49,19 +49,7 @@ object RootAutoStartModule {
                 flagDir = FLAG_DIR
             )
         )
-        val serviceSh = ensureTrailingNewline(
-            RootAutoStartScriptBuilders.buildServiceSh(
-                moduleId = MODULE_ID,
-                moduleDir = MODULE_DIR,
-                flagDir = FLAG_DIR,
-                flagFile = FLAG_FILE,
-                modeFile = MODE_FILE,
-                mainClass = RootNodeEntry::class.java.name,
-                frpDir = File(context.filesDir, "frp").absolutePath,
-                nativeLibDir = context.applicationInfo.nativeLibraryDir ?: "",
-                packageName = context.packageName,
-            )
-        )
+        val serviceSh = buildServiceScript(context)
 
         val script = StringBuilder().apply {
             append("set -e\n")
@@ -110,6 +98,62 @@ object RootAutoStartModule {
         val modeResult = writeRunModeFlag(RunMode.Root)
         if (!modeResult.ok) return modeResult
         return OpResult(true, "已安装模块并开启开机自启")
+    }
+
+    private fun buildServiceScript(context: Context): String = ensureTrailingNewline(
+        RootAutoStartScriptBuilders.buildServiceSh(
+            moduleId = MODULE_ID,
+            moduleDir = MODULE_DIR,
+            flagDir = FLAG_DIR,
+            flagFile = FLAG_FILE,
+            modeFile = MODE_FILE,
+            mainClass = RootNodeEntry::class.java.name,
+            frpDir = com.example.danmuapiapp.data.tunnel.TunnelStore.dir(context).absolutePath,
+            nativeLibDir = context.applicationInfo.nativeLibraryDir ?: "",
+            packageName = context.packageName,
+            outboundConfigPath = AppOutboundSettingsStore.ensureConfig(context)
+        )
+    )
+
+    private val scriptMigrationWorker = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "root-module-migration").apply { isDaemon = true }
+    }
+
+    fun scheduleInstalledScriptMigration(context: Context) {
+        val appContext = context.applicationContext
+        if (runCatching { RuntimeModePrefs.get(appContext) }.getOrNull() != com.example.danmuapiapp.domain.model.RunMode.Root) return
+        scriptMigrationWorker.execute {
+            runCatching {
+                val present = RootShell.exec("[ -f '$MODULE_DIR/service.sh' ]", 3000L)
+                if (present.ok) {
+                    com.example.danmuapiapp.data.tunnel.TunnelStore.dir(appContext)
+                    val result = refreshInstalledServiceScript(appContext)
+                    if (!result.ok) AppDiagnosticLogger.w(appContext, "RootAutoStart", result.message)
+                }
+            }.onFailure { AppDiagnosticLogger.w(appContext, "RootAutoStart", "开机脚本迁移失败", it) }
+        }
+    }
+
+    /** 升级已安装的脚本，保留用户的启用/禁用状态，不安装新模块。 */
+    @Synchronized
+    fun refreshInstalledServiceScript(context: Context): OpResult {
+        val script = """
+            set -e
+            [ -f '$MODULE_DIR/service.sh' ] || exit 0
+            cat > '$MODULE_DIR/service.sh.new' <<'DANMUAPI_SERVICE_EOF'
+${buildServiceScript(context)}DANMUAPI_SERVICE_EOF
+            chmod 0755 '$MODULE_DIR/service.sh.new' || exit 1
+            if cmp -s '$MODULE_DIR/service.sh.new' '$MODULE_DIR/service.sh'; then
+              rm -f '$MODULE_DIR/service.sh.new'
+            else
+              mv -f '$MODULE_DIR/service.sh.new' '$MODULE_DIR/service.sh' || exit 1
+              if command -v chcon >/dev/null 2>&1; then
+                chcon u:object_r:magisk_file:s0 '$MODULE_DIR/service.sh' 2>/dev/null || true
+              fi
+            fi
+        """.trimIndent()
+        val result = RootShell.exec(script, 10_000L)
+        return OpResult(result.ok, if (result.ok) "" else "开机脚本更新失败：${result.stderr.takeLast(200)}")
     }
 
     fun disableOnly(): OpResult {

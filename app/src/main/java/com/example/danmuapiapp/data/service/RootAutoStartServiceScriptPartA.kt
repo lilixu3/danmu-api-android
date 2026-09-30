@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.tunnel.RootTunnelScripts
+
 object RootAutoStartServiceScriptPartA {
 
     fun build(
@@ -11,7 +13,8 @@ object RootAutoStartServiceScriptPartA {
         mainClass: String,
         frpDir: String = "",
         nativeLibDir: String = "",
-        packageName: String = ""
+        packageName: String = "",
+        outboundConfigPath: String = ""
     ): String {
         return """
             #!/system/bin/sh
@@ -45,10 +48,15 @@ object RootAutoStartServiceScriptPartA {
             }
 
             # 内网穿透：只有 App 写过 autostart 标记才跟随开机启动
-            start_frpc() {
+            start_frpc() (
               [ -n "${'$'}FRP_DIR" ] || return 0
               [ -f "${'$'}FRP_DIR/autostart" ] || return 0
-              [ -f "${'$'}FRP_DIR/frpc.toml" ] || return 0
+              FRP_CFG="${'$'}FRP_DIR/frpc.conf"
+              if [ ! -f "${'$'}FRP_CFG" ] && [ -f "${'$'}FRP_DIR/frpc.toml" ]; then
+                cp "${'$'}FRP_DIR/frpc.toml" "${'$'}FRP_CFG" || return 0
+                chmod 0644 "${'$'}FRP_CFG"
+              fi
+              [ -f "${'$'}FRP_CFG" ] || return 0
               FRP_LIB="${'$'}FRP_LIB_FALLBACK"
               if [ -n "${'$'}FRP_PKG" ]; then
                 APK=$(pm path "${'$'}FRP_PKG" 2>/dev/null | head -n 1 | cut -d: -f2)
@@ -57,34 +65,58 @@ object RootAutoStartServiceScriptPartA {
                   [ -n "${'$'}NEWLIB" ] && [ -x "${'$'}NEWLIB/libfrpc.so" ] && FRP_LIB="${'$'}NEWLIB/libfrpc.so"
                 fi
               fi
+              FRP_LOG_HELPER="$(dirname "${'$'}FRP_LIB")/libdanmu_outbound.so"
+              ${RootTunnelScripts.selectKernel()}
               [ -x "${'$'}FRP_LIB" ] || { log "frpc kernel missing"; return 0; }
               FRP_PIDFILE="${'$'}FRP_DIR/frpc-root.pid"
               FRP_LOG="${'$'}FRP_DIR/frpc.log"
-              OLD=$(cat "${'$'}FRP_PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
-              if [ -n "${'$'}OLD" ] && [ -d "/proc/${'$'}OLD" ] && tr '\0' ' ' < "/proc/${'$'}OLD/cmdline" 2>/dev/null | grep -q 'libfrpc.so'; then
-                logd "frpc already running pid=${'$'}OLD"
+              ${RootTunnelScripts.lock()}
+              ${RootTunnelScripts.identityFunctions()}
+              PIDS=$(frpc_pids)
+              set -- ${'$'}PIDS
+              if [ "${'$'}#" -gt 1 ]; then
+                log "duplicate frpc processes; restart tunnel from app to recover"
                 return 0
               fi
-              rm -f "${'$'}FRP_PIDFILE" 2>/dev/null || true
+              if [ "${'$'}#" -eq 1 ]; then
+                OLD=$(cat "${'$'}FRP_PIDFILE" 2>/dev/null)
+                [ "${'$'}OLD" = "${'$'}1" ] || echo '[app] frpc process adopted' >> "${'$'}FRP_LOG"
+                remember_frpc "${'$'}1"
+                logd "frpc already running pid=${'$'}1"
+                return 0
+              fi
+              rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" 2>/dev/null || true
+              ${RootTunnelScripts.logSink()}
               if command -v setsid >/dev/null 2>&1; then
-                setsid "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+                setsid "${'$'}FRP_LIB" -c "${'$'}FRP_CFG" > "${'$'}FRP_PIPE" 2>&1 < /dev/null 9>&- &
               elif command -v nohup >/dev/null 2>&1; then
-                nohup "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+                nohup "${'$'}FRP_LIB" -c "${'$'}FRP_CFG" > "${'$'}FRP_PIPE" 2>&1 < /dev/null 9>&- &
               else
-                "${'$'}FRP_LIB" -c "${'$'}FRP_DIR/frpc.toml" >> "${'$'}FRP_LOG" 2>&1 < /dev/null &
+                "${'$'}FRP_LIB" -c "${'$'}FRP_CFG" > "${'$'}FRP_PIPE" 2>&1 < /dev/null 9>&- &
               fi
               FPID=$!
               echo "${'$'}FPID" > "${'$'}FRP_PIDFILE"
+              frpc_ticks "${'$'}FPID" > "${'$'}FRP_PIDFILE.start"
+              "${'$'}FRP_LIB" --version > "${'$'}FRP_PIDFILE.version" 2>/dev/null
               sleep 2
-              if [ -d "/proc/${'$'}FPID" ]; then
-                chmod 0644 "${'$'}FRP_PIDFILE" "${'$'}FRP_LOG" 2>/dev/null || true
+              rm -f "${'$'}FRP_PIPE"
+              if owns_frpc "${'$'}FPID"; then
+                chmod 0644 "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" "${'$'}FRP_LOG" 2>/dev/null || true
+                FRP_APP_UID=$(stat -c '%u' "${'$'}FRP_DIR" 2>/dev/null)
+                case "${'$'}FRP_APP_UID" in ''|*[!0-9]*) ;; *)
+                  chown "${'$'}FRP_APP_UID:${'$'}FRP_APP_UID" "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" "${'$'}FRP_LOG" 2>/dev/null || true ;;
+                esac
                 logd "frpc started pid=${'$'}FPID"
               else
+                if [ -n "$(cat "${'$'}FRP_PIDFILE.start" 2>/dev/null)" ] && [ "$(frpc_ticks "${'$'}FPID")" = "$(cat "${'$'}FRP_PIDFILE.start" 2>/dev/null)" ]; then
+                  kill "${'$'}FPID" 2>/dev/null || true
+                fi
+                kill "${'$'}FRP_LOG_PID" 2>/dev/null || true
                 log "frpc exited early"
-                rm -f "${'$'}FRP_PIDFILE" 2>/dev/null || true
+                rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" 2>/dev/null || true
               fi
               return 0
-            }
+            )
 
             logd() {
               [ "${'$'}DEBUG" = "1" ] && log "${'$'}@"
@@ -229,6 +261,8 @@ object RootAutoStartServiceScriptPartA {
                 export LD_LIBRARY_PATH="${'$'}LIBDIR"
               fi
               export DANMUAPI_LIBDIR="${'$'}LIBDIR"
+              export DANMU_APP_OUTBOUND_HELPER="${'$'}LIBDIR/libdanmu_outbound.so"
+              export DANMU_APP_OUTBOUND_CONFIG='${outboundConfigPath.replace("'", "'\"'\"'")}'
 
               # 使用 DE 目录，避免依赖 CE 解锁后可见
               RUNTIME_BASE='/data/adb/danmuapi_runtime'

@@ -555,6 +555,7 @@ object RootRuntimeController {
 
         StartupFailureStore.clearRoot(context)
 
+        val outboundConfigPath = AppOutboundSettingsStore.ensureConfig(context)
         val startScript = """
             PKG=${shellQuote(pkgName)}
             APP_APK_HINT=${shellQuote(apkPathHint)}
@@ -603,6 +604,8 @@ object RootRuntimeController {
 
             export CLASSPATH="${'$'}APP_APK"
             export DANMUAPI_LIBDIR="${'$'}LIB_DIR"
+            export DANMU_APP_OUTBOUND_HELPER="${'$'}LIB_DIR/libdanmu_outbound.so"
+            export DANMU_APP_OUTBOUND_CONFIG=${shellQuote(outboundConfigPath)}
             if [ -n "${'$'}LD_LIBRARY_PATH" ]; then
               export LD_LIBRARY_PATH="${'$'}LIB_DIR:${'$'}LD_LIBRARY_PATH"
             else
@@ -1048,7 +1051,7 @@ object RootRuntimeController {
                 mkdir -p "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
 
                 # 热启动只修正启动必需的浅层文件和配置/日志目录。
-                for NAME in main.js android-server.js worker-proxy.js startup-failure.js package.json package-lock.json .app_version; do
+                for NAME in main.js android-server.js worker-proxy.js app-outbound-runtime.js app-outbound-bridge.js app-outbound-diagnostics.js startup-failure.js package.json package-lock.json .app_version; do
                   [ -f "${'$'}DST/${'$'}NAME" ] && chmod 0644 "${'$'}DST/${'$'}NAME" 2>/dev/null || true
                 done
 

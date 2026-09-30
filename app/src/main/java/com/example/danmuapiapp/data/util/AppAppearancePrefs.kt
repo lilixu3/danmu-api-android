@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.util
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import android.content.Context
 import android.content.res.Configuration
 import android.content.SharedPreferences
@@ -44,6 +46,24 @@ object AppAppearancePrefs {
         ignoreUnknownKeys = true
         encodeDefaults = false
         explicitNulls = false
+    }
+
+    private const val PREF_KEY_ACCESS_ENTRY_DEFAULT_TAB = "access_entry_default_tab"
+
+    fun readAccessEntryDefaultTab(prefs: SharedPreferences): AccessEntryTab =
+        AccessEntryTab.fromStorageValue(prefs.safeGetString(PREF_KEY_ACCESS_ENTRY_DEFAULT_TAB))
+
+    fun writeAccessEntryDefaultTab(prefs: SharedPreferences, tab: AccessEntryTab) {
+        prefs.edit { putString(PREF_KEY_ACCESS_ENTRY_DEFAULT_TAB, tab.storageValue) }
+    }
+
+    private const val PREF_KEY_ACCESS_ENTRY_LAYOUT = "access_entry_layout"
+
+    fun readAccessEntryLayout(prefs: SharedPreferences): AccessEntryLayout =
+        AccessEntryLayout.fromStorageValue(prefs.safeGetString(PREF_KEY_ACCESS_ENTRY_LAYOUT))
+
+    fun writeAccessEntryLayout(prefs: SharedPreferences, layout: AccessEntryLayout) {
+        prefs.edit { putString(PREF_KEY_ACCESS_ENTRY_LAYOUT, layout.storageValue) }
     }
 
     fun readNightMode(prefs: SharedPreferences): NightModePreference {

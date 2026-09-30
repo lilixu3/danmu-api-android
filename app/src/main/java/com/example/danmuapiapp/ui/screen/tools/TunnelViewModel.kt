@@ -75,7 +75,7 @@ class TunnelViewModel @Inject constructor(
         }
         _saving.value = true
         try {
-            val result = repository.save(value.settings(), value.effectiveConfig(state.value.servicePort))
+            val result = repository.save(value.settings())
             if (result.ok) _savedDraft.value = value
             onResult(result)
         } catch (cancelled: CancellationException) {
@@ -89,9 +89,10 @@ class TunnelViewModel @Inject constructor(
 
     fun refreshLog() = viewModelScope.launch { _log.value = repository.readLog() }
 
-    fun clearLog() = viewModelScope.launch {
-        repository.clearLog()
+    fun clearLog(onResult: (TunnelActionResult) -> Unit = {}) = viewModelScope.launch {
+        val result = repository.clearLog()
         _log.value = repository.readLog()
+        onResult(result)
     }
 
     fun save(
@@ -99,7 +100,7 @@ class TunnelViewModel @Inject constructor(
         configText: String,
         onResult: (TunnelActionResult) -> Unit
     ) = viewModelScope.launch {
-        onResult(repository.save(settings, configText))
+        onResult(repository.save(settings.copy(configText = configText)))
     }
 
     fun start(onResult: (TunnelActionResult) -> Unit = {}) = viewModelScope.launch {
@@ -157,13 +158,15 @@ class TunnelViewModel @Inject constructor(
     }
 
     fun applyKernelUpdate() = viewModelScope.launch {
+        if (_kernelUpdate.value.applying) return@launch
         val release = _kernelUpdate.value.release ?: return@launch
         _kernelUpdate.value = _kernelUpdate.value.copy(applying = true)
-        val result = repository.applyFrpcUpdate(release)
-        _kernelUpdate.value = _kernelUpdate.value.copy(
-            applying = false,
-            message = result.message
-        )
+        try {
+            val result = repository.applyFrpcUpdate(release)
+            _kernelUpdate.value = _kernelUpdate.value.copy(message = result.message)
+        } finally {
+            _kernelUpdate.value = _kernelUpdate.value.copy(applying = false)
+        }
     }
 
     private suspend fun awaitRunning(

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.domain.repository
 
+import com.example.danmuapiapp.domain.model.AccessEntryTab
+import com.example.danmuapiapp.domain.model.AccessEntryLayout
 import com.example.danmuapiapp.domain.model.*
 import kotlinx.coroutines.flow.StateFlow
 
@@ -48,7 +50,8 @@ interface CoreRepository {
     suspend fun checkAllUpdates()
     suspend fun fetchUpdateComparison(variant: ApiVariant): Result<CoreUpdateComparison>
     suspend fun installCore(variant: ApiVariant): Result<Unit>
-    suspend fun updateCore(variant: ApiVariant): Result<Unit>
+    suspend fun prepareCoreUpdate(variant: ApiVariant): Result<CoreUpdatePlan>
+    suspend fun updateCore(request: CoreUpdateRequest): Result<Unit>
     suspend fun switchCoreBranch(variant: ApiVariant, branch: String): Result<Unit>
     suspend fun deleteCore(variant: ApiVariant): Result<Unit>
     suspend fun rollbackCore(variant: ApiVariant, release: GithubRelease): Result<Unit>
@@ -135,6 +138,8 @@ interface SettingsRepository {
     val normalNotificationBehavior: StateFlow<NormalNotificationBehavior>
     val serviceNotificationInfoEnabled: StateFlow<Boolean>
     val rootNotificationEnabled: StateFlow<Boolean>
+    val accessEntryDefaultTab: StateFlow<AccessEntryTab>
+    val accessEntryLayout: StateFlow<AccessEntryLayout>
     val nightMode: StateFlow<NightModePreference>
     val glassMaterial: StateFlow<GlassMaterialPreference>
     val glassBottomBar: StateFlow<Boolean>
@@ -165,6 +170,8 @@ interface SettingsRepository {
     fun setNormalNotificationBehavior(behavior: NormalNotificationBehavior)
     fun setServiceNotificationInfoEnabled(enabled: Boolean)
     fun setRootNotificationEnabled(enabled: Boolean)
+    fun setAccessEntryDefaultTab(tab: AccessEntryTab)
+    fun setAccessEntryLayout(layout: AccessEntryLayout)
     fun setNightMode(mode: NightModePreference)
     fun setGlassMaterial(material: GlassMaterialPreference)
     fun setGlassBottomBar(enabled: Boolean)

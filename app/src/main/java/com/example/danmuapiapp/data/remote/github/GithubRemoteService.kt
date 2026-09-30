@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.remote.github
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.util.Log
 import com.example.danmuapiapp.data.repository.executeCancellable
 import com.example.danmuapiapp.data.service.CoreVersionParser
@@ -94,7 +96,7 @@ class GithubRemoteService @Inject constructor(
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    val response = metadataHttpClient.newCall(request).execute()
+                    val response = metadataHttpClient.newOutboundCall(request).execute()
                     response.use {
                         if (!it.isSuccessful) break
                         val body = it.body.string()
@@ -129,7 +131,7 @@ class GithubRemoteService @Inject constructor(
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    val response = metadataHttpClient.newCall(request).execute()
+                    val response = metadataHttpClient.newOutboundCall(request).execute()
                     response.use {
                         if (!it.isSuccessful) break
                         val body = it.body.string()
@@ -167,7 +169,7 @@ class GithubRemoteService @Inject constructor(
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    val response = metadataHttpClient.newCall(request).executeCancellable()
+                    val response = metadataHttpClient.newOutboundCall(request).executeCancellable()
                     response.use {
                         if (!it.isSuccessful) break
                         val body = it.body.string()
@@ -204,7 +206,7 @@ class GithubRemoteService @Inject constructor(
                         headers.forEach { (key, value) -> header(key, value) }
                         githubProxyService.applyGithubAuth(this, url)
                     }.build()
-                    val response = metadataHttpClient.newCall(request).executeCancellable()
+                    val response = metadataHttpClient.newOutboundCall(request).executeCancellable()
                     response.use {
                         if (!it.isSuccessful) break
                         val mapped = mapper(it.body.string())

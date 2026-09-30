@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import androidx.core.content.edit
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
@@ -259,7 +261,7 @@ class RuntimeDependencyPackManager @Inject constructor(
                         .header("User-Agent", USER_AGENT)
                         .apply { githubProxyService.applyGithubAuth(this, url) }
                         .build()
-                    metadataHttpClient.newCall(request).executeCancellable().use { response ->
+                    metadataHttpClient.newOutboundCall(request).executeCancellable().use { response ->
                         if (!response.isSuccessful) return@use
                         val body = response.body
                         if (body.contentLength() > maxBytes.toLong()) {
@@ -359,10 +361,10 @@ class RuntimeDependencyPackManager @Inject constructor(
                         .header("User-Agent", USER_AGENT)
                         .apply { githubProxyService.applyGithubAuth(this, url) }
                         .build()
-                    httpClient.newCall(request).executeCancellable().use { response ->
+                    httpClient.newOutboundCall(request).useCancellableResponse { response ->
                         if (!response.isSuccessful) {
                             lastFailure = "HTTP ${response.code}"
-                            return@use
+                            return@useCancellableResponse
                         }
                         val body = response.body
                         if (body.contentLength() > RuntimeDependencyPackProtocol.MAX_ARCHIVE_BYTES) {

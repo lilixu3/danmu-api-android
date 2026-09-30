@@ -20,8 +20,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.102"
-val defaultVersionCode = 190
+val defaultVersionName = "1.0.5.106"
+val defaultVersionCode = 194
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
@@ -293,10 +293,8 @@ android {
             }
             // 内网穿透内核：普通模式要从 nativeLibraryDir 直接 exec libfrpc.so
             // （useLegacyPackaging=true 会在安装时解压到 lib 目录）。
-            val frpDir = File(project.rootDir, "runtime/frp")
-            if (frpDir.isDirectory) {
-                jniDirs += frpDir.absolutePath
-            }
+            jniDirs += File(project.rootDir, "runtime/frp").absolutePath
+            jniDirs += layout.buildDirectory.dir("prepared-outbound-jni").get().asFile.absolutePath
             jniLibs.directories.clear()
             jniLibs.directories.addAll(jniDirs)
         }
@@ -988,7 +986,7 @@ fun sha256(file: File): String {
  */
 private val ELF_16K_REQUIRED_ABIS = setOf("arm64-v8a", "x86_64")
 
-fun assertElfLoadAlignment(file: File) {
+fun assertElfLoadAlignment(file: File, relativePath: String = file.relativeTo(preparedNativeRuntimeDir).invariantSeparatorsPath) {
     RandomAccessFile(file, "r").use { raf ->
         fun u8(): Int = raf.read().also { if (it < 0) throw GradleException("ELF 文件被截断：${file.name}") }
         fun u16At(offset: Long): Int {
@@ -1027,7 +1025,6 @@ fun assertElfLoadAlignment(file: File) {
             )
         }
 
-        val relativePath = file.relativeTo(preparedNativeRuntimeDir).invariantSeparatorsPath
         val minRequired = if (ELF_16K_REQUIRED_ABIS.any { "/$it/" in "/$relativePath" }) 16384L else 4096L
         var sawLoad = false
         for (i in 0 until phnum) {
@@ -1540,6 +1537,52 @@ val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") 
 
 val (prepareNativeRuntimeTask, verifyNativeRuntimeInputsTask) = registerNativeRuntimeTasks()
 
+fun verifyFrpcKernels(required: Boolean) {
+    val directory = rootProject.file("runtime/frp")
+    val checksums = File(directory, "SHA256SUMS").takeIf { it.isFile }?.readLines().orEmpty()
+        .mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"), limit = 2)
+            if (parts.size == 2) parts[1] to parts[0] else null
+        }.toMap()
+    val version = File(directory, "VERSION").takeIf { it.isFile }?.readText()?.trim()
+    val code = file("src/main/java/com/example/danmuapiapp/data/tunnel/TunnelLogic.kt").readText()
+    val codeVersion = Regex("const val FRPC_KERNEL_VERSION = \"([^\"]+)\"").find(code)?.groupValues?.get(1)
+    val problems = mutableListOf<String>()
+    if (version == null || version != codeVersion) problems += "frpc VERSION 与代码版本不一致"
+    for (abi in configuredAbiFilters) {
+        val path = "$abi/libfrpc.so"
+        val kernel = File(directory, path)
+        val expected = checksums[path]
+        if (!kernel.isFile || kernel.length() == 0L || expected == null) {
+            problems += "$abi 缺少内核或校验值"
+        } else {
+            val digest = MessageDigest.getInstance("SHA-256")
+            kernel.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (actual != expected) problems += "$abi 内核 SHA-256 不匹配"
+        }
+    }
+    if (problems.isNotEmpty()) {
+        val message = problems.joinToString("；") + "。请运行 ./scripts/prepare_frp_kernel.sh ${configuredAbiFilters.joinToString(" ")}"
+        if (required) throw GradleException(message) else logger.warn("内网穿透不可用：$message")
+    }
+}
+
+val verifyFrpcReleaseTask = tasks.register("verifyFrpcReleaseKernels") {
+    doLast { verifyFrpcKernels(required = true) }
+}
+val verifyFrpcDebugTask = tasks.register("verifyFrpcDebugKernels") {
+    doLast { verifyFrpcKernels(required = false) }
+}
+tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(verifyFrpcDebugTask) }
+
 tasks.named("preBuild").configure {
     dependsOn(verifyNativeRuntimeInputsTask)
     dependsOn(verifyBundledNodeModulesTask)
@@ -1548,6 +1591,7 @@ tasks.named("preBuild").configure {
     dependsOn(testBundledCoreRuntimeDependenciesTask)
     dependsOn(testDanmakuPrepareCacheTask)
     dependsOn(testFavoriteSchedulerHostTask)
+    dependsOn("testAppOutboundBridge")
 }
 
 tasks.matching {
@@ -1563,6 +1607,7 @@ tasks.matching {
 
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     dependsOn(verifyEmbeddedNodeCompatibilityTask)
+    dependsOn(verifyFrpcReleaseTask)
 }
 
 val verifyPackagedNodeModulesReleaseTask = tasks.named("verifyPackagedNodeModulesRelease")
@@ -1592,3 +1637,70 @@ tasks.matching {
 }.configureEach {
     dependsOn(prepareNativeRuntimeTask)
 }
+
+// App-owned Go helper. Release APKs must contain every selected ABI. Debug
+// builds may omit it, but the settings switch refuses to enable a missing helper.
+val outboundKernelStageLock = Any()
+fun verifyOutboundKernels(required: Boolean) = synchronized(outboundKernelStageLock) {
+    val directory = File(project.rootDir, "runtime/outbound")
+    val problems = mutableListOf<String>()
+    for (abi in configuredAbiFilters) {
+        val kernel = File(directory, "$abi/libdanmu_outbound.so")
+        val checked = layout.buildDirectory.file("prepared-outbound-jni/$abi/libdanmu_outbound.so").get().asFile
+        if (!kernel.isFile || kernel.length() == 0L) {
+            checked.delete()
+            problems += "$abi 缺少增强直连组件"
+            continue
+        }
+        val inputs = File(directory, "$abi/BUILD.inputs").takeIf { it.isFile }?.readLines().orEmpty()
+            .mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"), limit = 2)
+                if (parts.size == 2) parts[1] to parts[0] else null
+            }.toMap()
+        val expectedInputs = File(directory, "src").listFiles().orEmpty()
+            .filter { it.isFile && (it.extension == "go" || it.name in setOf("go.mod", "go.sum")) }
+            .map { it.relativeTo(project.rootDir).invariantSeparatorsPath }.toSet() + "scripts/prepare_outbound_kernel.sh"
+        fun hash(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+        }
+        val binaryHash = File(directory, "$abi/BUILD.binary").takeIf { it.isFile }?.readText()?.trim()
+        if (inputs.keys != expectedInputs || inputs.any { (path, digest) ->
+                val source = File(project.rootDir, path); !source.isFile || hash(source) != digest
+            } || binaryHash != hash(kernel)) {
+            checked.delete()
+            problems += "$abi 增强直连组件与当前源码或构建参数不一致"
+            continue
+        }
+        // Reuse the existing ELF page-alignment validator with its expected
+        // ABI-relative staging path; never strip or mutate the source artifact.
+        checked.parentFile.mkdirs()
+        kernel.copyTo(checked, overwrite = true)
+        assertElfLoadAlignment(checked, "outbound/$abi/libdanmu_outbound.so")
+    }
+    if (problems.isNotEmpty()) {
+        val message = problems.joinToString("；") + "。请运行 scripts/prepare_outbound_kernel.sh ${configuredAbiFilters.joinToString(" ")}"
+        if (required) throw GradleException(message) else logger.warn(message)
+    }
+}
+val verifyOutboundReleaseTask = tasks.register("verifyOutboundReleaseKernels") {
+    doLast { verifyOutboundKernels(required = true) }
+}
+val verifyOutboundDebugTask = tasks.register("verifyOutboundDebugKernels") {
+    doLast { verifyOutboundKernels(required = false) }
+}
+val testAppOutboundTask = tasks.register<Exec>("testAppOutboundBridge") {
+    workingDir(project.rootDir)
+    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs")
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyOutboundReleaseTask) }
+tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(verifyOutboundDebugTask) }
+
+tasks.matching {
+    (it.name.startsWith("merge") && (it.name.endsWith("JniLibFolders") || it.name.endsWith("NativeLibs"))) ||
+        (it.name.startsWith("strip") && it.name.endsWith("DebugSymbols"))
+}.configureEach { dependsOn(if (name.contains("Release")) verifyOutboundReleaseTask else verifyOutboundDebugTask) }

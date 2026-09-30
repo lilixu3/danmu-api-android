@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
@@ -288,7 +290,7 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private fun executeRaw(request: Request): RawHttpResult {
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newOutboundCall(request).execute().use { response ->
             return RawHttpResult(
                 code = response.code,
                 isSuccessful = response.isSuccessful,
@@ -308,7 +310,7 @@ class AccessControlRepositoryImpl @Inject constructor(
     }
 
     private fun executeJson(request: Request): JSONObject {
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newOutboundCall(request).execute().use { response ->
             val raw = response.body.string()
             if (!response.isSuccessful) {
                 val message = extractErrorMessage(raw)

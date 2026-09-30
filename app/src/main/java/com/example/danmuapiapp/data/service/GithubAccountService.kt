@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.domain.model.GithubAccountStatus
@@ -154,7 +156,7 @@ class GithubAccountService @Inject constructor(
             }
             .build()
 
-        directHttpClient.newCall(request).execute().use { response ->
+        directHttpClient.newOutboundCall(request).execute().use { response ->
             HttpPayload(
                 code = response.code,
                 body = response.body.string()

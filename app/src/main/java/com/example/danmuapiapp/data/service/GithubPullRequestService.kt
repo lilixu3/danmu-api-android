@@ -370,13 +370,13 @@ class GithubPullRequestService @Inject constructor(
         baseRepository = repository
     )
 
-    suspend fun get(repository: String, pullRequestNumber: Int): CorePullRequest {
+    suspend fun get(repository: String, pullRequestNumber: Int, forceRefresh: Boolean = false): CorePullRequest {
         val repo = validateRepository(repository)
         if (pullRequestNumber <= 0) throw IOException("PR 编号无效")
         val cacheKey = "${repo.lowercase()}:$pullRequestNumber"
-        cachedPullRequestDetails(cacheKey)?.let { return it }
+        if (!forceRefresh) cachedPullRequestDetails(cacheKey)?.let { return it }
         return mutexFor(pullRequestDetailsLocks, cacheKey).withLock {
-            cachedPullRequestDetails(cacheKey)?.let { return@withLock it }
+            if (!forceRefresh) cachedPullRequestDetails(cacheKey)?.let { return@withLock it }
             val body = githubRemoteService.requestTextCancellable(
                 urls = githubRemoteService.apiUrlCandidates("repos/$repo/pulls/$pullRequestNumber"),
                 headers = githubHeaders()
@@ -393,6 +393,48 @@ class GithubPullRequestService @Inject constructor(
                 )
             }
         }
+    }
+
+    internal suspend fun coverageForUpdate(
+        repository: String, pullRequest: CorePullRequest,
+        installedHead: String, installedBase: String, targetSha: String
+    ): PullRequestUpdateCoverage {
+        val repo = validateRepository(repository)
+        if (!pullRequest.baseRepository.equals(repo, true)) {
+            return PullRequestUpdateCoverage(CorePullRequestInclusion.Unknown, "PR 来源与当前仓库不一致")
+        }
+        return PullRequestUpdateCoveragePolicy.evaluate(
+            installedHead = installedHead, installedBase = installedBase,
+            currentHead = pullRequest.headSha,
+            mergedCommit = pullRequest.mergeCommitSha.takeIf { !pullRequest.mergedAt.isNullOrBlank() },
+            target = targetSha,
+            compare = { base, head ->
+                githubRemoteService.requestMappedCancellable(
+                    urls = githubRemoteService.apiUrlCandidates("repos/$repo/compare/$base...$head?per_page=1&page=1"),
+                    headers = githubHeaders(),
+                    mapper = PullRequestCommitComparison::parse
+                )
+            },
+            currentPullRequestPaths = {
+                val paths = mutableSetOf<String>()
+                var complete = false
+                for (page in 1..30) {
+                    val result = listFiles(repo, pullRequest.number, page, 100)
+                    result.files.forEach { file ->
+                        paths += file.path
+                        file.previousPath?.let(paths::add)
+                    }
+                    if (!result.hasNextPage && page * 100 < 3000) {
+                        complete = true
+                        break
+                    }
+                }
+                // 文件接口按 PR 编号读取，再验证 head 未变，避免把另一版本的文件列表拿来作证。
+                val latest = if (complete) get(repo, pullRequest.number, forceRefresh = true) else null
+                paths.takeIf { complete && latest != null && latest.headSha == pullRequest.headSha &&
+                    latest.baseSha == pullRequest.baseSha && latest.mergeCommitSha == pullRequest.mergeCommitSha }
+            }
+        )
     }
 
     suspend fun getWithCurrentCoreInclusion(

@@ -11,7 +11,8 @@ object RootAutoStartScriptBuilders {
         mainClass: String,
         frpDir: String = "",
         nativeLibDir: String = "",
-        packageName: String = ""
+        packageName: String = "",
+        outboundConfigPath: String = ""
     ): String {
         return RootAutoStartServiceScriptPartA.build(
             moduleId = moduleId,
@@ -22,7 +23,8 @@ object RootAutoStartScriptBuilders {
             mainClass = mainClass,
             frpDir = frpDir,
             nativeLibDir = nativeLibDir,
-            packageName = packageName
+            packageName = packageName,
+            outboundConfigPath = outboundConfigPath
         )
     }
 

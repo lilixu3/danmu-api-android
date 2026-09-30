@@ -53,7 +53,9 @@ internal fun CoreUpdateAvailableDialog(
     remoteCommit: CoreRemoteCommit?,
     onDismiss: () -> Unit,
     onShowDetails: () -> Unit,
-    onUpdateNow: () -> Unit
+    onUpdateNow: () -> Unit,
+    pullRequestNumbers: List<Int> = emptyList(),
+    updatedPullRequestNumbers: List<Int> = emptyList()
 ) {
     AppDialog(
         onDismissRequest = onDismiss,
@@ -63,6 +65,14 @@ internal fun CoreUpdateAvailableDialog(
         title = { Text("发现核心更新") },
         supportingText = { Text(variantLabel) },
         text = {
+            if (pullRequestNumbers.isNotEmpty()) {
+                Text(
+                    if (updatedPullRequestNumbers.isNotEmpty())
+                        "PR ${updatedPullRequestNumbers.joinToString("、") { "#$it" }} 有新提交。更新前会检查 PR 是否已包含，未包含时可选择直接更新或继续合并。"
+                    else "更新前会检查 PR 是否已包含，未包含时可选择直接更新或继续合并。",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
             AppGlassSurface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),

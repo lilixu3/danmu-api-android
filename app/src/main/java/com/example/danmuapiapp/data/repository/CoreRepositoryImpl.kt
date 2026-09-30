@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
@@ -82,18 +84,6 @@ class CoreRepositoryImpl @Inject constructor(
             Log.w(TAG, "$message：$summary")
         }
     }
-
-    @Serializable
-    private data class CoreSourceMetadata(
-        val repo: String = "",
-        val branch: String = "",
-        val commitSha: String = "",
-        val commitPublishedAt: String = "",
-        val versionLabel: String = "",
-        val pullRequestNumbers: List<Int> = emptyList(),
-        val pullRequestHeadShas: List<String> = emptyList(),
-        val localMergeSha: String = ""
-    )
 
     private data class CoreRemoteSource(
         val release: GithubRelease,
@@ -452,16 +442,17 @@ class CoreRepositoryImpl @Inject constructor(
             try {
                 val mode = currentRunMode()
                 ensureCoreDirWatcher(mode)
-                val previous = _coreInfoList.value
                 val refreshed = ApiVariant.entries.map { loadCoreState(it, mode) }
-                val merged = refreshed.map { state ->
-                    mergeVersionUpdateState(
-                        previousInfo = previous.find { it.variant == state.info.variant },
-                        refreshedInfo = state.info,
-                        refreshedMetadata = state.localMetadata
-                    )
+                currentCoroutineContext().ensureActive()
+                _coreInfoList.update { current ->
+                    refreshed.map { state ->
+                        mergeVersionUpdateState(
+                            previousInfo = current.find { it.variant == state.info.variant },
+                            refreshedInfo = state.info,
+                            refreshedMetadata = state.localMetadata
+                        )
+                    }
                 }
-                _coreInfoList.value = merged
             } finally {
                 if (refreshTicket.get() == ticket) {
                     hasLoadedCoreInfoOnce = true
@@ -550,7 +541,11 @@ class CoreRepositoryImpl @Inject constructor(
         val localSha = refreshedMetadata?.commitSha?.trim().orEmpty()
         val remoteSha = previousInfo?.remoteCommit?.sha?.trim().orEmpty()
             .ifBlank { previousAvailable.commitSha }
+        val changedPullRequests = CorePullRequestUpdatePolicy.changedHeads(
+            refreshedMetadata, previousInfo?.updatedPullRequestHeads.orEmpty()
+        )
         val stillHasUpdate = when {
+            changedPullRequests.isNotEmpty() -> true
             remoteSha.isNotBlank() && localSha.isNotBlank() && commitShasEquivalent(remoteSha, localSha) -> false
             previousInfo?.updateRelation == CoreUpdateRelation.Identical ||
                 previousInfo?.updateRelation == CoreUpdateRelation.LocalAhead -> false
@@ -564,10 +559,13 @@ class CoreRepositoryImpl @Inject constructor(
         return refreshedInfo.copy(
             availableVersion = latestKnownVersionLabel.ifBlank { null }.takeIf { stillHasUpdate },
             hasVersionUpdate = stillHasUpdate,
+            updatedPullRequestHeads = changedPullRequests,
             remoteVersion = previousInfo?.remoteVersion,
             remoteBranch = previousInfo?.remoteBranch,
             remoteCommit = previousInfo?.remoteCommit,
-            updateRelation = if (
+            updateRelation = if (changedPullRequests.isNotEmpty()) {
+                CoreUpdateRelation.Changed
+            } else if (
                 remoteSha.isNotBlank() && localSha.isNotBlank() && commitShasEquivalent(remoteSha, localSha)
             ) {
                 CoreUpdateRelation.Identical
@@ -944,8 +942,62 @@ class CoreRepositoryImpl @Inject constructor(
     override suspend fun installCore(variant: ApiVariant): Result<Unit> =
         installOrUpdateCore(variant, actionLabel = "安装")
 
-    override suspend fun updateCore(variant: ApiVariant): Result<Unit> =
-        installOrUpdateCore(variant, actionLabel = "更新")
+    override suspend fun prepareCoreUpdate(variant: ApiVariant): Result<CoreUpdatePlan> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            val mode = currentRunMode()
+            val installed = readLocalCoreSourceMetadata(variant, mode)
+            val remote = resolveRemoteSource(variant) ?: throw IOException("无法读取远程核心信息")
+            val repo = resolveRepo(variant)
+            val branch = remote.metadata?.branch.orEmpty()
+            val targetSha = remote.metadata?.commitSha.orEmpty()
+            val numbers = installed?.pullRequestNumbers.orEmpty()
+            if (numbers.isNotEmpty() && (targetSha.isBlank() || installed?.repo != repo ||
+                    !branchesEquivalent(installed.branch, branch))) {
+                throw IOException("无法确认 PR 组合的远程基线，请检查来源与网络后重试")
+            }
+            val missing = mutableListOf<Int>()
+            val unknown = mutableListOf<Int>()
+            val confirmedHeads = mutableMapOf<Int, String>()
+            val notes = mutableMapOf<Int, String>()
+            val installedHeads = numbers.mapIndexed { index, number ->
+                number to installed?.pullRequestHeadShas?.getOrNull(index).orEmpty()
+            }.toMap()
+            numbers.forEach { number ->
+                val inclusion = try {
+                    val pr = githubPullRequestService.get(repo, number, forceRefresh = true)
+                    confirmedHeads[number] = pr.headSha
+                    val coverage = githubPullRequestService.coverageForUpdate(repo, pr,
+                        installedHeads[number].orEmpty(), installed?.commitSha.orEmpty(), targetSha)
+                    if (coverage.reason.isNotBlank()) notes[number] = coverage.reason
+                    coverage.inclusion
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    logRecoverableWarning("确认 PR #$number 是否已包含失败", error)
+                    notes[number] = "查询失败，尚未确认是否包含；可以取消后重试"
+                    CorePullRequestInclusion.Unknown
+                }
+                when (inclusion) {
+                    CorePullRequestInclusion.Included -> Unit
+                    CorePullRequestInclusion.NotIncluded -> missing += number
+                    else -> unknown += number
+                }
+            }
+            CoreUpdatePlan(
+                variant = variant, runMode = mode, repo = repo, branch = branch,
+                targetCommitSha = targetSha,
+                versionLabel = remote.metadata?.versionLabel.orEmpty().ifBlank { remote.release.version },
+                release = remote.release.copy(zipballUrl = if (targetSha.isNotBlank()) buildBranchZipUrl(repo, targetSha) else remote.release.zipballUrl),
+                installedSourceFingerprint = installed?.let { json.encodeToString(it) }.orEmpty(),
+                pullRequestNumbers = numbers, notIncludedPullRequestNumbers = missing, unknownPullRequestNumbers = unknown,
+                confirmedPullRequestHeads = confirmedHeads, installedPullRequestHeads = installedHeads,
+                pullRequestNotes = notes
+            )
+        }
+    }
+
+    override suspend fun updateCore(request: CoreUpdateRequest): Result<Unit> =
+        installOrUpdateCore(request.plan.variant, actionLabel = "更新", updateRequest = request)
 
     override suspend fun switchCoreBranch(variant: ApiVariant, branch: String): Result<Unit> {
         val normalizedBranch = normalizeGithubBranch(branch)
@@ -1006,17 +1058,53 @@ class CoreRepositoryImpl @Inject constructor(
                     CoreSourceStatus.NotApplicable
                 }
                 val sourceMismatch = sourceStatus == CoreSourceStatus.Mismatched
-                val relation = when {
+                val shaRelation = CorePullRequestUpdatePolicy.branchRelation(localSha, remoteSha)
+                var relationshipCheckError: IOException? = null
+                val branchRelation = if (!sourceMismatch && shaRelation == CoreUpdateRelation.Changed) {
+                    val cacheKey = "${resolveRepo(variant).lowercase()}:${localSha.lowercase()}:${remoteSha.lowercase()}"
+                    val commit = remoteSource.remoteCommit ?: CoreRemoteCommit(remoteSha, "远程提交")
+                    val comparison = updateComparisonCache[cacheKey] ?: githubRemoteService.requestMappedCancellable(
+                        urls = apiUrlCandidates("repos/${resolveRepo(variant)}/compare/${encodeUrlPart(localSha)}...${encodeUrlPart(remoteSha)}"),
+                        headers = githubApiHeaders()
+                    ) { raw -> CoreUpdateComparisonParser.parse(raw, resolveRepo(variant), resolveBranch(variant).orEmpty(), localSha, commit) }
+                    comparison?.let { if (updateComparisonCache.size >= 24) updateComparisonCache.clear(); updateComparisonCache[cacheKey] = it }
+                    // A missing relationship is not proof that the remote is ahead.
+                    if (comparison == null) relationshipCheckError = IOException("无法确认提交更新方向，请稍后重试")
+                    comparison?.relation ?: CoreUpdateRelation.Unknown
+                } else shaRelation
+                val baseRelation = when {
                     sourceMismatch -> CoreUpdateRelation.Unknown
-                    remoteSha.isNotBlank() && localSha.isNotBlank() &&
-                        commitShasEquivalent(remoteSha, localSha) -> CoreUpdateRelation.Identical
-                    remoteSha.isNotBlank() && localSha.isNotBlank() -> CoreUpdateRelation.Changed
+                    branchRelation != null -> branchRelation
                     remoteVersion.isNotBlank() && localVersion.isNotBlank() -> when {
                         compareVersions(remoteVersion, localVersion) > 0 -> CoreUpdateRelation.Changed
                         compareVersions(remoteVersion, localVersion) < 0 -> CoreUpdateRelation.LocalAhead
                         else -> CoreUpdateRelation.Identical
                     }
                     else -> CoreUpdateRelation.Unknown
+                }
+                var pullRequestCheckError: Exception? = null
+                val changedPullRequests = if (!sourceMismatch && localMetadata != null) {
+                    val remoteHeads = buildMap {
+                        localMetadata.pullRequestNumbers.forEach { number ->
+                            try {
+                                val head = githubPullRequestService.get(resolveRepo(variant), number, forceRefresh = true).headSha
+                                    .takeIf { it.isNotBlank() } ?: throw IOException("无法读取 PR #$number 的最新提交")
+                                put(number, head)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                pullRequestCheckError = error
+                                logRecoverableWarning("检查 PR #$number 更新失败", error)
+                            }
+                        }
+                    }
+                    CorePullRequestUpdatePolicy.changedHeads(localMetadata, remoteHeads)
+                } else emptyMap()
+                val relation = CorePullRequestUpdatePolicy.relation(baseRelation, changedPullRequests)
+                // 已确认主分支有新提交时，不因单个 PR API 失败而隐藏更新入口。
+                if (!relation.hasRemoteUpdate) {
+                    relationshipCheckError?.let { throw it }
+                    pullRequestCheckError?.let { throw it }
                 }
                 val hasVersionUpdate = !sourceMismatch && relation.hasRemoteUpdate
                 val availableVersionLabel = buildLatestVersionLabel(remoteVersion, remoteSha)
@@ -1043,11 +1131,12 @@ class CoreRepositoryImpl @Inject constructor(
                         htmlUrl = "https://github.com/${resolveRepo(variant)}/commit/$sha"
                     )
                 }
-                _coreInfoList.value = _coreInfoList.value.map {
+                _coreInfoList.update { current -> current.map {
                     if (it.variant == variant) {
                         it.copy(
                             availableVersion = availableVersionLabel.ifBlank { null }.takeIf { hasVersionUpdate },
                             hasVersionUpdate = hasVersionUpdate,
+                            updatedPullRequestHeads = changedPullRequests,
                             sourceMismatch = sourceMismatch,
                             sourceStatus = sourceStatus,
                             desiredSource = desiredSource.takeIf { sourceMismatch },
@@ -1061,7 +1150,7 @@ class CoreRepositoryImpl @Inject constructor(
                         )
                     }
                     else it
-                }
+                } }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
@@ -1126,7 +1215,7 @@ class CoreRepositoryImpl @Inject constructor(
                 .ifBlank { resolveBranch(variant).orEmpty() }
                 .ifBlank { localMetadata?.branch.orEmpty() }
 
-            val comparison = if (commitShasEquivalent(localSha, remoteSha)) {
+            val baseComparison = if (commitShasEquivalent(localSha, remoteSha)) {
                 CoreUpdateComparisonParser.identical(
                     repo = repo,
                     branch = branch,
@@ -1153,6 +1242,7 @@ class CoreRepositoryImpl @Inject constructor(
                 } ?: throw IOException("无法获取已安装版本与远程版本的差异")
             }
 
+            val comparison = CorePullRequestUpdatePolicy.comparison(baseComparison, info.updatedPullRequestHeads)
             val hasUpdate = comparison.relation.hasRemoteUpdate ||
                 (comparison.relation == CoreUpdateRelation.Unknown &&
                     !commitShasEquivalent(localSha, remoteSha))
@@ -1638,8 +1728,7 @@ class CoreRepositoryImpl @Inject constructor(
                 }
                 RuntimeDependencyHealthChecker.clearPendingIssue(context, pending.repair.variant)
                 if (
-                    pending.type == PendingCoreMutationType.ReplaceCore &&
-                    pending.repair.actionLabel in setOf("安装", "更新", "切换分支")
+                    pending.type == PendingCoreMutationType.ReplaceCore
                 ) {
                     refreshLatestInstalledCoreState(pending.repair.variant)
                 } else {
@@ -2467,27 +2556,38 @@ class CoreRepositoryImpl @Inject constructor(
         mode: RunMode
     ): CoreSourceMetadata? {
         val location = getCoreLocation(variant, mode)
-        val candidates = buildList {
-            if (mode != RunMode.Normal) {
-                add(File(location.rootDirPath, CORE_SOURCE_METADATA_FILE))
-            }
-            add(metadataFile(location.normalDir))
-        }
-        return candidates.firstNotNullOfOrNull { file ->
-            if (!file.exists() || !file.isFile) return@firstNotNullOfOrNull null
-            runCatching {
-                json.decodeFromString<CoreSourceMetadata>(file.readText(Charsets.UTF_8))
-            }.getOrNull()
+        return CoreSourceMetadataStore.read(
+            mode = mode,
+            normalFile = metadataFile(location.normalDir),
+            rootPath = "${location.rootDirPath}/$CORE_SOURCE_METADATA_FILE"
+        ) { path ->
+            val result = RootShell.exec("cat ${shellQuote(path)} 2>/dev/null", timeoutMs = 4500L)
+            result.stdout.takeIf { result.ok && it.isNotBlank() }
         }
     }
 
     private suspend fun installOrUpdateCore(
         variant: ApiVariant,
         actionLabel: String,
-        branchOverride: String? = null
+        branchOverride: String? = null,
+        updateRequest: CoreUpdateRequest? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runOwnedCoreOperation(variant, actionLabel) { operationId ->
-            val remoteSource = resolveRemoteSource(variant, branchOverride)
+            val plan = updateRequest?.plan
+            if (plan != null) {
+                val installed = readLocalCoreSourceMetadata(variant, currentRunMode())
+                val fingerprint = installed?.let { json.encodeToString(it) }.orEmpty()
+                if (plan.runMode != currentRunMode() || plan.repo != resolveRepo(variant) ||
+                    (!resolveBranch(variant).isNullOrBlank() && !branchesEquivalent(plan.branch, resolveBranch(variant).orEmpty())) ||
+                    plan.installedSourceFingerprint != fingerprint) {
+                    throw IOException("核心或来源已变化，请重新检查更新并选择 PR 处理方式")
+                }
+            }
+            val remoteSource = if (plan != null) CoreRemoteSource(
+                release = plan.release,
+                metadata = CoreSourceMetadata(repo = plan.repo, branch = plan.branch,
+                    commitSha = plan.targetCommitSha, versionLabel = plan.versionLabel)
+            ) else resolveRemoteSource(variant, branchOverride)
                 ?: throw IOException("无法获取版本信息")
             val release = remoteSource.release
             val sourceMetadata = remoteSource.metadata ?: buildReleaseInstallMetadata(
@@ -2495,6 +2595,47 @@ class CoreRepositoryImpl @Inject constructor(
                 release = release,
                 versionHint = release.version.ifBlank { release.tagName }.ifBlank { null }
             )
+            val mode = currentRunMode()
+            val installed = readLocalCoreSourceMetadata(variant, mode)
+            if (updateRequest?.keepPullRequests == true && plan != null && plan.pullRequestsToReapply.isNotEmpty()) {
+                val metadata = sourceMetadata ?: throw IOException("无法读取远程基线，PR 组合未修改")
+                if (installed == null || !installed.repo.equals(metadata.repo, ignoreCase = true) ||
+                    !branchesEquivalent(installed.branch, metadata.branch)) {
+                    throw IOException("PR 组合来源与目标分支不一致，请先切换分支或重装核心")
+                }
+                val location = getCoreLocation(variant, mode)
+                val staging = createCoreTempDir(location.normalDir, "staging")
+                try {
+                    writeOperationMarker(staging, operationId)
+                    val merged = pullRequestMergeService.buildInto(
+                        repository = metadata.repo,
+                        baseBranch = metadata.branch,
+                        pullRequestNumbers = plan.pullRequestsToReapply,
+                        destination = staging,
+                        preferredBaseCommitSha = metadata.commitSha,
+                        expectedHeadShas = plan.confirmedPullRequestHeads,
+                        requiredPreviousHeads = plan.installedPullRequestHeads,
+                        verifyUpdatePreservation = true
+                    ) { stage, progress ->
+                        updateDownloadProgress(variant, actionLabel, stage, progress, 0L, -1L)
+                    }
+                    val mergedMetadata = CoreSourceMetadata(
+                        repo = merged.repository, branch = merged.baseBranch,
+                        commitSha = merged.baseCommitSha, versionLabel = merged.version.orEmpty(),
+                        pullRequestNumbers = merged.pullRequests.map { it.number },
+                        pullRequestHeadShas = merged.pullRequests.map { it.headSha },
+                        localMergeSha = merged.localMergeSha
+                    )
+                    finalizeStagedCore(operationId, variant, actionLabel, staging, location.normalDir,
+                        mode, location.rootDirPath, merged.version, mergedMetadata)
+                    persistResolvedCoreSourceIfNeeded(variant, mergedMetadata)
+                    refreshLatestInstalledCoreState(variant)
+                } finally {
+                    // 缺依赖时保留候选目录，让现有修复流程继续；合并失败不触碰已安装核心。
+                    if (pendingCoreMutation?.operationId != operationId) staging.deleteRecursively()
+                }
+                return@runOwnedCoreOperation
+            }
             val versionHint = sourceMetadata?.versionLabel?.ifBlank { null }
                 ?: release.version.ifBlank { release.tagName }.ifBlank { null }
             downloadAndExtract(
@@ -2521,6 +2662,7 @@ class CoreRepositoryImpl @Inject constructor(
                     remoteBranch = null,
                     remoteCommit = null,
                     updateRelation = CoreUpdateRelation.Unknown,
+                    updatedPullRequestHeads = emptyMap(),
                     updateCheckError = null,
                     updateCheckedAtEpochMillis = null
                 )
@@ -2599,124 +2741,133 @@ class CoreRepositoryImpl @Inject constructor(
             totalBytes = -1L
         )
 
-        try {
-            val candidateUrls = buildDownloadUrlCandidates(zipUrl)
-            var lastFailureMessage: String? = null
-            var selectedResponse: okhttp3.Response? = null
-            for (url in candidateUrls) {
-                try {
-                    currentCoroutineContext().ensureActive()
-                    val reqBuilder = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", USER_AGENT)
-                    githubProxyService.applyGithubAuth(reqBuilder, url)
-                    val resp = httpClient.newCall(reqBuilder.build()).executeCancellable()
-                    if (resp.isSuccessful) {
-                        selectedResponse = resp
-                        break
-                    } else {
-                        lastFailureMessage = when (resp.code) {
-                            401, 403 -> "下载失败：GitHub 拒绝访问（HTTP ${resp.code}），请检查 Token、仓库权限或代理线路"
-                            404 -> "下载失败：仓库、分支或版本不存在（HTTP 404）"
-                            else -> "下载失败：GitHub 返回 HTTP ${resp.code}"
-                        }
-                        resp.close()
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (e: Exception) {
-                    lastFailureMessage = e.message ?: "下载失败：网络异常"
-                }
+        kotlinx.coroutines.coroutineScope {
+            val activeDownload = java.util.concurrent.atomic.AtomicReference<okhttp3.Call?>()
+            val cancellationWatcher = launch(kotlinx.coroutines.Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                try { kotlinx.coroutines.awaitCancellation() } finally { activeDownload.get()?.cancel() }
             }
-            val response = selectedResponse
-                ?: throw IOException(lastFailureMessage ?: "下载失败，请检查仓库、分支和 GitHub 线路")
-
-            var lastBytes = 0L
-            var totalBytes = -1L
-            var lastEmitAt = 0L
-
             try {
-                response.use { resp ->
-                    val body = resp.body
-                    totalBytes = body.contentLength().takeIf { it > 0 } ?: -1L
-                    val rawStream = body.byteStream()
-                    updateDownloadProgress(
-                        variant = variant,
-                        actionLabel = actionLabel,
-                        stageText = "正在下载核心包",
-                        progress = if (totalBytes > 0) 0f else null,
-                        downloadedBytes = 0L,
-                        totalBytes = totalBytes
-                    )
-
-                    val operationJob = currentCoroutineContext()[Job]
-                    val streamWithProgress = ProgressInputStream(rawStream) { bytes ->
-                        operationJob?.ensureActive()
-                        lastBytes = bytes
-                        val now = System.currentTimeMillis()
-                        val shouldEmit = now - lastEmitAt >= 300 || (totalBytes > 0 && bytes >= totalBytes)
-                        if (shouldEmit) {
-                            lastEmitAt = now
-                            val progress = if (totalBytes > 0) {
-                                (bytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                            } else {
-                                null
+                val candidateUrls = buildDownloadUrlCandidates(zipUrl)
+                var lastFailureMessage: String? = null
+                var selectedResponse: okhttp3.Response? = null
+                for (url in candidateUrls) {
+                    try {
+                        currentCoroutineContext().ensureActive()
+                        val reqBuilder = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", USER_AGENT)
+                        githubProxyService.applyGithubAuth(reqBuilder, url)
+                        val call = httpClient.newOutboundCall(reqBuilder.build())
+                        activeDownload.set(call)
+                        val resp = call.executeCancellable()
+                        if (resp.isSuccessful) {
+                            selectedResponse = resp
+                            break
+                        } else {
+                            lastFailureMessage = when (resp.code) {
+                                401, 403 -> "下载失败：GitHub 拒绝访问（HTTP ${resp.code}），请检查 Token、仓库权限或代理线路"
+                                404 -> "下载失败：仓库、分支或版本不存在（HTTP 404）"
+                                else -> "下载失败：GitHub 返回 HTTP ${resp.code}"
                             }
-                            updateDownloadProgress(
-                                variant = variant,
-                                actionLabel = actionLabel,
-                                stageText = "正在下载核心包",
-                                progress = progress,
-                                downloadedBytes = bytes,
-                                totalBytes = totalBytes
+                            resp.close()
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        lastFailureMessage = e.message ?: "下载失败：网络异常"
+                    }
+                }
+                val response = selectedResponse
+                    ?: throw IOException(lastFailureMessage ?: "下载失败，请检查仓库、分支和 GitHub 线路")
+
+                var lastBytes = 0L
+                var totalBytes = -1L
+                var lastEmitAt = 0L
+
+                try {
+                    response.use { resp ->
+                        val body = resp.body
+                        totalBytes = body.contentLength().takeIf { it > 0 } ?: -1L
+                        val rawStream = body.byteStream()
+                        updateDownloadProgress(
+                            variant = variant,
+                            actionLabel = actionLabel,
+                            stageText = "正在下载核心包",
+                            progress = if (totalBytes > 0) 0f else null,
+                            downloadedBytes = 0L,
+                            totalBytes = totalBytes
+                        )
+
+                        val operationJob = currentCoroutineContext()[Job]
+                        val streamWithProgress = ProgressInputStream(rawStream) { bytes ->
+                            operationJob?.ensureActive()
+                            lastBytes = bytes
+                            val now = System.currentTimeMillis()
+                            val shouldEmit = now - lastEmitAt >= 300 || (totalBytes > 0 && bytes >= totalBytes)
+                            if (shouldEmit) {
+                                lastEmitAt = now
+                                val progress = if (totalBytes > 0) {
+                                    (bytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    null
+                                }
+                                updateDownloadProgress(
+                                    variant = variant,
+                                    actionLabel = actionLabel,
+                                    stageText = "正在下载核心包",
+                                    progress = progress,
+                                    downloadedBytes = bytes,
+                                    totalBytes = totalBytes
+                                )
+                            }
+                        }
+
+                        val extracted = extractDanmuFolder(streamWithProgress, stagingDir)
+                        if (!extracted.extractedAny) {
+                            throw IOException("核心压缩包中未找到 danmu_api 或 danmu-api 目录")
+                        }
+                        if (effectiveSourceMetadata?.commitSha.isNullOrBlank() &&
+                            !extracted.commitSha.isNullOrBlank()
+                        ) {
+                            effectiveSourceMetadata = effectiveSourceMetadata?.copy(
+                                commitSha = extracted.commitSha
                             )
                         }
                     }
-
-                    val extracted = extractDanmuFolder(streamWithProgress, stagingDir)
-                    if (!extracted.extractedAny) {
-                        throw IOException("核心压缩包中未找到 danmu_api 或 danmu-api 目录")
-                    }
-                    if (effectiveSourceMetadata?.commitSha.isNullOrBlank() &&
-                        !extracted.commitSha.isNullOrBlank()
-                    ) {
-                        effectiveSourceMetadata = effectiveSourceMetadata?.copy(
-                            commitSha = extracted.commitSha
-                        )
-                    }
+                } catch (e: Exception) {
+                    runCatching { stagingDir.deleteRecursively() }
+                    throw e
                 }
+
+                updateDownloadProgress(
+                    variant = variant,
+                    actionLabel = actionLabel,
+                    stageText = "正在整理核心文件",
+                    progress = 1f,
+                    downloadedBytes = if (totalBytes > 0) totalBytes else lastBytes,
+                    totalBytes = totalBytes
+                )
+
+                finalizeStagedCore(
+                    operationId = operationId,
+                    variant = variant,
+                    actionLabel = actionLabel,
+                    stagingDir = stagingDir,
+                    targetDir = targetDir,
+                    mode = mode,
+                    rootDirPath = location.rootDirPath,
+                    versionHint = versionHint,
+                    sourceMetadata = effectiveSourceMetadata
+                )
             } catch (e: Exception) {
-                runCatching { stagingDir.deleteRecursively() }
+                if (e !is CoreDependencyRepairRequiredException) {
+                    runCatching { stagingDir.deleteRecursively() }
+                }
                 throw e
+            } finally {
+                cancellationWatcher.cancel()
+                _downloadProgress.value = CoreDownloadProgress()
             }
-
-            updateDownloadProgress(
-                variant = variant,
-                actionLabel = actionLabel,
-                stageText = "正在整理核心文件",
-                progress = 1f,
-                downloadedBytes = if (totalBytes > 0) totalBytes else lastBytes,
-                totalBytes = totalBytes
-            )
-
-            finalizeStagedCore(
-                operationId = operationId,
-                variant = variant,
-                actionLabel = actionLabel,
-                stagingDir = stagingDir,
-                targetDir = targetDir,
-                mode = mode,
-                rootDirPath = location.rootDirPath,
-                versionHint = versionHint,
-                sourceMetadata = effectiveSourceMetadata
-            )
-        } catch (e: Exception) {
-            if (e !is CoreDependencyRepairRequiredException) {
-                runCatching { stagingDir.deleteRecursively() }
-            }
-            throw e
-        } finally {
-            _downloadProgress.value = CoreDownloadProgress()
         }
     }
 

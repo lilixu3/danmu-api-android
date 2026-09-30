@@ -9,8 +9,8 @@ import java.io.FileOutputStream
 /**
  * 内网穿透（frpc）的落盘布局与状态读写。
  *
- * 目录固定在应用私有 filesDir/frp/，两种运行模式共用：
- *   frpc.toml / settings.json / status.json / frpc.log / autostart / PID 文件
+ * 目录固定在应用私有设备保护 filesDir/frp/（旧 CE 配置自动迁移），两种运行模式共用：
+ *   frpc.conf / settings.json / status.json / frpc.log / autostart / PID 文件
  */
 object TunnelStore {
 
@@ -22,12 +22,53 @@ object TunnelStore {
     private const val LOG_KEEP_BYTES = 256 * 1024
 
     fun dir(context: Context): File {
-        val dir = File(context.filesDir, "frp")
-        if (!dir.isDirectory) dir.mkdirs()
-        return dir
+        val directory = File(context.createDeviceProtectedStorageContext().filesDir, "frp")
+        check(directory.isDirectory || directory.mkdirs()) { "无法创建穿透目录" }
+        val unlocked = context.getSystemService(android.os.UserManager::class.java)?.isUserUnlocked == true
+        if (unlocked) migrateStorage(File(context.applicationContext.filesDir, "frp"), directory)
+        return directory
     }
 
-    fun configFile(context: Context) = File(dir(context), "frpc.toml")
+    /** Copy once under a cross-process lock; retain legacy paths for live-process adoption. */
+    @Synchronized internal fun migrateStorage(legacy: File, directory: File) {
+        if (legacy.absolutePath == directory.absolutePath || !legacy.isDirectory || File(directory, ".storage-v2").isFile) return
+        FileOutputStream(File(directory, ".migration.lock"), true).channel.use { channel ->
+            channel.lock().use {
+                if (File(directory, ".storage-v2").isFile) return
+                val names = setOf("frpc.conf", "frpc.toml", "settings.json", "status.json", "autostart",
+                    "frpc.pid", "frpc-root.pid", "frpc-root.pid.start", "frpc-root.pid.version", "frpc.log", "kernel/libfrpc.so", "kernel/version.txt")
+                names.map { File(legacy, it) }.filter { it.isFile }.forEach { source ->
+                    val target = File(directory, source.relativeTo(legacy).path)
+                    if (!target.exists()) {
+                        target.parentFile?.mkdirs()
+                        val pending = File.createTempFile("migrate-", ".pending", target.parentFile)
+                        try {
+                            FileOutputStream(pending).use { output ->
+                                if (source.name == "frpc.log") output.write(readText(source, LOG_KEEP_BYTES).toByteArray(Charsets.UTF_8))
+                                else source.inputStream().use { it.copyTo(output) }
+                                output.fd.sync()
+                            }
+                            if (source.canExecute()) pending.setExecutable(true, true)
+                            check(pending.renameTo(target)) { "穿透配置迁移失败" }
+                        } finally { pending.delete() }
+                    }
+                }
+                check(writeText(File(directory, ".storage-v2"), "2")) { "穿透迁移标记写入失败" }
+            }
+        }
+    }
+
+    // .conf 不强制格式，frpc 会按内容识别 TOML / INI / JSON / YAML。
+    fun configFile(context: Context): File = migrateConfigFile(dir(context))
+
+    internal fun migrateConfigFile(dir: File): File {
+        val target = File(dir, "frpc.conf")
+        val legacy = File(dir, "frpc.toml")
+        if (!target.exists() && legacy.isFile) {
+            check(writeText(target, legacy.readText())) { "穿透配置迁移失败" }
+        }
+        return target
+    }
     fun settingsFile(context: Context) = File(dir(context), "settings.json")
     fun statusFile(context: Context) = File(dir(context), "status.json")
     fun logFile(context: Context) = File(dir(context), "frpc.log")
@@ -63,9 +104,9 @@ object TunnelStore {
     }
 
     /** 当前生效的内核版本：在线更新过就以更新版本为准。 */
-    fun kernelVersion(context: Context): String {
+    fun kernelVersion(context: Context, rootMode: Boolean = false): String {
         val custom = customKernelFile(context)
-        if (custom.isFile && custom.canExecute()) {
+        if (rootMode && custom.isFile && custom.canExecute() && custom.length() > 0) {
             val version = readText(customKernelVersionFile(context), 64).trim()
             if (version.isNotEmpty()) return version
         }
@@ -85,7 +126,14 @@ object TunnelStore {
                     if (step <= 0) break
                     skipped += step
                 }
-                input.readBytes().toString(Charsets.UTF_8)
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (output.size() < maxBytes) {
+                    val count = input.read(buffer, 0, minOf(buffer.size, maxBytes - output.size()))
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+                output.toString(Charsets.UTF_8.name())
             }
         } catch (_: Exception) {
             ""
@@ -95,16 +143,18 @@ object TunnelStore {
     /** 先写临时文件再改名：进程被杀也不会留下半个 JSON。 */
     fun writeText(file: File, text: String): Boolean {
         file.parentFile?.let { if (!it.isDirectory) it.mkdirs() }
-        val tmp = File(file.absolutePath + ".tmp")
+        var tmp: File? = null
         return try {
+            tmp = File.createTempFile(file.name + ".", ".tmp", file.parentFile)
             FileOutputStream(tmp).use { output ->
                 output.write((text).toByteArray(Charsets.UTF_8))
                 output.flush()
             }
-            if (file.exists() && !file.delete()) return false
             tmp.renameTo(file)
         } catch (_: Exception) {
             false
+        } finally {
+            tmp?.delete()
         }
     }
 
@@ -124,9 +174,9 @@ object TunnelStore {
         val ok = writeText(settingsFile(context), json.toString())
         val flag = autostartFlag(context)
         if (settings.enabled && settings.autoStart) {
-            writeText(flag, "1")
+            return ok && writeText(flag, "1")
         } else if (flag.exists()) {
-            flag.delete()
+            return ok && flag.delete()
         }
         return ok
     }
@@ -175,7 +225,7 @@ object TunnelStore {
     fun rotateLogIfNeeded(context: Context) {
         val log = logFile(context)
         if (!log.isFile || log.length() <= LOG_MAX_BYTES) return
-        writeText(log, readText(log, LOG_KEEP_BYTES))
+        replaceLogContents(log, readText(log, LOG_KEEP_BYTES))
     }
 
     fun readLogTail(context: Context, maxLines: Int = 200): String {
@@ -186,7 +236,10 @@ object TunnelStore {
         return lines.takeLast(maxLines).joinToString("\n")
     }
 
-    fun clearLog(context: Context) {
-        writeText(logFile(context), "")
-    }
+    fun clearLog(context: Context): Boolean = replaceLogContents(logFile(context), "")
+
+    /** 保留 inode，运行中的 O_APPEND 写入端无需重新打开日志。 */
+    internal fun replaceLogContents(file: File, text: String): Boolean = runCatching {
+        FileOutputStream(file, false).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+    }.isSuccess
 }

@@ -34,6 +34,7 @@ fun NetworkSettingsScreen(
     val updateCheckIntervalMinutes by
         viewModel.coreUpdateCheckIntervalMinutes.collectAsStateWithLifecycle()
     var showUpdateIntervalDialog by remember { mutableStateOf(false) }
+    var showGithubConnectivity by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
@@ -58,11 +59,13 @@ fun NetworkSettingsScreen(
         ) {
             SettingsPageHeader(
                 title = "网络设置",
-                subtitle = "GitHub 线路与核心更新检查",
+                subtitle = "增强直连、GitHub 线路与核心更新检查",
                 onBack = onBack
             )
 
-            SettingsGroup(title = "代理线路") {
+            AppOutboundSettingsSection()
+
+            SettingsGroup(title = "GitHub 网络") {
                 SettingsValueItem(
                     title = "当前线路",
                     value = viewModel.currentProxyLabel(),
@@ -71,9 +74,16 @@ fun NetworkSettingsScreen(
                 SettingsDivider()
                 SettingsItem(
                     title = "测速并选择线路",
-                    subtitle = "并发测速，选择最快的代理节点",
+                    subtitle = "官方直连、增强直连和代理线路",
                     icon = Icons.Rounded.Speed,
                     onClick = viewModel::openProxyPicker
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "连通性测试",
+                    subtitle = "并行检测更新接口、配置文件和安装包下载",
+                    icon = Icons.Rounded.NetworkCheck,
+                    onClick = { showGithubConnectivity = true }
                 )
             }
 
@@ -87,6 +97,10 @@ fun NetworkSettingsScreen(
                 )
             }
         }
+    }
+
+    if (showGithubConnectivity) {
+        AppOutboundConnectivityDialog(github = true, onDismiss = { showGithubConnectivity = false })
     }
 
     if (viewModel.showProxyPickerDialog) {

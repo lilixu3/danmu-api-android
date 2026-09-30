@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.service
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import android.os.Build
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
@@ -43,7 +45,7 @@ class TvConfigSyncClient @Inject constructor(
                 .readTimeout(20, TimeUnit.SECONDS)
                 .callTimeout(25, TimeUnit.SECONDS)
                 .build()
-                .newCall(request)
+                .newOutboundCall(request)
                 .execute()
                 .use { response ->
                     val raw = response.body.string().trim()

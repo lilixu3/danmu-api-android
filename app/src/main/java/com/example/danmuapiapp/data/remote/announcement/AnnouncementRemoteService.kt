@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.data.remote.announcement
 
+import com.example.danmuapiapp.data.network.newOutboundCall
+
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.domain.model.ActiveAnnouncementsEnvelope
 import com.example.danmuapiapp.domain.model.ApiVariant
@@ -42,7 +44,7 @@ class AnnouncementRemoteService @Inject constructor(
                 .header("Accept", "application/json")
                 .header("User-Agent", "$USER_AGENT/${BuildConfig.VERSION_NAME}")
                 .build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newOutboundCall(request).execute().use { response ->
                 if (response.code == 204 || response.code == 404) return@use emptyList()
                 if (!response.isSuccessful) return@use emptyList()
                 val body = response.body.string().trim()
