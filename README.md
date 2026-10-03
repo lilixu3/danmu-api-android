@@ -60,7 +60,7 @@
 - 国内网络也能流畅更新核心
 
 ### 📱 设备兼容
-- 支持 Android 7.0 及以上设备（minSdk 24，Node 24 运行时要求）
+- 支持 Android 7.0 及以上设备（minSdk 24，Node 26 运行时要求）
 - TV/盒子自动进入兼容模式
 - 支持扫码同步配置
 
@@ -151,7 +151,7 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 24.21.0（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 26.10.0 lite（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -170,8 +170,18 @@ cd danmu-api-android
 ./scripts/prepare_outbound_kernel.sh
 
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v24.21.0
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.10.0
 ```
+
+Node 运行时只使用 **26.10.0 lite**，与 Flutter 项目固定为同一份 `fogtape/nodejs-mobile`
+Build #36（run `37016855809`）的 `nodejs-mobile-android-lite`，artifact ID `11232566680`。
+来源及产物指纹见 `app/native-runtime-sources.properties`、`app/native-runtime.sha256`
+与 `app/native-runtime-provenance.json`。旧 Release 的同版本 lite 不能替换这份产物。
+JNI 桥由同份 ZIP 的头文件与 NDK r29 在构建时重新编译，配套 libc++ 取同一 NDK。
+
+离线构建可将校验通过的 ZIP 放入
+`dist/nodejs-mobile/node26-lite-actions-37016855809/`；缺少本地/Gradle 缓存时，构建脚本
+通过已认证的 `gh api` 下载固定 Actions artifact。artifact 到期后使用本地 ZIP，不能回退旧 Release。
 
 正式构建只读取仓库内的 Node 运行时资产，不会隐式读取相邻的 `danmu_api`
 仓库或根目录 `node_modules.zip`。维护依赖资产时，显式运行

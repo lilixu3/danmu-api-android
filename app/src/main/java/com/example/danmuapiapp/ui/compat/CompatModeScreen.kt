@@ -1,126 +1,44 @@
 package com.example.danmuapiapp.ui.compat
 
-import android.content.res.Resources
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.Build
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.QrCode2
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.Upgrade
-import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material.icons.rounded.WifiOff
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.danmuapiapp.data.service.TvConfigSyncCodec
-import com.example.danmuapiapp.data.util.AppAppearancePrefs
-import com.example.danmuapiapp.domain.model.ApiVariant
-import com.example.danmuapiapp.domain.model.CoreDownloadProgress
-import com.example.danmuapiapp.domain.model.CoreInfo
-import com.example.danmuapiapp.domain.model.GithubProxyOption
-import com.example.danmuapiapp.domain.model.NightModePreference
-import com.example.danmuapiapp.domain.model.RunMode
-import com.example.danmuapiapp.domain.model.ServiceStatus
-import com.example.danmuapiapp.domain.model.formatCoreVersionTransition
-import com.example.danmuapiapp.domain.model.resolveCoreVariantBranch
-import com.example.danmuapiapp.domain.model.resolveCoreVariantRepo
-import com.example.danmuapiapp.domain.model.resolveCoreVariantSourceText
-import com.example.danmuapiapp.ui.component.AppDialog
-import com.example.danmuapiapp.ui.component.AppDialogStyle
-import com.example.danmuapiapp.ui.component.AppDialogTone
-import com.example.danmuapiapp.ui.component.CoreBranchPickerDialog
-import com.example.danmuapiapp.ui.component.GithubProxyPickerDialog
+import com.example.danmuapiapp.data.util.DeviceCompatMode
+import com.example.danmuapiapp.data.util.InterfaceMode
+import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
-import com.example.danmuapiapp.ui.component.AppGlassSurface
-import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
-import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.theme.GlassBackdropScene
-import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.example.danmuapiapp.ui.component.remoteFocusHighlight
+import kotlinx.coroutines.launch
 
 data class CompatModeActions(
     val onStartService: () -> Unit,
@@ -138,10 +56,13 @@ data class CompatModeActions(
     val onDeleteCore: (ApiVariant) -> Unit,
     val onSaveCustomCore: (String, String) -> Unit,
     val onToggleKeepAliveProfile: () -> Unit,
+    val onOpenNotificationPermission: () -> Unit,
+    val onOpenBatterySettings: () -> Unit,
     val onCheckAppUpdate: () -> Unit,
     val onDownloadAppUpdate: () -> Unit,
     val onInstallAppUpdate: () -> Unit,
     val onToggleNightMode: () -> Unit,
+    val onSetIpv6Enabled: (Boolean) -> Unit,
     val onSetAppDpiOverride: (Int) -> Unit,
     val onOpenProxyPicker: () -> Unit,
     val onSelectProxy: (String) -> Unit,
@@ -156,7 +77,7 @@ data class CompatModeActions(
     val onDismissDependencyRepair: () -> Unit,
     val onExitToBackground: () -> Unit,
     val onStopServiceAndExit: () -> Unit,
-    val onExitCompatMode: () -> Unit
+    val onSetInterfaceMode: (InterfaceMode) -> Unit
 )
 
 data class CompatProxyPickerState(
@@ -168,1592 +89,257 @@ data class CompatProxyPickerState(
     val isVisible: Boolean
 )
 
-private enum class CompatPage {
-    Home,
-    Settings
+internal enum class CompatPage(val title: String, val subtitle: String, val icon: ImageVector) {
+    // Keep the historical enum name so Android can unparcel saved state after an update.
+    Home("概览", "服务运行与访问地址", Icons.Rounded.Dashboard),
+    Cores("核心", "管理安装版本与来源", Icons.Rounded.Layers),
+    Connection("同步", "设备配置同步", Icons.Rounded.Devices),
+    Logs("日志", "实时日志与问题排查", Icons.Rounded.Terminal),
+    Config("配置", "系统配置与管理员权限", Icons.Rounded.SettingsSuggest),
+    Settings("设置", "后台运行、线路与界面", Icons.Rounded.Tune)
 }
 
+private enum class CompatModal { None, Exit, Stop, Restart, StopExit, Delete, Reinstall, Custom, Scale, Interface }
+
 @Composable
-fun CompatModeScreen(
+internal fun CompatModeScreen(
     uiState: CompatModeUiState,
     proxyPickerState: CompatProxyPickerState,
     showDependencyRequiredPrompt: Boolean,
     showDependencyRepairDialog: Boolean,
     showLocalNetworkPermissionHint: Boolean,
     onOpenLocalNetworkPermission: () -> Unit,
-    actions: CompatModeActions
-) {
-    var currentPage by rememberSaveable { mutableStateOf(CompatPage.Home) }
-    var showExitDialog by rememberSaveable { mutableStateOf(false) }
-    var showExitCompatModeDialog by rememberSaveable { mutableStateOf(false) }
-
-    BackHandler {
-        if (currentPage == CompatPage.Settings) {
-            currentPage = CompatPage.Home
-        } else {
-            showExitDialog = true
-        }
-    }
-
-    GlassBackdropScene(modifier = Modifier.fillMaxSize()) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 40.dp, vertical = 32.dp)
-        ) {
-            val wideLayout = maxWidth >= 960.dp
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                CompatHeader(
-                    uiState = uiState,
-                    actions = actions,
-                    isWide = wideLayout,
-                    currentPage = currentPage,
-                    onOpenSettings = { currentPage = CompatPage.Settings },
-                    onBackHome = { currentPage = CompatPage.Home }
-                )
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(bottom = 40.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    if (currentPage == CompatPage.Settings) {
-                        CompatSettingsPage(
-                            uiState = uiState,
-                            proxyPickerState = proxyPickerState,
-                            actions = actions,
-                            wideLayout = wideLayout,
-                            onRequestExitCompatMode = { showExitCompatModeDialog = true }
-                        )
-                    } else {
-                        CompatHomePage(
-                            uiState = uiState,
-                            actions = actions,
-                            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
-                            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
-                        )
-                    }
-                }
-            }
-        }
-
-        if (proxyPickerState.isVisible) {
-            GithubProxyPickerDialog(
-                title = "选择 GitHub 线路",
-                subtitle = "首次下载核心前请先测速并选择线路",
-                options = proxyPickerState.options,
-                selectedId = proxyPickerState.selectedId,
-                testingIds = proxyPickerState.testingIds,
-                resultMap = proxyPickerState.latencyMap,
-                onSelect = actions.onSelectProxy,
-                onRetest = actions.onRetestProxySpeed,
-                onConfirm = actions.onConfirmProxySelection,
-                onDismiss = actions.onDismissProxyPicker,
-                confirmText = "保存线路"
-            )
-        }
-
-        uiState.branchDialogVariant?.let { variant ->
-            CoreBranchPickerDialog(
-                variantLabel = resolveVariantLabel(uiState, variant),
-                catalog = uiState.branchCatalog,
-                currentBranch = uiState.coreBranchSelections.resolve(variant),
-                isLoading = uiState.isLoadingBranches,
-                errorMessage = uiState.branchLoadError,
-                onRetry = actions.onRetryBranches,
-                onConfirm = actions.onSwitchCoreBranch,
-                onDismiss = actions.onDismissBranchPicker
-            )
-        }
-
-        CoreDependencyRepairHost(
-            request = uiState.pendingDependencyRepair,
-            showRequiredPrompt = showDependencyRequiredPrompt,
-            showRepairDialog = showDependencyRepairDialog,
-            onOpenRepair = actions.onOpenDependencyRepair,
-            onDismissRequiredPrompt = actions.onDismissDependencyRequired,
-            onOnlineRepair = actions.onRepairDependenciesOnline,
-            onRepairFromArchive = actions.onRepairDependenciesFromArchive,
-            onCancelMutation = actions.onCancelPendingCoreMutation,
-            onDismissRepairDialog = actions.onDismissDependencyRepair
-        )
-
-        if (showExitDialog) {
-            ExitConfirmDialog(
-                isRunning = uiState.runtimeState.status == ServiceStatus.Running,
-                onDismiss = { showExitDialog = false },
-                onBackground = {
-                    showExitDialog = false
-                    actions.onExitToBackground()
-                },
-                onStopAndExit = {
-                    showExitDialog = false
-                    actions.onStopServiceAndExit()
-                }
-            )
-        }
-
-        if (showExitCompatModeDialog) {
-            ExitCompatModeDialog(
-                onDismiss = { showExitCompatModeDialog = false },
-                onConfirm = {
-                    showExitCompatModeDialog = false
-                    actions.onExitCompatMode()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun CompatHomePage(
-    uiState: CompatModeUiState,
     actions: CompatModeActions,
-    showLocalNetworkPermissionHint: Boolean,
-    onOpenLocalNetworkPermission: () -> Unit
+    management: CompatManagementState,
+    logs: List<LogEntry>,
+    onPageOpened: (CompatPage) -> Unit,
+    onRefreshLogs: () -> Unit,
+    onRefreshConfig: () -> Unit,
+    onAdminLogin: (String) -> Unit,
+    onSaveConfig: (CompatConfigEntry, String, Boolean) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        ServiceHeroCard(uiState, actions)
-        RuntimeStatusStrip(
-            uiState = uiState,
-            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
-            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
-        )
-        OperationProgressCard(uiState)
-        CoreManagementCard(uiState, actions)
-        SyncCard(uiState)
-    }
-}
+    var page by rememberSaveable { mutableStateOf(CompatPage.Home) }
+    var modal by rememberSaveable { mutableStateOf(CompatModal.None) }
+    var deleteVariantKey by rememberSaveable { mutableStateOf(ApiVariant.Stable.key) }
+    var reinstallVariantKey by rememberSaveable { mutableStateOf(ApiVariant.Stable.key) }
+    val listStates = CompatPage.entries.map { rememberLazyListState() }
+    val contentFocus = remember { FocusRequester() }
+    val navigationFocus = remember { CompatPage.entries.map { FocusRequester() } }
+    val scope = rememberCoroutineScope()
+    val pageState = rememberSaveableStateHolder()
+    val context = LocalContext.current
+    val remoteDevice = remember(context) { DeviceCompatMode.isCompatModeDevice(context) }
+    val busy = uiState.isOperating || uiState.runtimeState.status in setOf(ServiceStatus.Starting, ServiceStatus.Stopping)
 
-@Composable
-private fun CompatSettingsPage(
-    uiState: CompatModeUiState,
-    proxyPickerState: CompatProxyPickerState,
-    actions: CompatModeActions,
-    wideLayout: Boolean,
-    onRequestExitCompatMode: () -> Unit
-) {
-    if (wideLayout) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .focusGroup(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                AppUpdateCard(uiState, actions)
-                CompatAppDisplayCard(uiState, actions)
-                GithubProxyCard(proxyPickerState, actions)
+    LaunchedEffect(page) { onPageOpened(page) }
+    fun navigate(target: CompatPage) { page = target }
+    BackHandler(enabled = modal == CompatModal.None && !proxyPickerState.isVisible &&
+        uiState.branchDialogVariant == null && !showDependencyRequiredPrompt && !showDependencyRepairDialog) {
+        if (page != CompatPage.Home) {
+            page = CompatPage.Home
+            scope.launch {
+                withFrameNanos { }
+                navigationFocus[0].requestFocus()
             }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .focusGroup(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                KeepAliveCard(uiState, actions)
-                CompatModeExitCard(
-                    onRequestExitCompatMode = onRequestExitCompatMode
-                )
-            }
-        }
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            AppUpdateCard(uiState, actions)
-            CompatAppDisplayCard(uiState, actions)
-            KeepAliveCard(uiState, actions)
-            GithubProxyCard(proxyPickerState, actions)
-            CompatModeExitCard(
-                onRequestExitCompatMode = onRequestExitCompatMode
-            )
-        }
-    }
-}
-
-@Composable
-internal fun CompatLocalNetworkPermissionDialog(
-    openSettings: Boolean,
-    onGrant: () -> Unit,
-    onContinueLocalOnly: () -> Unit
-) {
-    AppDialog(
-        onDismissRequest = onContinueLocalOnly,
-        style = AppDialogStyle.Confirm,
-        tone = AppDialogTone.Info,
-        icon = {
-            Icon(
-                imageVector = Icons.Rounded.Wifi,
-                contentDescription = null
-            )
-        },
-        title = { Text("允许局域网访问") },
-        supportingText = { Text("Android 17 首次使用必需权限") },
-        text = {
-            Text("Android 17 默认拦截应用的局域网入站连接。允许后，同一 Wi-Fi 或有线网络中的设备才能访问本机弹幕服务。")
-            Text("暂不允许仍可在本机使用，但其他设备连接时会超时，下次启动还会再次提醒。")
-        },
-        dismissButton = {
-            AppGlassButton(onClick = onContinueLocalOnly) {
-                Text("仅本机使用")
-            }
-        },
-        confirmButton = {
-            AppGlassButton(onClick = onGrant, tint = MaterialTheme.colorScheme.primary) {
-                Text(if (openSettings) "前往应用设置" else "允许访问")
-            }
-        }
-    )
-}
-
-@Composable
-private fun ExitConfirmDialog(
-    isRunning: Boolean,
-    onDismiss: () -> Unit,
-    onBackground: () -> Unit,
-    onStopAndExit: () -> Unit
-) {
-    AppDialog(
-        onDismissRequest = onDismiss,
-        style = AppDialogStyle.Confirm,
-        tone = AppDialogTone.Warning,
-        title = { Text("退出弹幕 API？") },
-        text = {
-            Text(
-                text = if (isRunning) {
-                    "服务正在运行。选择后台运行会只关闭界面，服务继续提供访问；选择关闭退出会先停止服务再退出 App。"
-                } else {
-                    "当前服务未运行。你可以退到后台保留界面状态，也可以直接关闭退出。"
-                }
-            )
-        },
-        confirmButton = {
-            AppGlassButton(onClick = onStopAndExit, tint = MaterialTheme.colorScheme.error) {
-                Text("关闭退出")
-            }
-        },
-        dismissButton = {
-            AppGlassButton(onClick = onBackground) {
-                Text("后台运行")
-            }
-        }
-    )
-}
-
-@Composable
-private fun ExitCompatModeDialog(
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AppDialog(
-        onDismissRequest = onDismiss,
-        style = AppDialogStyle.Confirm,
-        tone = AppDialogTone.Warning,
-        icon = {
-            Icon(
-                imageVector = Icons.Rounded.WarningAmber,
-                contentDescription = null
-            )
-        },
-        title = { Text("退出兼容模式？") },
-        text = {
-            Text(
-                text = "TV 或一些旧设备退出兼容模式后，普通首页可能打不开或出现闪退。确认后会立即切换到普通首页，并在下次启动继续使用普通模式。"
-            )
-        },
-        confirmButton = {
-            AppGlassButton(onClick = onConfirm, tint = MaterialTheme.colorScheme.error) {
-                Text("仍要退出")
-            }
-        },
-        dismissButton = {
-            AppGlassButton(onClick = onDismiss) {
-                Text("继续使用兼容模式")
-            }
-        }
-    )
-}
-
-@Composable
-private fun CompatModeExitCard(
-    onRequestExitCompatMode: () -> Unit
-) {
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.34f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.42f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "兼容模式",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "当前正在使用 TV / 旧设备兼容首页。退出后会改用普通首页。",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = "高风险",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-
-            Text(
-                text = "如果普通首页在当前设备上无法渲染，App 可能打不开或闪退。建议只在确认普通模式可用时退出。",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 20.sp
-            )
-
-            TvActionButton(
-                text = "退出兼容模式",
-                icon = Icons.Rounded.PowerSettingsNew,
-                tone = ButtonTone.Danger,
-                onClick = onRequestExitCompatMode
-            )
-        }
-    }
-}
-
-@Composable
-private fun CompatHeader(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions,
-    isWide: Boolean,
-    currentPage: CompatPage,
-    onOpenSettings: () -> Unit,
-    onBackHome: () -> Unit
-) {
-    val runtime = uiState.runtimeState
-    val statusColor = statusColor(runtime.status)
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(horizontal = if (isWide) 28.dp else 22.dp, vertical = 22.dp)
-                .fillMaxWidth()
-                .focusGroup(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "弹幕 API",
-                    style = MaterialTheme.typography.headlineLarge.copy(
-                        fontSize = if (isWide) 34.sp else 30.sp,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = if (currentPage == CompatPage.Settings) "兼容模式设置" else "兼容模式控制台",
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            StatusPill(
-                text = statusLabel(runtime.status),
-                color = statusColor
-            )
-            NightModeButton(
-                label = nightModeLabel(uiState.nightMode),
-                onClick = actions.onToggleNightMode
-            )
-            TvActionButton(
-                text = if (currentPage == CompatPage.Settings) "首页" else "设置",
-                icon = if (currentPage == CompatPage.Settings) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Settings,
-                tone = ButtonTone.Secondary,
-                onClick = if (currentPage == CompatPage.Settings) onBackHome else onOpenSettings
-            )
-            TvActionButton(
-                text = "刷新",
-                icon = Icons.Rounded.Refresh,
-                tone = ButtonTone.Secondary,
-                onClick = actions.onRefreshCoreInfo
-            )
-        }
-    }
-}
-
-@Composable
-private fun ServiceHeroCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    val runtime = uiState.runtimeState
-    val statusColor = statusColor(runtime.status)
-    val isRunning = runtime.status == ServiceStatus.Running
-    val isBusy = uiState.isOperating
-    val primaryActionRequester = remember { FocusRequester() }
-    LaunchedEffect(primaryActionRequester) {
-        primaryActionRequester.requestFocus()
-    }
-    val cardTone = when (runtime.status) {
-        ServiceStatus.Running -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.96f)
-        ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.primaryContainer
-        ServiceStatus.Error -> MaterialTheme.colorScheme.errorContainer
-        ServiceStatus.Stopped -> MaterialTheme.colorScheme.surfaceContainerHigh
+        } else modal = CompatModal.Exit
     }
 
-    AppGlassSurface(
-        shape = RoundedCornerShape(28.dp),
-        color = cardTone,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "服务状态",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = statusLabel(runtime.status),
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = statusColor
-                    )
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+        .safeDrawingPadding().imePadding()) {
+        val layout = CompatLayoutPolicy.resolve(maxWidth.value, maxHeight.value, LocalDensity.current.fontScale)
+        CompositionLocalProvider(LocalCompatLayout provides layout) {
+            Row(Modifier.fillMaxSize().padding(layout.outerPadding.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                if (layout.useRail) {
+                    CompatNavigationRail(page, uiState, navigationFocus, contentFocus, ::navigate)
                 }
-                StatusPill(text = runtime.runMode.label, color = MaterialTheme.colorScheme.secondary)
-            }
-
-            Text(
-                text = runtime.statusMessage?.takeIf { it.isNotBlank() }
-                    ?: runtime.errorMessage?.takeIf { it.isNotBlank() }
-                    ?: when (runtime.status) {
-                        ServiceStatus.Running -> "服务正在正常提供局域网与本机访问地址。"
-                        ServiceStatus.Starting -> "正在启动中，界面会继续刷新运行状态。"
-                        ServiceStatus.Stopping -> "正在停止中，等待服务进程回收。"
-                        ServiceStatus.Error -> "服务异常，建议先查看核心与运行模式。"
-                        ServiceStatus.Stopped -> "当前尚未启动服务，可以直接启动或切换核心后再启动。"
-                    },
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusGroup()
-            ) {
-                TvActionButton(
-                    text = if (isRunning) "重启服务" else "启动服务",
-                    icon = if (isRunning) Icons.Rounded.RestartAlt else Icons.Rounded.PlayArrow,
-                    tone = ButtonTone.Primary,
-                    enabled = !isBusy,
-                    onClick = if (isRunning) actions.onRestartService else actions.onStartService,
-                    modifier = Modifier.focusRequester(primaryActionRequester)
-                )
-                TvActionButton(
-                    text = "停止服务",
-                    icon = Icons.Rounded.Stop,
-                    tone = ButtonTone.Secondary,
-                    enabled = isRunning && !isBusy,
-                    onClick = actions.onStopService
-                )
-                TvActionButton(
-                    text = if (uiState.keepAlive.recommendedProfileEnabled) "后台恢复 开" else "后台恢复 关",
-                    icon = if (uiState.keepAlive.recommendedProfileEnabled) {
-                        Icons.Rounded.Shield
-                    } else {
-                        Icons.Rounded.Security
-                    },
-                    tone = ButtonTone.Secondary,
-                    enabled = uiState.keepAlive.actionEnabled && !isBusy,
-                    onClick = actions.onToggleKeepAliveProfile
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RuntimeStatusStrip(
-    uiState: CompatModeUiState,
-    showLocalNetworkPermissionHint: Boolean,
-    onOpenLocalNetworkPermission: () -> Unit
-) {
-    val runtime = uiState.runtimeState
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val compact = maxWidth < 680.dp
-            if (compact) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        MetricTile(
-                            label = "当前核心",
-                            value = resolveVariantLabel(uiState, runtime.variant),
-                            icon = Icons.Rounded.Memory,
-                            modifier = Modifier.weight(1f)
-                        )
-                        MetricTile(
-                            label = "核心版本",
-                            value = coreVersionText(
-                                info = uiState.coreInfos.find { it.variant == runtime.variant },
-                                isLoading = uiState.isCoreInfoLoading
-                            ),
-                            icon = Icons.Rounded.Upgrade,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        MetricTile(
-                            label = "运行模式",
-                            value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
-                            icon = Icons.Rounded.Security,
-                            modifier = Modifier.weight(1f)
-                        )
-                        MetricTile(
-                            label = "端口",
-                            value = runtime.port.toString(),
-                            icon = Icons.Rounded.Settings,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MetricTile(
-                        label = "当前核心",
-                        value = resolveVariantLabel(uiState, runtime.variant),
-                        icon = Icons.Rounded.Memory,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricTile(
-                        label = "核心版本",
-                        value = coreVersionText(
-                            info = uiState.coreInfos.find { it.variant == runtime.variant },
-                            isLoading = uiState.isCoreInfoLoading
-                        ),
-                        icon = Icons.Rounded.Upgrade,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricTile(
-                        label = "运行模式",
-                        value = if (runtime.runMode == RunMode.Root) "兼容 / Root" else "兼容 / 普通",
-                        icon = Icons.Rounded.Security,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricTile(
-                        label = "端口",
-                        value = runtime.port.toString(),
-                        icon = Icons.Rounded.Settings,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-        AccessAddressPanel(
-            serviceStatus = runtime.status,
-            localUrl = runtime.localUrl,
-            lanUrl = runtime.lanUrl,
-            lanIpv6Url = runtime.lanIpv6Url,
-            showLocalNetworkPermissionHint = showLocalNetworkPermissionHint,
-            onOpenLocalNetworkPermission = onOpenLocalNetworkPermission
-        )
-    }
-}
-
-@Composable
-private fun AccessAddressPanel(
-    serviceStatus: ServiceStatus,
-    localUrl: String,
-    lanUrl: String,
-    lanIpv6Url: String,
-    showLocalNetworkPermissionHint: Boolean,
-    onOpenLocalNetworkPermission: () -> Unit
-) {
-    val hasLocal = localUrl.isNotBlank()
-    val hasLanIpv4 = lanUrl.isNotBlank()
-    val hasLanIpv6 = lanIpv6Url.isNotBlank()
-    val hasLan = hasLanIpv4 || hasLanIpv6
-    val addressStatus = CompatAccessAddressStatusPolicy.resolve(
-        serviceStatus = serviceStatus,
-        hasLocalAddress = hasLocal,
-        hasLanIpv4Address = hasLanIpv4,
-        hasLanIpv6Address = hasLanIpv6,
-        localNetworkPermissionMissing = showLocalNetworkPermissionHint
-    )
-    AppGlassSurface(
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "访问地址",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 19.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = when (addressStatus) {
-                            CompatAccessAddressStatus.Waiting ->
-                                "服务启动后会显示本机与局域网访问地址。"
-                            CompatAccessAddressStatus.LocalOnly ->
-                                "本机地址可正常使用，授权后即可供同一局域网设备访问。"
-                            CompatAccessAddressStatus.Ready ->
-                                "本机和局域网地址都保留完整显示，方便直接输入或扫码。"
-                            CompatAccessAddressStatus.LocalAvailable ->
-                                "本机地址已可用，局域网地址生成后会显示在下方。"
-                        },
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = when (addressStatus) {
-                        CompatAccessAddressStatus.Waiting -> "等待启动"
-                        CompatAccessAddressStatus.LocalOnly -> "仅本机"
-                        CompatAccessAddressStatus.Ready -> "已就绪"
-                        CompatAccessAddressStatus.LocalAvailable -> "本机可用"
-                    },
-                    color = if (addressStatus == CompatAccessAddressStatus.Ready) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.secondary
-                    }
-                )
-            }
-
-            AnimatedVisibility(visible = showLocalNetworkPermissionHint) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.WifiOff,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = if (addressStatus == CompatAccessAddressStatus.LocalOnly) {
-                            "仅本机可访问 · 局域网权限未开启"
-                        } else {
-                            "局域网权限未开启 · 授权后可供同网设备访问"
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    AppGlassAssistChip(
-                        onClick = onOpenLocalNetworkPermission,
-                        label = { Text("去授权") }
-                    )
-                }
-            }
-
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                val compact = maxWidth < 620.dp
-                if (compact) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AddressEntry(
-                            label = "本机访问",
-                            value = localUrl.ifBlank { "等待服务启动后生成" },
-                            icon = Icons.Rounded.Settings,
-                            accent = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        AddressEntry(
-                            label = "IPv4 局域网",
-                            value = lanUrl.ifBlank { "等待局域网地址" },
-                            icon = Icons.Rounded.Wifi,
-                            accent = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (lanIpv6Url.isNotBlank()) {
-                            AddressEntry(
-                                label = "IPv6 局域网",
-                                value = lanIpv6Url,
-                                icon = Icons.Rounded.Wifi,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            AddressEntry(
-                                label = "本机访问",
-                                value = localUrl.ifBlank { "等待服务启动后生成" },
-                                icon = Icons.Rounded.Settings,
-                                accent = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            AddressEntry(
-                                label = "IPv4 局域网",
-                                value = lanUrl.ifBlank { "等待局域网地址" },
-                                icon = Icons.Rounded.Wifi,
-                                accent = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        if (lanIpv6Url.isNotBlank()) {
-                            AddressEntry(
-                                label = "IPv6 局域网",
-                                value = lanIpv6Url,
-                                icon = Icons.Rounded.Wifi,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AddressEntry(
-    label: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accent: Color,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accent,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
-        }
-        SelectionContainer {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = 20.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 3,
-                overflow = TextOverflow.Clip
-            )
-        }
-    }
-}
-
-@Composable
-private fun OperationProgressCard(uiState: CompatModeUiState) {
-    val progress = uiState.downloadProgress
-    val visible = progress.inProgress || uiState.isOperating
-    AnimatedVisibility(visible = visible) {
-        AppGlassSurface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = progress.actionLabel.ifBlank {
-                        uiState.operationProgressTitle.ifBlank { "处理中" }
-                    },
-                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 19.sp),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = buildString {
-                        val stage = progress.stageText.ifBlank {
-                            if (uiState.isOperating) "请稍候" else "正在准备资源"
-                        }
-                        append(stage)
-                        val bytesText = formatByteProgress(progress)
-                        if (bytesText.isNotBlank()) {
-                            append("\n")
-                            append(bytesText)
-                        }
-                    },
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (progress.progress == null) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(7.dp)
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        progress = { progress.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(7.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun KeepAliveCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    val state = uiState.keepAlive
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "后台运行健康度",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = state.summary,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = if (state.recommendedProfileEnabled) "推荐方案已启用" else "可配置",
-                    color = if (state.recommendedProfileEnabled) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                )
-            }
-
-            Text(
-                text = state.detail,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 20.sp
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvActionButton(
-                    text = state.actionLabel,
-                    icon = if (state.recommendedProfileEnabled) {
-                        Icons.Rounded.Shield
-                    } else {
-                        Icons.Rounded.Security
-                    },
-                    tone = ButtonTone.Primary,
-                    enabled = state.actionEnabled,
-                    onClick = actions.onToggleKeepAliveProfile
-                )
-                if (state.isRootMode) {
-                    StatusChip(
-                        text = "Root 模式",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                } else {
-                    StatusChip(
-                        text = "心跳：${state.heartbeatModeLabel}",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GithubProxyCard(
-    proxyPickerState: CompatProxyPickerState,
-    actions: CompatModeActions
-) {
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "GitHub 加速",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "用于核心下载、更新和版本检查。",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = proxyPickerState.currentLabel,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvActionButton(
-                    text = "测速并选择",
-                    icon = Icons.Rounded.Speed,
-                    tone = ButtonTone.Primary,
-                    onClick = actions.onOpenProxyPicker
-                )
-                TvActionButton(
-                    text = "重新测速",
-                    icon = Icons.Rounded.Refresh,
-                    tone = ButtonTone.Secondary,
-                    onClick = actions.onOpenProxyPicker
-                )
-            }
-
-            Text(
-                text = when {
-                    proxyPickerState.testingIds.isNotEmpty() -> "正在测速 ${proxyPickerState.testingIds.size} 条线路"
-                    proxyPickerState.latencyMap.isNotEmpty() -> "测速结果已更新，可继续切换线路"
-                    else -> "当前线路已保存，必要时可重新测速。"
-                },
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun AppUpdateCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    val update = uiState.appUpdate.checkResult
-    val primaryActionRequester = remember { FocusRequester() }
-    var restorePrimaryActionFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(
-        uiState.appUpdate.isChecking,
-        uiState.appUpdate.isDownloading,
-        uiState.appUpdate.downloadedApk
-    ) {
-        if (
-            restorePrimaryActionFocus &&
-            !uiState.appUpdate.isChecking &&
-            !uiState.appUpdate.isDownloading
-        ) {
-            primaryActionRequester.requestFocus()
-            restorePrimaryActionFocus = false
-        }
-    }
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "App 更新",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = uiState.appUpdate.checkError.takeIf { it.isNotBlank() }
-                            ?: if (uiState.appUpdate.isChecking) {
-                                "正在检查版本..."
-                            } else if (update?.hasUpdate == true) {
-                                "发现新版本 v${update.latestVersion}，当前 v${update.currentVersion}"
-                            } else {
-                                "当前版本 v${uiState.appUpdate.currentVersion}"
-                            },
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = when {
-                        uiState.appUpdate.isChecking -> "检查中"
-                        update?.hasUpdate == true -> "有更新"
-                        else -> "最新"
-                    },
-                    color = when {
-                        uiState.appUpdate.isChecking -> MaterialTheme.colorScheme.secondary
-                        update?.hasUpdate == true -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.primary
-                    }
-                )
-            }
-
-            if (update?.hasUpdate == true) {
-                Text(
-                    text = update.releaseNotes.takeIf { it.isNotBlank() } ?: "未提供更新说明",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (uiState.appUpdate.isDownloading) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        LinearProgressIndicator(
-                            progress = {
-                                if (uiState.appUpdate.downloadPercent in 0..100) {
-                                    uiState.appUpdate.downloadPercent / 100f
-                                } else {
-                                    0f
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(7.dp)
-                        )
-                        Text(
-                            text = uiState.appUpdate.downloadDetail,
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (uiState.appUpdate.downloadedApk == null) {
-                        TvActionButton(
-                            text = "下载更新",
-                            icon = Icons.Rounded.CloudDownload,
-                            tone = ButtonTone.Primary,
-                            enabled = !uiState.appUpdate.isDownloading,
-                            onClick = {
-                                restorePrimaryActionFocus = true
-                                actions.onDownloadAppUpdate()
-                            },
-                            modifier = Modifier.focusRequester(primaryActionRequester)
-                        )
-                    } else {
-                        TvActionButton(
-                            text = "安装更新",
-                            icon = Icons.Rounded.Upgrade,
-                            tone = ButtonTone.Primary,
-                            onClick = {
-                                restorePrimaryActionFocus = true
-                                actions.onInstallAppUpdate()
-                            },
-                            modifier = Modifier.focusRequester(primaryActionRequester)
-                        )
-                    }
-                    TvActionButton(
-                        text = "检查版本",
-                        icon = Icons.Rounded.Refresh,
-                        tone = ButtonTone.Secondary,
-                        enabled = !uiState.appUpdate.isChecking,
-                        onClick = {
-                            restorePrimaryActionFocus = true
-                            actions.onCheckAppUpdate()
-                        }
-                    )
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvActionButton(
-                        text = "检查版本",
-                        icon = Icons.Rounded.Refresh,
-                        tone = ButtonTone.Primary,
-                        enabled = !uiState.appUpdate.isChecking,
-                        onClick = {
-                            restorePrimaryActionFocus = true
-                            actions.onCheckAppUpdate()
-                        },
-                        modifier = Modifier.focusRequester(primaryActionRequester)
-                    )
-                    if (uiState.appUpdate.downloadedApk != null) {
-                        TvActionButton(
-                            text = "安装缓存包",
-                            icon = Icons.Rounded.Upgrade,
-                            tone = ButtonTone.Secondary,
-                            onClick = {
-                                restorePrimaryActionFocus = true
-                                actions.onInstallAppUpdate()
+                Column(Modifier.weight(1f).fillMaxHeight()
+                    .focusRequester(contentFocus).focusRestorer()
+                    .focusProperties {
+                        onExit = {
+                            if (layout.useRail && requestedFocusDirection == FocusDirection.Left) {
+                                navigationFocus[page.ordinal].requestFocus()
                             }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompatAppDisplayCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    val systemDpi = remember { Resources.getSystem().displayMetrics.densityDpi }
-    val effectiveDpi = if (uiState.appDpiOverride > 0) uiState.appDpiOverride else systemDpi
-    val presetDpi = remember(systemDpi) {
-        listOf(
-            (systemDpi * 0.85f).toInt(),
-            (systemDpi * 0.95f).toInt(),
-            systemDpi,
-            (systemDpi * 1.08f).toInt(),
-            (systemDpi * 1.18f).toInt()
-        )
-            .map { it.coerceIn(AppAppearancePrefs.APP_DPI_MIN, AppAppearancePrefs.APP_DPI_MAX) }
-            .distinct()
-    }
-    var dpiInput by rememberSaveable(uiState.appDpiOverride, systemDpi) {
-        mutableStateOf((if (uiState.appDpiOverride > 0) uiState.appDpiOverride else systemDpi).toString())
-    }
-
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "显示缩放（App DPI）",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "系统 DPI：$systemDpi  ·  当前应用 DPI：$effectiveDpi",
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = if (uiState.appDpiOverride > 0) "已覆盖" else "跟随系统",
-                    color = if (uiState.appDpiOverride > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                )
-            }
-
-            Text(
-                text = "仅对本应用生效，不会修改系统 DPI。",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "可用范围：${AppAppearancePrefs.APP_DPI_MIN}-${AppAppearancePrefs.APP_DPI_MAX}",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                presetDpi.forEach { dpi ->
-                    AppGlassAssistChip(
-                        onClick = {
-                            dpiInput = dpi.toString()
-                            actions.onSetAppDpiOverride(dpi)
-                        },
-                        label = { Text("$dpi") }
-                    )
-                }
-                AppGlassAssistChip(
-                    onClick = {
-                        dpiInput = AppAppearancePrefs.APP_DPI_SYSTEM.toString()
-                        actions.onSetAppDpiOverride(AppAppearancePrefs.APP_DPI_SYSTEM)
-                    },
-                    label = { Text("跟随系统") }
-                )
-            }
-
-            OutlinedTextField(
-                value = dpiInput,
-                onValueChange = { input ->
-                    dpiInput = input.filter { it.isDigit() }.take(4)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("自定义 App DPI") },
-                placeholder = { Text("例如 360") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                AppGlassButton(
-                    onClick = {
-                        val parsed = dpiInput.toIntOrNull()
-                        if (parsed == null) {
-                            dpiInput = if (uiState.appDpiOverride > 0) {
-                                uiState.appDpiOverride.toString()
-                            } else {
-                                systemDpi.toString()
-                            }
-                        } else {
-                            actions.onSetAppDpiOverride(parsed)
                         }
+                    }.focusGroup(), verticalArrangement = Arrangement.spacedBy(layout.gap.dp)) {
+                    if (!layout.useRail) {
+                        CompatTopNavigation(page, navigationFocus, ::navigate)
+                    } else {
+                        CompatPageHeading(page.title, page.subtitle, uiState)
                     }
-                ) {
-                    Text("应用 DPI")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CoreManagementCard(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions
-) {
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "核心管理",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "安装、更新、切换和删除都在这里完成。",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TvActionButton(
-                    text = "刷新",
-                    icon = Icons.Rounded.Refresh,
-                    tone = ButtonTone.Secondary,
-                    onClick = actions.onRefreshCoreInfo
-                )
-            }
-
-            if (uiState.isCoreInfoLoading) {
-                Text(
-                    text = "正在读取核心信息...",
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                uiState.coreInfos.forEach { info ->
-                    CoreVariantCard(
-                        uiState = uiState,
-                        info = info,
-                        actions = actions
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CoreVariantCard(
-    uiState: CompatModeUiState,
-    info: CoreInfo,
-    actions: CompatModeActions
-) {
-    val runtime = uiState.runtimeState
-    val isActive = runtime.variant == info.variant
-    val hasPendingDependencyRepair = uiState.pendingDependencyRepair?.variant == info.variant
-    val surfaceColor = if (isActive) {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f)
-    }
-    val badge = when {
-        hasPendingDependencyRepair -> "待修复"
-        isActive -> "使用中"
-        info.sourceMismatch -> "需替换"
-        info.hasVersionUpdate -> "可更新"
-        info.isInstalled -> "已安装"
-        else -> "未安装"
-    }
-    val badgeColor = when {
-        hasPendingDependencyRepair -> MaterialTheme.colorScheme.error
-        isActive -> MaterialTheme.colorScheme.primary
-        info.sourceMismatch -> MaterialTheme.colorScheme.error
-        info.hasVersionUpdate -> MaterialTheme.colorScheme.tertiary
-        info.isInstalled -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.outline
-    }
-    val sourceText = resolveVariantSource(uiState, info.variant)
-    val sourceRepo = resolveCoreVariantRepo(info.variant, uiState.customRepo)
-    val sourceBranch = resolveCoreVariantBranch(
-        variant = info.variant,
-        customRepo = uiState.customRepo,
-        customBranch = uiState.customRepoBranch,
-        branchSelections = uiState.coreBranchSelections
-    )
-    val mainText = when {
-        hasPendingDependencyRepair -> "修复依赖"
-        !info.isInstalled -> "下载核心"
-        info.sourceMismatch -> "重新下载"
-        info.hasVersionUpdate -> "立即更新"
-        else -> "检查更新"
-    }
-    val mainIcon = when {
-        hasPendingDependencyRepair -> Icons.Rounded.Build
-        !info.isInstalled -> Icons.Rounded.CloudDownload
-        info.sourceMismatch || info.hasVersionUpdate -> Icons.Rounded.Upgrade
-        else -> Icons.Rounded.Refresh
-    }
-    val mainPrimary = hasPendingDependencyRepair || !info.isInstalled ||
-        info.sourceMismatch || info.hasVersionUpdate
-    val canDelete = info.isInstalled && !isActive && !hasPendingDependencyRepair
-    val activeProgress = uiState.downloadProgress.takeIf {
-        it.inProgress && it.variant == info.variant
-    }
-    val primaryActionRequester = remember(info.variant) { FocusRequester() }
-    var restorePrimaryActionFocus by remember(info.variant) { mutableStateOf(false) }
-    LaunchedEffect(uiState.isOperating, info.variant) {
-        if (restorePrimaryActionFocus && !uiState.isOperating) {
-            primaryActionRequester.requestFocus()
-            restorePrimaryActionFocus = false
-        }
-    }
-    var isCustomEditing by rememberSaveable(info.variant.name) { mutableStateOf(false) }
-
-    AppGlassSurface(
-        shape = RoundedCornerShape(20.dp),
-        color = surfaceColor,
-        border = BorderStroke(
-            1.dp,
-            if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = resolveVariantLabel(uiState, info.variant),
-                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        StatusChip(text = badge, color = badgeColor)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = coreVersionText(info, uiState.isCoreInfoLoading),
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = if (info.needsAttention) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (sourceText.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        if (info.isInstalled) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = sourceRepo,
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "·",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                AppGlassAssistChip(
-                                    onClick = { actions.onOpenBranchPicker(info.variant) },
-                                    enabled = !uiState.isOperating && !hasPendingDependencyRepair,
-                                    modifier = Modifier.widthIn(max = 220.dp),
-                                    label = {
-                                        Text(
-                                            text = sourceBranch ?: "默认分支",
-                                            modifier = Modifier.widthIn(max = 175.dp),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.ArrowDropDown,
-                                            contentDescription = "展开分支列表",
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                    pageState.SaveableStateProvider(page.name) {
+                        if (page == CompatPage.Home) {
+                            CompatHomePage(uiState, busy, showLocalNetworkPermissionHint, onOpenLocalNetworkPermission,
+                                onStart = actions.onStartService, onRestart = { modal = CompatModal.Restart },
+                                onStop = { modal = CompatModal.Stop },
+                                onCores = { navigate(CompatPage.Cores) }, onSettings = {
+                                    pageState.removeState(CompatPage.Settings.name)
+                                    navigate(CompatPage.Settings)
+                                },
+                                firstActionModifier = if (layout.useRail) Modifier.focusProperties {
+                                    left = navigationFocus[page.ordinal]
+                                } else Modifier,
+                                listState = listStates[page.ordinal], modifier = Modifier.weight(1f).fillMaxWidth())
+                        } else if (page == CompatPage.Logs) {
+                            CompatLogsPage(logs, uiState.runtimeState, onRefreshLogs,
+                                listStates[page.ordinal], Modifier.weight(1f).fillMaxWidth())
+                        } else if (page == CompatPage.Config) {
+                            CompatConfigPage(management, uiState.runtimeState, onRefreshConfig, onAdminLogin, onSaveConfig,
+                                listStates[page.ordinal], Modifier.weight(1f).fillMaxWidth())
+                        } else if (page == CompatPage.Settings) {
+                            CompatSettingsPane(uiState, proxyPickerState, actions, busy,
+                                interactionBlocked = modal != CompatModal.None || proxyPickerState.isVisible ||
+                                    uiState.branchDialogVariant != null || showDependencyRequiredPrompt || showDependencyRepairDialog,
+                                onScale = { modal = CompatModal.Scale }, onInterface = { modal = CompatModal.Interface },
+                                onStopExit = { modal = CompatModal.StopExit }, modifier = Modifier.weight(1f).fillMaxWidth())
+                        } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listStates[page.ordinal],
+                            contentPadding = PaddingValues(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(layout.gap.dp)) {
+                            when (page) {
+                                CompatPage.Home, CompatPage.Settings, CompatPage.Logs, CompatPage.Config -> Unit
+                                CompatPage.Cores -> {
+                                    item("core-header") {
+                                        CompatSectionHeading("核心库", "选择版本，下载后即可使用", "刷新", actions.onRefreshCoreInfo)
                                     }
-                                )
+                                    if (uiState.coreInfos.isEmpty()) item("empty") {
+                                        CompatEmptyCard(if (uiState.isCoreInfoLoading) "正在读取核心…" else "暂未读取到核心信息",
+                                            "可以刷新重试。", "刷新", actions.onRefreshCoreInfo)
+                                    }
+                                    uiState.coreInfos.forEach { info ->
+                                        item("core-${info.variant.key}") {
+                                            CompatCoreCard(uiState, info, actions,
+                                                onEditCustom = { modal = CompatModal.Custom },
+                                                onDelete = { deleteVariantKey = info.variant.key; modal = CompatModal.Delete },
+                                                onReinstall = { reinstallVariantKey = info.variant.key; modal = CompatModal.Reinstall })
+                                        }
+                                    }
+                                }
+                                CompatPage.Connection -> {
+                                    item("sync") { CompatSyncCard(uiState.syncState) }
+                                }
                             }
-                        } else {
-                            Text(
-                                text = sourceText,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (page == CompatPage.Cores && (uiState.isOperating || uiState.downloadProgress.inProgress)) item("operation-progress") {
+                                CompatOperationCard(uiState)
+                            }
                         }
                     }
                 }
-                if (info.variant == ApiVariant.Custom) {
-                    StatusChip(
-                        text = "自定义",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+            }
+            LaunchedEffect(remoteDevice) {
+                if (remoteDevice) {
+                    withFrameNanos { }
+                    navigationFocus[page.ordinal].requestFocus()
                 }
             }
+        }
+    }
 
-            if (info.variant == ApiVariant.Custom) {
-                CustomCoreEditor(
-                    uiState = uiState,
-                    actions = actions,
-                    isEditing = isCustomEditing,
-                    onEditingChange = { isCustomEditing = it }
-                )
-            }
+    if (proxyPickerState.isVisible) CompatProxyDialog(proxyPickerState, actions)
+    uiState.branchDialogVariant?.let { variant ->
+        CompatBranchDialog(variantLabel = uiState.coreDisplayNames.resolve(variant),
+            catalog = uiState.branchCatalog, currentBranch = uiState.coreBranchSelections.resolve(variant),
+            isLoading = uiState.isLoadingBranches, errorMessage = uiState.branchLoadError,
+            actions = actions)
+    }
+    CoreDependencyRepairHost(request = uiState.pendingDependencyRepair,
+        showRequiredPrompt = showDependencyRequiredPrompt, showRepairDialog = showDependencyRepairDialog,
+        onOpenRepair = actions.onOpenDependencyRepair, onDismissRequiredPrompt = actions.onDismissDependencyRequired,
+        onOnlineRepair = actions.onRepairDependenciesOnline, onRepairFromArchive = actions.onRepairDependenciesFromArchive,
+        onCancelMutation = actions.onCancelPendingCoreMutation, onDismissRepairDialog = actions.onDismissDependencyRepair)
 
-            if (activeProgress != null) {
-                CoreVariantProgress(progress = activeProgress)
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (info.variant == ApiVariant.Custom) {
-                    TvActionButton(
-                        text = if (isCustomEditing) "收起编辑" else "编辑配置",
-                        icon = if (isCustomEditing) Icons.Rounded.ExpandLess else Icons.Rounded.Edit,
-                        tone = ButtonTone.Secondary,
-                        enabled = !uiState.isOperating,
-                        onClick = { isCustomEditing = !isCustomEditing }
-                    )
+    val dismiss = { modal = CompatModal.None }
+    when (modal) {
+        CompatModal.None -> Unit
+        CompatModal.Exit -> CompatExitDialog(uiState.runtimeState.status, busy, dismiss,
+            onKeepService = { dismiss(); actions.onExitToBackground() },
+            onStopAndExit = { dismiss(); actions.onStopServiceAndExit() })
+        CompatModal.Stop, CompatModal.StopExit -> CompatDialog("停止服务？", dismiss,
+            if (modal == CompatModal.StopExit) "停止并退出" else "停止服务", {
+                val exit = modal == CompatModal.StopExit
+                dismiss()
+                if (exit) actions.onStopServiceAndExit() else actions.onStopService()
+            }, danger = true, confirmEnabled = !busy) {
+            Text("停止后，其他设备将无法访问本机弹幕服务。需要时可再次手动启动。")
+        }
+        CompatModal.Restart -> CompatDialog("重启服务？", dismiss, "重启", {
+            dismiss(); actions.onRestartService()
+        }, confirmEnabled = !busy) { Text("重启期间访问会短暂中断，完成后恢复。") }
+        CompatModal.Delete -> {
+            val variant = ApiVariant.entries.firstOrNull { it.key == deleteVariantKey } ?: ApiVariant.Stable
+            CompatDialog("删除${uiState.coreDisplayNames.resolve(variant)}？", dismiss, "删除", {
+                dismiss(); actions.onDeleteCore(variant)
+            }, danger = true, confirmEnabled = !busy &&
+                uiState.pendingDependencyRepair?.variant != variant &&
+                uiState.coreInfos.any { it.variant == variant && it.isInstalled }) {
+                Text("删除已下载的核心文件，保留服务配置。需要使用时可以重新下载安装。")
+                if (uiState.runtimeState.variant == variant && uiState.runtimeState.status == ServiceStatus.Running) {
+                    Text("将先停止当前服务，其他设备的访问会中断。", color = MaterialTheme.colorScheme.error)
                 }
-                if (!isActive) {
-                    TvActionButton(
-                        text = "切换使用",
-                        icon = Icons.Rounded.Sync,
-                        tone = ButtonTone.Secondary,
-                        enabled = info.isReady && !uiState.isOperating,
-                        onClick = { actions.onSwitchVariant(info.variant) }
-                    )
+            }
+        }
+        CompatModal.Reinstall -> {
+            val variant = ApiVariant.entries.firstOrNull { it.key == reinstallVariantKey } ?: ApiVariant.Stable
+            CompatDialog("重装${uiState.coreDisplayNames.resolve(variant)}？", dismiss, "重新下载", {
+                dismiss(); actions.onInstallCore(variant)
+            }, confirmEnabled = !busy && uiState.pendingDependencyRepair?.variant != variant &&
+                uiState.coreInfos.any { it.variant == variant && it.isInstalled }) {
+                Text("将按当前仓库和分支重新下载核心文件，替换已安装版本。")
+                Text("本地修改及已组合的 PR 会被替换。", color = MaterialTheme.colorScheme.tertiary)
+                if (uiState.runtimeState.variant == variant && uiState.runtimeState.status == ServiceStatus.Running) {
+                    Text("当前核心正在运行，完成后会重启服务，访问将短暂中断。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TvActionButton(
-                    text = mainText,
-                    icon = mainIcon,
-                    tone = if (mainPrimary) ButtonTone.Primary else ButtonTone.Secondary,
-                    enabled = !uiState.isOperating,
-                    onClick = {
-                        restorePrimaryActionFocus = true
-                        when {
-                            hasPendingDependencyRepair -> actions.onOpenDependencyRepair()
-                            !info.isInstalled -> actions.onInstallCore(info.variant)
-                            info.needsAttention -> actions.onUpdateCore(info.variant)
-                            else -> actions.onCheckCoreUpdate(info.variant)
-                        }
-                    },
-                    modifier = Modifier.focusRequester(primaryActionRequester)
-                )
-                if (canDelete) {
-                    TvActionButton(
-                        text = "删除",
-                        icon = Icons.Rounded.Delete,
-                        tone = ButtonTone.Danger,
-                        enabled = !uiState.isOperating,
-                        onClick = { actions.onDeleteCore(info.variant) }
-                    )
+            }
+        }
+        CompatModal.Custom -> CompatCustomSourceDialog(uiState, actions, dismiss)
+        CompatModal.Scale -> CompatScaleDialog(uiState.appDpiOverride, actions.onSetAppDpiOverride, dismiss)
+        CompatModal.Interface -> CompatInterfaceDialog(actions.onSetInterfaceMode, dismiss)
+    }
+}
+
+@Composable
+private fun CompatNavigationRail(page: CompatPage, state: CompatModeUiState,
+    focus: List<FocusRequester>, contentFocus: FocusRequester, onNavigate: (CompatPage) -> Unit) {
+    Column(Modifier.width(172.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+            .focusRestorer().focusGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompatBrand()
+            Spacer(Modifier.height(12.dp))
+            CompatPage.entries.forEach { target ->
+                CompatNavItem(target, page == target, onClick = { onNavigate(target) },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus[target.ordinal])
+                        .focusProperties { right = contentFocus })
+            }
+        }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text("当前服务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp))
+            CompatBadge(compatStatusLabel(state.runtimeState.status), compatStatusColor(state.runtimeState.status))
+            Text("${state.runtimeState.runMode.label} · TCP ${state.runtimeState.port}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun CompatTopNavigation(page: CompatPage, focus: List<FocusRequester>, onNavigate: (CompatPage) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val width = maxWidth
+        val showBrand = width >= 700.dp && LocalDensity.current.fontScale <= 1.3f
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (showBrand) CompatBrand()
+            val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+            val showIcon = width >= 700.dp && fontScale <= 1.3f
+            val available = width.value - if (showBrand) 150f else 0f
+            val scrollTabs = available / fontScale < CompatPage.entries.size * (if (showIcon) 88f else 64f)
+            Row(Modifier.weight(1f).then(if (scrollTabs) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                .focusRestorer().focusGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CompatPage.entries.forEach { target ->
+                    CompatNavItem(target, page == target, onClick = { onNavigate(target) },
+                        modifier = (if (scrollTabs) Modifier.width(((if (showIcon) 88f else 64f) * fontScale).dp)
+                            else Modifier.weight(1f)).focusRequester(focus[target.ordinal]),
+                        showIcon = showIcon)
                 }
             }
         }
@@ -1761,634 +347,51 @@ private fun CoreVariantCard(
 }
 
 @Composable
-private fun CoreVariantProgress(progress: CoreDownloadProgress) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = progress.actionLabel.ifBlank { "正在处理核心" },
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                val detail = buildString {
-                    if (progress.stageText.isNotBlank()) append(progress.stageText)
-                    val bytes = formatByteProgress(progress)
-                    if (bytes.isNotBlank()) {
-                        if (isNotEmpty()) append(" · ")
-                        append(bytes)
-                    }
-                }
-                if (detail.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            if (progress.progress != null) {
-                Text(
-                    text = "${(progress.progress.coerceIn(0f, 1f) * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
+private fun CompatNavItem(page: CompatPage, selected: Boolean, onClick: () -> Unit,
+    modifier: Modifier = Modifier, showIcon: Boolean = true) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(modifier.clip(shape).background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+        .remoteFocusHighlight(shape).selectable(selected, role = Role.Tab, onClick = onClick)
+        .heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+        val ink = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        if (showIcon) Icon(page.icon, null, tint = ink, modifier = Modifier.size(20.dp))
+        Text(page.title, color = ink, style = MaterialTheme.typography.labelLarge)
+    }
+}
 
-        if (progress.progress == null) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(7.dp)
-            )
-        } else {
-            LinearProgressIndicator(
-                progress = { progress.progress.coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(7.dp)
-            )
+@Composable
+private fun CompatBrand() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Forum, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(21.dp))
+        }
+        Column {
+            Text("弹幕 API", style = MaterialTheme.typography.titleMedium)
+            Text("兼容控制台", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun CustomCoreEditor(
-    uiState: CompatModeUiState,
-    actions: CompatModeActions,
-    isEditing: Boolean,
-    onEditingChange: (Boolean) -> Unit
-) {
-    val source = uiState.customCoreSource
-    val focusManager = LocalFocusManager.current
-    var repoText by rememberSaveable(uiState.customRepo) { mutableStateOf(uiState.customRepo) }
-    var branchText by rememberSaveable(uiState.customRepoBranch) { mutableStateOf(uiState.customRepoBranch) }
-
-    LaunchedEffect(uiState.customRepo, uiState.customRepoBranch) {
-        repoText = uiState.customRepo
-        branchText = uiState.customRepoBranch
-    }
-
-    val saveAction = {
-        actions.onSaveCustomCore(repoText.trim(), branchText.trim())
-        focusManager.clearFocus(force = true)
-        onEditingChange(false)
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-                .padding(14.dp)
-        ) {
-            val compact = maxWidth < 540.dp
-            if (compact) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = when {
-                            source.isValidRepo -> "当前来源：${source.sourceText}"
-                            source.isConfigured -> "仓库格式无效"
-                            else -> "未配置自定义仓库"
-                        },
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "自定义核心来源",
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = when {
-                                source.isValidRepo -> "当前来源：${source.sourceText}"
-                                source.isConfigured -> "仓库格式无效"
-                                else -> "未配置自定义仓库"
-                            },
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+private fun CompatPageHeading(title: String, subtitle: String, state: CompatModeUiState) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineMedium)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
-
-        AnimatedVisibility(visible = isEditing) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val compact = maxWidth < 560.dp
-                    if (compact) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedTextField(
-                                value = repoText,
-                                onValueChange = { repoText = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("仓库") },
-                                placeholder = { Text("owner/repo 或 GitHub 地址") },
-                                singleLine = true,
-                                maxLines = 1,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                                keyboardActions = KeyboardActions(onDone = { saveAction() })
-                            )
-                            OutlinedTextField(
-                                value = branchText,
-                                onValueChange = { branchText = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("分支") },
-                                placeholder = { Text(source.suggestedBranch.ifBlank { "自动检测" }) },
-                                singleLine = true,
-                                maxLines = 1,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { saveAction() })
-                            )
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedTextField(
-                                value = repoText,
-                                onValueChange = { repoText = it },
-                                modifier = Modifier.weight(1f),
-                                label = { Text("仓库") },
-                                placeholder = { Text("owner/repo 或 GitHub 地址") },
-                                singleLine = true,
-                                maxLines = 1,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                                keyboardActions = KeyboardActions(onDone = { saveAction() })
-                            )
-                            OutlinedTextField(
-                                value = branchText,
-                                onValueChange = { branchText = it },
-                                modifier = Modifier.widthIn(min = 170.dp).weight(0.55f),
-                                label = { Text("分支") },
-                                placeholder = { Text(source.suggestedBranch.ifBlank { "自动检测" }) },
-                                singleLine = true,
-                                maxLines = 1,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { saveAction() })
-                            )
-                        }
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvActionButton(
-                        text = "保存自定义核心",
-                        icon = Icons.Rounded.Settings,
-                        tone = ButtonTone.Primary,
-                        enabled = !uiState.isOperating,
-                        onClick = saveAction
-                    )
-                    TvActionButton(
-                        text = "取消编辑",
-                        icon = Icons.Rounded.ExpandLess,
-                        tone = ButtonTone.Secondary,
-                        enabled = !uiState.isOperating,
-                        onClick = {
-                            repoText = uiState.customRepo
-                            branchText = uiState.customRepoBranch
-                            focusManager.clearFocus(force = true)
-                            onEditingChange(false)
-                        }
-                    )
-                }
-            }
-        }
+        CompatBadge("TCP ${state.runtimeState.port}", MaterialTheme.colorScheme.secondary)
     }
 }
 
 @Composable
-private fun SyncCard(uiState: CompatModeUiState) {
-    val sync = uiState.syncState
-    val inviteUrl = sync.inviteUrl
-    val qrBitmap by produceState(initialValue = null as androidx.compose.ui.graphics.ImageBitmap?, inviteUrl) {
-        value = if (inviteUrl.isBlank()) {
-            null
-        } else {
-            withContext(Dispatchers.Default) {
-                TvConfigSyncCodec.buildQrBitmap(inviteUrl, 540).asImageBitmap()
-            }
-        }
-    }
-    var focused by remember { mutableStateOf(false) }
-
-    AppGlassSurface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-        border = BorderStroke(
-            if (focused) 2.dp else 1.dp,
-            if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .focusable()
-            .onFocusChanged { focused = it.isFocused }
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "手机同步",
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (inviteUrl.isNotBlank()) {
-                            "手机端进入备份与恢复，扫码后即可推送当前配置。"
-                        } else {
-                            "请让电视和手机接入同一 Wi-Fi，获取局域网地址后会自动生成同步码。"
-                        },
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                StatusPill(
-                    text = if (inviteUrl.isNotBlank()) "可扫码" else "等待局域网",
-                    color = if (inviteUrl.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(184.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (qrBitmap != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = qrBitmap!!,
-                            contentDescription = "手机同步二维码",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .padding(10.dp)
-                                .fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.QrCode2,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(72.dp)
-                        )
-                    }
-                }
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = sync.statusText,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (sync.lastSyncSummary.isNotBlank()) {
-                        Text(
-                            text = sync.lastSyncSummary,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        text = if (inviteUrl.isNotBlank()) {
-                            "配对地址：${sync.host}:${sync.port}"
-                        } else {
-                            "当前未检测到可用局域网地址"
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "同步时会自动覆盖电视侧配置，适合在手机上集中整理后一次性推送。",
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusPill(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = color.copy(alpha = 0.14f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.5f))
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-            color = color,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun StatusChip(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.5f))
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            color = color,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun NightModeButton(
-    label: String,
-    onClick: () -> Unit,
-    focusEnabled: Boolean = true
-) {
-    TvActionButton(
-        text = label,
-        icon = if (label.contains("浅")) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
-        tone = ButtonTone.Secondary,
-        onClick = onClick,
-        focusEnabled = focusEnabled
-    )
-}
-
-@Composable
-private fun MetricTile(
-    label: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier = Modifier
-) {
-    AppGlassSurface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-        modifier = modifier.heightIn(min = 112.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                lineHeight = 19.sp,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-enum class ButtonTone {
-    Primary,
-    Secondary,
-    Danger
-}
-
-@Composable
-private fun TvActionButton(
-    text: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tone: ButtonTone,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    focusEnabled: Boolean = true
-) {
-    val baseColor = when (tone) {
-        ButtonTone.Primary -> MaterialTheme.colorScheme.primary
-        ButtonTone.Secondary -> MaterialTheme.colorScheme.surfaceContainerHighest
-        ButtonTone.Danger -> MaterialTheme.colorScheme.error
-    }
-    val contentColor = when (tone) {
-        ButtonTone.Primary -> MaterialTheme.colorScheme.onPrimary
-        ButtonTone.Secondary -> MaterialTheme.colorScheme.onSurface
-        ButtonTone.Danger -> MaterialTheme.colorScheme.onError
-    }
-    val disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
-    val disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-    var focused by remember { mutableStateOf(false) }
-    val focusedScale by animateFloatAsState(
-        targetValue = if (enabled && focused) 1.05f else 1f,
-        label = "tv_button_scale"
-    )
-    val shape = RoundedCornerShape(18.dp)
-
-    Surface(
-        shape = shape,
-        color = if (enabled) baseColor else disabledContainerColor,
-        contentColor = if (enabled) contentColor else disabledContentColor,
-        border = BorderStroke(
-            if (focused && enabled) 2.dp else 1.dp,
-            when (tone) {
-                ButtonTone.Primary -> {
-                    if (!enabled) {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-                    } else if (focused) {
-                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.95f)
-                    } else {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
-                    }
-                }
-                ButtonTone.Secondary -> {
-                    if (!enabled) {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-                    } else if (focused) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.95f)
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f)
-                    }
-                }
-                ButtonTone.Danger -> {
-                    if (!enabled) {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-                    } else if (focused) {
-                        MaterialTheme.colorScheme.onError.copy(alpha = 0.95f)
-                    } else {
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.95f)
-                    }
-                }
-            }
-        ),
-        modifier = modifier
-            .widthIn(min = 118.dp)
-            .heightIn(min = 54.dp)
-            .graphicsLayer {
-                scaleX = if (enabled) focusedScale else 1f
-                scaleY = if (enabled) focusedScale else 1f
-            }
-            .shadow(if (focused && enabled) 10.dp else if (enabled) 2.dp else 0.dp, shape = shape, clip = false)
-            .focusProperties { canFocus = enabled && focusEnabled }
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(
-                enabled = enabled,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .focusable(enabled && focusEnabled)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-private fun resolveVariantLabel(
-    uiState: CompatModeUiState,
-    variant: ApiVariant
-): String {
-    return uiState.coreDisplayNames.resolve(variant)
-}
-
-private fun resolveVariantSource(
-    uiState: CompatModeUiState,
-    variant: ApiVariant
-): String {
-    return resolveCoreVariantSourceText(
-        variant = variant,
-        customRepo = uiState.customRepo,
-        customBranch = uiState.customRepoBranch,
-        branchSelections = uiState.coreBranchSelections
-    )
-}
-
-private fun coreVersionText(info: CoreInfo?, isLoading: Boolean): String {
-    return when {
-        info == null -> if (isLoading) "读取中" else "未知"
-        !info.isInstalled -> "未安装"
-        info.hasVersionUpdate && !info.version.isNullOrBlank() ->
-            formatCoreVersionTransition(info.version, info.availableVersion)
-        !info.version.isNullOrBlank() -> formatCoreVersionTransition(info.version, null)
-        else -> "版本未知"
-    }
-}
-
-private fun statusLabel(status: ServiceStatus): String = when (status) {
-    ServiceStatus.Stopped -> "已停止"
-    ServiceStatus.Starting -> "启动中"
-    ServiceStatus.Running -> "运行中"
-    ServiceStatus.Stopping -> "停止中"
-    ServiceStatus.Error -> "异常"
-}
-
-private fun statusColor(status: ServiceStatus): Color = when (status) {
-    ServiceStatus.Stopped -> Color(0xFF748197)
-    ServiceStatus.Starting -> Color(0xFF4F8CFF)
-    ServiceStatus.Running -> Color(0xFF48C78E)
-    ServiceStatus.Stopping -> Color(0xFFFFC857)
-    ServiceStatus.Error -> Color(0xFFFF7C8A)
-}
-
-private fun nightModeLabel(mode: NightModePreference): String {
-    return when (mode) {
-        NightModePreference.Dark -> "浅色"
-        NightModePreference.Light -> "深色"
-        NightModePreference.FollowSystem -> "深色"
-    }
-}
-
-private fun formatByteProgress(progress: CoreDownloadProgress): String {
-    if (progress.downloadedBytes <= 0L && progress.totalBytes <= 0L) return ""
-    return buildString {
-        append(formatBytes(progress.downloadedBytes))
-        if (progress.totalBytes > 0L) {
-            append(" / ")
-            append(formatBytes(progress.totalBytes))
-        }
-    }
-}
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0L) return "0 B"
-    val kb = 1024.0
-    val mb = kb * 1024.0
-    val gb = mb * 1024.0
-    return when {
-        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
-        bytes >= mb -> String.format(Locale.getDefault(), "%.2f MB", bytes / mb)
-        bytes >= kb -> String.format(Locale.getDefault(), "%.2f KB", bytes / kb)
-        else -> "$bytes B"
+internal fun CompatLocalNetworkPermissionDialog(openSettings: Boolean, onGrant: () -> Unit, onContinueLocalOnly: () -> Unit) {
+    CompatDialog("允许局域网访问", onContinueLocalOnly,
+        if (openSettings) "前往设置" else "允许访问", onGrant, cancelText = "仅本机使用") {
+        Text("允许后，同一 Wi-Fi 或有线网络中的设备才能访问本机弹幕服务。")
+        Text("暂不允许仍可在本机使用，连接页会保留授权入口。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

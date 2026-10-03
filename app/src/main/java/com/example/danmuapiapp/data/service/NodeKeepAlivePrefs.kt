@@ -134,14 +134,22 @@ object NodeKeepAlivePrefs {
             getHeartbeatMode(context) == KeepAliveHeartbeatMode.Accessibility
     }
 
-    fun shouldScheduleSystemHeartbeat(context: Context): Boolean {
-        return !isRootMode(context) &&
-            isKeepAliveEnabled(context) &&
-            isDesiredRunning(context) &&
-            hasPostNotificationsPermission(context) &&
-            isHeartbeatEnabled(context) &&
-            getHeartbeatMode(context) == KeepAliveHeartbeatMode.System
-    }
+    fun shouldScheduleSystemHeartbeat(context: Context): Boolean = shouldScheduleSystemHeartbeat(
+        isRootMode = isRootMode(context),
+        keepAliveEnabled = isKeepAliveEnabled(context),
+        desiredRunning = isDesiredRunning(context),
+        heartbeatEnabled = isHeartbeatEnabled(context),
+        heartbeatMode = getHeartbeatMode(context)
+    )
+
+    internal fun shouldScheduleSystemHeartbeat(
+        isRootMode: Boolean,
+        keepAliveEnabled: Boolean,
+        desiredRunning: Boolean,
+        heartbeatEnabled: Boolean,
+        heartbeatMode: KeepAliveHeartbeatMode
+    ): Boolean = !isRootMode && keepAliveEnabled && desiredRunning && heartbeatEnabled &&
+        heartbeatMode == KeepAliveHeartbeatMode.System
 
     fun shouldHoldRuntimeWakeLock(
         isCompatModeDevice: Boolean,

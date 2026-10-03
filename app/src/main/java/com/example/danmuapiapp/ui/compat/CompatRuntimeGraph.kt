@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.compat
 import android.annotation.SuppressLint
 import android.content.Context
 import com.example.danmuapiapp.data.remote.github.GithubRemoteService
+import com.example.danmuapiapp.data.repository.AdminSessionRepositoryImpl
 import com.example.danmuapiapp.data.repository.CoreRepositoryImpl
 import com.example.danmuapiapp.data.repository.EnvConfigRepositoryImpl
 import com.example.danmuapiapp.data.repository.RuntimeDependencyPackManager
@@ -14,10 +15,6 @@ import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.GithubPullRequestService
 import com.example.danmuapiapp.data.service.PullRequestMergeService
 import com.example.danmuapiapp.data.service.UpdateChecker
-import com.example.danmuapiapp.domain.model.AdminSessionState
-import com.example.danmuapiapp.domain.repository.AdminSessionRepository
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import com.example.danmuapiapp.data.network.GithubOutboundNetwork
 
@@ -35,7 +32,8 @@ object CompatRuntimeGraph {
 
     private fun buildHolder(context: Context): Holder {
         val settingsRepository = SettingsRepositoryImpl(context)
-        val adminSessionRepository = NoOpAdminSessionRepository()
+        val envConfigRepository = EnvConfigRepositoryImpl(context)
+        val adminSessionRepository = AdminSessionRepositoryImpl(context, envConfigRepository)
         val httpClient = GithubOutboundNetwork.createClient(context)
         val githubProxyService = GithubProxyService(context, httpClient)
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
@@ -87,7 +85,10 @@ object CompatRuntimeGraph {
             appUpdateService = appUpdateService,
             updateChecker = updateChecker,
             githubProxyService = githubProxyService,
-            githubProxySpeedTester = githubProxySpeedTester
+            githubProxySpeedTester = githubProxySpeedTester,
+            envConfigRepository = envConfigRepository,
+            adminSessionRepository = adminSessionRepository,
+            httpClient = httpClient
         )
     }
 
@@ -99,29 +100,9 @@ object CompatRuntimeGraph {
         val appUpdateService: AppUpdateService,
         val updateChecker: UpdateChecker,
         val githubProxyService: GithubProxyService,
-        val githubProxySpeedTester: GithubProxySpeedTester
-    ) {
-        val envConfigRepository: EnvConfigRepositoryImpl by lazy {
-            EnvConfigRepositoryImpl(context)
-        }
-    }
-
-    private class NoOpAdminSessionRepository : AdminSessionRepository {
-        private val state = MutableStateFlow(AdminSessionState())
-        override val sessionState: StateFlow<AdminSessionState> = state
-
-        override fun refresh() = Unit
-
-        override suspend fun login(inputToken: String): Result<Unit> {
-            return Result.failure(IllegalStateException("兼容模式不支持管理员登录"))
-        }
-
-        override suspend fun logout() = Unit
-
-        override suspend fun setAdminTokenAndLogin(token: String): Result<Unit> {
-            return Result.failure(IllegalStateException("兼容模式不支持管理员登录"))
-        }
-
-        override fun currentAdminTokenOrNull(): String = ""
-    }
+        val githubProxySpeedTester: GithubProxySpeedTester,
+        val envConfigRepository: EnvConfigRepositoryImpl,
+        val adminSessionRepository: AdminSessionRepositoryImpl,
+        val httpClient: OkHttpClient
+    )
 }

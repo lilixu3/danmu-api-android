@@ -17,8 +17,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -153,7 +151,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheStats
@@ -183,6 +180,8 @@ import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
 import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionAction
 import com.example.danmuapiapp.ui.startup.LocalNetworkPermissionPolicy
 import com.example.danmuapiapp.ui.startup.StartupPermissionGatePrefs
+import com.example.danmuapiapp.ui.startup.StartupPermissionItem
+import com.example.danmuapiapp.ui.startup.StartupPermissionSupport
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -267,7 +266,16 @@ fun HomeScreen(
         mutableStateOf(NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context))
     }
     var hasNotificationPermission by remember {
-        mutableStateOf(NodeKeepAlivePrefs.hasPostNotificationsPermission(context))
+        mutableStateOf(readHomeNotificationPermission(context))
+    }
+    val notificationSupported = remember(context) {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            StartupPermissionSupport.runtimePermissionSupported(context, Manifest.permission.POST_NOTIFICATIONS)
+    }
+    val batterySupported = remember(context) { StartupPermissionSupport.batterySupported(context) }
+    val localNetworkSupported = remember(context) {
+        Build.VERSION.SDK_INT < LocalNetworkPermissionPolicy.ANDROID_17_API_LEVEL ||
+            StartupPermissionSupport.runtimePermissionSupported(context, LocalNetworkPermissionPolicy.PERMISSION)
     }
     var localNetworkPermissionState by remember {
         mutableStateOf(readHomeLocalNetworkPermissionState(context))
@@ -276,14 +284,21 @@ fun HomeScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) {
-        hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+        hasNotificationPermission = readHomeNotificationPermission(context)
+        if (!hasNotificationPermission) {
+            StartupPermissionGatePrefs.skip(context, StartupPermissionItem.Notification)
+            viewModel.postMessage("通知权限未获授权，已完成启动检查，可稍后手动设置")
+        }
     }
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
+    ) {
         localNetworkPermissionState = readHomeLocalNetworkPermissionState(context)
-        if (granted) {
+        if (localNetworkPermissionState.granted) {
             viewModel.postMessage("已允许局域网访问")
+        } else {
+            StartupPermissionGatePrefs.skip(context, StartupPermissionItem.LocalNetwork)
+            viewModel.postMessage("局域网权限未获授权，已完成启动检查，其他设备连接可能受限")
         }
     }
 
@@ -396,7 +411,7 @@ fun HomeScreen(
     var expandedQueueGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     LaunchedEffect(state.runMode) {
-        hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+        hasNotificationPermission = readHomeNotificationPermission(context)
         if (state.runMode == RunMode.Normal) {
             isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
         }
@@ -421,7 +436,7 @@ fun HomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshRuntimeState()
                 viewModel.refreshTunnel()
-                hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(context)
+                hasNotificationPermission = readHomeNotificationPermission(context)
                 localNetworkPermissionState = readHomeLocalNetworkPermissionState(context)
                 if (state.runMode == RunMode.Normal) {
                     isBatteryWhitelisted = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(context)
@@ -457,41 +472,56 @@ fun HomeScreen(
         expandedQueueGroupKeys = expandedQueueGroupKeys.intersect(validKeys)
     }
     val shouldShowRuntimePermissionHint = state.runMode == RunMode.Normal &&
-        (!hasNotificationPermission || !isBatteryWhitelisted)
-    val shouldShowLocalNetworkAddressHint =
+        ((notificationSupported && !hasNotificationPermission) || (batterySupported && !isBatteryWhitelisted))
+    val shouldShowLocalNetworkAddressHint = localNetworkSupported &&
         LocalNetworkPermissionPolicy.shouldShowAddressHint(localNetworkPermissionState)
 
     fun openNotificationPermissionQuickAction() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (hasNotificationPermission) return
+        if (!StartupPermissionSupport.runtimePermissionSupported(context, Manifest.permission.POST_NOTIFICATIONS)) {
+            StartupPermissionGatePrefs.skip(context, StartupPermissionItem.Notification)
+            viewModel.postMessage("未找到可用的通知权限入口，已完成启动检查，可继续使用")
+            return
+        }
 
         val shouldShowRationale = activity?.let {
-            ActivityCompat.shouldShowRequestPermissionRationale(
-                it,
-                Manifest.permission.POST_NOTIFICATIONS
-            )
+            runCatching { ActivityCompat.shouldShowRequestPermissionRationale(
+                it, Manifest.permission.POST_NOTIFICATIONS
+            ) }.getOrDefault(false)
         } == true
         val requestedBefore = StartupPermissionGatePrefs.hasRequestedNotificationPermission(context)
 
         if (activity != null && (!requestedBefore || shouldShowRationale)) {
             StartupPermissionGatePrefs.markNotificationPermissionRequested(context)
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }.isFailure) {
+                StartupPermissionGatePrefs.skip(context, StartupPermissionItem.Notification)
+                if (!openHomeNotificationSettings(context)) {
+                    viewModel.postMessage("权限申请未能打开，已完成启动检查，可在系统设置中手动检查")
+                }
+            }
             return
         }
 
         if (!openHomeNotificationSettings(context)) {
-            viewModel.postMessage("无法打开通知设置，请手动进入应用详情开启通知")
+            StartupPermissionGatePrefs.skip(context, StartupPermissionItem.Notification)
+            viewModel.postMessage("未找到可用的通知设置入口，已完成启动检查，可继续使用")
         }
     }
 
     fun openLocalNetworkPermissionQuickAction() {
         val latestState = readHomeLocalNetworkPermissionState(context)
         localNetworkPermissionState = latestState
+        if (!latestState.required || latestState.granted) return
+        if (!StartupPermissionSupport.runtimePermissionSupported(context, LocalNetworkPermissionPolicy.PERMISSION)) {
+            StartupPermissionGatePrefs.skip(context, StartupPermissionItem.LocalNetwork)
+            viewModel.postMessage("未找到可用的局域网权限入口，已完成启动检查，可继续使用")
+            return
+        }
         val shouldShowRationale = activity?.let {
-            ActivityCompat.shouldShowRequestPermissionRationale(
-                it,
-                LocalNetworkPermissionPolicy.PERMISSION
-            )
+            runCatching { ActivityCompat.shouldShowRequestPermissionRationale(
+                it, LocalNetworkPermissionPolicy.PERMISSION
+            ) }.getOrDefault(false)
         } == true
 
         when (
@@ -503,12 +533,18 @@ fun HomeScreen(
         ) {
             LocalNetworkPermissionAction.Request -> {
                 StartupPermissionGatePrefs.markLocalNetworkPermissionRequested(context)
-                localNetworkPermissionLauncher.launch(LocalNetworkPermissionPolicy.PERMISSION)
+                if (runCatching { localNetworkPermissionLauncher.launch(LocalNetworkPermissionPolicy.PERMISSION) }.isFailure) {
+                    StartupPermissionGatePrefs.skip(context, StartupPermissionItem.LocalNetwork)
+                    if (!openHomeAppDetailsSettings(context)) {
+                        viewModel.postMessage("权限申请未能打开，已完成启动检查，局域网连接可能受限")
+                    }
+                }
             }
 
             LocalNetworkPermissionAction.Settings -> {
                 if (!openHomeAppDetailsSettings(context)) {
-                    viewModel.postMessage("无法打开应用设置，请手动开启局域网访问权限")
+                    StartupPermissionGatePrefs.skip(context, StartupPermissionItem.LocalNetwork)
+                    viewModel.postMessage("未找到可用的应用设置入口，已完成启动检查，局域网连接可能受限")
                 }
             }
 
@@ -640,15 +676,17 @@ fun HomeScreen(
                 ) {
                     HomeSectionSlot {
                     RuntimePermissionHintCard(
-                        notificationReady = hasNotificationPermission,
-                        batteryRequired = state.runMode == RunMode.Normal,
+                        // These values only control hint visibility; real grants remain unchanged.
+                        notificationReady = hasNotificationPermission || !notificationSupported,
+                        batteryRequired = state.runMode == RunMode.Normal && batterySupported,
                         batteryReady = state.runMode != RunMode.Normal || isBatteryWhitelisted,
                         onOpenNotificationSettings = ::openNotificationPermissionQuickAction,
                         onOpenBatterySettings = {
                             val opened = NormalModeKeepAliveGuideNavigator.requestIgnoreBatteryOptimization(context) ||
                                 NormalModeKeepAliveGuideNavigator.openAppBatterySettings(context)
                             if (!opened) {
-                                viewModel.postMessage("无法打开电池设置，请手动进入应用信息将电池改为不受限制")
+                                StartupPermissionGatePrefs.skip(context, StartupPermissionItem.Battery)
+                                viewModel.postMessage("未找到可用的电池设置入口，已完成启动检查，可继续使用")
                             }
                         }
                     )
@@ -1145,7 +1183,7 @@ fun HomeScreen(
                     if (LocalGlassMaterial.current.enabled) {
                         AppGlassButton(
                             onClick = viewModel::startInAppUpdateDownload,
-                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
+                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate && !viewModel.isRefreshingAppUpdatePrompt,
                             modifier = Modifier.fillMaxWidth(),
                             tint = MaterialTheme.colorScheme.primary
                         ) {
@@ -1156,7 +1194,7 @@ fun HomeScreen(
                     } else {
                         FilledTonalButton(
                             onClick = viewModel::startInAppUpdateDownload,
-                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate,
+                            enabled = hasInAppDownload && !viewModel.isDownloadingAppUpdate && !viewModel.isRefreshingAppUpdatePrompt,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp)
                         ) {
@@ -1197,10 +1235,16 @@ fun HomeScreen(
                     }
                     if (!hasInAppDownload) {
                         Text(
-                            "当前版本未找到可安装 APK，建议使用浏览器下载。",
+                            if (viewModel.isRefreshingAppUpdatePrompt) "正在获取安装包信息…"
+                            else "暂未获取到兼容的安装包，可重试检查或使用浏览器下载。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (!viewModel.isRefreshingAppUpdatePrompt) {
+                            AppGlassButton(onClick = viewModel::refreshForegroundAppUpdatePrompt, modifier = Modifier.fillMaxWidth()) {
+                                Text("重试检查安装包")
+                            }
+                        }
                     }
                     Text(
                         "首次安装新版本可能需要“安装未知应用”权限，授权后返回 App 会自动继续安装。",
@@ -1362,55 +1406,32 @@ fun HomeScreen(
 }
 
 
-private fun openHomeNotificationSettings(context: Context): Boolean {
-    val packageUri = Uri.parse("package:${context.packageName}")
-    val candidates = listOf(
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-        },
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = packageUri
-        }
-    )
-    return candidates.any { intent ->
-        val finalIntent = Intent(intent).apply {
-            if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching {
-            val resolved = finalIntent.resolveActivity(context.packageManager) != null
-            if (!resolved) {
-                false
-            } else {
-                context.startActivity(finalIntent)
-                true
-            }
-        }.getOrDefault(false)
-    }
-}
+private fun readHomeNotificationPermission(context: Context): Boolean =
+    runCatching { NodeKeepAlivePrefs.hasPostNotificationsPermission(context) }.getOrDefault(false)
 
-private fun openHomeAppDetailsSettings(context: Context): Boolean {
-    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-        data = "package:${context.packageName}".toUri()
+private fun openHomeNotificationSettings(context: Context): Boolean =
+    StartupPermissionSupport.notificationIntents(context).any { launchHomeSettings(context, it) }
+
+private fun openHomeAppDetailsSettings(context: Context): Boolean =
+    launchHomeSettings(context, StartupPermissionSupport.appDetails(context))
+
+private fun launchHomeSettings(context: Context, intent: Intent): Boolean = runCatching {
+    val finalIntent = Intent(intent).apply {
         if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    return runCatching {
-        if (intent.resolveActivity(context.packageManager) == null) {
-            false
-        } else {
-            context.startActivity(intent)
-            true
-        }
-    }.getOrDefault(false)
-}
+    // Queries can be visibility-filtered; the actual launch is the definitive check.
+    context.startActivity(finalIntent)
+    true
+}.getOrDefault(false)
 
 private fun readHomeLocalNetworkPermissionState(context: Context) =
     LocalNetworkPermissionPolicy.stateFor(
         sdkInt = Build.VERSION.SDK_INT,
         granted = Build.VERSION.SDK_INT < LocalNetworkPermissionPolicy.ANDROID_17_API_LEVEL ||
-            ContextCompat.checkSelfPermission(
+            runCatching { ContextCompat.checkSelfPermission(
                 context.applicationContext,
                 LocalNetworkPermissionPolicy.PERMISSION
-            ) == PackageManager.PERMISSION_GRANTED,
+            ) == PackageManager.PERMISSION_GRANTED }.getOrDefault(false),
         requestAttempted = StartupPermissionGatePrefs.hasRequestedLocalNetworkPermission(context)
     )
 

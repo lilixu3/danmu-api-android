@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.service.AppUpdateService
+import com.example.danmuapiapp.ui.screen.home.NormalModeKeepAliveGuideNavigator
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.SystemHeartbeatScheduler
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
@@ -29,6 +30,7 @@ import com.example.danmuapiapp.domain.model.NightModePreference
 import com.example.danmuapiapp.domain.model.ResolvedCustomCoreSource
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
+import com.example.danmuapiapp.domain.model.RuntimeListenMode
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.domain.model.resolveCustomCoreSource
@@ -40,6 +42,7 @@ import com.example.danmuapiapp.ui.screen.push.PushLanScanner
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -50,6 +53,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 
 data class CompatModeUiState(
     val runtimeState: RuntimeState = RuntimeState(),
@@ -91,6 +96,7 @@ data class CompatKeepAliveUiState(
     val recommendedProfileEnabled: Boolean = false,
     val isRootMode: Boolean = false,
     val hasNotificationPermission: Boolean = true,
+    val batteryOptimizationIgnored: Boolean = false,
     val desiredRunning: Boolean = false,
     val accessibilityEnabled: Boolean = false,
     val heartbeatModeLabel: String = ""
@@ -112,6 +118,7 @@ class CompatModeViewModel(
 ) : ViewModel() {
 
     private val appContext = context.applicationContext
+    internal val startupCoordinator = com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator(appContext)
     private val graph = CompatRuntimeGraph.get(appContext)
     private val syncServer = CompatTvConfigSyncServer(
         envConfigRepository = graph.envConfigRepository,
@@ -120,6 +127,34 @@ class CompatModeViewModel(
         coreRepository = graph.coreRepository,
         githubProxyService = graph.githubProxyService
     )
+    internal val managementController = CompatManagementController(graph, viewModelScope, ::emitEvent)
+    internal val managementState = managementController.state
+    val logs = graph.runtimeRepository.logs
+    fun refreshLogs() = graph.runtimeRepository.refreshLogs()
+    private var currentCompatPage = CompatPage.Home
+    private var activityForeground = false
+    private var logsRefreshJob: Job? = null
+    private fun updateLogsRefresh() {
+        logsRefreshJob?.cancel()
+        logsRefreshJob = null
+        if (currentCompatPage == CompatPage.Logs && activityForeground) {
+            logsRefreshJob = viewModelScope.launch {
+                while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                    refreshLogs()
+                    kotlinx.coroutines.delay(2_000)
+                }
+            }
+        }
+    }
+    internal fun onPageOpened(page: CompatPage) {
+        currentCompatPage = page
+        updateLogsRefresh()
+        when (page) {
+            CompatPage.Logs -> refreshLogs()
+            CompatPage.Config -> managementController.refresh()
+            else -> Unit
+        }
+    }
     val proxyOptions: List<GithubProxyOption> = graph.githubProxyService.proxyOptions()
 
     private val proxyPickerController = ProxyPickerController(
@@ -174,7 +209,7 @@ class CompatModeViewModel(
             nightMode = graph.settingsRepository.nightMode.value,
             glassMaterial = graph.settingsRepository.glassMaterial.value,
             appBackground = graph.settingsRepository.appBackground.value,
-            appDpiOverride = graph.settingsRepository.appDpiOverride.value,
+            appDpiOverride = graph.settingsRepository.compatDpiOverride.value,
             pendingDependencyRepair = graph.coreRepository.pendingDependencyRepair.value
         )
     )
@@ -210,6 +245,7 @@ class CompatModeViewModel(
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     init {
+        startupCoordinator.startIfNeeded()
         observeState()
         val initialHost = resolveSyncHost(_uiState.value.runtimeState)
         syncServer.start(initialHost)
@@ -218,6 +254,9 @@ class CompatModeViewModel(
     }
 
     fun onActivityResumed(activity: Activity) {
+        activityForeground = true
+        updateLogsRefresh()
+        if (currentCompatPage == CompatPage.Config) managementController.refresh()
         graph.runtimeRepository.setAppForeground(true)
         graph.appUpdateService.tryResumePendingInstall(activity)
         refreshKeepAliveUi()
@@ -225,6 +264,8 @@ class CompatModeViewModel(
     }
 
     fun onActivityStopped() {
+        activityForeground = false
+        updateLogsRefresh()
         graph.runtimeRepository.setAppForeground(false)
     }
 
@@ -272,6 +313,21 @@ class CompatModeViewModel(
         }
     }
 
+    fun setIpv6Enabled(enabled: Boolean) {
+        val state = _uiState.value
+        val runtime = graph.runtimeRepository.runtimeState.value
+        if (state.isOperating || runtime.status == ServiceStatus.Starting || runtime.status == ServiceStatus.Stopping) return
+        val target = if (enabled) RuntimeListenMode.DualStack else RuntimeListenMode.Ipv4Only
+        if (runtime.listenMode == target) return
+        graph.runtimeRepository.applyServiceConfig(
+            port = runtime.port,
+            token = runtime.token,
+            restartIfRunning = true,
+            listenMode = target
+        )
+        emitEvent(if (runtime.status == ServiceStatus.Running) "正在应用监听设置并重启服务" else "正在保存监听设置")
+    }
+
     fun toggleKeepAliveProfile() {
         if (_uiState.value.isOperating) return
         val runtimeState = _uiState.value.runtimeState
@@ -312,7 +368,7 @@ class CompatModeViewModel(
         val message = if (!NodeKeepAlivePrefs.isDesiredRunning(appContext)) {
             "已启用 TV 实验保活，请再手动启动一次服务"
         } else if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext)) {
-            "已启用 TV 实验保活，请授予通知权限"
+            "已配置后台恢复，建议开启通知以显示服务状态"
         } else {
             "已启用 TV 实验保活"
         }
@@ -576,11 +632,19 @@ class CompatModeViewModel(
 
     fun deleteCore(variant: ApiVariant) {
         if (_uiState.value.isOperating) return
-        if (_uiState.value.runtimeState.variant == variant) {
-            emitEvent("当前正在使用此核心，请先切换到其他核心再删除")
-            return
-        }
+        if (_uiState.value.pendingDependencyRepair?.variant == variant) return
         performCoreOperation("正在删除 ${resolveVariantLabel(variant)}") {
+            val current = graph.runtimeRepository.runtimeState.value
+            if (current.variant == variant && current.status != ServiceStatus.Stopped) {
+                graph.runtimeRepository.stopService()
+                val stopped = withTimeoutOrNull(25_000L) {
+                    graph.runtimeRepository.runtimeState.first { it.status == ServiceStatus.Stopped }
+                }
+                if (stopped == null) {
+                    emitEvent("服务未能安全停止，核心未删除，请查看日志后重试")
+                    return@performCoreOperation
+                }
+            }
             graph.coreRepository.deleteCore(variant).fold(
                 onSuccess = {
                     graph.coreRepository.refreshCoreInfo()
@@ -835,7 +899,14 @@ class CompatModeViewModel(
 
     fun setAppDpiOverride(activity: Activity?, dpi: Int) {
         val normalized = AppAppearancePrefs.normalizeAppDpiOverride(dpi)
-        if (normalized == _uiState.value.appDpiOverride) {
+        val actualDpi = activity?.resources?.displayMetrics?.densityDpi
+            ?: AppAppearancePrefs.systemDensityDpi(appContext)
+        val refreshNeeded = AppAppearancePrefs.shouldRecreateForDpi(
+            _uiState.value.appDpiOverride, normalized, actualDpi, AppAppearancePrefs.systemDensityDpi(appContext)
+        )
+        // Persist even if a second repository has a stale cached value.
+        graph.settingsRepository.setCompatDpiOverride(normalized)
+        if (!refreshNeeded) {
             emitEvent(
                 if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
                     "当前已是跟随系统 DPI"
@@ -845,7 +916,6 @@ class CompatModeViewModel(
             )
             return
         }
-        graph.settingsRepository.setAppDpiOverride(normalized)
         emitEvent(
             if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
                 "已恢复跟随系统 DPI"
@@ -942,7 +1012,7 @@ class CompatModeViewModel(
             }
         }
         viewModelScope.launch {
-            graph.settingsRepository.appDpiOverride.collectLatest { dpi ->
+            graph.settingsRepository.compatDpiOverride.collectLatest { dpi ->
                 _uiState.update { it.copy(appDpiOverride = dpi) }
             }
         }
@@ -1015,6 +1085,8 @@ class CompatModeViewModel(
         return false
     }
 
+    fun refreshBackgroundPermissions() = refreshKeepAliveUi()
+
     private fun refreshKeepAliveUi() {
         _uiState.update {
             it.copy(
@@ -1042,6 +1114,7 @@ class CompatModeViewModel(
         val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(appContext)
         val hasNotificationPermission = NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext)
         val accessibilityEnabled = NodeKeepAlivePrefs.isAccessibilityServiceEnabled(appContext)
+        val batteryOptimizationIgnored = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(appContext)
         val isRootMode = runtimeState.runMode == RunMode.Root
         val recommendedProfileEnabled = !isRootMode &&
             autoStartEnabled &&
@@ -1056,29 +1129,33 @@ class CompatModeViewModel(
 
         val summary = when {
             isRootMode -> "Root 模式优先使用 Root 开机自启"
+            recommendedProfileEnabled && !desiredRunning -> "后台恢复已配置，等待手动启动服务"
             recommendedProfileEnabled ->
-                "已启用后台恢复：系统心跳约 ${heartbeatIntervalMinutes} 分钟兜底一次"
+                "后台恢复已配置：系统心跳按 ${heartbeatIntervalMinutes} 分钟间隔调度，可能延迟"
             hasPartialConfig -> "后台恢复配置不完整，建议重新应用 TV 推荐方案"
             else -> "未启用后台恢复，服务被系统回收后不会自动恢复"
         }
 
         val detail = buildString {
             append("该能力用于掉线后兜底恢复，不承诺让 TV 后台长期常驻。")
+            if (!isRootMode && !batteryOptimizationIgnored) append("\n建议允许后台运行；盒子若没有此选项，可在系统应用设置中查看。")
             when {
                 isRootMode -> {
                     append("\n当前是 Root 模式，稳定保活应使用完整设置页里的 Root 开机模块。")
                 }
                 recommendedProfileEnabled -> {
                     append("\n已配置：普通模式开机恢复、系统定时心跳、${heartbeatIntervalMinutes} 分钟恢复间隔。")
-                    append("\n运行期间会保持 CPU 唤醒，降低部分盒子待机后服务被打断的概率。")
+                    if (com.example.danmuapiapp.data.util.DeviceCompatMode.isCompatModeDevice(appContext)) {
+                        append("\n电视 / 盒子运行期间会续期 CPU 唤醒锁，降低部分设备待机中断的概率。")
+                    }
                     if (!desiredRunning) {
                         append("\n启用后请至少手动启动一次服务，系统才会按“期望运行”继续恢复。")
                     }
                     if (!hasNotificationPermission) {
-                        append("\n当前缺少通知权限，系统恢复拉起前台服务可能失败。")
+                        append("\n尚未开启通知，服务状态可能无法显示；心跳仍会按配置尝试恢复。")
                     }
                     if (Build.VERSION.SDK_INT >= 35) {
-                        append("\nAndroid 15 及以上限制开机直接拉起前台服务，仍以系统心跳兜底为主。")
+                        append("\n系统可能限制开机或后台拉起服务，返回应用后可再次启动。")
                     }
                     if (accessibilityEnabled) {
                         append("\n检测到无障碍保活已启用，支持的设备上它也会一起参与恢复。")
@@ -1117,6 +1194,7 @@ class CompatModeViewModel(
             recommendedProfileEnabled = recommendedProfileEnabled,
             isRootMode = isRootMode,
             hasNotificationPermission = hasNotificationPermission,
+            batteryOptimizationIgnored = batteryOptimizationIgnored,
             desiredRunning = desiredRunning,
             accessibilityEnabled = accessibilityEnabled,
             heartbeatModeLabel = heartbeatMode.label

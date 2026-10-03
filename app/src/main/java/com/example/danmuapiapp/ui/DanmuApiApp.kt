@@ -9,6 +9,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,6 +60,7 @@ import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
 import com.example.danmuapiapp.ui.screen.settings.SettingsHubScreen
+import com.example.danmuapiapp.ui.screen.settings.CompatModeSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.ThemeDisplayScreen
 import com.example.danmuapiapp.ui.screen.settings.VideoShellInjectionSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.WorkDirScreen
@@ -170,11 +180,13 @@ private fun DanmuApiMainContent() {
     val showBottomBar = currentDestination.isTopLevelDestination()
     val recordBackdrop = showBottomBar && glassEnabled
     val pageBackdrop = rememberLayerBackdrop()
+    val pageFocus = remember { FocusRequester() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .focusRequester(pageFocus).focusRestorer().focusGroup()
                 .then(
                     if (recordBackdrop) {
                         Modifier.layerBackdrop(pageBackdrop)
@@ -271,6 +283,7 @@ private fun DanmuApiMainContent() {
             composable(Screen.Settings.route) {
                 SettingsHubScreen(
                     onOpenRuntimeAndDir = { navController.navigate(SettingsRoute.RuntimeAndDir) },
+                    onOpenCompatMode = { navController.navigate(SettingsRoute.CompatMode) },
                     onOpenThemeDisplay = { navController.navigate(SettingsRoute.ThemeDisplay) },
                     onOpenWorkDir = { navController.navigate(SettingsRoute.WorkDir) },
                     onOpenServiceConfig = { navController.navigate(SettingsRoute.ServiceConfig) },
@@ -290,6 +303,9 @@ private fun DanmuApiMainContent() {
                     onBack = { navController.popBackStack() },
                     onOpenHarmonyGuide = { navController.navigate(SettingsRoute.HarmonyGuide) }
                 )
+            }
+            composable(SettingsRoute.CompatMode) {
+                CompatModeSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.ThemeDisplay) {
                 ThemeDisplayScreen(onBack = { navController.popBackStack() })
@@ -390,7 +406,11 @@ private fun DanmuApiMainContent() {
                 onNavigate = { screen ->
                     navController.navigateToTopLevelRoute(screen.route)
                 },
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier.align(Alignment.BottomCenter).onPreviewKeyEvent { event ->
+                    if (event.key != Key.DirectionUp) false
+                    else if (event.type == KeyEventType.KeyDown) pageFocus.requestFocus()
+                    else event.type == KeyEventType.KeyUp
+                }
             )
         }
     }

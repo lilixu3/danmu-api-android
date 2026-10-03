@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import com.example.danmuapiapp.ui.component.remoteFocusHighlight
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -116,7 +117,7 @@ fun AppGlassButton(
         }
         FilledTonalButton(
             onClick = onClick,
-            modifier = modifier.height(height),
+            modifier = modifier.remoteFocusHighlight(shape, enabled).height(height),
             enabled = enabled,
             shape = shape,
             border = if (borderColor.isSpecified) BorderStroke(1.dp, borderColor) else null,
@@ -196,7 +197,7 @@ fun AppGlassPrimaryButton(
     if (!glassRequested) {
         Button(
             onClick = onClick,
-            modifier = modifier,
+            modifier = modifier.remoteFocusHighlight(shape, enabled),
             enabled = enabled,
             shape = shape,
             contentPadding = contentPadding,
@@ -273,7 +274,7 @@ fun AppGlassDangerButton(
     if (!glassRequested) {
         Button(
             onClick = onClick,
-            modifier = modifier,
+            modifier = modifier.remoteFocusHighlight(shape, enabled),
             enabled = enabled,
             shape = shape,
             contentPadding = contentPadding,
@@ -344,7 +345,7 @@ fun AppGlassIconButton(
             if (container.isSpecified) {
                 FilledTonalIconButton(
                     onClick = onClick,
-                    modifier = modifier.size(size),
+                    modifier = modifier.remoteFocusHighlight(CircleShape, enabled).size(size),
                     enabled = enabled,
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = container,
@@ -360,7 +361,7 @@ fun AppGlassIconButton(
                 ) {
                     IconButton(
                         onClick = onClick,
-                        modifier = modifier.size(size),
+                        modifier = modifier.remoteFocusHighlight(CircleShape, enabled).size(size),
                         enabled = enabled,
                         content = content
                     )
@@ -369,7 +370,7 @@ fun AppGlassIconButton(
         } else {
             FilledTonalIconButton(
                 onClick = onClick,
-                modifier = modifier.size(size),
+                modifier = modifier.remoteFocusHighlight(CircleShape, enabled).size(size),
                 enabled = enabled,
                 colors = if (container.isSpecified) {
                     IconButtonDefaults.filledTonalIconButtonColors(
@@ -428,7 +429,7 @@ fun AppGlassFilterChip(
         FilterChip(
             selected = selected,
             onClick = onClick,
-            modifier = modifier,
+            modifier = modifier.remoteFocusHighlight(Capsule(), enabled),
             enabled = enabled,
             label = label,
             leadingIcon = leadingIcon,
@@ -503,7 +504,7 @@ fun AppGlassAssistChip(
     if (!LocalGlassMaterial.current.enabled) {
         AssistChip(
             onClick = onClick,
-            modifier = modifier,
+            modifier = modifier.remoteFocusHighlight(Capsule(), enabled),
             enabled = enabled,
             label = label,
             leadingIcon = leadingIcon,

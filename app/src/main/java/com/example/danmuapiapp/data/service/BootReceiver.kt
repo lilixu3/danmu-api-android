@@ -25,6 +25,11 @@ class BootReceiver : BroadcastReceiver() {
                     if (runMode == RunMode.Normal) {
                         val projectDir = RuntimePaths.normalProjectDir(appContext)
                         if (NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)) {
+                            if (!NormalAutoStartPrefs.isBootAutoStartEnabled(appContext)) return@runCatching
+                            // Record boot intent before slow preparation. A manual stop
+                            // during preparation must win over the eventual start command.
+                            NodeKeepAlivePrefs.setDesiredRunning(appContext, true)
+                            SystemHeartbeatScheduler.refresh(appContext)
                             runCatching {
                                 NodeProjectManager.syncRuntimeEnvIfProjectReady(
                                     context = appContext,
@@ -33,11 +38,15 @@ class BootReceiver : BroadcastReceiver() {
                             }
                             val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
                                 .getInt("port", 9321)
+                            if (!NodeKeepAlivePrefs.isDesiredRunning(appContext) ||
+                                !NormalAutoStartPrefs.isBootAutoStartEnabled(appContext) ||
+                                RuntimeModePrefs.get(appContext) != RunMode.Normal
+                            ) return@runCatching
                             val recovered = runCatching {
                                 NodeService.recoverStaleProcessIfNeeded(appContext, port)
                             }.getOrDefault(true)
                             if (!recovered) return@runCatching
-                            NodeService.start(appContext, userInitiated = false)
+                            NodeService.requestRecoveryStart(appContext)
                         }
                     }
                 }.onFailure {

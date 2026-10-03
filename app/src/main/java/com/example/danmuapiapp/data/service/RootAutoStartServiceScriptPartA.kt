@@ -273,6 +273,11 @@ object RootAutoStartServiceScriptPartA {
               STARTED_AT_FILE="${'$'}RUNTIME/root_node_started_at_ms"
               STAMPFILE="${'$'}RUNTIME/apk_stamp"
 
+              # app_process changes argv to its nice-name; check the exact home too.
+              PROJECT="${'$'}PROJ"
+              PROC_ROOT='/proc'
+              ${RootRuntimeRecovery.identityFunctionShell()}
+
               ensure_runtime() {
                 mkdir -p "${'$'}RUNTIME" "${'$'}PROJ"
 
@@ -451,7 +456,7 @@ object RootAutoStartServiceScriptPartA {
                 OLD=$(cat "${'$'}PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
                 if [ -n "${'$'}OLD" ] && [ -d "/proc/${'$'}OLD" ]; then
                   CMDLINE=$(tr '\0' ' ' < "/proc/${'$'}OLD/cmdline" 2>/dev/null)
-                  if echo "${'$'}CMDLINE" | grep -q "${'$'}MAIN_CLASS"; then
+                  if owned_root "${'$'}OLD"; then
                     if is_runtime_port_ready "${'$'}RUNTIME_PORT"; then
                       log "skip: already running pid=${'$'}OLD port=${'$'}RUNTIME_PORT"
                       return 0
@@ -477,7 +482,7 @@ object RootAutoStartServiceScriptPartA {
                 NEW=$(cat "${'$'}PIDFILE" 2>/dev/null | tr -d '\r' | tr -d '\n')
                 if [ -n "${'$'}NEW" ] && [ -d "/proc/${'$'}NEW" ]; then
                   CMDLINE=$(tr '\0' ' ' < "/proc/${'$'}NEW/cmdline" 2>/dev/null)
-                  if echo "${'$'}CMDLINE" | grep -q "${'$'}MAIN_CLASS" && is_runtime_port_ready "${'$'}RUNTIME_PORT"; then
+                  if owned_root "${'$'}NEW" && is_runtime_port_ready "${'$'}RUNTIME_PORT"; then
                     logd "start ok pid=${'$'}NEW port=${'$'}RUNTIME_PORT"
                     return 0
                   fi

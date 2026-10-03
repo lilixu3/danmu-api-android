@@ -35,6 +35,31 @@
         android:required="false" />
 
     <queries>
+        <package android:name="com.miui.securitycenter" />
+        <package android:name="com.miui.powerkeeper" />
+        <package android:name="com.coloros.safecenter" />
+        <package android:name="com.oppo.safe" />
+        <package android:name="com.oneplus.security" />
+        <package android:name="com.iqoo.secure" />
+        <package android:name="com.vivo.permissionmanager" />
+        <package android:name="com.huawei.systemmanager" />
+        <package android:name="com.asus.mobilemanager" />
+        <!-- Capability checks for stripped TV ROMs must remain visible on Android 11+. -->
+        <intent><action android:name="android.content.pm.action.REQUEST_PERMISSIONS" /></intent>
+        <intent><action android:name="android.settings.APP_NOTIFICATION_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS" /></intent>
+        <intent>
+            <action android:name="android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+            <data android:scheme="package" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.APP_BATTERY_SETTINGS" />
+            <data android:scheme="package" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS" />
+            <data android:scheme="package" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.INSTALL_PACKAGE" />
             <data android:mimeType="application/vnd.android.package-archive" />
@@ -61,21 +86,23 @@
         tools:targetApi="35">
 
 
+        <!-- Route before Hilt creates the normal-mode graph on TV devices. -->
         <activity
             android:name="com.example.danmuapiapp.CompatEntryActivity"
-            android:exported="false"
-            android:theme="@style/Theme.DanmuApiApp.Startup" />
+            android:exported="true"
+            android:theme="@style/Theme.DanmuApiApp.Startup">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name="com.example.danmuapiapp.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.DanmuApiApp.SplashEntry"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-            </intent-filter>
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -84,6 +111,8 @@
 
         <activity
             android:name="com.example.danmuapiapp.ui.compat.CompatModeActivity"
+            android:screenOrientation="sensorLandscape"
+            android:windowSoftInputMode="adjustResize"
             android:exported="false"
             android:theme="@style/Theme.DanmuApiApp" />
 

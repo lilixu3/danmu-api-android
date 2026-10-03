@@ -20,8 +20,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.106"
-val defaultVersionCode = 194
+val defaultVersionName = "1.0.5.107"
+val defaultVersionCode = 195
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
@@ -371,6 +371,9 @@ dependencies {
     implementation(libs.markdown.renderer.coil2)
     implementation(libs.markdown.renderer.code)
 
+    // HTML fallback for GitHub releases: structure and asset links, independent of CSS classes.
+    implementation("org.jsoup:jsoup:1.23.2")
+
     // 提供 XML 主题 Theme.Material3.DayNight.NoActionBar
     implementation(libs.material)
 
@@ -434,7 +437,7 @@ val androidRuntimeExcludedNodeModules = setOf(
     "@electric-sql/pglite-tools",
     "drizzle-orm",
     // Node >= 16.5 内置 node:stream/web；web-streams-polyfill 仅作为
-    // fetch-blob 在无原生 ReadableStream 环境的兜底，内嵌 Node 24 永不触达。
+    // fetch-blob 在无原生 ReadableStream 环境的兜底，内嵌 Node 26 永不触达。
     "web-streams-polyfill"
 )
 
@@ -529,7 +532,7 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
             }
         }
 
-    // Node 24 require(esm) 返回 ESM namespace，dan-any 打包产物对
+    // Node 26 require(esm) 返回 ESM namespace，dan-any 打包产物对
     // fast-xml-builder 的 interop 会把整个 namespace 塞进 .default，
     // 使 `new o.default()` 失效。仅 CJS 理论路径受影响（生产全走 ESM），
     // 此处做幂等防护补丁，保证该调用点在两种模块体系下均可构造。
@@ -777,7 +780,10 @@ tasks.register<Exec>("testBundledCoreRuntimeDependencies") {
     commandLine("node", "node-tests/core-runtime-dependencies-smoke.mjs")
 }
 
-val embeddedNodeVersion = "24.21.0"
+val embeddedNodeVersion = Properties().apply {
+    nativeRuntimeSourcesFile.inputStream().use { load(it) }
+}.getProperty("node.version")?.trim()?.takeIf { it.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")) }
+    ?: throw GradleException("原生运行时来源清单缺少合法的 node.version")
 val targetNodeExecutable = (findProperty("targetNodeExecutable") as? String)
     ?.trim()
     ?.takeIf { it.isNotBlank() }
@@ -797,6 +803,7 @@ tasks.register("verifyEmbeddedNodeCompatibility") {
     inputs.file("src/main/assets/nodejs-project/android-server.js")
     inputs.file("src/main/assets/nodejs-project/favorite-scheduler-host.js")
     inputs.property("targetNodeExecutable", targetNodeExecutable)
+    inputs.property("embeddedNodeVersion", embeddedNodeVersion)
     doLast {
         fun runTargetNode(arguments: List<String>): String {
             val process = try {
@@ -1072,7 +1079,8 @@ data class NativeRuntimeReleaseSource(
     val assetName: String,
     val url: String,
     val size: Long,
-    val sha256: String
+    val sha256: String,
+    val githubActionsArtifact: Boolean = false
 )
 
 fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeReleaseSource>> {
@@ -1086,6 +1094,10 @@ fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeRel
         ?: throw GradleException("原生运行时来源清单缺少 $key")
 
     val releaseVersion = required("release.version")
+    val sourceKind = props.getProperty("source.kind", "release").trim()
+    if (sourceKind !in listOf("release", "github-actions")) {
+        throw GradleException("原生运行时 source.kind 非法：$sourceKind")
+    }
     val sources = defaultReleaseAbis.associateWith { abi ->
         val sha = required("$abi.sha256").lowercase()
         if (!sha.matches(Regex("[0-9a-f]{64}"))) {
@@ -1097,7 +1109,8 @@ fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeRel
             url = required("$abi.url"),
             size = required("$abi.size").toLongOrNull()?.takeIf { it in 1..(128L * 1024L * 1024L) }
                 ?: throw GradleException("原生运行时来源清单中的 $abi.size 非法"),
-            sha256 = sha
+            sha256 = sha,
+            githubActionsArtifact = sourceKind == "github-actions"
         )
     }
     return releaseVersion to sources
@@ -1179,7 +1192,7 @@ fun compileJniBridge(
     if (!bridgeSource.isFile) throw GradleException("缺少 JNI 桥源码：${bridgeSource.absolutePath}")
     if (!includeDir.isDirectory) throw GradleException("缺少 Node 头文件目录：${includeDir.absolutePath}")
     outFile.parentFile.mkdirs()
-    val command = listOf(
+    val command = (if (isTermuxHost) listOf("sh") else emptyList()) + listOf(
         clang.absolutePath,
         "-std=c++20", "-O2", "-fPIC", "-shared",
         "-I", includeDir.absolutePath,
@@ -1195,6 +1208,7 @@ fun compileJniBridge(
     if (exit != 0) {
         throw GradleException("编译 JNI 桥失败（$abi，exit=$exit）：\n${output.trim()}")
     }
+    stripNativeRuntimeLibrary(ndkDir, outFile)
     println("JNI 桥现编完成：$abi -> ${outFile.name}（${outFile.length()} 字节）")
 }
 
@@ -1209,6 +1223,17 @@ fun copyNdkLibcxxShared(ndkDir: File, abi: String, target: File) {
     if (!source.isFile) throw GradleException("NDK 缺少 libc++_shared.so：${source.absolutePath}")
     target.parentFile.mkdirs()
     source.copyTo(target, overwrite = true)
+    stripNativeRuntimeLibrary(ndkDir, target)
+}
+
+fun stripNativeRuntimeLibrary(ndkDir: File, library: File) {
+    val hostTag = resolveNdkHostTag(ndkDir)
+        ?: throw GradleException("NDK 缺少可用预编译工具链")
+    val strip = File(ndkDir, "toolchains/llvm/prebuilt/$hostTag/bin/llvm-strip")
+    val process = ProcessBuilder(strip.absolutePath, "--strip-unneeded", library.absolutePath)
+        .redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    if (process.waitFor() != 0) throw GradleException("strip ${library.name} 失败：${output.trim()}")
 }
 
 // 解析（必要时下载）原生运行时资产 zip，本地 dist 与 Gradle 缓存都按 SHA-256 校验。
@@ -1235,35 +1260,57 @@ fun resolveNativeRuntimeZip(
     val partFile = File(cacheApk.parentFile, "${cacheApk.name}.part")
     partFile.delete()
     try {
-        val connection = (URI(source.url).toURL().openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", "DanmuApiApp-Gradle")
-        }
-        try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw GradleException("下载 ${source.assetName} 失败：HTTP $responseCode")
+        if (source.githubActionsArtifact) {
+            val uri = URI(source.url)
+            if (uri.scheme != "https" || uri.host != "api.github.com" ||
+                !uri.path.matches(Regex("/repos/fogtape/nodejs-mobile/actions/artifacts/[0-9]+/zip"))
+            ) {
+                throw GradleException("Actions artifact URL 非法")
             }
-            connection.inputStream.use { input ->
-                partFile.outputStream().use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var total = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        if (total > 128L * 1024L * 1024L) {
-                            throw GradleException("下载的 ${source.assetName} 超过大小上限")
+            val process = try {
+                ProcessBuilder("gh", "api", uri.path.removePrefix("/"))
+                    .redirectOutput(partFile).start()
+            } catch (error: Exception) {
+                throw GradleException(
+                    "下载固定 Actions artifact 需要已认证的 gh；也可先把校验通过的 ZIP 放到 dist/$releaseVersion/",
+                    error
+                )
+            }
+            val errorOutput = process.errorStream.bufferedReader().use { it.readText() }
+            if (process.waitFor() != 0) {
+                throw GradleException("下载 ${source.assetName} Actions artifact 失败：${errorOutput.trim()}")
+            }
+        } else {
+            val connection = (URI(source.url).toURL().openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = 20_000
+                readTimeout = 60_000
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "DanmuApiApp-Gradle")
+            }
+            try {
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    throw GradleException("下载 ${source.assetName} 失败：HTTP $responseCode")
+                }
+                connection.inputStream.use { input ->
+                    partFile.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > 128L * 1024L * 1024L) {
+                                throw GradleException("下载的 ${source.assetName} 超过大小上限")
+                            }
+                            output.write(buffer, 0, count)
                         }
-                        output.write(buffer, 0, count)
                     }
                 }
+            } finally {
+                connection.disconnect()
             }
-        } finally {
-            connection.disconnect()
         }
         if (!isValid(partFile)) {
             throw GradleException("下载的 ${source.assetName} 大小或 SHA-256 不匹配")
@@ -1287,6 +1334,7 @@ fun resolveNativeRuntimeZip(
 fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
     val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
     inputs.files(nativeRuntimeChecksumFile, nativeRuntimeSourcesFile)
+    inputs.file("src/main/cpp/native-lib.cpp")
     inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
     outputs.dir(preparedNativeRuntimeDir)
     doLast {
@@ -1633,7 +1681,8 @@ tasks.register("releaseCheck") {
 
 tasks.matching {
     (it.name.startsWith("merge") && (it.name.endsWith("JniLibFolders") || it.name.endsWith("NativeLibs"))) ||
-        (it.name.startsWith("strip") && it.name.endsWith("DebugSymbols"))
+        (it.name.startsWith("strip") && it.name.endsWith("DebugSymbols")) ||
+        it.name.startsWith("configureCMake") || it.name.startsWith("buildCMake")
 }.configureEach {
     dependsOn(prepareNativeRuntimeTask)
 }
@@ -1695,7 +1744,7 @@ val verifyOutboundDebugTask = tasks.register("verifyOutboundDebugKernels") {
 }
 val testAppOutboundTask = tasks.register<Exec>("testAppOutboundBridge") {
     workingDir(project.rootDir)
-    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs")
+    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs")
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyOutboundReleaseTask) }
 tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(verifyOutboundDebugTask) }

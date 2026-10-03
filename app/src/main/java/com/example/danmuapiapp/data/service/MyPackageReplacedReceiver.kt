@@ -43,7 +43,7 @@ class MyPackageReplacedReceiver : BroadcastReceiver() {
                                 NodeService.recoverStaleProcessIfNeeded(appContext, port)
                             }.getOrDefault(true)
                             if (!recovered) return@runCatching
-                            NodeService.start(appContext, userInitiated = false)
+                            NodeService.requestRecoveryStart(appContext)
                             return@runCatching
                         }
                     }

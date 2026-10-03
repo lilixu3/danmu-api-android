@@ -11,7 +11,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.text.Html
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -122,7 +121,7 @@ class AppUpdateService @Inject constructor(
     }
 
     suspend fun checkLatestRelease(): Result<CheckResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val currentVersion = currentVersionName()
             val info = fetchLatestReleaseInfo()
             val latestVersion = info.tagName.removePrefix("v").removePrefix("V").trim()
@@ -354,7 +353,7 @@ class AppUpdateService @Inject constructor(
             tagName = release.tagName,
             htmlUrl = release.htmlUrl.ifBlank { FALLBACK_LATEST_PAGE },
             body = release.body,
-            apkAssets = assets
+            apkAssets = assets.ifEmpty { fetchAssetsFromHtml(release.tagName) }
         )
     }
 
@@ -394,26 +393,7 @@ class AppUpdateService @Inject constructor(
             )
         ) ?: return emptyList()
 
-        val itemRegex = Regex("""<li\b.*?</li>""", setOf(RegexOption.DOT_MATCHES_ALL))
-        val hrefRegex = Regex("href=\"([^\"]+\\.apk)\"")
-        val nameRegex = Regex("""Truncate-text text-bold">([^<]+\.apk)""")
-        val sizeRegex = Regex(
-            """class="color-fg-muted text-right flex-shrink-0 flex-grow-0 ml-2 ml-sm-3 ml-md-4">([^<]+)</span>"""
-        )
-
-        return itemRegex.findAll(payload.body).mapNotNull { match ->
-            val itemHtml = match.value
-            val href = hrefRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
-            val name = nameRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
-            if (href.isBlank() || name.isBlank()) return@mapNotNull null
-
-            val sizeText = sizeRegex.find(itemHtml)?.groupValues?.getOrNull(1)?.trim().orEmpty()
-            ApkAsset(
-                name = name,
-                url = normalizeGithubPath(href),
-                size = parseAssetSizeBytes(sizeText)
-            )
-        }.toList()
+        return AppReleaseHtmlParser.assets(payload.body, APP_REPO, tagName)
     }
 
     private fun extractReleaseTag(finalUrl: String, html: String): String? {
@@ -433,77 +413,9 @@ class AppUpdateService @Inject constructor(
             }
     }
 
-    private fun extractReleaseNotesFromHtml(html: String): String {
-        val metaRegex = Regex(
-            "(?:property|name)=\\\"(?:og:description|twitter:description)\\\"\\s+content=\\\"(.*?)\\\"",
-            setOf(RegexOption.DOT_MATCHES_ALL)
-        )
-        val bodyRegex = Regex(
-            """data-test-selector="body-content"[^>]*>(.*?)</div>\s*</div>""",
-            setOf(RegexOption.DOT_MATCHES_ALL)
-        )
+    private fun extractReleaseNotesFromHtml(html: String): String = AppReleaseHtmlParser.notes(html)
 
-        val raw = bodyRegex.find(html)?.groupValues?.getOrNull(1)
-            ?: metaRegex.find(html)?.groupValues?.getOrNull(1)
-            ?: ""
-        return htmlToPlainText(raw, preserveStructure = bodyRegex.containsMatchIn(html))
-    }
-
-    private fun htmlToPlainText(raw: String, preserveStructure: Boolean = false): String {
-        if (raw.isBlank()) return ""
-        val normalizedRaw = if (preserveStructure) {
-            raw
-                .replace(Regex("(?i)<br\\s*/?>"), "\n")
-                .replace(Regex("(?i)</(p|div|h1|h2|h3|h4|h5|h6|li|ul|ol|pre|blockquote)>"), "$0\n")
-                .replace(Regex("(?i)<li[^>]*>"), "\n- ")
-                .replace(Regex("(?i)<h1[^>]*>"), "\n# ")
-                .replace(Regex("(?i)<h2[^>]*>"), "\n## ")
-                .replace(Regex("(?i)<h3[^>]*>"), "\n### ")
-                .replace(Regex("(?i)<h4[^>]*>"), "\n#### ")
-                .replace(Regex("(?i)<pre[^>]*><code[^>]*>"), "\n```text\n")
-                .replace(Regex("(?i)</code></pre>"), "\n```\n")
-                .replace(Regex("(?i)<code[^>]*>"), "`")
-                .replace(Regex("(?i)</code>"), "`")
-        } else {
-            raw
-        }
-        val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            Html.fromHtml(normalizedRaw, Html.FROM_HTML_MODE_LEGACY)
-        } else {
-            @Suppress("DEPRECATION")
-            Html.fromHtml(normalizedRaw)
-        }
-        return decoded.toString()
-            .replace("\u00A0", " ")
-            .replace(Regex("\n{3,}"), "\n\n")
-            .lines()
-            .joinToString("\n") { it.trimEnd() }
-            .trim()
-    }
-
-    private fun normalizeGithubPath(rawPath: String): String {
-        val trimmed = rawPath.trim()
-        return when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.startsWith("/") -> "https://github.com$trimmed"
-            else -> "https://github.com/$trimmed"
-        }
-    }
-
-    private fun parseAssetSizeBytes(sizeText: String): Long {
-        val match = Regex("""([0-9]+(?:\.[0-9]+)?)\s*([KMG]?B)""", RegexOption.IGNORE_CASE)
-            .find(sizeText.trim())
-            ?: return 0L
-        val value = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return 0L
-        val unit = match.groupValues.getOrNull(2)?.uppercase(Locale.US).orEmpty()
-        val multiplier = when (unit) {
-            "KB" -> 1024.0
-            "MB" -> 1024.0 * 1024.0
-            "GB" -> 1024.0 * 1024.0 * 1024.0
-            else -> 1.0
-        }
-        return (value * multiplier).toLong()
-    }
+    private fun htmlToPlainText(raw: String): String = org.jsoup.parser.Parser.unescapeEntities(raw, false).trim()
 
     private fun sanitizeReleaseNotes(raw: String): String {
         val clean = raw

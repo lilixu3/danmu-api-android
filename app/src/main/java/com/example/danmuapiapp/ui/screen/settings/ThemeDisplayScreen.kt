@@ -101,7 +101,7 @@ fun ThemeDisplayScreen(
     val configuration = LocalConfiguration.current
     val systemDpi = remember { viewModel.currentSystemDensityDpi() }
     val appCurrentDpi = configuration.densityDpi
-    val effectiveDpi = if (appDpiOverride > 0) appDpiOverride else systemDpi
+    val effectiveDpi = appCurrentDpi
     val presetDpi = remember(systemDpi) {
         listOf(
             (systemDpi * 0.85f).roundToInt(),
@@ -553,7 +553,7 @@ fun ThemeDisplayScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("仅对本应用生效，不会修改系统 DPI。")
+                    Text("仅对普通界面生效，兼容模式单独设置，不会修改系统 DPI。")
                     Text("系统 DPI：$systemDpi  ·  当前应用 DPI：$effectiveDpi")
                     Text("可用范围：${AppAppearancePrefs.APP_DPI_MIN}-${AppAppearancePrefs.APP_DPI_MAX}")
                     Row(
@@ -607,7 +607,7 @@ fun ThemeDisplayScreen(
                 }
                 SettingsDivider()
                 Text(
-                    text = "修改 DPI 后会自动刷新当前界面；如果无变化请手动重启应用。",
+                    text = "修改后会自动刷新当前界面；选择“跟随系统”可恢复普通界面的系统缩放。",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
             }

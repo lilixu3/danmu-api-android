@@ -35,7 +35,9 @@ object AppAppearancePrefs {
     const val PREF_KEY_BACKGROUND_RANDOM_URL_MIGRATED = "background_random_url_migrated"
     const val PREF_KEY_DARK_THEME_LEGACY = "dark_theme"
     const val PREF_KEY_HIDE_FROM_RECENTS = "hide_from_recents"
+    // The historical key belongs to the normal interface. Compat starts at system DPI.
     const val PREF_KEY_APP_DPI_OVERRIDE = "app_dpi_override"
+    const val PREF_KEY_COMPAT_DPI_OVERRIDE = "compat_dpi_override"
 
     // 仅影响应用内显示：小于等于 0 表示跟随系统。
     const val APP_DPI_SYSTEM = -1
@@ -202,14 +204,14 @@ object AppAppearancePrefs {
         prefs.edit { putBoolean(PREF_KEY_HIDE_FROM_RECENTS, enabled) }
     }
 
-    fun readAppDpiOverride(prefs: SharedPreferences): Int {
-        val raw = prefs.safeGetInt(PREF_KEY_APP_DPI_OVERRIDE, APP_DPI_SYSTEM)
+    fun readAppDpiOverride(prefs: SharedPreferences, compat: Boolean = false): Int {
+        val raw = prefs.safeGetInt(dpiPreferenceKey(compat), APP_DPI_SYSTEM)
         return normalizeAppDpiOverride(raw)
     }
 
-    fun writeAppDpiOverride(prefs: SharedPreferences, dpi: Int) {
+    fun writeAppDpiOverride(prefs: SharedPreferences, dpi: Int, compat: Boolean = false) {
         prefs.edit {
-            putInt(PREF_KEY_APP_DPI_OVERRIDE, normalizeAppDpiOverride(dpi))
+            putInt(dpiPreferenceKey(compat), normalizeAppDpiOverride(dpi))
         }
     }
 
@@ -218,14 +220,25 @@ object AppAppearancePrefs {
         return dpi.coerceIn(APP_DPI_MIN, APP_DPI_MAX)
     }
 
-    fun wrapContextWithAppDpi(base: Context, includeCompatMode: Boolean = false): Context {
-        if (!includeCompatMode && DeviceCompatMode.shouldUseCompatMode(base)) return base
+    internal fun dpiPreferenceKey(compat: Boolean): String =
+        if (compat) PREF_KEY_COMPAT_DPI_OVERRIDE else PREF_KEY_APP_DPI_OVERRIDE
+
+    fun systemDensityDpi(context: Context): Int =
+        context.applicationContext.resources.displayMetrics.densityDpi
+
+    internal fun shouldRecreateForDpi(savedDpi: Int, targetDpi: Int, actualDpi: Int, systemDpi: Int): Boolean =
+        savedDpi != targetDpi || actualDpi != if (targetDpi > 0) targetDpi else systemDpi
+
+    /** Each Activity chooses its own scale explicitly, independent of the mode preference. */
+    fun wrapContextWithAppDpi(base: Context, compat: Boolean = false): Context {
         val prefs = base.getSharedPreferences(PREFS_UI_SCALE_LEGACY, Context.MODE_PRIVATE)
-        val overrideDpi = readAppDpiOverride(prefs)
-        if (overrideDpi == APP_DPI_SYSTEM) return base
-        val cfg = Configuration(base.resources.configuration)
-        if (cfg.densityDpi == overrideDpi) return base
-        cfg.densityDpi = overrideDpi
+        val overrideDpi = readAppDpiOverride(prefs, compat)
+        // Derive resets from the application resources, never the scaled Activity.
+        val targetDpi = if (overrideDpi > 0) overrideDpi else systemDensityDpi(base)
+        if (base.resources.configuration.densityDpi == targetDpi) return base
+        // Override density only. Copying the full configuration would also pin the
+        // old orientation, window size, font scale, locale and night mode.
+        val cfg = Configuration().apply { densityDpi = targetDpi }
         return base.createConfigurationContext(cfg)
     }
 

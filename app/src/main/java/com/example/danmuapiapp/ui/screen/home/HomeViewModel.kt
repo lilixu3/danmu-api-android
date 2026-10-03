@@ -174,6 +174,8 @@ class HomeViewModel @Inject constructor(
         private set
     var appUpdatePromptDownloadUrls by mutableStateOf<List<String>>(emptyList())
         private set
+    var isRefreshingAppUpdatePrompt by mutableStateOf(false)
+        private set
     var appUpdateMessage by mutableStateOf<String?>(null)
         private set
     var foregroundAnnouncementPrompt by mutableStateOf<AppAnnouncement?>(null)
@@ -1009,6 +1011,41 @@ class HomeViewModel @Inject constructor(
         showAppUpdatePromptDialog = false
         appUpdateInstaller.openMethodDialog()
         appForegroundUpdateChecker.consumeLatestPrompt(appUpdatePromptLatestVersion)
+        if (appUpdatePromptDownloadUrls.isEmpty()) refreshForegroundAppUpdatePrompt()
+    }
+
+    fun refreshForegroundAppUpdatePrompt() {
+        if (isRefreshingAppUpdatePrompt || isDownloadingAppUpdate) return
+        val expectedVersion = appUpdatePromptLatestVersion ?: return
+        isRefreshingAppUpdatePrompt = true
+        viewModelScope.launch {
+            try {
+                appUpdateService.checkLatestRelease().fold(
+                    onSuccess = { info ->
+                        if (appUpdatePromptLatestVersion != expectedVersion) return@fold
+                        if (!info.hasUpdate) {
+                            showAppUpdatePromptDialog = false
+                            appUpdateInstaller.dismissMethodDialog()
+                            appUpdateMessage = "当前已是最新版本"
+                        } else {
+                            applyForegroundAppUpdateInfo(info)
+                            if (info.downloadUrls.isEmpty()) appUpdateMessage = "暂未获取到兼容的安装包，可重试检查或使用浏览器下载"
+                        }
+                    },
+                    onFailure = { appUpdateMessage = "获取安装包失败：${it.message ?: "请稍后重试"}" }
+                )
+            } finally {
+                isRefreshingAppUpdatePrompt = false
+            }
+        }
+    }
+
+    private fun applyForegroundAppUpdateInfo(info: AppUpdateService.CheckResult) {
+        appUpdatePromptCurrentVersion = info.currentVersion
+        appUpdatePromptLatestVersion = info.latestVersion
+        appUpdatePromptReleaseNotes = info.releaseNotes
+        appUpdatePromptReleasePage = info.releasePage
+        appUpdatePromptDownloadUrls = info.downloadUrls
     }
 
     fun dismissForegroundAppUpdatePrompt() {
@@ -1395,11 +1432,7 @@ class HomeViewModel @Inject constructor(
             appForegroundUpdateChecker.latestUpdate.collect { info ->
                 if (info == null || !info.hasUpdate) return@collect
 
-                appUpdatePromptCurrentVersion = info.currentVersion
-                appUpdatePromptLatestVersion = info.latestVersion
-                appUpdatePromptReleaseNotes = info.releaseNotes
-                appUpdatePromptReleasePage = info.releasePage
-                appUpdatePromptDownloadUrls = info.downloadUrls
+                applyForegroundAppUpdateInfo(info)
 
                 if (!showAppUpdateMethodDialog && !isDownloadingAppUpdate && !showInstallAppUpdateDialog) {
                     showAppUpdatePromptDialog = true

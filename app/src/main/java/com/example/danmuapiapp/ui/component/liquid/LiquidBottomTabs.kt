@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -246,6 +247,9 @@ fun LiquidBottomTabs(
             ) {
                 Row(
                     Modifier
+                        // This row only records the glass backdrop; its duplicated tabs must
+                        // never become invisible D-pad/keyboard destinations.
+                        .focusProperties { canFocus = false }
                         .clearAndSetSemantics {}
                         .alpha(0f)
                         .layerBackdrop(tabsBackdrop)

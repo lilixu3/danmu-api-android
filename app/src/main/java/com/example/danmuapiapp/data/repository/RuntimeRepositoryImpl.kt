@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import com.example.danmuapiapp.data.util.WatcherRegistry
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
@@ -129,6 +130,8 @@ class RuntimeRepositoryImpl @Inject constructor(
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     }
 
+    private val mayRecoverRootModeAfterReinstall = !RuntimeModePrefs.hasExplicitSelection(context)
+    private var rootRecoveryChecked = false
     private val _runtimeState = MutableStateFlow(loadInitialState())
     override val runtimeState: StateFlow<RuntimeState> = _runtimeState.asStateFlow()
     private val runtimeTransitionSequence = AtomicLong(0L)
@@ -304,7 +307,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         scope.launch {
-            reconcileInitialState()
+            operationMutex.withLock { reconcileInitialState() }
         }
         startNormalStateReconciler()
         startNetworkMonitor()
@@ -563,7 +566,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 "RuntimeRepository",
                 "后台恢复通知时确认运行时已退出（重试 ${probe.attempts} 次，耗时 ${probe.elapsedMs} ms），改为完整启动 Node"
             )
-            runCatching { NodeService.start(context, userInitiated = false) }
+            runCatching { NodeService.requestRecoveryStart(context) }
             return
         }
         val manuallyHidden = NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
@@ -727,6 +730,14 @@ class RuntimeRepositoryImpl @Inject constructor(
                 }
             }
 
+            if (mode == RunMode.Root && current.status != ServiceStatus.Running && current.status != ServiceStatus.Starting) {
+                val recovered = RootRuntimeController.recoverRuntime(context, current.port)
+                if (recovered != null) {
+                    adoptRecoveredRootRuntime(recovered)
+                    return@launchSerializedUserOperation
+                }
+            }
+
             val transitionId = beginRuntimeTransition(
                 kind = RuntimeTransitionKind.SwitchingRunMode,
                 message = "正在从${current.runMode.label}模式切换到${mode.label}模式…"
@@ -785,6 +796,15 @@ class RuntimeRepositoryImpl @Inject constructor(
                 stopWorkDirHotReload()
 
                 addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
+
+                if (mode == RunMode.Root) {
+                    val recovered = RootRuntimeController.recoverRuntime(context, current.port)
+                    rootRecoveryChecked = true
+                    if (recovered != null) {
+                        adoptRecoveredRootRuntime(recovered)
+                        return@launchSerializedUserOperation
+                    }
+                }
 
                 if (shouldResume) {
                     updateRuntimeTransition(transitionId, "已切换到${mode.label}模式，正在启动服务…")
@@ -1242,6 +1262,11 @@ class RuntimeRepositoryImpl @Inject constructor(
             }
 
             RunMode.Root -> {
+                val recovered = RootRuntimeController.recoverRuntime(context, state.port)
+                if (recovered != null) {
+                    adoptRecoveredRootRuntime(recovered)
+                    return
+                }
                 armCandidateObservation(state.variant, state.runMode)
                 val result = RootRuntimeController.start(context, state.port, quickMode = false)
                 if (result.ok) {
@@ -1825,7 +1850,54 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun adoptRecoveredRootRuntime(recovered: RootRuntimeController.RecoveredRuntime) {
+        val before = _runtimeState.value
+        val env = recovered.env
+        val token = if (env.isNotEmpty()) RuntimeTokenNormalizer.normalizeInput(env["TOKEN"].orEmpty()) else before.token
+        val variant = normalizeVariantKey(env["DANMU_API_VARIANT"])?.let { key -> ApiVariant.entries.firstOrNull { it.key == key } } ?: before.variant
+        val listenMode = RuntimeListenMode.fromBindHost(env[RuntimeListenMode.ENV_KEY]) ?: before.listenMode
+        RuntimeModePrefs.put(context, RunMode.Root)
+        prefs.edit {
+            putInt("port", recovered.port)
+            putString("token", token)
+            putString(RuntimeListenMode.PREFERENCE_KEY, listenMode.key)
+        }
+        persistSelectedVariant(variant, commit = true)
+        _runtimeState.update {
+            it.copy(runMode = RunMode.Root, port = recovered.port, token = token, variant = variant,
+                listenMode = listenMode, pid = recovered.pid, errorMessage = null)
+        }
+        recovered.startedAtMs?.let { saveRuntimeStartedAt(it) }
+        rootRecoveryChecked = true
+        markRunning(
+            pid = recovered.pid, forceNewStart = false,
+            statusMessage = if (recovered.apiReady) "已接管正在运行的 Root 服务"
+                else "已接管 Root 进程，健康接口暂未响应，可停止或重启"
+        )
+        addLog(LogLevel.Info, "已恢复 Root 进程控制，PID=${recovered.pid}，端口=${recovered.port}")
+    }
+
     private suspend fun reconcileInitialState() {
+        val before = _runtimeState.value
+        if (!rootRecoveryChecked && before.transition == null) {
+            rootRecoveryChecked = true
+            val recovered = when {
+                before.runMode == RunMode.Root -> RootRuntimeController.recoverRuntime(context, before.port)
+                mayRecoverRootModeAfterReinstall && !isNormalProcessRunning() -> {
+                    val passive = RootRuntimeController.recoverRuntimePassive(context, before.port)
+                    val shouldTryRoot = com.example.danmuapiapp.data.service.RootRuntimeRecovery.shouldTryAfterDataLoss(
+                        noExplicitMode = true, normalProcessRunning = false,
+                        rootHealthMatches = passive != null, portOpen = isPortOpen(before.port)
+                    )
+                    if (shouldTryRoot) RootRuntimeController.recoverRuntime(context, before.port) ?: passive else null
+                }
+                else -> null
+            }
+            if (recovered != null) {
+                adoptRecoveredRootRuntime(recovered)
+                return
+            }
+        }
         val state = _runtimeState.value
         if (
             state.status == ServiceStatus.Running ||
@@ -2640,7 +2712,7 @@ class RuntimeRepositoryImpl @Inject constructor(
     ) {
         val rootPath: String = rootDir.absolutePath
         private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
-        private val observers = ConcurrentHashMap<String, FileObserver>()
+        private val observers = WatcherRegistry<FileObserver> { it.stopWatching() }
         private val mask = FileObserver.CLOSE_WRITE or
             FileObserver.MODIFY or
             FileObserver.ATTRIB or
@@ -2656,10 +2728,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         fun stop() {
-            observers.values.forEach { observer ->
-                runCatching { observer.stopWatching() }
-            }
-            observers.clear()
+            observers.stop()
         }
 
         private fun createFileObserver(path: String, onEvent: (Int, String?) -> Unit): FileObserver {
@@ -2681,34 +2750,37 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
 
         private fun watchRecursively(dir: File) {
-            if (!dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
+            if (observers.isStopped || !dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
             val key = runCatching { dir.canonicalPath }.getOrElse { dir.absolutePath }
-            if (observers.containsKey(key)) return
+            val registered = observers.register(key) {
+                val observer = createFileObserver(key) { event, path ->
+                    if (observers.isStopped) return@createFileObserver
+                    val target = if (path.isNullOrBlank()) {
+                        File(key)
+                    } else {
+                        File(key, path)
+                    }
+                    if (shouldIgnore(target)) return@createFileObserver
 
-            val observer = createFileObserver(key) { event, path ->
-                val target = if (path.isNullOrBlank()) {
-                    File(key)
-                } else {
-                    File(key, path)
-                }
-                if (shouldIgnore(target)) return@createFileObserver
+                    if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
+                        watchRecursively(target)
+                    }
 
-                if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
-                    watchRecursively(target)
-                }
+                    val rel = toRelative(target).ifBlank { target.name }
+                    onChanged(rel)
 
-                val rel = toRelative(target).ifBlank { target.name }
-                onChanged(rel)
-
-                if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
-                    observers.remove(key)?.let { removed ->
-                        runCatching { removed.stopWatching() }
+                    if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
+                        observers.remove(key)
                     }
                 }
-            }
 
-            observer.startWatching()
-            observers[key] = observer
+                try { observer.startWatching() } catch (error: Exception) {
+                    runCatching { observer.stopWatching() }
+                    throw error
+                }
+                observer
+            }
+            if (!registered) return
             dir.listFiles()?.filter { it.isDirectory }?.forEach { child ->
                 watchRecursively(child)
             }

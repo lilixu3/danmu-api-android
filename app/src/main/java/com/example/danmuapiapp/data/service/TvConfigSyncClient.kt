@@ -61,17 +61,17 @@ class TvConfigSyncClient @Inject constructor(
                     val parsed = raw.takeIf { it.isNotBlank() }?.let {
                         runCatching { TvConfigSyncCodec.decodeResponse(it) }.getOrNull()
                     }
-                    if (parsed != null && !parsed.ok) {
-                        error(parsed.message.ifBlank { "电视端未接受配置" })
-                    }
-                    parsed?.message?.ifBlank { "配置已同步到电视端" } ?: "配置已同步到电视端"
+                    requireNotNull(parsed) { "电视端未返回有效的同步确认，不能确认同步成功" }
+                    if (!parsed.ok) error(parsed.message.ifBlank { "电视端未接受配置" })
+                    parsed.message.ifBlank { "配置已同步到电视端" }
                 }
         }
     }
 
-    private fun buildPayload(): TvConfigSyncPayload {
+    private suspend fun buildPayload(): TvConfigSyncPayload {
         val runtime = runtimeRepository.runtimeState.value
-        val envContent = envConfigRepository.rawContent.value.ifBlank { "# DanmuApiApp .env\n" }
+        // The StateFlow may never have been loaded on this screen, or belong to a previous run mode.
+        val envContent = readTvSyncEnvContent(envConfigRepository)
         val displayNames = settingsRepository.coreDisplayNames.value
         return TvConfigSyncPayload(
             sourceDeviceName = buildDeviceName(),
@@ -110,4 +110,12 @@ internal fun encodeTvConfigSyncPayloadWithoutGithubToken(payload: TvConfigSyncPa
     return JsonObject(
         root + ("settings" to JsonObject(settings - "githubToken"))
     ).toString()
+}
+
+internal suspend fun readTvSyncEnvContent(repository: EnvConfigRepository): String {
+    val content = repository.readCurrentRawContent().getOrThrow()
+    require(com.example.danmuapiapp.data.util.DotEnvCodec.parse(content).isNotEmpty()) {
+        "当前工作目录没有可同步的配置，请先确认核心配置已保存"
+    }
+    return content
 }

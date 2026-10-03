@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
@@ -62,6 +63,7 @@ import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 @Composable
 fun SettingsHubScreen(
     onOpenRuntimeAndDir: () -> Unit,
+    onOpenCompatMode: () -> Unit,
     onOpenThemeDisplay: () -> Unit,
     onOpenWorkDir: () -> Unit,
     onOpenServiceConfig: () -> Unit,
@@ -298,6 +300,13 @@ fun SettingsHubScreen(
             }
 
             SettingsGroup(title = "偏好与信息") {
+                SettingsItem(
+                    title = "兼容模式",
+                    subtitle = "界面选择、电视 / 盒子与遥控器操作",
+                    icon = Icons.Rounded.Tv,
+                    onClick = onOpenCompatMode
+                )
+                SettingsDivider()
                 SettingsItem(
                     title = "主题与显示",
                     subtitle = "主题模式、访问入口形式与界面缩放",

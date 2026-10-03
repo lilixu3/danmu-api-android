@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
-import com.example.danmuapiapp.data.util.PortProbe
 
 /**
  * 系统定时心跳（实验）调度器。
@@ -44,46 +43,41 @@ object SystemHeartbeatScheduler {
 
     private fun tickOnce(context: Context) {
         if (!NodeKeepAlivePrefs.shouldScheduleSystemHeartbeat(context)) return
-        val port = context.getSharedPreferences("runtime", Context.MODE_PRIVATE).getInt("port", 9321)
-        if (port in 1..65535 && isNodeRunning(context, port)) return
-
-        val projectDir = RuntimePaths.normalProjectDir(context)
-        if (!NodeProjectManager.hasSelectedCoreInstalled(context, projectDir)) return
-        runCatching {
-            NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                context = context,
-                targetProjectDir = projectDir
-            )
+        NodeHeartbeatRecovery.tick(context, "SystemHeartbeat") {
+            NodeKeepAlivePrefs.shouldScheduleSystemHeartbeat(context)
         }
-        val recovered = runCatching {
-            NodeService.recoverStaleProcessIfNeeded(context, port)
-        }.getOrDefault(true)
-        if (!recovered) return
-        runCatching { NodeService.start(context, userInitiated = false) }
     }
 
     private fun scheduleNext(context: Context, resetBeforeSchedule: Boolean) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val pendingIntent = buildPendingIntent(context, create = true) ?: return
-        if (resetBeforeSchedule) {
-            alarmManager.cancel(pendingIntent)
-        }
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val pendingIntent = buildPendingIntent(context, create = true) ?: return
+            if (resetBeforeSchedule) {
+                alarmManager.cancel(pendingIntent)
+            }
 
-        val intervalMinutes = NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(context)
-        val triggerAt = SystemClock.elapsedRealtime() + intervalMinutes * 60_000L
-        alarmManager.setAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            triggerAt,
-            pendingIntent
-        )
+            val intervalMinutes = NodeKeepAlivePrefs.getEffectiveSystemHeartbeatIntervalMinutes(context)
+            val triggerAt = SystemClock.elapsedRealtime() + intervalMinutes * 60_000L
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+        } catch (error: Exception) {
+            AppDiagnosticLogger.w(context, "SystemHeartbeat", "无法调度系统心跳，不影响手动启停服务：${error.message}", error)
+        }
     }
 
     fun cancel(context: Context) {
         val appContext = context.applicationContext
-        val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val pendingIntent = buildPendingIntent(appContext, create = false) ?: return
-        alarmManager.cancel(pendingIntent)
-        pendingIntent.cancel()
+        try {
+            val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val pendingIntent = buildPendingIntent(appContext, create = false) ?: return
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        } catch (error: Exception) {
+            AppDiagnosticLogger.w(appContext, "SystemHeartbeat", "取消系统心跳失败；停止意图仍会阻止恢复", error)
+        }
     }
 
     private fun buildPendingIntent(context: Context, create: Boolean): PendingIntent? {
@@ -100,7 +94,4 @@ object SystemHeartbeatScheduler {
         return PendingIntent.getBroadcast(context, REQUEST_CODE, intent, flags)
     }
 
-    private fun isNodeRunning(context: Context, port: Int): Boolean {
-        return PortProbe.isOpen(port = port)
-    }
 }

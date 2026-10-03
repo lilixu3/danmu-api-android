@@ -41,6 +41,7 @@ object CoreRoute {
 
 object SettingsRoute {
     const val RuntimeAndDir = "settings_runtime_dir"
+    const val CompatMode = "settings_compat_mode"
     const val ThemeDisplay = "settings_theme_display"
     const val WorkDir = "settings_work_dir"
     const val ServiceConfig = "settings_service_config"

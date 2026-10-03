@@ -1,10 +1,8 @@
 package com.example.danmuapiapp.data.repository
 
 import android.content.Context
-import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.util.SecureStringStore
 import com.example.danmuapiapp.domain.model.AdminSessionState
-import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -13,8 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -45,35 +42,20 @@ class AdminSessionRepositoryImpl @Inject constructor(
     @Volatile
     private var sessionToken: String = secureStore.get(SESSION_KEY).trim()
 
-    @Volatile
-    private var envLoadedOnce: Boolean = false
-
     init {
         repoScope.launch {
-            combine(
-                envConfigRepository.envVars,
-                envConfigRepository.isCatalogLoading
-            ) { env, loading ->
-                env to loading
-            }.collectLatest { (env, loading) ->
-                val latest = env["ADMIN_TOKEN"]?.trim().orEmpty()
-                configuredToken = latest
-                if (!loading) {
-                    envLoadedOnce = true
-                }
-                if (envLoadedOnce &&
-                    (latest.isBlank() || (sessionToken.isNotBlank() && sessionToken != latest))
-                ) {
+            envConfigRepository.loadedEnvVars.collect { env ->
+                // 未加载或读取失败时保留会话，不能用占位空表撤销已保存的登录。
+                if (env == null) return@collect
+                configuredToken = env["ADMIN_TOKEN"]?.trim().orEmpty()
+                if (sessionToken != restoreAdminSessionToken(sessionToken, env)) {
                     clearSessionToken()
                 }
                 publishState()
             }
         }
-        if (RuntimeModePrefs.get(context) == RunMode.Normal) {
-            refresh()
-        } else {
-            publishState()
-        }
+        // Root 模式同样需要异步读取配置，才能校验并恢复已保存的会话。
+        refresh()
     }
 
     override fun refresh() {
@@ -113,7 +95,7 @@ class AdminSessionRepositoryImpl @Inject constructor(
                 envConfigRepository.setValue("ADMIN_TOKEN", candidate)
                 envConfigRepository.reload()
 
-                val confirmed = withTimeoutOrNull(2200L) {
+                val confirmed = withTimeoutOrNull(20_000L) {
                     while (true) {
                         if (configuredToken == candidate) {
                             return@withTimeoutOrNull candidate

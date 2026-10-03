@@ -63,6 +63,7 @@ class CompatTvConfigSyncServer(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stateMutex = Mutex()
+    private val applyMutex = Mutex()
     private val token = UUID.randomUUID().toString().replace("-", "").take(12)
     private val deviceName = buildDeviceName()
 
@@ -232,7 +233,7 @@ class CompatTvConfigSyncServer(
                     return
                 }
 
-                val message = applyPayload(payload)
+                val message = applyMutex.withLock { applyPayload(payload) }
                 writeResponse(output, 200, TvConfigSyncResponse(true, message))
             }.onFailure { error ->
                 runCatching {
@@ -254,7 +255,11 @@ class CompatTvConfigSyncServer(
     private suspend fun applyPayload(payload: TvConfigSyncPayload): String {
         require(payload.envContent.isNotBlank()) { "同步内容为空" }
 
+        val expected = DotEnvCodec.parse(payload.envContent)
+        require(expected.isNotEmpty()) { "同步内容没有可用的配置变量" }
         envConfigRepository.saveRawContent(payload.envContent).getOrThrow()
+        val stored = DotEnvCodec.parse(envConfigRepository.readCurrentRawContent().getOrThrow())
+        check(expected.all { (key, value) -> stored[key] == value }) { "配置写入核验失败，请检查当前工作目录" }
 
         val runtimeSnapshot = runtimeRepository.runtimeState.value
         val requestedVariant = ApiVariant.entries.firstOrNull {
@@ -307,7 +312,9 @@ class CompatTvConfigSyncServer(
             if (shouldRestart) {
                 restartNote = "服务正在重启"
             }
-        } else if (variantChanged) {
+        } else {
+            // Even if port/token/variant are unchanged, the source and business variables changed.
+            // A restart also applies the full .env on boxes with conservative hot reload disabled.
             when (currentStatus) {
                 ServiceStatus.Running -> {
                     cancelPendingRestart()
@@ -344,7 +351,7 @@ class CompatTvConfigSyncServer(
         updateState {
             it.copy(
                 statusText = if (variantNote.isBlank()) "上次同步成功" else "上次同步成功：$variantNote",
-                lastSyncSummary = "$timeText 来自 $sourceName"
+                lastSyncSummary = "$timeText 来自 $sourceName · ${expected.size} 项配置已写入"
             )
         }
         return message

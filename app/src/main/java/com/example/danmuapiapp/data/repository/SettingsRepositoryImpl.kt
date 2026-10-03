@@ -156,6 +156,8 @@ class SettingsRepositoryImpl @Inject constructor(
 
     private val _appDpiOverride = MutableStateFlow(AppAppearancePrefs.readAppDpiOverride(uiScalePrefs))
     override val appDpiOverride: StateFlow<Int> = _appDpiOverride.asStateFlow()
+    private val _compatDpiOverride = MutableStateFlow(AppAppearancePrefs.readAppDpiOverride(uiScalePrefs, compat = true))
+    override val compatDpiOverride: StateFlow<Int> = _compatDpiOverride.asStateFlow()
 
     private val _hideFromRecents = MutableStateFlow(AppAppearancePrefs.readHideFromRecents(uiPrefs))
     override val hideFromRecents: StateFlow<Boolean> = _hideFromRecents.asStateFlow()
@@ -349,6 +351,12 @@ class SettingsRepositoryImpl @Inject constructor(
         _appDpiOverride.value = normalized
     }
 
+    override fun setCompatDpiOverride(dpi: Int) {
+        val normalized = AppAppearancePrefs.normalizeAppDpiOverride(dpi)
+        AppAppearancePrefs.writeAppDpiOverride(uiScalePrefs, normalized, compat = true)
+        _compatDpiOverride.value = normalized
+    }
+
     override fun setHideFromRecents(enabled: Boolean) {
         AppAppearancePrefs.writeHideFromRecents(uiPrefs, enabled)
         _hideFromRecents.value = enabled
@@ -539,6 +547,7 @@ class SettingsRepositoryImpl @Inject constructor(
         _glassTuning.value = AppAppearancePrefs.readGlassTuning(uiPrefs)
         _appBackground.value = AppAppearancePrefs.readAppBackground(uiPrefs)
         _appDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs)
+        _compatDpiOverride.value = AppAppearancePrefs.readAppDpiOverride(uiScalePrefs, compat = true)
         _hideFromRecents.value = AppAppearancePrefs.readHideFromRecents(uiPrefs)
         _tokenVisible.value = settingsPrefs.safeGetBoolean("token_visible", false)
         _logEnabled.value = settingsPrefs.safeGetBoolean("log_enabled", true)

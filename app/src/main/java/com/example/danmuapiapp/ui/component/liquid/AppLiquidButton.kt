@@ -4,6 +4,7 @@
  */
 package com.example.danmuapiapp.ui.component.liquid
 
+import com.example.danmuapiapp.ui.component.remoteFocusHighlight
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -199,6 +200,7 @@ fun AppLiquidButton(
                         )
                 }
             )
+                .remoteFocusHighlight(shape, enabled)
                 .clickable(
                 interactionSource = null,
                 indication = if (glassEnabled && enabled) null else LocalIndication.current,

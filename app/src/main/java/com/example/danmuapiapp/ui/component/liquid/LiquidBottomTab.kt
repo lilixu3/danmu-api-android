@@ -4,6 +4,7 @@
  */
 package com.example.danmuapiapp.ui.component.liquid
 
+import com.example.danmuapiapp.ui.component.remoteFocusHighlight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -33,6 +34,7 @@ fun RowScope.LiquidBottomTab(
     Column(
         modifier
             .clip(Capsule())
+            .remoteFocusHighlight(Capsule())
             .selectable(
                 selected = selected,
                 interactionSource = null,

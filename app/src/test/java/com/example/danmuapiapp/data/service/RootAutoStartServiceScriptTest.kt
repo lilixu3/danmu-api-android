@@ -40,4 +40,17 @@ class RootAutoStartServiceScriptTest {
         val output = shell.inputStream.bufferedReader().readText()
         assertEquals(output, 0, shell.waitFor())
     }
+    @Test fun bootDetectsNiceNameAndVerifiesRuntimeProject() {
+        val script = RootAutoStartScriptBuilders.buildServiceSh(
+            "module", "/module", "/flags", "/enabled", "/mode", "Entry", packageName = "example.app"
+        )
+        assertTrue(script.contains(RootRuntimeRecovery.identityFunctionShell()))
+        assertTrue(script.contains("owned_root \"\$OLD\""))
+        assertTrue(script.contains("owned_root \"\$NEW\""))
+        assertTrue(script.contains("PROJECT=\"\$PROJ\""))
+        val shell = ProcessBuilder("sh", "-n").redirectErrorStream(true).start()
+        shell.outputStream.bufferedWriter().use { it.write(script) }
+        assertEquals(shell.inputStream.bufferedReader().readText(), 0, shell.waitFor())
+    }
+
 }

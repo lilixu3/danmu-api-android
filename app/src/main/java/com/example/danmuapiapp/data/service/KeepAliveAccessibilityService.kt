@@ -10,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
-import android.widget.Toast
 import com.example.danmuapiapp.data.util.PortProbe
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -28,11 +27,10 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    @Volatile private var destroyed = false
+    private var lastKnownNodeRunning = false
     private var lastEventTickUptimeMs = 0L
-    private var lastPermToastMs = 0L
     private var isEventListeningEnabled = true
-    @Volatile
-    private var restartInFlight = false
     private val activeEventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
     private val probeExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "a11y-keepalive-probe").apply { isDaemon = true }
@@ -43,11 +41,20 @@ class KeepAliveAccessibilityService : AccessibilityService() {
             if (intent?.action != NodeService.ACTION_STATUS) return
             val status = intent.getStringExtra(NodeService.EXTRA_STATUS).orEmpty()
             if (status == NodeService.STATUS_STOPPED || status == NodeService.STATUS_ERROR) {
-                handler.post { runCatching { tickOnce() } }
+                handler.post {
+                    runCatching {
+                        refreshA11yEventListeningMode(nodeRunning = false)
+                        tickOnce()
+                    }
+                }
             } else {
                 handler.post {
                     runCatching {
-                        refreshA11yEventListeningMode()
+                        if (status == NodeService.STATUS_RUNNING) {
+                            refreshA11yEventListeningMode(nodeRunning = true)
+                        } else {
+                            refreshA11yEventListeningMode()
+                        }
                         refreshHeartbeatSchedule()
                     }
                 }
@@ -109,6 +116,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        destroyed = true
         handler.removeCallbacksAndMessages(null)
         probeExecutor.shutdownNow()
         unregisterStatusReceiverSafe()
@@ -117,6 +125,7 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     }
 
     private fun tickOnce() {
+        if (destroyed) return
         try {
             if (NodeKeepAlivePrefs.isRootMode(this)) {
                 disableSelfAndCleanup()
@@ -130,79 +139,21 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
             if (!NodeKeepAlivePrefs.isDesiredRunning(this)) return
 
-            if (!NodeKeepAlivePrefs.hasPostNotificationsPermission(this)) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastPermToastMs > 10 * 60_000L) {
-                        lastPermToastMs = now
-                        Toast.makeText(
-                            this,
-                            "无障碍保活需要通知权限才能稳定拉起前台服务",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }
-                return
-            }
-
             // socket 探测与核心文件检查都是阻塞 IO，放到后台线程执行。
             probeExecutor.execute {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
                 val appContext = applicationContext
-                val running = runCatching { isNodeRunning() }.getOrDefault(true)
-                if (running) {
-                    handler.post { runCatching { refreshA11yEventListeningMode(nodeRunning = true) } }
-                    return@execute
+                if (destroyed) return@execute
+                NodeHeartbeatRecovery.tick(appContext, "AccessibilityKeepAlive") {
+                    !destroyed && NodeKeepAlivePrefs.shouldAllowA11yRestart(appContext)
                 }
-                val projectDir = RuntimePaths.normalProjectDir(appContext)
-                val coreInstalled = runCatching {
-                    NodeProjectManager.hasSelectedCoreInstalled(appContext, projectDir)
-                }.getOrDefault(false)
-                if (!coreInstalled) return@execute
-
-                triggerRecoveryAwareStart(projectDir)
-                handler.post { runCatching { refreshA11yEventListeningMode(nodeRunning = false) } }
+                if (destroyed) return@execute
+                val running = runCatching { isNodeRunning() }.getOrDefault(true)
+                handler.post { runCatching { refreshA11yEventListeningMode(nodeRunning = running) } }
             }
         } finally {
             refreshHeartbeatSchedule()
         }
-    }
-
-    private fun triggerRecoveryAwareStart(projectDir: java.io.File) {
-        if (restartInFlight) return
-        restartInFlight = true
-        val appContext = applicationContext
-        Thread {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-            try {
-                runCatching {
-                    runCatching {
-                        NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                            context = appContext,
-                            targetProjectDir = projectDir
-                        )
-                    }
-                    val port = appContext.getSharedPreferences("runtime", Context.MODE_PRIVATE)
-                        .getInt("port", 9321)
-                    val recovered = runCatching {
-                        NodeService.recoverStaleProcessIfNeeded(appContext, port)
-                    }.getOrDefault(true)
-                    if (recovered) {
-                        runCatching { NodeService.start(appContext, userInitiated = false) }
-                    }
-                }.onFailure {
-                    AppDiagnosticLogger.e(appContext, TAG, "无障碍保活恢复失败", it)
-                }
-            } finally {
-                restartInFlight = false
-                handler.post {
-                    runCatching {
-                        refreshA11yEventListeningMode()
-                        refreshHeartbeatSchedule()
-                    }
-                }
-            }
-        }.start()
     }
 
     private fun isNodeRunning(): Boolean {
@@ -211,10 +162,11 @@ class KeepAliveAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * @param nodeRunning 由调用方传入的探测结果；主线程的低频调用方
-     *   （状态广播、onServiceConnected）可省略，此时才在当前线程探测。
+     * @param nodeRunning 后台探测或运行时广播结果。主线程只读取缓存，不连接 socket。
      */
-    private fun refreshA11yEventListeningMode(nodeRunning: Boolean = isNodeRunning()) {
+    private fun refreshA11yEventListeningMode(nodeRunning: Boolean = lastKnownNodeRunning) {
+        if (destroyed) return
+        lastKnownNodeRunning = nodeRunning
         val shouldListen = NodeKeepAlivePrefs.shouldAllowA11yRestart(this) && !nodeRunning
         if (shouldListen == isEventListeningEnabled) return
         val info = runCatching { serviceInfo }.getOrNull() ?: return
@@ -225,12 +177,14 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     private fun refreshHeartbeatSchedule() {
         handler.removeCallbacks(heartbeatRunnable)
+        if (destroyed) return
         if (!NodeKeepAlivePrefs.shouldRunA11yHeartbeat(this)) return
         val delayMs = NodeKeepAlivePrefs.getHeartbeatIntervalMinutes(this) * 60_000L
         handler.postDelayed(heartbeatRunnable, delayMs)
     }
 
     private fun disableSelfAndCleanup() {
+        destroyed = true
         handler.removeCallbacksAndMessages(null)
         unregisterStatusReceiverSafe()
         unregisterControlReceiverSafe()

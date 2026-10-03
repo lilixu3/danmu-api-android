@@ -8,7 +8,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.graphics.drawable.Icon
 import android.net.Uri
-import android.content.res.Resources
 import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -633,7 +632,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setAppDpiOverride(activity: Activity?, dpi: Int) {
         val normalized = AppAppearancePrefs.normalizeAppDpiOverride(dpi)
-        if (normalized == appDpiOverride.value) {
+        val actualDpi = activity?.resources?.displayMetrics?.densityDpi ?: currentSystemDensityDpi()
+        val refreshNeeded = AppAppearancePrefs.shouldRecreateForDpi(
+            appDpiOverride.value, normalized, actualDpi, currentSystemDensityDpi()
+        )
+        settingsRepo.setAppDpiOverride(normalized)
+        if (!refreshNeeded) {
             operationMessage = if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
                 "当前已是跟随系统 DPI"
             } else {
@@ -641,7 +645,6 @@ class SettingsViewModel @Inject constructor(
             }
             return
         }
-        settingsRepo.setAppDpiOverride(normalized)
         operationMessage = if (normalized == AppAppearancePrefs.APP_DPI_SYSTEM) {
             "已恢复跟随系统 DPI，正在刷新界面"
         } else {
@@ -650,7 +653,7 @@ class SettingsViewModel @Inject constructor(
         activity?.recreate()
     }
 
-    fun currentSystemDensityDpi(): Int = Resources.getSystem().displayMetrics.densityDpi
+    fun currentSystemDensityDpi(): Int = AppAppearancePrefs.systemDensityDpi(context)
 
     fun setHideFromRecents(enabled: Boolean) {
         settingsRepo.setHideFromRecents(enabled)

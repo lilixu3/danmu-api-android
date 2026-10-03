@@ -13,6 +13,11 @@ import java.io.File
 
 object EnvVarConfigLoader {
 
+    // Metadata reads are also used while constructing the launcher repositories.
+    // They must not unpack dependencies or wait for the extraction lock. The
+    // warmup/service paths prepare the project explicitly on an IO dispatcher.
+
+
     // envs.js imports these executable metadata values, so the lightweight parser
     // resolves the identifier from the core's output-format protocol here.
     private val DAN_ANY_OUTPUT_FORMATS = listOf(
@@ -55,9 +60,6 @@ object EnvVarConfigLoader {
 
     private fun readVariantFromEnv(context: Context): String? {
         val mode = currentRunMode(context)
-        if (mode == RunMode.Normal) {
-            runCatching { NodeProjectManager.ensureProjectExtracted(context) }
-        }
         val envFile = File(NodeProjectManager.projectDir(context, mode), "config/.env")
         val text = if (mode != RunMode.Normal) {
             rootReadText(envFile.absolutePath)
@@ -78,22 +80,29 @@ object EnvVarConfigLoader {
 
     private fun readEnvsJs(context: Context, variant: String): String? {
         val mode = currentRunMode(context)
-        if (mode == RunMode.Normal) {
-            runCatching { NodeProjectManager.ensureProjectExtracted(context) }
-        }
         val base = NodeProjectManager.projectDir(context, mode)
+        if (mode == RunMode.Normal) return readLocalCoreSource(base, variant)
+        for (file in coreSourceCandidates(base, variant)) {
+            if (!rootFileExists(file.absolutePath)) continue
+            return rootReadText(file.absolutePath)
+        }
+        return null
+    }
+
+    private fun coreSourceCandidates(base: File, variant: String): List<File> {
         val subdir = "danmu_api_$variant"
-        val candidates = listOf(
+        return listOf(
             File(base, "$subdir/danmu_api/configs/envs.js"),
+            File(base, "$subdir/danmu-api/configs/envs.js"),
             File(base, "$subdir/configs/envs.js"),
         )
-        for (f in candidates) {
-            if (mode != RunMode.Normal) {
-                if (!rootFileExists(f.absolutePath)) continue
-                return rootReadText(f.absolutePath)
-            }
-            if (!f.exists()) continue
-            return runCatching { f.readText(Charsets.UTF_8) }.getOrNull()
+    }
+
+    internal fun readLocalCoreSource(base: File, variant: String): String? {
+        // Read legacy archive layouts in place: startup must not migrate directories.
+        for (file in coreSourceCandidates(base, variant)) {
+            if (!file.isFile) continue
+            return runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
         }
         return null
     }

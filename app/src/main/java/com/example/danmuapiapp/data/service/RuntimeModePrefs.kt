@@ -18,6 +18,13 @@ object RuntimeModePrefs {
     private const val RUNTIME_MIRROR_PREFS = "runtime"
     private const val RUN_MODE_MIRROR_FILE = "runtime_mode"
 
+    fun hasExplicitSelection(context: Context): Boolean =
+        readModeMirror(File(context.noBackupFilesDir, RUN_MODE_MIRROR_FILE)) != null ||
+            listOf(PREFS_NAME, RUNTIME_MIRROR_PREFS).any { name ->
+                val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+                prefs.contains(KEY_RUN_MODE) || prefs.contains(KEY_ROOT_MODE_LEGACY)
+            }
+
     fun get(context: Context): RunMode {
         readModeMirror(File(context.noBackupFilesDir, RUN_MODE_MIRROR_FILE))?.let { return it }
         val legacyPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

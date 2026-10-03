@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.*
@@ -36,6 +37,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import com.example.danmuapiapp.data.util.DeviceCompatMode
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -631,6 +634,7 @@ private fun DraggableTagFlow(
     emptyHint: String = "",
     showSeparator: Boolean = false
 ) {
+    val remoteDevice = DeviceCompatMode.isCompatModeDevice(LocalContext.current)
     val bounds = remember { mutableStateMapOf<Int, Rect>() }
     var dragIndex by remember { mutableStateOf<Int?>(null) }
     var targetIndex by remember { mutableStateOf<Int?>(null) }
@@ -725,7 +729,15 @@ private fun DraggableTagFlow(
                                 MaterialTheme.colorScheme.onSurface
                             }
                         )
-                        AppGlassIconButton(onClick = { onDelete(index) }, size = 24.dp) {
+                        if (remoteDevice) {
+                            AppGlassIconButton(onClick = { onMove(index, index - 1) }, enabled = index > 0, size = 32.dp) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "前移", modifier = Modifier.size(16.dp))
+                            }
+                            AppGlassIconButton(onClick = { onMove(index, index + 1) }, enabled = index < tags.lastIndex, size = 32.dp) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowForward, "后移", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                        AppGlassIconButton(onClick = { onDelete(index) }, size = if (remoteDevice) 32.dp else 24.dp) {
                             Icon(
                                 Icons.Rounded.Close,
                                 "删除",

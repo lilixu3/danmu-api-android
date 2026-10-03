@@ -7,6 +7,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NodeKeepAlivePrefsTest {
+    @Test
+    fun `system heartbeat only runs for an explicitly enabled desired normal runtime`() {
+        for (root in listOf(false, true)) for (keepAlive in listOf(false, true))
+            for (desired in listOf(false, true)) for (heartbeat in listOf(false, true))
+                for (mode in com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode.entries) {
+                    val expected = !root && keepAlive && desired && heartbeat &&
+                        mode == com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode.System
+                    assertEquals(expected, NodeKeepAlivePrefs.shouldScheduleSystemHeartbeat(
+                        root, keepAlive, desired, heartbeat, mode))
+                }
+    }
+
 
     @Test
     fun `desired running mirror accepts only explicit values`() {

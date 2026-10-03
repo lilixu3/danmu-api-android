@@ -40,6 +40,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalContext
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -347,7 +349,7 @@ fun AppDialogOption(
         OutlinedCard(
             onClick = onClick,
             enabled = enabled,
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.remoteFocusHighlight(shape, enabled).fillMaxWidth(),
             shape = shape,
             border = BorderStroke(
                 width = 1.dp,
@@ -465,7 +467,10 @@ private fun AppDialogFrame(
     // dispose the parent composition and immediately detach the child entry.
     // Keep nested dialogs in their own window so their state remains mounted.
     val nestedDialog = LocalAppDialogContext.current
-    if (LocalGlassMaterial.current.enabled && host != null && !nestedDialog) {
+    // TV modals use a separate focus-owning window so D-pad focus cannot reach
+    // the page behind a liquid portal. Phones retain their inline glass dialogs.
+    val remoteDevice = DeviceCompatMode.isCompatModeDevice(LocalContext.current)
+    if (LocalGlassMaterial.current.enabled && host != null && !nestedDialog && !remoteDevice) {
         AppDialogPortal(
             host = host,
             onDismissRequest = onDismissRequest,

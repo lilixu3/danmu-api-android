@@ -393,9 +393,19 @@ object RootRuntimeController {
                 connectTimeout = 450
                 readTimeout = 700
                 requestMethod = "GET"
+                instanceFollowRedirects = false
             }
             if (connection.responseCode !in 200..299) return null
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                val chars = CharArray(65537)
+                var count = 0
+                while (count < chars.size) {
+                    val read = reader.read(chars, count, chars.size - count)
+                    if (read < 0) break
+                    count += read
+                }
+                if (count > 65536) null else String(chars, 0, count)
+            }
         } catch (_: Exception) {
             null
         } finally {
@@ -403,35 +413,73 @@ object RootRuntimeController {
         }
     }
 
+    data class RecoveredRuntime(
+        val pid: Int,
+        val port: Int,
+        val startedAtMs: Long?,
+        val env: Map<String, String>,
+        val apiReady: Boolean
+    )
+
+    internal fun discoverProcesses(context: Context): List<RootRuntimeRecovery.Process>? {
+        val result = RootShell.exec(
+            RootRuntimeRecovery.buildScanShell(rootProjectDir(context), mainClassName), timeoutMs = 4500L
+        )
+        return if (result.ok) RootRuntimeRecovery.parseProcesses(result.stdout) else null
+    }
+
+    /** Requires an explicit Root operation; never used by periodic passive checks. */
+    fun recoverRuntime(context: Context, preferredPort: Int): RecoveredRuntime? {
+        if (Looper.getMainLooper().thread === Thread.currentThread()) return null
+        val processes = discoverProcesses(context)?.takeIf { it.isNotEmpty() } ?: return null
+        val envResult = RootShell.exec(
+            "head -c 262144 ${shellQuote("${rootProjectDir(context)}/config/.env")}", timeoutMs = 2500L
+        )
+        val env = if (envResult.ok) com.example.danmuapiapp.data.util.DotEnvCodec.parse(envResult.stdout) else emptyMap()
+        val port = env["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: preferredPort
+        val health = readRuntimeHealthBody(port)
+        val healthPid = health?.let { Regex("\"pid\"\\s*:\\s*(\\d+)").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+        val process = processes.firstOrNull { it.pid == healthPid }
+            ?: processes.maxByOrNull { it.startTicks } ?: return null
+        val clockTicks = runCatching { android.system.Os.sysconf(android.system.OsConstants._SC_CLK_TCK) }.getOrNull()
+        val startedAt = clockTicks?.takeIf { it > 0 }?.let {
+            System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime() + process.startTicks * 1000L / it
+        }?.takeIf { it > 0 }
+        rememberRecoveredMarkers(context, process.pid, startedAt)
+        return RecoveredRuntime(process.pid, port, startedAt, env, health != null)
+    }
+
+    /** A same-home health reply can recover the mode without opening a Root shell. */
+    fun recoverRuntimePassive(context: Context, port: Int): RecoveredRuntime? {
+        val body = readRuntimeHealthBody(port) ?: return null
+        val ownership = determineRuntimeOwnershipFromHealth(body, RuntimeIdentityStore.ensureInstanceId(context), rootProjectDir(context))
+        if (!isRuntimeOwnershipAcceptedForRoot(ownership)) return null
+        // Exact identity alone must not adopt a normal-mode runtime as Root.
+        val rootHome = rootProjectDir(context).trimEnd('/')
+        val sameHome = listOf("resolvedHome", "envHome", "cwd").any { key ->
+            com.example.danmuapiapp.data.repository.extractHealthString(body, key)?.trimEnd('/') == rootHome
+        }
+        if (!sameHome) return null
+        val pid = Regex("\"pid\"\\s*:\\s*(\\d+)").find(body)?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it > 1 } ?: return null
+        val uptime = Regex("\"uptimeSec\"\\s*:\\s*(\\d+)").find(body)?.groupValues?.getOrNull(1)?.toLongOrNull()
+        val startedAt = uptime?.takeIf { it >= 0 && it < System.currentTimeMillis() / 1000L }?.let { System.currentTimeMillis() - it * 1000L }
+        rememberRecoveredMarkers(context, pid, startedAt)
+        return RecoveredRuntime(pid, port, startedAt, emptyMap(), apiReady = true)
+    }
+
+    private fun rememberRecoveredMarkers(context: Context, pid: Int, startedAt: Long?) {
+        runCatching { pidFile(context).writeText("$pid\n", Charsets.UTF_8) }
+        if (startedAt != null) runCatching { startedAtFile(context).writeText("$startedAt\n", Charsets.UTF_8) }
+    }
+
     fun isRunning(context: Context, port: Int): Boolean {
-        if (isRuntimeOwnedByAppPassive(context, port)) return true
+        if (recoverRuntimePassive(context, port) != null) return true
 
-        val pid = readPid(context) ?: return false
-        if (Looper.getMainLooper().thread === Thread.currentThread()) {
-            return false
-        }
-
-        val checkScript = """
-            PID=${shellQuote(pid.toString())}
-            if [ ! -d /proc/${'$'}PID ]; then
-              exit 1
-            fi
-            CMDLINE=${'$'}(tr '\\0' ' ' < /proc/${'$'}PID/cmdline 2>/dev/null || true)
-            echo "${'$'}CMDLINE" | grep -q ${shellQuote(mainClassName)}
-        """.trimIndent()
-
-        val result = RootShell.exec(checkScript, timeoutMs = 2500L)
-        if (result.ok) return true
-
-        // 如果没有 Root 权限、授权超时或 su 会话不可用，不要在状态探测路径里
-        // 删除 pid 文件或把仍可能存活的 Root 运行时判死。保留非 su 的被动
-        // liveness 结果，避免“没 Root 权限 + 身份暂时不匹配”导致 UI 异常停止。
-        if (result.timedOut || result.exitCode == -1) {
-            return isProbablyRunning(context, port)
-        }
-
-        runCatching { pidFile(context).delete() }
-        return false
+        if (Looper.getMainLooper().thread === Thread.currentThread()) return false
+        val recovered = recoverRuntime(context, port)
+        if (recovered != null) return true
+        // Query failure remains unknown. A successful empty scan is authoritative.
+        return if (discoverProcesses(context) == null) isProbablyRunning(context, port) && readPid(context) != null else false
     }
 
     /**
@@ -674,74 +722,44 @@ object RootRuntimeController {
     }
 
     fun stop(context: Context, port: Int): OpResult {
+        val processes = discoverProcesses(context)
+            ?: return OpResult(false, "停止失败", "无法校验 Root 进程，请确认 Root 授权")
+        if (processes.isEmpty()) {
+            if (isRunningFast(port)) return OpResult(false, "停止失败", "端口仍在监听，但未找到可确认归属的 Root 进程，已保留外部服务")
+            clearRuntimeMarkers(context)
+            return OpResult(true, "已停止")
+        }
         RootTunnel.stop(context)
-        requestShutdown(port)
-
-        if (waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 4000L)) {
-            clearRuntimeMarkers(context)
-            return OpResult(true, "已停止")
+        // Never send shutdown to an unverified port. Processes are validated by
+        // root UID, exact project directory, app_process executable and birth tick.
+        val term = RootShell.exec(RootRuntimeRecovery.buildSignalShell(rootProjectDir(context), mainClassName, processes, false), 5000L)
+        if (!term.ok) return OpResult(false, "停止失败", "无法停止已校验的 Root 进程")
+        val deadline = System.currentTimeMillis() + 3500L
+        var remaining = discoverProcesses(context) ?: return OpResult(false, "停止失败", "无法确认 Root 进程是否退出")
+        while (remaining.isNotEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(180L)
+            remaining = discoverProcesses(context) ?: return OpResult(false, "停止失败", "无法确认 Root 进程是否退出")
         }
-
-        val pid = readPid(context)
-        if (pid == null) {
-            clearRuntimeMarkers(context)
-            return OpResult(true, "已停止")
+        if (remaining.isNotEmpty()) {
+            val kill = RootShell.exec(RootRuntimeRecovery.buildSignalShell(rootProjectDir(context), mainClassName, remaining, true), 5000L)
+            if (!kill.ok) return OpResult(false, "停止失败", "Root 进程未退出")
+            Thread.sleep(180L)
+            remaining = discoverProcesses(context) ?: return OpResult(false, "停止失败", "无法确认 Root 进程是否退出")
         }
-
-        if (!RootShell.hasRoot(2500L)) {
-            return OpResult(false, "停止失败", "缺少 Root 权限")
-        }
-
-        if (!pidSafeToSignal(context, pid)) {
-            // pid 文件已过期（原进程退出后系统复用了该 PID），
-            // 不能对陌生进程发信号；端口侧的 __shutdown 已尝试过，按停止成功收尾。
-            AppDiagnosticLogger.w(context, "RootRuntimeController", "pid=$pid 的 cmdline 与 Root 运行时不匹配，按过期 pid 记录处理")
-            clearRuntimeMarkers(context)
-            return OpResult(true, "已停止")
-        }
-
-        RootShell.exec("kill -TERM $pid 2>/dev/null || true", timeoutMs = 5000L)
-        if (waitForPidExit(pid, timeoutMs = 3000L) || waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 2500L)) {
-            clearRuntimeMarkers(context)
-            return OpResult(true, "已停止")
-        }
-
-        RootShell.exec("kill -KILL $pid 2>/dev/null || true", timeoutMs = 5000L)
-        val stopped = waitForPidExit(pid, timeoutMs = 1500L) || !isPidAlive(pid)
-        if (stopped) clearRuntimeMarkers(context)
-
-        return if (stopped) {
-            OpResult(true, "已停止")
-        } else {
-            OpResult(false, "停止失败", "进程未退出")
-        }
+        if (remaining.isNotEmpty()) return OpResult(false, "停止失败", "Root 进程仍在运行，未清除控制记录")
+        clearRuntimeMarkers(context)
+        return OpResult(true, "已停止")
     }
 
     fun restart(context: Context, port: Int): OpResult {
-        val beforePid = readPid(context)
-        val stopResult = stop(context, port)
-        if (!stopResult.ok) {
-            return OpResult(
-                false,
-                "重启失败",
-                "停止阶段失败：${stopResult.detail.ifBlank { stopResult.message }}"
-            )
-        }
-
-        // 兜底确认：端口仍被占用时说明旧进程未完全退出，避免误判“已重启”。
-        if (isRunningFast(port)) {
-            val pid = beforePid ?: readPid(context)
-            if (pid != null && RootShell.hasRoot(1500L) && pidSafeToSignal(context, pid)) {
-                RootShell.exec("kill -KILL $pid 2>/dev/null || true", timeoutMs = 3500L)
-                waitForPidExit(pid, timeoutMs = 1800L)
-                waitForPort("127.0.0.1", port, wantOpen = false, timeoutMs = 1800L)
-            }
-        }
-
-        if (isRunningFast(port)) {
+        val recovered = recoverRuntime(context, port)
+        val actualPort = recovered?.port ?: port
+        val stopResult = stop(context, actualPort)
+        if (!stopResult.ok) return OpResult(false, "重启失败", "停止阶段失败：${stopResult.detail.ifBlank { stopResult.message }}")
+        if (isRunningFast(actualPort)) {
             return OpResult(false, "重启失败", "旧进程仍在运行，未执行新启动")
         }
-        return start(context, port, quickMode = false)
+        return start(context, actualPort, quickMode = false)
     }
 
     fun getPid(context: Context): Int? = readPid(context)
@@ -763,6 +781,16 @@ object RootRuntimeController {
     private fun clearRuntimeMarkers(context: Context) {
         runCatching { pidFile(context).delete() }
         runCatching { startedAtFile(context).delete() }
+        val base = rootBaseDir(context)
+        RootShell.exec(
+            RootRuntimeRecovery.buildScanShell(rootProjectDir(context), mainClassName) + "\n" + """
+                MARKER=${shellQuote("$base/$PID_FILE_NAME")}
+                OWNER_PID=${'$'}(cat "${'$'}MARKER" 2>/dev/null)
+                if ! owned_root "${'$'}OWNER_PID"; then
+                  rm -f "${'$'}MARKER" ${shellQuote("$base/$STARTED_AT_FILE_NAME")}
+                fi
+            """.trimIndent(), 4500L
+        )
     }
 
     fun getPidFileLastModified(context: Context): Long? {
@@ -1051,7 +1079,7 @@ object RootRuntimeController {
                 mkdir -p "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
 
                 # 热启动只修正启动必需的浅层文件和配置/日志目录。
-                for NAME in main.js android-server.js worker-proxy.js app-outbound-runtime.js app-outbound-bridge.js app-outbound-diagnostics.js startup-failure.js package.json package-lock.json .app_version; do
+                for NAME in main.js android-server.js app-management.js worker-proxy.js app-outbound-runtime.js app-outbound-bridge.js app-outbound-diagnostics.js startup-failure.js package.json package-lock.json .app_version; do
                   [ -f "${'$'}DST/${'$'}NAME" ] && chmod 0644 "${'$'}DST/${'$'}NAME" 2>/dev/null || true
                 done
 
@@ -1325,65 +1353,11 @@ $indentedAction
         return RootShell.exec(script, timeoutMs = 1200L).ok
     }
 
-    /**
-     * kill 前校验 /proc/$PID/cmdline 是否为本应用的 Root 运行时，防止 pid 文件残留
-     * 且系统已把该 PID 复用给无关进程时以 root 权限误杀。与 [isRunning] 的身份校验一致。
-     *
-     * 返回 false 仅表示“cmdline 明确不匹配”（应按过期 pid 记录处理）；
-     * 进程已退出或校验通道不可用（无 root/超时）时返回 true 以保持原有可用性。
-     */
-    private fun pidSafeToSignal(context: Context, pid: Int): Boolean {
-        val script = """
-            PID=${shellQuote(pid.toString())}
-            if [ ! -d /proc/${'$'}PID ]; then
-              echo IDENT_GONE
-              exit 0
-            fi
-            CMDLINE=${'$'}(tr '\\0' ' ' < /proc/${'$'}PID/cmdline 2>/dev/null || true)
-            if echo "${'$'}CMDLINE" | grep -q ${shellQuote(mainClassName)}; then
-              echo IDENT_OK
-            else
-              echo IDENT_FAIL
-            fi
-        """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 2500L)
-        if (!result.ok) {
-            AppDiagnosticLogger.w(
-                context,
-                "RootRuntimeController",
-                "pid=$pid 身份校验不可用(exit=${result.exitCode})，保守放行"
-            )
-            return true
-        }
-        return !result.stdout.contains("IDENT_FAIL")
-    }
-
-    private fun waitForPidExit(pid: Int, timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (!isPidAlive(pid)) return true
-            runCatching { Thread.sleep(180) }
-        }
-        return !isPidAlive(pid)
-    }
-
     private fun mergeRootBootstrapDetail(primary: String, tail: String): String {
         val normalizedPrimary = primary.trim().ifBlank { "未知错误" }
         val normalizedTail = tail.trim()
         if (normalizedTail.isBlank()) return normalizedPrimary
         return "$normalizedPrimary\n最近 Root 引导日志：\n$normalizedTail"
-    }
-
-    private fun requestShutdown(port: Int) {
-        runCatching {
-            val conn = (URL("http://127.0.0.1:$port/__shutdown").openConnection() as HttpURLConnection).apply {
-                connectTimeout = 800
-                readTimeout = 800
-                requestMethod = "GET"
-            }
-            conn.responseCode
-            conn.disconnect()
-        }
     }
 
     private fun isPortOpen(host: String, port: Int, timeoutMs: Int): Boolean {

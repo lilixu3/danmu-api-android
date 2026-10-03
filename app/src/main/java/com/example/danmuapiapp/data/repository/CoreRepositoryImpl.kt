@@ -22,6 +22,7 @@ import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
 import com.example.danmuapiapp.data.service.RuntimeModePrefs
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
+import com.example.danmuapiapp.data.util.WatcherRegistry
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
@@ -3436,6 +3437,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
+    @Synchronized
     private fun ensureCoreDirWatcher(mode: RunMode) {
         if (mode != RunMode.Normal) {
             coreWatcher?.stop()
@@ -3480,7 +3482,7 @@ class CoreRepositoryImpl @Inject constructor(
     ) {
         val rootPath: String = rootDir.absolutePath
         private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
-        private val observers = LinkedHashMap<String, FileObserver>()
+        private val observers = WatcherRegistry<FileObserver> { it.stopWatching() }
         private val mask = FileObserver.CLOSE_WRITE or
             FileObserver.MODIFY or
             FileObserver.CREATE or
@@ -3495,10 +3497,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
 
         fun stop() {
-            observers.values.forEach { observer ->
-                runCatching { observer.stopWatching() }
-            }
-            observers.clear()
+            observers.stop()
         }
 
         private fun createFileObserver(path: String, onEvent: (Int, String?) -> Unit): FileObserver {
@@ -3520,34 +3519,37 @@ class CoreRepositoryImpl @Inject constructor(
         }
 
         private fun watchRecursively(dir: File) {
-            if (!dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
+            if (observers.isStopped || !dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
             val key = runCatching { dir.canonicalPath }.getOrElse { dir.absolutePath }
-            if (observers.containsKey(key)) return
+            val registered = observers.register(key) {
+                val observer = createFileObserver(key) { event, path ->
+                    if (observers.isStopped) return@createFileObserver
+                    val target = if (path.isNullOrBlank()) {
+                        File(key)
+                    } else {
+                        File(key, path)
+                    }
+                    if (shouldIgnore(target)) return@createFileObserver
 
-            val observer = createFileObserver(key) { event, path ->
-                val target = if (path.isNullOrBlank()) {
-                    File(key)
-                } else {
-                    File(key, path)
-                }
-                if (shouldIgnore(target)) return@createFileObserver
+                    if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
+                        watchRecursively(target)
+                    }
 
-                if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
-                    watchRecursively(target)
-                }
+                    val rel = toRelative(target).ifBlank { target.name }
+                    onChanged(rel)
 
-                val rel = toRelative(target).ifBlank { target.name }
-                onChanged(rel)
-
-                if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
-                    observers.remove(key)?.let { removed ->
-                        runCatching { removed.stopWatching() }
+                    if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
+                        observers.remove(key)
                     }
                 }
-            }
 
-            observer.startWatching()
-            observers[key] = observer
+                try { observer.startWatching() } catch (error: Exception) {
+                    runCatching { observer.stopWatching() }
+                    throw error
+                }
+                observer
+            }
+            if (!registered) return
             dir.listFiles()?.filter { it.isDirectory }?.forEach { child ->
                 watchRecursively(child)
             }

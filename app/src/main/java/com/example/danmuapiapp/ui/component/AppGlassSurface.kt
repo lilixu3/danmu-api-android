@@ -138,7 +138,7 @@ fun AppGlassSurface(
     }
 
     val clickModifier = if (onClick != null) {
-        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        Modifier.remoteFocusHighlight(shape, enabled).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
     } else {
         Modifier
     }

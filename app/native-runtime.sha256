@@ -1,8 +1,7 @@
-# Node 24.21.0 运行时清单：lilixu3/nodejs-mobile v24.21.0-0（Android full，上游配方产物）
-# libnode.so 来自该 release 的 bin/<abi>/libnode.so，哈希在此钉死；
-# libnative-lib.so 不再预先提供，而是构建时由本地 NDK 依据该产物自带的
-# include/node 头文件现编（app/src/main/cpp/native-lib.cpp，C++20，16KB 页对齐）；
-# libc++_shared.so 取同一 NDK 的 sysroot，保证与桥库同源，因此两者都不进本清单。
-955b308b1dfdf7662e8fe5ee4eb8c0c7d0a313f2d306387f2307529993c4bc32  libnode/bin/arm64-v8a/libnode.so
-15cfa70b29f83fe969c0357c133cef94cb15d99b90e53a06724b334ae915fa49  libnode/bin/armeabi-v7a/libnode.so
-3d57865f3f474fa0f55c0495d386c17d46c292c95df8f26b3856e56ab8314acd  libnode/bin/x86_64/libnode.so
+# Node 26.10.0 lite, fogtape/nodejs-mobile Build #36, run 37016855809.
+# libnode comes from Actions artifact 11232566680; do not substitute the old Release.
+# libnative-lib.so is rebuilt from matching headers with NDK r29, C++20, API 24, 16 KB alignment.
+# libc++_shared.so comes from the same NDK sysroot.
+794325a9b3acb18f3ca8aad53f1913ecbcbfde5a110ba5322e7c0f84ab176bb1  libnode/bin/arm64-v8a/libnode.so
+1002c32466e99cca39cce7f53c54cd36ec08276b7c275c6e9207d5dd4d1aac24  libnode/bin/armeabi-v7a/libnode.so
+7d553a4e0b2399e103fecf90b781d14ad8ae9ec0890d747006ab50e2c98a17d0  libnode/bin/x86_64/libnode.so

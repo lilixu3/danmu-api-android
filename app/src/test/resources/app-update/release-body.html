@@ -1,0 +1,17 @@
+<div data-pjax="true" data-test-selector="body-content" data-view-component="true" class="markdown-body tmp-my-3"><h1>更新日志</h1>
+<ul>
+<li>新增利用 ECH、HTTP/3（H3）及优化 DNS 解析的源站直连功能，支持巴哈姆特、TMDB、弹弹play和 Animeko，可按来源开启，由 App 独立提供，无需核心适配。该功能默认关闭，请前往「设置 → 网络设置 → 增强直连」开启「App 增强直连」，并勾选需要的来源。相关议题：<a href="https://github.com/lilixu3/danmu-api-android/issues/43" data-hovercard-type="issue" data-hovercard-url="/lilixu3/danmu-api-android/issues/43/hovercard">#43</a>。</li>
+<li>新增内网穿透（FRP），支持普通模式和 Root 模式，可配置远程 frps、查看连接状态与日志并自动启动；Root 模式支持在线更新 frpc 内核。</li>
+<li>新增 GitHub 直连线路，可用于应用更新、核心安装与更新、文件下载和 PR 操作。 如需使用，请在「设置 → 网络设置 → GitHub 网络 → 测速并选择线路」中选择「GitHub 官方（增强直连）」；此选项与源站开关独立。</li>
+<li>新增并行连通性测试弹窗，显示源站和 GitHub 各类访问的连通结果与延迟。</li>
+<li>核心更新新增 PR 处理选项，可检测已合并 PR 的新提交，选择直接更新或在更新后继续合并 PR。</li>
+<li>首页访问入口默认采用标签布局，集中展示穿透、IPv4、IPv6和本机地址，并支持设置布局与默认标签。</li>
+<li>安装包体积增加：本版内置了 FRP（frpc）和 ECH/H3 网络组件，相关组件随 APK 提供，无需另行安装。</li>
+</ul>
+<h3>🔐 SHA256 Checksums</h3>
+<div class="snippet-clipboard-content notranslate position-relative overflow-auto" data-snippet-clipboard-copy-content="1843f2633a2414b224dd9b5c35bb2bec3b3c4e744cf749733126702c28a6df79  app-1.0.5.106-194-arm64-v8a.apk
+ada1e05a29f923e7f7dcba44d7bb73b620db9f3feaeb7791a26a2355b93458f5  app-1.0.5.106-194-armeabi-v7a.apk
+b9967aea27d438a2de4de6c6d3aff2b8e87a23cf71590ffce3b9b0300f7f92e0  app-1.0.5.106-194-x86_64.apk"><pre class="notranslate"><code>1843f2633a2414b224dd9b5c35bb2bec3b3c4e744cf749733126702c28a6df79  app-1.0.5.106-194-arm64-v8a.apk
+ada1e05a29f923e7f7dcba44d7bb73b620db9f3feaeb7791a26a2355b93458f5  app-1.0.5.106-194-armeabi-v7a.apk
+b9967aea27d438a2de4de6c6d3aff2b8e87a23cf71590ffce3b9b0300f7f92e0  app-1.0.5.106-194-x86_64.apk
+</code></pre></div></div>

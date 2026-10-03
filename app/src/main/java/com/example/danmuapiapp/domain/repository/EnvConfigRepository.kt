@@ -5,6 +5,9 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface EnvConfigRepository {
     val envVars: StateFlow<Map<String, String>>
+
+    /** 成功读取的配置快照；未读取、正在读取或读取失败时为 null，不能视为密钥已移除。 */
+    val loadedEnvVars: StateFlow<Map<String, String>?>
     val catalog: StateFlow<List<EnvVarDef>>
     val isCatalogLoading: StateFlow<Boolean>
     val rawContent: StateFlow<String>

@@ -7,6 +7,7 @@ const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
 const { createAppOutboundRuntime } = require('./app-outbound-runtime.js');
+const appManagement = require('./app-management.js');
 const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG, helperPath:process.env.DANMU_APP_OUTBOUND_HELPER};
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
@@ -2462,6 +2463,30 @@ function createMainServer() {
         });
       }
 
+      // All core variants use the App's shared config/.env. Never let a variant-local
+      // Node handler write a different .env and report a false successful hot update.
+      if (method === 'POST' && /\/api\/env\/(set|add|del)$/.test(rawPathname)) {
+        loadConfigOnce();
+        const action = appManagement.routeForAdmin(rawPathname, String(process.env.ADMIN_TOKEN || '').trim());
+        const origin = String(req.headers.origin || '');
+        if (!action || !appManagement.isManagementOriginAllowed(origin, host)) {
+          _sendJson(res, 403, { success: false, message: '需要管理员权限' });
+          return;
+        }
+        try {
+          const data = await appManagement.readManagementBody(req);
+          appManagement.saveEnvValue(ENV_FILE, data.key, data.value, action === 'del');
+          loadConfigOnce();
+          _refreshLogLevel();
+          _refreshLogConfig();
+          _syncEnvToWorker();
+          _sendJson(res, 200, { success: true, message: '配置已保存并热更新' });
+        } catch (error) {
+          _sendJson(res, error?.statusCode || 400, { success: false, message: '配置保存失败，请检查配置内容与目录权限' });
+        }
+        return;
+      }
+
       // Build headers (Node gives lower-cased keys)
       const headers = {};
       for (const [k, v] of Object.entries(req.headers)) {
@@ -2574,6 +2599,16 @@ function createMainServer() {
         if (shouldQuietCoreLogs) {
           _removeQuietCoreLogNoise(quietLogStart);
         }
+      }
+      const section = fullUrl.searchParams.get('app_section');
+      if (method === 'GET' && webRes.status === 200 && ['env', 'logs'].includes(section) &&
+          String(webRes.headers.get('content-type') || '').toLowerCase().includes('text/html')) {
+        const html = appManagement.injectWebSection(await webRes.text(), section);
+        const rewrittenHeaders = new Headers(webRes.headers);
+        rewrittenHeaders.delete('content-length');
+        rewrittenHeaders.delete('content-encoding');
+        rewrittenHeaders.set('cache-control', 'no-store');
+        webRes = new Response(html, { status: webRes.status, headers: rewrittenHeaders });
       }
       await toNodeResponse(webRes, res);
     } catch (e) {

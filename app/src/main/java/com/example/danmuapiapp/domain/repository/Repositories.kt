@@ -146,6 +146,7 @@ interface SettingsRepository {
     val glassTuning: StateFlow<GlassTuningPreference>
     val appBackground: StateFlow<AppBackgroundPreference>
     val appDpiOverride: StateFlow<Int>
+    val compatDpiOverride: StateFlow<Int>
     val hideFromRecents: StateFlow<Boolean>
     val coreDisplayNames: StateFlow<CoreVariantDisplayNames>
     val coreBranchSelections: StateFlow<CoreBranchSelections>
@@ -178,6 +179,7 @@ interface SettingsRepository {
     fun setGlassTuning(tuning: GlassTuningPreference)
     fun setAppBackground(background: AppBackgroundPreference)
     fun setAppDpiOverride(dpi: Int)
+    fun setCompatDpiOverride(dpi: Int)
     fun setHideFromRecents(enabled: Boolean)
     fun setVariantDisplayName(variant: ApiVariant, name: String)
     fun setCoreBranch(variant: ApiVariant, branch: String)

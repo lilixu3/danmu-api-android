@@ -4,12 +4,11 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.net.toUri
-import java.util.Locale
+import com.example.danmuapiapp.data.util.DeviceCompatMode
 
 object NormalModeKeepAliveGuideNavigator {
 
@@ -19,11 +18,16 @@ object NormalModeKeepAliveGuideNavigator {
     }
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
-        return powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return runCatching {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return@runCatching false
+            powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        }.getOrDefault(false)
     }
 
-    fun openAppBatterySettings(context: Context): Boolean {
+    fun batterySettingsHint(): String = VendorSettingsPolicy.batteryHint(normalizedBrand())
+
+    fun batterySettingsIntents(context: Context): List<Intent> {
         val packageUri = "package:${context.packageName}".toUri()
         val candidates = listOf(
             Intent("android.settings.APP_BATTERY_SETTINGS").apply {
@@ -36,50 +40,43 @@ object NormalModeKeepAliveGuideNavigator {
                 data = packageUri
             }
         )
-        return candidates.any { launchIntent(context, it) }
+        // OEM battery controls can live inside App info; a missing AOSP screen
+        // is not evidence that MIUI/OriginOS/ColorOS lacks battery controls.
+        return candidates
     }
+
+    fun openAppBatterySettings(context: Context): Boolean =
+        batterySettingsIntents(context).any { launchIntent(context, it) }
 
     fun requestIgnoreBatteryOptimization(context: Context): Boolean {
         if (isIgnoringBatteryOptimizations(context)) return false
         val packageUri = "package:${context.packageName}".toUri()
         val candidates = listOf(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = packageUri },
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
             Intent("android.settings.APP_BATTERY_SETTINGS").apply { data = packageUri },
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = packageUri },
-            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = packageUri }
         )
         return candidates.any { launchIntent(context, it) }
     }
 
     fun openAutoStartSettings(context: Context): Boolean {
-        val brand = normalizedBrand()
-        val candidates = when {
-            brand in setOf("xiaomi", "redmi") -> listOf(
-                componentIntent("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")
-            )
-
-            brand in setOf("huawei", "honor") -> listOf(
-                componentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
-                componentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity")
-            )
-
-            brand in setOf("oppo", "oneplus", "realme") -> listOf(
-                componentIntent("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
-                componentIntent("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"),
-                componentIntent("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity")
-            )
-
-            brand in setOf("vivo", "iqoo") -> listOf(
-                componentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"),
-                componentIntent("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
-                componentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager")
-            )
-
-            brand == "asus" -> listOf(
-                componentIntent("com.asus.mobilemanager", "com.asus.mobilemanager.powersaver.PowerSaverSettings")
-            )
-
-            else -> emptyList()
+        if (DeviceCompatMode.isCompatModeDevice(context)) {
+            return launchIntent(context, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = "package:${context.packageName}".toUri()
+            })
         }
+        val brand = normalizedBrand()
+        val candidates = VendorSettingsPolicy.autoStartComponents(brand).map { (pkg, clazz) ->
+            componentIntent(pkg, clazz)
+        } + if (brand in setOf("xiaomi", "redmi")) {
+            // Xiaomi's documented permission editor is a fallback, not a grant check.
+            listOf(Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                setPackage("com.miui.securitycenter")
+                addCategory(Intent.CATEGORY_DEFAULT)
+                putExtra("extra_pkgname", context.packageName)
+            })
+        } else emptyList()
 
         if (candidates.any { launchIntent(context, it) }) return true
 
@@ -117,32 +114,18 @@ object NormalModeKeepAliveGuideNavigator {
 
     fun autoStartHint(): String {
         return when (normalizedBrand()) {
-            "xiaomi", "redmi" -> "建议路径：设置 > 应用 > 本应用 > 应用权限 > 后台自启动。"
-            "oppo", "oneplus", "realme" -> "建议路径：设置 > 应用管理 > 自启动管理。"
-            "vivo", "iqoo" -> "建议路径：设置 > 更多设置 > 应用 > 自启动。"
+            "xiaomi", "redmi" -> "MIUI/澎湃 OS：设置 > 应用 > 权限管理 > 后台自启动；不同版本也可能位于应用详情。"
+            "oppo", "oneplus", "realme" -> "ColorOS/realme UI：设置 > 应用 > 自启动；旧版也可能在手机管家或电池设置。部分版本没有独立开关，请以系统显示为准。"
+            "vivo", "iqoo" -> "OriginOS/Funtouch OS：设置 > 应用与权限 > 权限管理 > 自启动；旧版也可能位于 i 管家。"
             "huawei", "honor" -> "建议路径：设置 > 应用启动管理，关闭“自动管理”并开启后台运行。"
             else -> "如系统有“自启动管理”，请将本应用设为允许。"
         }
     }
 
-    private fun normalizedBrand(): String {
-        val brand = Build.BRAND.orEmpty().lowercase(Locale.ROOT)
-        val manufacturer = Build.MANUFACTURER.orEmpty().lowercase(Locale.ROOT)
-        return when {
-            "iqoo" in brand || "iqoo" in manufacturer -> "iqoo"
-            "redmi" in brand || "redmi" in manufacturer -> "redmi"
-            "oneplus" in brand || "oneplus" in manufacturer -> "oneplus"
-            "realme" in brand || "realme" in manufacturer -> "realme"
-            "honor" in brand || "hihonor" in manufacturer || "honor" in manufacturer -> "honor"
-            brand.isNotBlank() -> brand
-            else -> manufacturer
-        }
-    }
+    private fun normalizedBrand(): String = VendorSettingsPolicy.family(Build.BRAND, Build.MANUFACTURER)
 
     private fun componentIntent(pkg: String, clazz: String): Intent {
-        return Intent().apply {
-            component = ComponentName(pkg, clazz)
-        }
+        return Intent().apply { component = ComponentName(pkg, clazz) }
     }
 
     private fun launchIntent(context: Context, intent: Intent): Boolean {

@@ -80,6 +80,7 @@ class NodeService : Service() {
         val ACTION_COPY_LAN_ADDRESS: String
             get() = "$actionPrefix.COPY_LAN_ADDRESS"
         const val RUNTIME_WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
+        internal const val RUNTIME_WAKE_LOCK_RENEW_INTERVAL_MS = RUNTIME_WAKE_LOCK_TIMEOUT_MS / 2
         private const val STALE_PROCESS_POLL_INTERVAL_MS = 180L
         private const val UNEXPECTED_FOREGROUND_REATTACH_MIN_INTERVAL_MS = 30_000L
         private const val NOTIFICATION_ENDPOINT_REFRESH_DEBOUNCE_MS = 300L
@@ -96,6 +97,19 @@ class NodeService : Service() {
             }
             RuntimeIdentityStore.ensureInstanceId(appContext)
             SystemHeartbeatScheduler.refresh(appContext)
+            return dispatchStart(appContext, userInitiated)
+        }
+
+        /** Recovery must never overwrite a manual stop which raced with a heartbeat. */
+        fun requestRecoveryStart(context: Context): Boolean {
+            val appContext = context.applicationContext
+            if (!NodeKeepAlivePrefs.isDesiredRunning(appContext) || NodeKeepAlivePrefs.isRootMode(appContext)) {
+                return false
+            }
+            return dispatchStart(appContext, userInitiated = false)
+        }
+
+        private fun dispatchStart(context: Context, userInitiated: Boolean): Boolean {
             val intent = Intent(context, NodeService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_EXPLICIT_START, userInitiated)
@@ -107,6 +121,15 @@ class NodeService : Service() {
             }
             return true
         }
+
+        @Suppress("DEPRECATION")
+        fun isForegroundHostRunning(context: Context): Boolean = runCatching {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                ?: return@runCatching true
+            manager.getRunningServices(Int.MAX_VALUE).any {
+                it.service.className == NodeService::class.java.name && it.foreground
+            }
+        }.getOrDefault(true)
 
         fun stop(context: Context) {
             // 在调用进程先写入期望状态，确保 :node 进程立即可见“用户要停止”。
@@ -332,6 +355,7 @@ class NodeService : Service() {
         }
     }
     private var runtimeWakeLock: PowerManager.WakeLock? = null
+    private var runtimeWakeLockRenewJob: Job? = null
     @Volatile
     private var foregroundStarted = false
     @Volatile
@@ -583,25 +607,29 @@ class NodeService : Service() {
         foregroundStarted = true
     }
 
-    private fun syncRuntimeWakeLock() {
+    private fun syncRuntimeWakeLock(renew: Boolean = false) {
         val serviceRunning = runtime.shouldHoldWakeLock()
         val shouldHold = NodeKeepAlivePrefs.shouldHoldRuntimeWakeLock(
-            isCompatModeDevice = DeviceCompatMode.shouldUseCompatMode(applicationContext),
+            isCompatModeDevice = DeviceCompatMode.isCompatModeDevice(applicationContext),
             isRootMode = NodeKeepAlivePrefs.isRootMode(applicationContext),
-            serviceRunning = serviceRunning
+            serviceRunning = serviceRunning && !serviceStopRequested &&
+                NodeKeepAlivePrefs.isDesiredRunning(applicationContext)
         )
         if (shouldHold) {
-            acquireRuntimeWakeLock()
+            acquireRuntimeWakeLock(renew)
         } else {
             releaseRuntimeWakeLock()
         }
     }
 
-    private fun acquireRuntimeWakeLock() {
+    private fun acquireRuntimeWakeLock(renew: Boolean) {
         synchronized(stateLock) {
-            if (runtimeWakeLock?.isHeld == true) return
+            if (serviceStopRequested || !scope.isActive ||
+                !NodeKeepAlivePrefs.isDesiredRunning(applicationContext)
+            ) return
+            if (runtimeWakeLock?.isHeld == true && !renew) return
             val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
-            val wakeLock = powerManager.newWakeLock(
+            val wakeLock = runtimeWakeLock ?: powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "$packageName:$TAG:runtime"
             ).apply {
@@ -610,17 +638,30 @@ class NodeService : Service() {
             try {
                 wakeLock.acquire(RUNTIME_WAKE_LOCK_TIMEOUT_MS)
                 runtimeWakeLock = wakeLock
+                if (runtimeWakeLockRenewJob?.isActive != true) {
+                    runtimeWakeLockRenewJob = scope.launch {
+                        while (isActive) {
+                            delay(RUNTIME_WAKE_LOCK_RENEW_INTERVAL_MS)
+                            syncRuntimeWakeLock(renew = true)
+                        }
+                    }
+                }
             } catch (t: Throwable) {
+                runCatching { if (wakeLock.isHeld) wakeLock.release() }
                 runtimeWakeLock = null
-                AppDiagnosticLogger.w(this, TAG, "启用 TV 兼容模式 CPU 唤醒锁失败：${t.message}")
+                runtimeWakeLockRenewJob?.cancel()
+                runtimeWakeLockRenewJob = null
+                AppDiagnosticLogger.w(this, TAG, "启用 TV 服务 CPU 唤醒锁失败：${t.message}")
                 return
             }
-            AppDiagnosticLogger.i(this, TAG, "TV 兼容模式运行中，已启用 CPU 唤醒锁")
+            if (!renew) AppDiagnosticLogger.i(this, TAG, "TV 服务运行中，已启用 CPU 唤醒锁")
         }
     }
 
     private fun releaseRuntimeWakeLock() {
         val wakeLock = synchronized(stateLock) {
+            runtimeWakeLockRenewJob?.cancel()
+            runtimeWakeLockRenewJob = null
             runtimeWakeLock.also { runtimeWakeLock = null }
         } ?: return
         runCatching {

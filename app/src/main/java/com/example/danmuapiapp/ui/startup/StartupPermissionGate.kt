@@ -10,9 +10,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -64,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -127,6 +125,25 @@ object StartupPermissionGatePrefs {
         prefs(context).edit().putBoolean(KEY_MODE_ACKNOWLEDGED, acknowledged).apply()
     }
 
+    internal fun hasSkipped(context: Context, item: StartupPermissionItem): Boolean =
+        prefs(context).getBoolean("skipped_${item.key}", false)
+
+    internal fun skip(context: Context, item: StartupPermissionItem) {
+        prefs(context).edit { putBoolean("skipped_${item.key}", true) }
+    }
+
+    internal fun showSkipNotice(context: Context, item: StartupPermissionItem, detail: String) {
+        runCatching { Toast.makeText(context, "${item.label}：$detail，已跳过启动检查。", Toast.LENGTH_LONG).show() }
+        prefs(context).edit { putBoolean("skip_notice_${item.key}", true) }
+    }
+
+    internal fun showUnsupportedNoticeOnce(context: Context, items: List<StartupPermissionItem>) {
+        val unseen = items.filter { !prefs(context).getBoolean("skip_notice_${it.key}", false) }
+        if (unseen.isEmpty()) return
+        runCatching { Toast.makeText(context, "未发现可用的${unseen.joinToString("、") { it.label }}设置入口，已跳过，可继续使用。", Toast.LENGTH_LONG).show() }
+        prefs(context).edit { unseen.forEach { putBoolean("skip_notice_${it.key}", true) } }
+    }
+
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
@@ -149,16 +166,32 @@ private data class StartupPermissionState(
     val notificationGranted: Boolean,
     val notificationRequestAttempted: Boolean,
     val batteryOptimizationIgnored: Boolean,
-    val localNetwork: LocalNetworkPermissionState
+    val localNetwork: LocalNetworkPermissionState,
+    val notificationSupported: Boolean,
+    val batterySupported: Boolean,
+    val localNetworkSupported: Boolean,
+    val notificationSkipped: Boolean,
+    val batterySkipped: Boolean,
+    val localNetworkSkipped: Boolean
 ) {
     val notificationReady: Boolean
-        get() = notificationRequired.not() || notificationGranted
+        get() = startupPermissionStepReady(notificationRequired, notificationSupported, notificationGranted, notificationSkipped)
 
     val batteryRequired: Boolean
         get() = runMode == RunMode.Normal
 
     val batteryReady: Boolean
-        get() = batteryRequired.not() || batteryOptimizationIgnored
+        get() = startupPermissionStepReady(batteryRequired, batterySupported, batteryOptimizationIgnored, batterySkipped)
+
+    val localNetworkReady: Boolean
+        get() = startupPermissionStepReady(localNetwork.required, localNetworkSupported, localNetwork.granted, localNetworkSkipped)
+
+    val unsupportedItems: List<StartupPermissionItem>
+        get() = buildList {
+            if (runMode == RunMode.Normal && notificationRequired && !notificationSupported && !notificationGranted) add(StartupPermissionItem.Notification)
+            if (batteryRequired && !batterySupported && !batteryOptimizationIgnored) add(StartupPermissionItem.Battery)
+            if (localNetwork.required && !localNetworkSupported && !localNetwork.granted) add(StartupPermissionItem.LocalNetwork)
+        }
 }
 
 @Composable
@@ -209,6 +242,10 @@ fun StartupPermissionGateHost(
         StartupPermissionGatePrefs.clearLegacyGuideDismissed(context)
     }
 
+    LaunchedEffect(permissionState.unsupportedItems) {
+        StartupPermissionGatePrefs.showUnsupportedNoticeOnce(context, permissionState.unsupportedItems)
+    }
+
     LaunchedEffect(runtimeState.runMode) {
         permissionState = readPermissionState(context, runtimeState.runMode)
         if (requestedRunMode == runtimeState.runMode) {
@@ -246,12 +283,8 @@ fun StartupPermissionGateHost(
     val shouldShowDependencyStep = canConfigureSetup &&
         pendingDependencyRepair != null &&
         coreDeferredThisLaunch.not()
-    val shouldShowPermissionStep = LocalNetworkPermissionPolicy.shouldShowSetupStep(
-        runMode = runtimeState.runMode,
-        notificationReady = permissionState.notificationReady,
-        batteryReady = permissionState.batteryReady,
-        localNetworkState = permissionState.localNetwork
-    )
+    val shouldShowPermissionStep = !permissionState.localNetworkReady ||
+        (runtimeState.runMode == RunMode.Normal && (!permissionState.notificationReady || !permissionState.batteryReady))
 
     val pendingSteps = buildList {
         if (shouldShowModeStep) add(SetupStep.Mode)
@@ -362,16 +395,42 @@ private fun StartupPermissionGateScreen(
         resolveLocalNetworkAction(activity = activity, state = permissionState.localNetwork)
     }
 
+    fun skipPermission(item: StartupPermissionItem, detail: String) {
+        StartupPermissionGatePrefs.skip(context, item)
+        StartupPermissionGatePrefs.showSkipNotice(context, item, detail)
+        onRefreshPermissionState()
+    }
+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) {
-        onRefreshPermissionState()
+    ) { granted ->
+        if (!granted) skipPermission(StartupPermissionItem.Notification, "系统未授予权限")
+        else onRefreshPermissionState()
     }
     val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) {
+    ) { granted ->
         localNetworkPermissionResultGeneration += 1
-        onRefreshPermissionState()
+        if (!granted) skipPermission(StartupPermissionItem.LocalNetwork, "系统未授予权限，局域网连接可能受限")
+        else onRefreshPermissionState()
+    }
+    var settingsItemName by rememberSaveable { mutableStateOf<String?>(null) }
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val item = StartupPermissionItem.entries.firstOrNull { it.name == settingsItemName }
+        settingsItemName = null
+        val current = readPermissionState(context, runtimeState.runMode)
+        val granted = when (item) {
+            StartupPermissionItem.Notification -> current.notificationGranted
+            StartupPermissionItem.Battery -> current.batteryOptimizationIgnored
+            StartupPermissionItem.LocalNetwork -> current.localNetwork.granted
+            null -> true
+        }
+        if (!granted && item != null) {
+            val detail = if (item == StartupPermissionItem.Battery) {
+                "未检测到标准电池豁免，厂商后台设置请以系统显示为准"
+            } else "未检测到授权，请以系统设置显示为准"
+            skipPermission(item, detail)
+        } else onRefreshPermissionState()
     }
 
     LaunchedEffect(viewModel.operationMessage) {
@@ -381,56 +440,58 @@ private fun StartupPermissionGateScreen(
         viewModel.dismissMessage()
     }
 
+    fun openSettings(item: StartupPermissionItem, candidates: List<Intent>) {
+        if (activity == null) {
+            skipPermission(item, "当前没有可用的权限设置入口")
+            return
+        }
+        for (intent in candidates) {
+            // Visibility and OEM activity aliases can hide a usable entry. At the
+            // user's explicit request, try each candidate and catch launch failures.
+            settingsItemName = item.name
+            if (runCatching { settingsLauncher.launch(intent) }.isSuccess) return
+        }
+        settingsItemName = null
+        skipPermission(item, "当前系统没有可用的设置入口")
+    }
+
     fun openNotificationPermissionFlow() {
+        if (!StartupPermissionSupport.runtimePermissionSupported(context, Manifest.permission.POST_NOTIFICATIONS)) {
+            skipPermission(StartupPermissionItem.Notification, "当前系统未提供此权限")
+            return
+        }
         when (notificationAction) {
             NotificationAction.Request -> {
                 StartupPermissionGatePrefs.markNotificationPermissionRequested(context)
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-
-            NotificationAction.Settings -> {
-                if (openNotificationSettings(context).not()) {
-                    scope.launch {
-                        snackbarHostState.showSnackbar("当前设备无法直接打开通知设置，请在应用详情中手动开启")
-                    }
+                if (runCatching { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }.isFailure) {
+                    skipPermission(StartupPermissionItem.Notification, "权限申请未能打开，可在系统设置中手动检查")
                 }
             }
-
+            NotificationAction.Settings -> openSettings(StartupPermissionItem.Notification, StartupPermissionSupport.notificationIntents(context))
             null -> onRefreshPermissionState()
         }
     }
 
     fun openLocalNetworkPermissionFlow() {
-        val currentAction = resolveLocalNetworkAction(
-            activity = activity,
-            state = permissionState.localNetwork
-        )
+        if (!StartupPermissionSupport.runtimePermissionSupported(context, LocalNetworkPermissionPolicy.PERMISSION)) {
+            skipPermission(StartupPermissionItem.LocalNetwork, "当前系统未提供此权限")
+            return
+        }
+        val currentAction = resolveLocalNetworkAction(activity, permissionState.localNetwork)
         when (currentAction) {
             LocalNetworkPermissionAction.Request -> {
                 StartupPermissionGatePrefs.markLocalNetworkPermissionRequested(context)
-                localNetworkPermissionLauncher.launch(LocalNetworkPermissionPolicy.PERMISSION)
-            }
-
-            LocalNetworkPermissionAction.Settings -> {
-                if (openAppDetailsSettings(context).not()) {
-                    scope.launch {
-                        snackbarHostState.showSnackbar("当前设备无法直接打开应用设置，请手动开启局域网访问权限")
-                    }
+                if (runCatching { localNetworkPermissionLauncher.launch(LocalNetworkPermissionPolicy.PERMISSION) }.isFailure) {
+                    skipPermission(StartupPermissionItem.LocalNetwork, "权限申请未能打开，可在系统设置中手动检查")
                 }
             }
-
+            LocalNetworkPermissionAction.Settings -> openSettings(StartupPermissionItem.LocalNetwork, listOf(StartupPermissionSupport.appDetails(context)))
             null -> onRefreshPermissionState()
         }
     }
 
     fun openBatteryOptimizationFlow() {
-        val opened = NormalModeKeepAliveGuideNavigator.requestIgnoreBatteryOptimization(context) ||
-            NormalModeKeepAliveGuideNavigator.openAppBatterySettings(context)
-        if (opened.not()) {
-            scope.launch {
-                snackbarHostState.showSnackbar("当前设备没有可用的电池优化设置入口")
-            }
-        }
+        openSettings(StartupPermissionItem.Battery, StartupPermissionSupport.batteryIntents(context))
     }
 
     val stepIndex = pendingSteps.indexOf(currentStep).coerceAtLeast(0) + 1
@@ -440,7 +501,7 @@ private fun StartupPermissionGateScreen(
         SetupStep.Mode -> "先确定这台设备用普通模式还是 Root 模式。这里不会直接启动或停止服务。"
         SetupStep.Core -> "把当前要用的核心准备好。下载只处理核心文件，不会在这里启动服务。"
         SetupStep.Dependency -> "检查核心运行依赖，缺失项修复并校验通过后才会进入下一步。"
-        SetupStep.Permission -> if (permissionState.localNetwork.ready.not()) {
+        SetupStep.Permission -> if (permissionState.localNetworkReady.not()) {
             "Android 17 默认拦截局域网连接，授权后其他设备才能访问弹幕服务。"
         } else {
             "普通模式建议把提醒和后台权限补齐，启动反馈会更清楚，后台也更稳。"
@@ -484,7 +545,7 @@ private fun StartupPermissionGateScreen(
                             SetupStep.Mode -> "先选运行模式"
                             SetupStep.Core -> "再准备核心"
                             SetupStep.Dependency -> "补齐运行依赖"
-                            SetupStep.Permission -> if (permissionState.localNetwork.ready.not()) {
+                            SetupStep.Permission -> if (permissionState.localNetworkReady.not()) {
                                 "授权局域网访问"
                             } else {
                                 "最后补齐提醒"
@@ -1076,7 +1137,7 @@ private fun PermissionStepContent(
     onOpenBatterySettings: () -> Unit,
     onContinueHome: () -> Unit
 ) {
-    val showLocalNetwork = permissionState.localNetwork.ready.not()
+    val showLocalNetwork = permissionState.localNetworkReady.not()
     val showNotification = permissionState.notificationReady.not()
     val showBattery = permissionState.batteryRequired && permissionState.batteryReady.not()
     val itemSpacing = if (compact) 10.dp else 12.dp
@@ -1180,14 +1241,14 @@ private fun PermissionStepContent(
                     stateLabel = "建议处理",
                     stateAccent = MaterialTheme.colorScheme.secondary,
                     buttonText = "前往设置",
-                    helper = "完成后回到应用，这里的状态会自动刷新。",
+                    helper = NormalModeKeepAliveGuideNavigator.batterySettingsHint(),
                     onClick = onOpenBatterySettings
                 )
             }
 
             SettingsHintCard(
                 text = if (showLocalNetwork) {
-                    "暂不授权仍可进入首页，但只能在本机使用；下次启动会再次提醒。"
+                    "未授权可能影响其他设备连接；无法申请或不授予时会跳过启动检查，可稍后在设置中处理。"
                 } else {
                     "通知和电池项只影响提示与后台稳定，不影响你现在直接进入首页。"
                 }
@@ -1506,21 +1567,28 @@ private fun normalizeStartupVariant(variant: ApiVariant): ApiVariant {
 private fun readPermissionState(context: Context, runMode: RunMode): StartupPermissionState {
     val appContext = context.applicationContext
     val localNetworkRequired = Build.VERSION.SDK_INT >= LocalNetworkPermissionPolicy.ANDROID_17_API_LEVEL
-    val localNetworkGranted = localNetworkRequired.not() || ContextCompat.checkSelfPermission(
-        appContext,
-        LocalNetworkPermissionPolicy.PERMISSION
-    ) == PackageManager.PERMISSION_GRANTED
+    val localNetworkGranted = localNetworkRequired.not() || runCatching { ContextCompat.checkSelfPermission(
+        appContext, LocalNetworkPermissionPolicy.PERMISSION
+    ) == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
     return StartupPermissionState(
         runMode = runMode,
         notificationRequired = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
-        notificationGranted = NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext),
+        notificationGranted = runCatching { NodeKeepAlivePrefs.hasPostNotificationsPermission(appContext) }.getOrDefault(false),
         notificationRequestAttempted = StartupPermissionGatePrefs.hasRequestedNotificationPermission(appContext),
         batteryOptimizationIgnored = NormalModeKeepAliveGuideNavigator.isIgnoringBatteryOptimizations(appContext),
         localNetwork = LocalNetworkPermissionPolicy.stateFor(
             sdkInt = Build.VERSION.SDK_INT,
             granted = localNetworkGranted,
             requestAttempted = StartupPermissionGatePrefs.hasRequestedLocalNetworkPermission(appContext)
-        )
+        ),
+        notificationSupported = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            StartupPermissionSupport.runtimePermissionSupported(appContext, Manifest.permission.POST_NOTIFICATIONS),
+        batterySupported = StartupPermissionSupport.batterySupported(appContext),
+        localNetworkSupported = !localNetworkRequired ||
+            StartupPermissionSupport.runtimePermissionSupported(appContext, LocalNetworkPermissionPolicy.PERMISSION),
+        notificationSkipped = StartupPermissionGatePrefs.hasSkipped(appContext, StartupPermissionItem.Notification),
+        batterySkipped = StartupPermissionGatePrefs.hasSkipped(appContext, StartupPermissionItem.Battery),
+        localNetworkSkipped = StartupPermissionGatePrefs.hasSkipped(appContext, StartupPermissionItem.LocalNetwork)
     )
 }
 
@@ -1532,10 +1600,9 @@ private fun resolveNotificationAction(
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
     if (activity == null) return NotificationAction.Settings
 
-    val shouldShowRationale = ActivityCompat.shouldShowRequestPermissionRationale(
-        activity,
-        Manifest.permission.POST_NOTIFICATIONS
-    )
+    val shouldShowRationale = runCatching { ActivityCompat.shouldShowRequestPermissionRationale(
+        activity, Manifest.permission.POST_NOTIFICATIONS
+    ) }.getOrDefault(false)
     return if (permissionState.notificationRequestAttempted.not() || shouldShowRationale) {
         NotificationAction.Request
     } else {
@@ -1549,57 +1616,15 @@ private fun resolveLocalNetworkAction(
 ): LocalNetworkPermissionAction? {
     if (state.ready) return null
     val shouldShowRationale = activity?.let {
-        ActivityCompat.shouldShowRequestPermissionRationale(
-            it,
-            LocalNetworkPermissionPolicy.PERMISSION
-        )
+        runCatching { ActivityCompat.shouldShowRequestPermissionRationale(
+            it, LocalNetworkPermissionPolicy.PERMISSION
+        ) }.getOrDefault(false)
     } == true
     return LocalNetworkPermissionPolicy.resolveAction(
         state = state,
         hasActivity = activity != null,
         shouldShowRationale = shouldShowRationale
     )
-}
-
-private fun openNotificationSettings(context: Context): Boolean {
-    val packageUri = Uri.parse("package:${context.packageName}")
-    val candidates = listOf(
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-        },
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = packageUri
-        }
-    )
-    return candidates.any { launchIntent(context, it) }
-}
-
-private fun openAppDetailsSettings(context: Context): Boolean {
-    return launchIntent(
-        context,
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = "package:${context.packageName}".toUri()
-        }
-    )
-}
-
-private fun launchIntent(context: Context, intent: Intent): Boolean {
-    val finalIntent = Intent(intent).apply {
-        if (context is Activity) {
-            // keep current task
-        } else {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    }
-    return runCatching {
-        val resolved = finalIntent.resolveActivity(context.packageManager) != null
-        if (resolved.not()) {
-            false
-        } else {
-            context.startActivity(finalIntent)
-            true
-        }
-    }.getOrDefault(false)
 }
 
 private tailrec fun Context.findActivity(): Activity? {

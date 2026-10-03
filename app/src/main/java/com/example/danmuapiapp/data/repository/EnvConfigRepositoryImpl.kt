@@ -17,7 +17,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -43,6 +45,8 @@ class EnvConfigRepositoryImpl @Inject constructor(
 
     private val _envVars = MutableStateFlow<Map<String, String>>(emptyMap())
     override val envVars: StateFlow<Map<String, String>> = _envVars.asStateFlow()
+    private val _loadedEnvVars = MutableStateFlow<Map<String, String>?>(null)
+    override val loadedEnvVars: StateFlow<Map<String, String>?> = _loadedEnvVars.asStateFlow()
 
     private val _catalog = MutableStateFlow<List<EnvVarDef>>(emptyList())
     override val catalog: StateFlow<List<EnvVarDef>> = _catalog.asStateFlow()
@@ -64,29 +68,35 @@ class EnvConfigRepositoryImpl @Inject constructor(
     }
 
     override fun reload() {
+        val ticket = reloadTicket.incrementAndGet()
         reloadJob?.cancel()
         _isCatalogLoading.value = true
-        val ticket = reloadTicket.incrementAndGet()
+        _loadedEnvVars.value = null
         reloadJob = repoScope.launch {
             try {
                 val file = envFile()
-                val text = readEnvText(file).getOrElse {
-                    Log.w(TAG, "读取 .env 失败：${file.absolutePath}", it)
-                    ""
-                }
+                val text = readEnvText(file).getOrThrow()
                 val userValues = DotEnvCodec.parse(text)
                 val defaultValues = runCatching { EnvVarConfigLoader.loadDefaultValues(context) }
                     .getOrElse {
                         Log.w(TAG, "加载核心默认值失败", it)
                         emptyMap()
                     }
+                val effectiveEnv = mergeEffectiveEnv(defaultValues, userValues)
+                ensureActive()
+                if (reloadTicket.get() != ticket) return@launch
                 _rawContent.value = text
-                _envVars.value = mergeEffectiveEnv(defaultValues, userValues)
+                _envVars.value = effectiveEnv
+                _loadedEnvVars.value = effectiveEnv
                 _catalog.value = runCatching { EnvVarConfigLoader.loadCatalog(context) }
                     .getOrElse {
                         Log.w(TAG, "加载环境变量目录失败", it)
                         emptyList()
                     }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                Log.w(TAG, "读取环境配置失败，保留上次成功读取的配置", error)
             } finally {
                 if (reloadTicket.get() == ticket) {
                     _isCatalogLoading.value = false
@@ -190,7 +200,10 @@ class EnvConfigRepositoryImpl @Inject constructor(
 
     private fun readEnvText(file: File): Result<String> {
         return if (currentRunMode() != RunMode.Normal) {
-            runCatching { rootReadText(file.absolutePath) ?: "" }
+            runCatching {
+                rootReadText(file.absolutePath)
+                    ?: throw IllegalStateException("Root 读取 .env 失败：${file.absolutePath}")
+            }
         } else {
             runCatching { if (file.exists()) file.readText(Charsets.UTF_8) else "" }
         }

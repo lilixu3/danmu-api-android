@@ -54,10 +54,8 @@ class AppForegroundUpdateChecker @Inject constructor(
                         _latestUpdate.value = null
                         return@onSuccess
                     }
-                    val current = _latestUpdate.value
-                    if (current == null || current.latestVersion != info.latestVersion) {
-                        _latestUpdate.value = info
-                    }
+                    // A previous HTML/partial result can lack assets. Refresh same-version metadata too.
+                    _latestUpdate.value = mergeForegroundAppUpdateResult(_latestUpdate.value, info)
                 }
             } finally {
                 isAutoChecking.set(false)

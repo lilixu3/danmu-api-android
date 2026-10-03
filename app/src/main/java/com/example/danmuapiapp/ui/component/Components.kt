@@ -19,6 +19,11 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -204,7 +209,7 @@ fun GradientButton(
     }
 
     Button(
-        onClick = onClick, modifier = modifier.height(52.dp), enabled = enabled,
+        onClick = onClick, modifier = modifier.remoteFocusHighlight(RoundedCornerShape(16.dp), enabled).height(52.dp), enabled = enabled,
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
         contentPadding = PaddingValues()
@@ -416,7 +421,7 @@ fun SettingsItem(
         modifier = modifier
             .fillMaxWidth()
             .clip(rowShape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.remoteFocusHighlight(rowShape).clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -498,6 +503,10 @@ fun SettingsSwitchItem(
     onCheckedChange: (Boolean) -> Unit
 ) {
     SettingsItem(
+        modifier = Modifier.semantics {
+            role = Role.Switch
+            toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+        },
         title = title,
         subtitle = subtitle,
         icon = icon,
@@ -509,7 +518,7 @@ fun SettingsSwitchItem(
             Switch(
                 checked = checked,
                 enabled = enabled,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = null,
                 modifier = Modifier.height(24.dp),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
@@ -607,7 +616,7 @@ fun SettingsEntryCard(
     onClick: () -> Unit
 ) {
     AppGlassSurface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().remoteFocusHighlight(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         color = glassSurfaceColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
