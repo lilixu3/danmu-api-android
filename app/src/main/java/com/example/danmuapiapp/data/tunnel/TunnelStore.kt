@@ -72,6 +72,7 @@ object TunnelStore {
     fun settingsFile(context: Context) = File(dir(context), "settings.json")
     fun statusFile(context: Context) = File(dir(context), "status.json")
     fun logFile(context: Context) = File(dir(context), "frpc.log")
+    fun linkStateFile(context: Context) = File(dir(context), "link-state.json")
     fun autostartFlag(context: Context) = File(dir(context), "autostart")
     fun rootPidFile(context: Context) = File(dir(context), "frpc-root.pid")
     fun normalPidFile(context: Context) = File(dir(context), "frpc.pid")
@@ -190,14 +191,15 @@ object TunnelStore {
         JSONObject()
     }
 
-    fun writeStatus(
+    internal fun writeStatus(
         context: Context,
         state: String,
         mode: String,
         pid: Long,
         since: Long,
         restarts: Int,
-        lastError: String
+        lastError: String,
+        identity: TunnelProcessIdentity = TunnelProcessIdentity()
     ) {
         val json = JSONObject()
             .put("state", state)
@@ -208,8 +210,28 @@ object TunnelStore {
             .put("lastError", lastError)
             .put("heartbeat", System.currentTimeMillis())
             .put("kernel", FRPC_KERNEL_VERSION)
+            .put("startTicks", identity.startTicks)
+            .put("bootId", identity.bootId)
+            .put("instanceId", identity.instanceId)
         writeText(statusFile(context), json.toString())
     }
+
+    internal fun readLinkState(context: Context): JSONObject = try {
+        JSONObject(readText(linkStateFile(context), 4096))
+    } catch (_: Exception) { JSONObject() }
+
+    internal fun writeLinkState(context: Context, instanceId: String, state: TunnelLinkState) {
+        writeText(linkStateFile(context), JSONObject()
+            .put("instanceId", instanceId).put("state", state.name)
+            .put("updatedAt", System.currentTimeMillis()).toString())
+        broadcastStatus(context)
+    }
+
+    internal fun processIdentity(context: Context, pid: Long, instanceId: String): TunnelProcessIdentity =
+        TunnelProcessIdentity(pid,
+            readText(File("/proc/$pid/stat"), 4096).substringAfterLast(')', "")
+                .trim().split(Regex("\\s+")).getOrNull(19).orEmpty(),
+            readText(File("/proc/sys/kernel/random/boot_id"), 128).trim(), instanceId)
 
     /** 状态变化后通知 App 进程（仅同 UID 可收）。 */
     fun broadcastStatus(context: Context) {

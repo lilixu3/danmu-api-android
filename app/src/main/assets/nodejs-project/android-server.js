@@ -2315,6 +2315,13 @@ function createMainServer() {
       const clientIp = getClientIp(req);
       const method = (req.method || 'GET').toUpperCase();
 
+      // Public discovery requests are not core API calls or malformed tokens.
+      if (rawPathname === '/.well-known/security.txt') {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+        return;
+      }
+
       // Update simple metrics (for diagnostics UI)
       try {
         METRICS.requestCount++;

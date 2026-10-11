@@ -45,3 +45,10 @@ local.properties
 !/runtime/outbound/README.md
 !/runtime/outbound/LICENSE
 !/runtime/outbound/UPSTREAM
+
+# Locked source packages and source-built C++ license records are reproducible inputs.
+!/runtime/node-dependencies/
+!/runtime/native-dependencies-licenses/
+
+# Generated Python bytecode from source-build helpers
+__pycache__/

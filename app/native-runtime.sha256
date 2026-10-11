@@ -1,7 +1,3 @@
-# Node 26.10.0 lite, fogtape/nodejs-mobile Build #36, run 37016855809.
-# libnode comes from Actions artifact 11232566680; do not substitute the old Release.
-# libnative-lib.so is rebuilt from matching headers with NDK r29, C++20, API 24, 16 KB alignment.
-# libc++_shared.so comes from the same NDK sysroot.
-794325a9b3acb18f3ca8aad53f1913ecbcbfde5a110ba5322e7c0f84ab176bb1  libnode/bin/arm64-v8a/libnode.so
-1002c32466e99cca39cce7f53c54cd36ec08276b7c275c6e9207d5dd4d1aac24  libnode/bin/armeabi-v7a/libnode.so
-7d553a4e0b2399e103fecf90b781d14ad8ae9ec0890d747006ab50e2c98a17d0  libnode/bin/x86_64/libnode.so
+159e171207bc1dd432caa22c665938092c0d5e29babb26f2eac369890f5019d1  libnode/bin/arm64-v8a/libnode.so
+6ba117bc50fd365991277ed92a34806370bc560403c4dc3705bea3d2904616b3  libnode/bin/armeabi-v7a/libnode.so
+bfd525ae74a98831d5685c6afb3bfd9a6b217f683fb4a62380a8079ef9b4ed54  libnode/bin/x86_64/libnode.so

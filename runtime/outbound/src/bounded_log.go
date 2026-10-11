@@ -10,7 +10,7 @@ const logLimit = 1024 * 1024
 const logKeep = 256 * 1024
 
 // Event-driven log sink: no polling, no network, no whole-file read, EOF exits.
-func boundedLog(input io.Reader, filename string) error {
+func boundedLog(input io.Reader, filename string, observers ...*frpcLinkObserver) error {
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		return err
@@ -47,6 +47,11 @@ func boundedLog(input io.Reader, filename string) error {
 	for {
 		n, readErr := input.Read(buffer)
 		if n > 0 {
+			for _, observer := range observers {
+				if err := observer.accept(buffer[:n]); err != nil {
+					return err
+				}
+			}
 			if _, err = file.Write(buffer[:n]); err != nil {
 				return err
 			}
@@ -55,6 +60,11 @@ func boundedLog(input io.Reader, filename string) error {
 			}
 		}
 		if readErr == io.EOF {
+			for _, observer := range observers {
+				if err := observer.accept([]byte("\n")); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if readErr != nil {

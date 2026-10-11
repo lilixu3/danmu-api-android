@@ -549,25 +549,7 @@ fun compareVersions(a: String, b: String): Int {
 /** 从 frpc 日志尾部判断链路状态（后出现的日志优先）。 */
 fun parseFrpcLogLinkState(logTail: String): TunnelLinkState {
     var state = TunnelLinkState.Unknown
-    logTail.split('\n').forEach { line ->
-        val lower = line.lowercase()
-        // "connect to local service ... connection refused" 是运行期本机目标端口的问题，
-        // 不代表 frpc 启动/链路失败，不能改链路状态。
-        if (lower.contains("local service")) return@forEach
-        when {
-            lower.contains("start frpc service for config file") || lower.contains("[app] frpc process adopted") ->
-                state = TunnelLinkState.Unknown
-            lower.contains("start error") && lower.contains("already exists") -> state = TunnelLinkState.Conflict
-            lower.contains("start proxy success") -> state = TunnelLinkState.Connected
-            lower.contains("login to server success") || lower.contains("try to connect to server") ->
-                state = TunnelLinkState.Connecting
-            lower.contains("login to server failed") || lower.contains("heartbeat timeout") ||
-                lower.contains("connect to server error") ||
-                lower.contains("start error") ||
-                lower.contains("i/o timeout") ||
-                lower.contains("connection refused") -> state = TunnelLinkState.Error
-        }
-    }
+    logTail.split('\n').forEach { line -> frpcLogLinkEvent(line)?.let { state = it } }
     return state
 }
 

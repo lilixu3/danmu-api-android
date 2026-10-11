@@ -87,6 +87,23 @@ class TunnelViewModel @Inject constructor(
         }
     }
 
+    private val _diagnosing = MutableStateFlow(false)
+    internal val diagnosing = _diagnosing.asStateFlow()
+    private val _diagnostic = MutableStateFlow("")
+    internal val diagnostic = _diagnostic.asStateFlow()
+
+    internal fun diagnose() = viewModelScope.launch {
+        if (_diagnosing.value) return@launch
+        _diagnosing.value = true
+        try {
+            _diagnostic.value = repository.diagnose().text()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _diagnostic.value = "检测未完成，请稍后重试。"
+        } finally { _diagnosing.value = false }
+    }
+
     fun refreshLog() = viewModelScope.launch { _log.value = repository.readLog() }
 
     fun clearLog(onResult: (TunnelActionResult) -> Unit = {}) = viewModelScope.launch {

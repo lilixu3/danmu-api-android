@@ -127,4 +127,49 @@ class RootTunnelScriptsTest {
             owner.waitFor()
         }
     }
+    @Test fun `boot publisher replaces stale status and preserves identity on verified adoption`() {
+        val dir = temporary.newFolder("boot-status")
+        val pidFile = File(dir, "frpc-root.pid").apply { writeText("31313") }
+        File(dir, "status.json").writeText("""{"pid":31313,"state":"running","instanceId":"old"}""")
+        val output = execute("""
+            FRP_DIR=${shellQuote(dir.path)}
+            FRP_PIDFILE=${shellQuote(pidFile.path)}
+            frpc_ticks() { echo 12345; }
+            ${RootTunnelScripts.statusFunctions()}
+            frpc_new_instance || exit 1
+            frpc_write_status running 42424 || exit 2
+            echo 42424 > "${'$'}FRP_PIDFILE"
+            echo 12345 > "${'$'}FRP_PIDFILE.start"
+            FIRST="${'$'}FRP_INSTANCE"
+            frpc_adopt_instance 42424 || exit 3
+            [ "${'$'}FIRST" = "${'$'}FRP_INSTANCE" ] || exit 4
+            frpc_write_status running 42424 || exit 5
+            cat "${'$'}FRP_DIR/status.json"
+        """.trimIndent())
+        val status = org.json.JSONObject(output)
+        assertEquals(42424L, status.getLong("pid"))
+        assertEquals("12345", status.getString("startTicks"))
+        assertEquals(File("/proc/sys/kernel/random/boot_id").readText().trim(), status.getString("bootId"))
+        assertEquals(File(dir, "frpc-root.pid.instance").readText().trim(), status.getString("instanceId"))
+        assertEquals("running", status.getString("state"))
+    }
+
+    @Test fun `adoption of reused pid creates fresh launch identity`() {
+        val dir = temporary.newFolder("reused-pid")
+        val pidFile = File(dir, "frpc-root.pid").apply { writeText("42424") }
+        File(dir, "frpc-root.pid.start").writeText("old-ticks")
+        File(dir, "frpc-root.pid.boot").writeText(File("/proc/sys/kernel/random/boot_id").readText())
+        File(dir, "frpc-root.pid.instance").writeText("old-instance")
+        execute("""
+            FRP_DIR=${shellQuote(dir.path)}
+            FRP_PIDFILE=${shellQuote(pidFile.path)}
+            frpc_ticks() { echo 12345; }
+            ${RootTunnelScripts.statusFunctions()}
+            frpc_adopt_instance 42424 || exit 1
+            frpc_write_status running 42424 || exit 2
+        """.trimIndent())
+        val status = org.json.JSONObject(File(dir, "status.json").readText())
+        assertNotEquals("old-instance", status.getString("instanceId"))
+    }
+
 }

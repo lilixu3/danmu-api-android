@@ -532,6 +532,13 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
             }
         }
 
+    // npm 重新安装后同步裁剪后的 brotli 根入口。
+    File(rootDir, "brotli/index.js").takeIf { it.isFile }?.writeText(
+        "exports.decompress = require('./decompress.js');\n", Charsets.UTF_8
+    )
+    rootDir.walkTopDown().filter { it.isDirectory && it.name == ".history" }
+        .toList().forEach { it.deleteRecursively() }
+
     // Node 26 require(esm) 返回 ESM namespace，dan-any 打包产物对
     // fast-xml-builder 的 interop 会把整个 namespace 塞进 .default，
     // 使 `new o.default()` 失效。仅 CJS 理论路径受影响（生产全走 ESM），
@@ -1120,10 +1127,10 @@ val nativeRuntimeLayoutDanmuPack = "danmu-pack"
 val nativeRuntimeLayoutNodejsMobile = "nodejs-mobile"
 
 // 运行时资产的布局：
-// - danmu-pack（默认）：历史布局，zip 内带三件套（libnode.so / libnative-lib.so / libc++_shared.so）
+// - danmu-pack：兼容旧来源清单的历史布局；本项目当前固定使用下面的 nodejs-mobile。
 // - nodejs-mobile：上游配方产物布局，zip 内只有每个 ABI 的 libnode.so 与头文件目录；
 //   这种布局下 JNI 桥由本次构建用本地 NDK 依据同一份头文件现编，
-//   libc++_shared.so 取同一 NDK 的 sysroot，保证与桥库同源。
+//   libc++ / libc++abi / libunwind 从固定的 NDK r29 源码重新编译。
 fun readNativeRuntimeLayout(sourcesFile: File): String {
     if (!sourcesFile.isFile) return nativeRuntimeLayoutDanmuPack
     val props = Properties().apply { sourcesFile.inputStream().use { load(it) } }
@@ -1200,7 +1207,8 @@ fun compileJniBridge(
         "-Wl,-soname,libnative-lib.so",
         "-o", outFile.absolutePath,
         bridgeSource.absolutePath,
-        libnodeSo.absolutePath
+        libnodeSo.absolutePath,
+        "-nostdlib++", File(outFile.parentFile, "libc++_shared.so").absolutePath
     )
     val process = ProcessBuilder(command).redirectErrorStream(true).start()
     val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -1212,18 +1220,15 @@ fun compileJniBridge(
     println("JNI 桥现编完成：$abi -> ${outFile.name}（${outFile.length()} 字节）")
 }
 
-fun copyNdkLibcxxShared(ndkDir: File, abi: String, target: File) {
-    val hostTag = resolveNdkHostTag(ndkDir)
-        ?: throw GradleException("NDK 缺少可用预编译工具链：${ndkDir.absolutePath}")
-    val (_, sysrootTriple) = nativeAbiTriples(abi)
-    val source = File(
-        ndkDir,
-        "toolchains/llvm/prebuilt/$hostTag/sysroot/usr/lib/$sysrootTriple/libc++_shared.so"
-    )
-    if (!source.isFile) throw GradleException("NDK 缺少 libc++_shared.so：${source.absolutePath}")
+fun buildNativeDependencies(ndkDir: File, abi: String, target: File) {
     target.parentFile.mkdirs()
-    source.copyTo(target, overwrite = true)
-    stripNativeRuntimeLibrary(ndkDir, target)
+    val script = rootProject.file("scripts/build-native-deps.py")
+    val command = listOf("python3", script.absolutePath, "--ndk", ndkDir.absolutePath,
+        "--abi", abi, "--api", "24", "--output", target.absolutePath)
+    val process = ProcessBuilder(command).redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    if (process.waitFor() != 0) throw GradleException("源码构建 C++ 运行库失败（$abi）：\n${output.trim()}")
+    println("libc++ / libc++abi / libunwind 源码重建完成：$abi")
 }
 
 fun stripNativeRuntimeLibrary(ndkDir: File, library: File) {
@@ -1335,6 +1340,7 @@ fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
     val prepareNativeRuntimeTask = tasks.register("prepareNativeRuntime") {
     inputs.files(nativeRuntimeChecksumFile, nativeRuntimeSourcesFile)
     inputs.file("src/main/cpp/native-lib.cpp")
+    inputs.file(rootProject.file("scripts/build-native-deps.py"))
     inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
     outputs.dir(preparedNativeRuntimeDir)
     doLast {
@@ -1365,7 +1371,7 @@ fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
             configuredAbiFilters.any { abi -> "/$abi/" in "/$path" }
         }
         val requiredManifestEntries = if (nativeRuntimeLayout == nativeRuntimeLayoutNodejsMobile) {
-            // 上游布局只提供 libnode.so；桥库与 libc++_shared.so 由本次构建现编/取用，不做清单钉死
+            // 上游布局只提供 libnode.so；JNI 与 C++ 依赖由本次构建从源码重编，另存构建指纹。
             configuredAbiFilters.map { abi -> "libnode/bin/$abi/libnode.so" }
         } else {
             configuredAbiFilters.flatMap { abi ->
@@ -1424,6 +1430,7 @@ fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
                     throw GradleException("提取的 libnode.so SHA-256 不匹配：$abi")
                 }
                 val jniDir = File(preparedNativeRuntimeDir, "jni-current/$abi").apply { mkdirs() }
+                buildNativeDependencies(ndkDir, abi, File(jniDir, "libc++_shared.so"))
                 compileJniBridge(
                     ndkDir = ndkDir,
                     abi = abi,
@@ -1433,7 +1440,6 @@ fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
                     libnodeSo = libnodeTarget,
                     outFile = File(jniDir, "libnative-lib.so")
                 )
-                copyNdkLibcxxShared(ndkDir, abi, File(jniDir, "libc++_shared.so"))
                 return@forEach
             }
             val abiEntries = selectedChecksums.filterKeys { "/$abi/" in "/$it" }
@@ -1744,7 +1750,7 @@ val verifyOutboundDebugTask = tasks.register("verifyOutboundDebugKernels") {
 }
 val testAppOutboundTask = tasks.register<Exec>("testAppOutboundBridge") {
     workingDir(project.rootDir)
-    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs")
+    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs", "node-tests/security-discovery-host.test.cjs")
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyOutboundReleaseTask) }
 tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(verifyOutboundDebugTask) }

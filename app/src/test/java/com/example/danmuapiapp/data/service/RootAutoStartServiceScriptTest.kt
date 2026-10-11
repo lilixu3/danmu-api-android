@@ -35,6 +35,9 @@ class RootAutoStartServiceScriptTest {
         assertTrue(script.contains("frpc_ticks"))
         assertTrue(script.contains("--version"))
         assertTrue(script.contains("FRP_PIDFILE.version"))
+        assertTrue(script.contains(com.example.danmuapiapp.data.tunnel.RootTunnelScripts.statusFunctions()))
+        assertTrue(script.contains("frpc_write_status running \"${'$'}FPID\""))
+        assertTrue(script.contains("--frpc-link-state"))
         val shell = ProcessBuilder("sh", "-n").redirectErrorStream(true).start()
         shell.outputStream.bufferedWriter().use { it.write(script) }
         val output = shell.inputStream.bufferedReader().readText()

@@ -190,6 +190,8 @@ class TunnelRepository @Inject constructor(
     /** 重启穿透：先等停止收敛，再启动。 */
     suspend fun restart(): TunnelActionResult = withContext(Dispatchers.IO) {
         refreshInternal()
+        com.example.danmuapiapp.data.service.AppDiagnosticLogger.i(context, "TunnelRestart",
+            "重连请求 mode=${if (_state.value.rootMode) "root" else "normal"} pid=${_state.value.pid} link=${_state.value.linkState}")
         if (_state.value.running) {
             val stopped = stopBlocking()
             if (!stopped.ok) return@withContext stopped
@@ -200,11 +202,28 @@ class TunnelRepository @Inject constructor(
                 refreshInternal()
             }
         }
-        startBlocking().also { refreshInternal() }
+        val result = startBlocking().also { refreshInternal() }
+        com.example.danmuapiapp.data.service.AppDiagnosticLogger.i(context, "TunnelRestart",
+            "重连完成 ok=${result.ok} pid=${_state.value.pid} link=${_state.value.linkState}")
+        result
     }
 
     suspend fun readLog(lines: Int = 200): String =
         withContext(Dispatchers.IO) { TunnelStore.readLogTail(context, lines) }
+
+    internal suspend fun diagnose(): TunnelDiagnosticReport = withContext(Dispatchers.IO) {
+        refreshInternal()
+        val before = _state.value
+        val report = TunnelDiagnostics(okHttpClient).check(before.servicePort, before.serviceToken,
+            derivePublicAddress(before.settings))
+        val identity = TunnelStore.readStatus(context)
+        val evidence = "mode=${if (before.rootMode) "root" else "normal"} pid=${before.pid} " +
+            "instance=${identity.optString("instanceId")} registered=${before.linkState} " +
+            "kernel=${before.kernelVersion}"
+        com.example.danmuapiapp.data.service.AppDiagnosticLogger.i(context, "TunnelDiagnostic",
+            "$evidence\n${report.text()}")
+        report
+    }
 
     suspend fun clearLog(): TunnelActionResult = withContext(Dispatchers.IO) {
         // 兼容旧开机脚本创建的 root:root 0644 日志，仍然必须原地截断。
@@ -256,10 +275,12 @@ class TunnelRepository @Inject constructor(
     private fun refreshInternal() {
         val settings = TunnelStore.readSettings(context)
         val status = TunnelStore.readStatus(context)
-        val log = TunnelStore.readLogTail(context, 60)
+        val linkSnapshot = TunnelStore.readLinkState(context)
         val rootMode = NodeKeepAlivePrefs.isRootMode(context)
         val heartbeat = status.optLong("heartbeat", 0L)
-        val rootPid = if (rootMode) RootTunnel.runningPid(context) else 0L
+        val identity = if (rootMode) RootTunnel.runningIdentity(context) else
+            TunnelStore.processIdentity(context, status.optLong("pid", 0L), status.optString("instanceId"))
+        val rootPid = if (rootMode) identity.pid else 0L
         val running = when {
             rootMode -> rootPid > 0L
             else -> status.optString("state") == "running" &&
@@ -279,10 +300,7 @@ class TunnelRepository @Inject constructor(
                 TunnelStore.readText(File(TunnelStore.dir(context), "frpc-root.pid.version"), 64)
                     .trim().ifBlank { TunnelStore.kernelVersion(context, true) }
             } else TunnelStore.kernelVersion(context, rootMode),
-            // 丢失记录后发现的旧进程不能借用另一实例留下的成功/失败日志。
-            linkState = if (rootMode && rootPid != status.optLong("pid", 0L)) {
-                TunnelLinkState.Unknown
-            } else parseFrpcLogLinkState(log),
+            linkState = resolveTunnelLinkState(running, identity, status, linkSnapshot),
             serviceRunning = runtimeRepository.runtimeState.value.status == ServiceStatus.Running,
             rootMode = rootMode,
             servicePort = currentServicePort(),

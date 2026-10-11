@@ -72,6 +72,7 @@ object RootAutoStartServiceScriptPartA {
               FRP_LOG="${'$'}FRP_DIR/frpc.log"
               ${RootTunnelScripts.lock()}
               ${RootTunnelScripts.identityFunctions()}
+              ${RootTunnelScripts.statusFunctions()}
               PIDS=$(frpc_pids)
               set -- ${'$'}PIDS
               if [ "${'$'}#" -gt 1 ]; then
@@ -81,12 +82,15 @@ object RootAutoStartServiceScriptPartA {
               if [ "${'$'}#" -eq 1 ]; then
                 OLD=$(cat "${'$'}FRP_PIDFILE" 2>/dev/null)
                 [ "${'$'}OLD" = "${'$'}1" ] || echo '[app] frpc process adopted' >> "${'$'}FRP_LOG"
+                frpc_adopt_instance "${'$'}1" || return 1
                 remember_frpc "${'$'}1"
+                frpc_write_status running "${'$'}1" || return 1
                 logd "frpc already running pid=${'$'}1"
                 return 0
               fi
               rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" 2>/dev/null || true
-              ${RootTunnelScripts.logSink()}
+              frpc_new_instance || return 1
+              ${RootTunnelScripts.logSink(trackLink = true)}
               if command -v setsid >/dev/null 2>&1; then
                 setsid "${'$'}FRP_LIB" -c "${'$'}FRP_CFG" > "${'$'}FRP_PIPE" 2>&1 < /dev/null 9>&- &
               elif command -v nohup >/dev/null 2>&1; then
@@ -98,9 +102,11 @@ object RootAutoStartServiceScriptPartA {
               echo "${'$'}FPID" > "${'$'}FRP_PIDFILE"
               frpc_ticks "${'$'}FPID" > "${'$'}FRP_PIDFILE.start"
               "${'$'}FRP_LIB" --version > "${'$'}FRP_PIDFILE.version" 2>/dev/null
+              frpc_write_status starting "${'$'}FPID" || true
               sleep 2
               rm -f "${'$'}FRP_PIPE"
               if owns_frpc "${'$'}FPID"; then
+                frpc_write_status running "${'$'}FPID" || return 1
                 chmod 0644 "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" "${'$'}FRP_LOG" 2>/dev/null || true
                 FRP_APP_UID=$(stat -c '%u' "${'$'}FRP_DIR" 2>/dev/null)
                 case "${'$'}FRP_APP_UID" in ''|*[!0-9]*) ;; *)
@@ -112,8 +118,9 @@ object RootAutoStartServiceScriptPartA {
                   kill "${'$'}FPID" 2>/dev/null || true
                 fi
                 kill "${'$'}FRP_LOG_PID" 2>/dev/null || true
+                frpc_write_status error 0 || true
                 log "frpc exited early"
-                rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" 2>/dev/null || true
+                rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" "${'$'}FRP_PIDFILE.instance" "${'$'}FRP_PIDFILE.boot" 2>/dev/null || true
               fi
               return 0
             )

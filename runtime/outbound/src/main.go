@@ -157,10 +157,20 @@ func main() {
 	timeoutMS := flag.Int("connect-timeout-ms", 3000, "connection budget in milliseconds")
 	dohURL := flag.String("doh-url", "", "custom DNS-over-HTTPS endpoint")
 	boundedLogPath := flag.String("bounded-log", "", "bounded local frpc log sink")
+	frpcLinkPath := flag.String("frpc-link-state", "", "local frpc connection snapshot")
+	frpcInstance := flag.String("frpc-instance", "", "frpc launch identity")
 	githubProxy := flag.Bool("github-proxy", false, "App GitHub CONNECT proxy (independent of Node)")
 	flag.Parse()
 	if *boundedLogPath != "" {
-		if err := boundedLog(os.Stdin, *boundedLogPath); err != nil {
+		var observers []*frpcLinkObserver
+		if *frpcLinkPath != "" {
+			observer, err := newFrpcLinkObserver(*frpcLinkPath, *frpcInstance)
+			if err != nil {
+				log.Fatal("local link snapshot failed")
+			}
+			observers = append(observers, observer)
+		}
+		if err := boundedLog(os.Stdin, *boundedLogPath, observers...); err != nil {
 			log.Fatal("local log sink failed")
 		}
 		return

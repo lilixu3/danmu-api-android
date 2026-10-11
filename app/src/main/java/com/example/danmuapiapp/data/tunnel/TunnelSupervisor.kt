@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 
 /**
  * 普通模式下的 frpc 进程监管（跑在 :node 前台服务进程里）。
@@ -28,6 +27,7 @@ class TunnelSupervisor(private val context: Context) {
     @Volatile private var restarts = 0
     @Volatile private var since = 0L
     @Volatile private var lastError = ""
+    @Volatile private var identity = TunnelProcessIdentity()
 
     @Synchronized
     fun start(): TunnelActionResult {
@@ -73,6 +73,7 @@ class TunnelSupervisor(private val context: Context) {
         heartbeat = null
         watchdog = null
         since = 0L
+        identity = TunnelProcessIdentity()
         TunnelStore.normalPidFile(context).delete()
         markStatus("stopped")
     }
@@ -107,7 +108,17 @@ class TunnelSupervisor(private val context: Context) {
             val started = builder.start()
             process = started
             since = System.currentTimeMillis()
-            pump(started.inputStream)
+            val instanceId = java.util.UUID.randomUUID().toString()
+            // The launcher writes its PID before exec; start ticks survive that exec.
+            var waited = 0L
+            while (readPidFile() <= 1L && started.isAlive && waited < 500L) {
+                Thread.sleep(10L); waited += 10L
+            }
+            val launchedIdentity = TunnelStore.processIdentity(context, readPidFile(), instanceId)
+            identity = launchedIdentity
+            TunnelStore.writeLinkState(context, instanceId, TunnelLinkState.Unknown)
+            markStatus("starting", pid = launchedIdentity.pid)
+            pump(started, launchedIdentity)
             Thread.sleep(600L)
             if (!started.isAlive) {
                 lastError = summarizeLog()
@@ -154,7 +165,7 @@ class TunnelSupervisor(private val context: Context) {
         heartbeat = Thread {
             while (!stopping && process === target && target.isAlive) {
                 TunnelStore.writeStatus(
-                    context, "running", "normal", readPidFile(), since, restarts, ""
+                    context, "running", "normal", readPidFile(), since, restarts, "", identity
                 )
                 try {
                     Thread.sleep(HEARTBEAT_MS)
@@ -165,15 +176,21 @@ class TunnelSupervisor(private val context: Context) {
         }.also { it.isDaemon = true; it.name = "danmu-frpc-heartbeat"; it.start() }
     }
 
-    private fun pump(input: InputStream) {
+    private fun pump(target: Process, launchedIdentity: TunnelProcessIdentity) {
         Thread {
             try {
-                input.use { source ->
+                val observer = FrpcLinkObserver { state ->
+                    if (process === target && identity == launchedIdentity && !stopping) {
+                        TunnelStore.writeLinkState(context, launchedIdentity.instanceId, state)
+                    }
+                }
+                target.inputStream.use { source ->
                     FileOutputStream(TunnelStore.logFile(context), true).use { output ->
                         val buffer = ByteArray(8192)
                         while (true) {
                             val read = source.read(buffer)
-                            if (read <= 0) break
+                            if (read <= 0) { observer.finish(); break }
+                            observer.accept(String(buffer, 0, read, Charsets.UTF_8))
                             output.write(buffer, 0, read)
                             output.flush()
                             TunnelStore.rotateLogIfNeeded(context)
@@ -199,7 +216,7 @@ class TunnelSupervisor(private val context: Context) {
 
     /** 写状态并广播（UI 被动刷新，不需要轮询）。 */
     private fun markStatus(state: String, pid: Long = 0L, lastError: String = "") {
-        TunnelStore.writeStatus(context, state, "normal", pid, since, restarts, lastError)
+        TunnelStore.writeStatus(context, state, "normal", pid, since, restarts, lastError, identity)
         TunnelStore.broadcastStatus(context)
     }
 

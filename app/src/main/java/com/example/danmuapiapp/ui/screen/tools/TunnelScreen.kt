@@ -32,6 +32,8 @@ import kotlinx.coroutines.delay
 fun TunnelScreen(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: TunnelViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val log by viewModel.log.collectAsStateWithLifecycle()
+    val diagnosing by viewModel.diagnosing.collectAsStateWithLifecycle()
+    val diagnostic by viewModel.diagnostic.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var busy by remember { mutableStateOf(false) }
@@ -83,6 +85,18 @@ fun TunnelScreen(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: Tunn
             )
             if ((state.state == "error" || state.state == "retrying") && state.lastError.isNotBlank()) {
                 TunnelNote(state.lastError, isError = state.state == "error")
+            }
+            TunnelCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("访问检测", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    TextButton(onClick = { viewModel.diagnose() },
+                        enabled = !diagnosing && !busy && state.running && state.serviceRunning) {
+                        Text(if (diagnosing) "正在检测…" else "检测访问")
+                    }
+                }
+                if (diagnostic.isNotBlank()) Text(diagnostic, style = MaterialTheme.typography.bodySmall)
+                else Text("对比本机与公网访问，帮助排查页面加载慢或接口超时。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             TunnelAddressCard(state, onOpenSettings) { value ->
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

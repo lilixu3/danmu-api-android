@@ -23,8 +23,9 @@ class RootTunnelLogSinkTest {
             FRP_LOG=${shellQuote(log.path)}
             FRP_LOG_HELPER=${shellQuote(helper!!.path)}
             ${RootTunnelScripts.lock()}
-            ${RootTunnelScripts.logSink()}
-            (dd if=/dev/zero bs=8192 count=384 2>/dev/null; printf 'LATEST') > "${'$'}FRP_PIPE"
+            FRP_INSTANCE=fixture-launch
+            ${RootTunnelScripts.logSink(trackLink = true)}
+            (printf 'start proxy success\n'; dd if=/dev/zero bs=8192 count=384 2>/dev/null; printf 'LATEST') > "${'$'}FRP_PIPE"
             rm -f "${'$'}FRP_PIPE"
             wait "${'$'}FRP_LOG_PID"
             echo done
@@ -36,6 +37,9 @@ class RootTunnelLogSinkTest {
             assertEquals(output, 0, process.exitValue())
             assertTrue(log.length() <= 1024 * 1024 + 8192)
             assertTrue(log.readText().endsWith("LATEST"))
+            val snapshot = org.json.JSONObject(File(dir, "link-state.json").readText())
+            assertEquals("fixture-launch", snapshot.getString("instanceId"))
+            assertEquals("Connected", snapshot.getString("state"))
             val lock = ProcessBuilder("/system/bin/sh", "-c", "export PATH=/system/bin:/system/xbin; FRP_DIR=${shellQuote(dir.path)}; ${RootTunnelScripts.lock()}").redirectErrorStream(true).start()
             assertTrue(lock.waitFor(3, TimeUnit.SECONDS))
             assertEquals(lock.inputStream.bufferedReader().readText(), 0, lock.exitValue())

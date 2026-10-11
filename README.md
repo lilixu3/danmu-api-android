@@ -151,7 +151,7 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 26.10.0 lite（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 26.11.0 lite（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -170,23 +170,22 @@ cd danmu-api-android
 ./scripts/prepare_outbound_kernel.sh
 
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.10.0
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.11.0
 ```
 
-Node 运行时只使用 **26.10.0 lite**，与 Flutter 项目固定为同一份 `fogtape/nodejs-mobile`
-Build #36（run `37016855809`）的 `nodejs-mobile-android-lite`，artifact ID `11232566680`。
-来源及产物指纹见 `app/native-runtime-sources.properties`、`app/native-runtime.sha256`
-与 `app/native-runtime-provenance.json`。旧 Release 的同版本 lite 不能替换这份产物。
-JNI 桥由同份 ZIP 的头文件与 NDK r29 在构建时重新编译，配套 libc++ 取同一 NDK。
+Node 运行时使用 **26.11.0 lite**，锁定 `fogtape/nodejs-mobile` 于 2026-10-07
+发布的 `v26.11.0-0` 裁剪版本。来源及 SHA-256 见
+`app/native-runtime-sources.properties`、`app/native-runtime.sha256` 和
+`app/native-runtime-provenance.json`。JNI 桥使用同份发布 ZIP 的头文件与 NDK r29
+重新编译，libc++、libc++abi、libunwind 由 `scripts/build-native-deps.py` 从固定源码重建。
 
-离线构建可将校验通过的 ZIP 放入
-`dist/nodejs-mobile/node26-lite-actions-37016855809/`；缺少本地/Gradle 缓存时，构建脚本
-通过已认证的 `gh api` 下载固定 Actions artifact。artifact 到期后使用本地 ZIP，不能回退旧 Release。
+离线构建可将校验通过的 `nodejs-mobile-android-lite-26.11.0-0.zip` 放入
+`dist/nodejs-mobile/v26.11.0-0-lite/`。缺少本地或 Gradle 缓存时下载上述固定发布附件；
+C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提取旧 APK 的原生库。
 
 正式构建只读取仓库内的 Node 运行时资产，不会隐式读取相邻的 `danmu_api`
-仓库或根目录 `node_modules.zip`。维护依赖资产时，显式运行
-`refreshBundledNodeModulesFromWorkspace` 或
-`refreshBundledNodeModulesFromArchive`，检查变更后再提交。
+仓库或根目录 `node_modules.zip`。维护依赖资产时，运行 `python3 scripts/rebuild-node-dependencies.py`，从
+`runtime/node-dependencies/package-lock.json` 在新目录准备源码并打包，再检查变更。
 
 ### 代码风格
 - 遵循 Kotlin 官方代码风格

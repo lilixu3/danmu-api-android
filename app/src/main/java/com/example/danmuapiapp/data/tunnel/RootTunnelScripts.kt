@@ -64,17 +64,64 @@ internal object RootTunnelScripts {
         }
     """.trimIndent()
 
+    /** Boot and App startup publish the same process identity; link events use a separate snapshot. */
+    fun statusFunctions(): String = """
+        frpc_new_instance() {
+          FRP_BOOT_ID=${'$'}(cat /proc/sys/kernel/random/boot_id) || return 1
+          FRP_INSTANCE=${'$'}(cat /proc/sys/kernel/random/uuid) || return 1
+          FRP_SINCE="${'$'}(date +%s)000"
+          [ -n "${'$'}FRP_BOOT_ID" ] && [ -n "${'$'}FRP_INSTANCE" ]
+        }
+        frpc_adopt_instance() {
+          frpc_new_instance || return 1
+          OLD_PID=${'$'}(cat "${'$'}FRP_PIDFILE" 2>/dev/null)
+          OLD_TICKS=${'$'}(cat "${'$'}FRP_PIDFILE.start" 2>/dev/null)
+          OLD_BOOT=${'$'}(cat "${'$'}FRP_PIDFILE.boot" 2>/dev/null)
+          OLD_INSTANCE=${'$'}(cat "${'$'}FRP_PIDFILE.instance" 2>/dev/null)
+          if [ "${'$'}OLD_PID" = "${'$'}1" ] && [ -n "${'$'}OLD_TICKS" ] && [ "${'$'}OLD_TICKS" = "${'$'}(frpc_ticks "${'$'}1")" ] && [ "${'$'}OLD_BOOT" = "${'$'}FRP_BOOT_ID" ]; then
+            case "${'$'}OLD_INSTANCE" in ''|*[!a-zA-Z0-9-]*) ;; *)
+              FRP_INSTANCE="${'$'}OLD_INSTANCE"
+              OLD_SINCE=${'$'}(sed -n 's/.*"since":[ ]*\([0-9][0-9]*\).*/\1/p' "${'$'}FRP_DIR/status.json" 2>/dev/null)
+              case "${'$'}OLD_SINCE" in ''|*[!0-9]*) ;; *) FRP_SINCE="${'$'}OLD_SINCE" ;; esac ;;
+            esac
+          fi
+        }
+        frpc_write_status() {
+          case "${'$'}1" in starting|running|error|stopped) ;; *) return 1 ;; esac
+          case "${'$'}2" in ''|*[!0-9]*) return 1 ;; esac
+          FRP_TICKS=''
+          if [ "${'$'}2" -gt 1 ]; then
+            FRP_TICKS=${'$'}(frpc_ticks "${'$'}2")
+            [ -n "${'$'}FRP_TICKS" ] || return 1
+            printf '%s\n' "${'$'}FRP_INSTANCE" > "${'$'}FRP_PIDFILE.instance" || return 1
+            printf '%s\n' "${'$'}FRP_BOOT_ID" > "${'$'}FRP_PIDFILE.boot" || return 1
+          fi
+          FRP_NOW="${'$'}(date +%s)000"
+          FRP_STATUS_TMP=${'$'}(mktemp "${'$'}FRP_DIR/status.json.XXXXXX") || return 1
+          if ! printf '{"state":"%s","mode":"root","pid":%s,"startTicks":"%s","bootId":"%s","instanceId":"%s","since":%s,"restarts":0,"lastError":"","heartbeat":%s,"kernel":"${FRPC_KERNEL_VERSION}"}\n' \
+            "${'$'}1" "${'$'}2" "${'$'}FRP_TICKS" "${'$'}FRP_BOOT_ID" "${'$'}FRP_INSTANCE" "${'$'}FRP_SINCE" "${'$'}FRP_NOW" > "${'$'}FRP_STATUS_TMP"; then
+            rm -f "${'$'}FRP_STATUS_TMP"; return 1
+          fi
+          chmod 0600 "${'$'}FRP_STATUS_TMP" "${'$'}FRP_PIDFILE.instance" "${'$'}FRP_PIDFILE.boot" 2>/dev/null || true
+          FRP_OWNER=${'$'}(stat -c '%u' "${'$'}FRP_DIR" 2>/dev/null)
+          case "${'$'}FRP_OWNER" in ''|*[!0-9]*) ;; *)
+            chown "${'$'}FRP_OWNER:${'$'}FRP_OWNER" "${'$'}FRP_STATUS_TMP" "${'$'}FRP_PIDFILE.instance" "${'$'}FRP_PIDFILE.boot" 2>/dev/null || true ;;
+          esac
+          mv -f "${'$'}FRP_STATUS_TMP" "${'$'}FRP_DIR/status.json"
+        }
+    """.trimIndent()
+
     /** FIFO keeps the actual frpc PID, while the sink exits on writer EOF. */
-    fun logSink(): String = """
+    fun logSink(trackLink: Boolean = false): String = """
         [ -x "${'$'}FRP_LOG_HELPER" ] || { echo '缺少日志组件，请更新完整 APK' >&2; exit 7; }
         FRP_PIPE="${'$'}FRP_DIR/frpc-log.pipe"
         rm -f "${'$'}FRP_PIPE"
         mkfifo -m 600 "${'$'}FRP_PIPE" || exit 7
         (
           if command -v setsid >/dev/null 2>&1; then
-            exec setsid "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" < "${'$'}FRP_PIPE"
+            exec setsid "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
           else
-            exec "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" < "${'$'}FRP_PIPE"
+            exec "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
           fi
         ) 9>&- > /dev/null 2>&1 &
         FRP_LOG_PID=${'$'}!
@@ -120,6 +167,6 @@ internal object RootTunnelScripts {
         if [ -n "$(frpc_pids)" ]; then
           echo '仍有本应用的 frpc 进程未退出，停止失败' >&2; exit 1
         fi
-        rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version"
+        rm -f "${'$'}FRP_PIDFILE" "${'$'}FRP_PIDFILE.start" "${'$'}FRP_PIDFILE.version" "${'$'}FRP_PIDFILE.instance" "${'$'}FRP_PIDFILE.boot"
     """.trimIndent()
 }
