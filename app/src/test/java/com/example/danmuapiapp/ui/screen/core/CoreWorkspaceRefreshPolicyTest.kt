@@ -63,4 +63,53 @@ class CoreWorkspaceRefreshPolicyTest {
         assertNull(coreWorkspaceUpdateSnapshot(checkedInfo.copy(updateCheckedAtEpochMillis = null), "owner/core", "main"))
         assertNull(coreWorkspaceUpdateSnapshot(checkedInfo.copy(remoteCommit = checkedInfo.remoteCommit!!.copy(sha = "")), "owner/core", "main"))
     }
+
+    @Test fun `initial disk scan does not invalidate a valid saved remote snapshot`() {
+        assertTrue(changedCoreInstallations(null, listOf(checkedInfo)).isEmpty())
+    }
+
+    @Test fun `reinstalling the same commit and version refreshes remote data immediately`() {
+        val installed = checkedInfo.copy(sourceCommitSha = "abc1234", sourceInstalledAtEpochMillis = 100L)
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(
+            listOf(installed), listOf(installed.copy(sourceInstalledAtEpochMillis = 200L))
+        ))
+    }
+
+    @Test fun `replacing an installed core is detected even before installation timestamp is available`() {
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(
+            listOf(checkedInfo), listOf(checkedInfo.copy(sourceCommitSha = "new-commit"))
+        ))
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(
+            listOf(checkedInfo), listOf(checkedInfo.copy(version = "1.21.6"))
+        ))
+    }
+
+    @Test fun `adding and removing PR overlays invalidates the installed core remote cache`() {
+        val combined = checkedInfo.copy(pullRequestNumbers = listOf(12, 34))
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(listOf(checkedInfo), listOf(combined)))
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(listOf(combined), listOf(checkedInfo)))
+    }
+
+    @Test fun `installation and deletion update only the changed core variant`() {
+        val development = checkedInfo.copy(variant = ApiVariant.Dev)
+        val absent = checkedInfo.copy(isInstalled = false, version = null)
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(
+            listOf(absent, development), listOf(checkedInfo, development)
+        ))
+        assertEquals(setOf(ApiVariant.Stable), changedCoreInstallations(
+            listOf(checkedInfo, development), listOf(absent, development)
+        ))
+    }
+
+    @Test fun `remote update checks and readiness changes never trigger repeated remote refreshes`() {
+        val remoteUpdated = checkedInfo.copy(
+            sourceMismatch = true,
+            hasVersionUpdate = true,
+            remoteVersion = "1.21.6",
+            remoteCommit = checkedInfo.remoteCommit!!.copy(sha = "new-remote-commit"),
+            updateCheckedAtEpochMillis = checkedAt + 600_001L
+        )
+        assertTrue(changedCoreInstallations(listOf(checkedInfo), listOf(remoteUpdated)).isEmpty())
+        assertTrue(changedCoreInstallations(listOf(remoteUpdated), listOf(checkedInfo)).isEmpty())
+    }
 }

@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -184,12 +185,34 @@ class CoreViewModel @Inject constructor(
     init {
         observeRuntimeDrivenCoreRefresh()
         observePendingDependencyRepair()
+        observeCoreInstallationChanges()
         if (githubAccountService.shouldRefresh() && !githubAccountStatus.value.isLoading) {
             refreshGithubAccount()
         }
         // 启动时只补齐缺失信息；已有远端信息的时效检查仍在进入核心页时进行。
         if (workspaceEntryFor(runtimeState.value.variant) == null) {
             refreshWorkspace(runtimeState.value.variant)
+        }
+    }
+
+    private fun observeCoreInstallationChanges() {
+        viewModelScope.launch {
+            var previous: List<CoreInfo>? = null
+            var previousScope: String? = null
+            combine(coreInfoList, isCoreInfoLoading, runtimeState.map { it.runMode }.distinctUntilChanged()) { info, loading, mode ->
+                Triple(info, loading, coreDisplayCache.scopeFor(mode))
+            }.collect { (info, loading, scope) ->
+                if (loading) return@collect
+                if (previousScope != scope) previous = null
+                val changed = changedCoreInstallations(previous, info)
+                previous = info
+                previousScope = scope
+                changed.forEach { variant ->
+                    workspaceHeadCache.keys.filter { it.startsWith("${variant.key}:") }.forEach(workspaceHeadCache::remove)
+                    coreDisplayCache.removeRemoteSnapshots(variant)
+                    refreshWorkspace(variant, force = true, afterCoreMutation = true)
+                }
+            }
         }
     }
 
@@ -236,8 +259,8 @@ class CoreViewModel @Inject constructor(
         StopTimeout
     }
 
-    fun refreshWorkspace(variant: ApiVariant, force: Boolean = false) {
-        if (isOperating) return
+    fun refreshWorkspace(variant: ApiVariant, force: Boolean = false, afterCoreMutation: Boolean = false) {
+        if (isOperating && !afterCoreMutation) return
         val repo = resolveCoreVariantRepo(variant, customRepo.value)
         val branch = resolveCoreVariantBranch(
             variant, customRepo.value, customRepoBranch.value, coreBranchSelections.value
@@ -268,11 +291,11 @@ class CoreViewModel @Inject constructor(
         }
         workspaceRefreshKey = key
         isRefreshingWorkspace = true
-        isManualWorkspaceRefresh = force
+        isManualWorkspaceRefresh = force && !afterCoreMutation
         workspaceRefreshJob = viewModelScope.launch {
             try {
                 // 本地状态由仓库独立读取；远端请求不用排在 Root 文件扫描后面。
-                if (force) coreRepo.refreshCoreInfo()
+                if (force && !afterCoreMutation) coreRepo.refreshCoreInfo()
                 if (repo.isNotBlank()) {
                     coreRepo.fetchBranchSnapshot(variant).fold(
                         onSuccess = { snapshot ->

@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreBranchSnapshot
 import com.example.danmuapiapp.domain.model.CoreInfo
 
@@ -24,4 +25,17 @@ internal fun coreWorkspaceUpdateSnapshot(
     if (!commit.htmlUrl.startsWith("https://github.com/$repo/commit/", ignoreCase = true)) return null
     if (requestedBranch.isNotBlank() && requestedBranch != branch) return null
     return checkedAt to CoreBranchSnapshot(repo, branch, commit)
+}
+
+/** Remote checks and runtime readiness are not installations; compare disk facts only. */
+internal fun changedCoreInstallations(previous: List<CoreInfo>?, current: List<CoreInfo>): Set<ApiVariant> {
+    if (previous == null) return emptySet()
+    val before = previous.associateBy { it.variant }
+    return current.filter { info ->
+        val old = before[info.variant] ?: return@filter false
+        old.isInstalled != info.isInstalled || old.version != info.version ||
+            old.sourceCommitSha != info.sourceCommitSha ||
+            old.sourceInstalledAtEpochMillis != info.sourceInstalledAtEpochMillis ||
+            old.pullRequestNumbers != info.pullRequestNumbers
+    }.mapTo(linkedSetOf()) { it.variant }
 }

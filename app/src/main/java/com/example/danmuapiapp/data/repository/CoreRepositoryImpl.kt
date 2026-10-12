@@ -447,19 +447,23 @@ class CoreRepositoryImpl @Inject constructor(
                 val mode = currentRunMode()
                 val displayScope = coreDisplayCache.scopeFor(mode)
                 ensureCoreDirWatcher(mode)
-                val refreshed = ApiVariant.entries.map { loadCoreState(it, mode) }
-                currentCoroutineContext().ensureActive()
-                if (refreshTicket.get() != ticket) return@launch
-                _coreInfoList.update { current ->
-                    refreshed.map { state ->
-                        mergeVersionUpdateState(
-                            previousInfo = current.find { it.variant == state.info.variant },
-                            refreshedInfo = state.info,
-                            refreshedMetadata = state.localMetadata
-                        )
+                // A scan must not read the old directory while a replacement is
+                // underway, or publish a partial snapshot after installation.
+                mutationMutex.withLock {
+                    val refreshed = ApiVariant.entries.map { loadCoreState(it, mode) }
+                    currentCoroutineContext().ensureActive()
+                    if (refreshTicket.get() != ticket) return@withLock
+                    _coreInfoList.update { current ->
+                        refreshed.map { state ->
+                            mergeVersionUpdateState(
+                                previousInfo = current.find { it.variant == state.info.variant },
+                                refreshedInfo = state.info,
+                                refreshedMetadata = state.localMetadata
+                            )
+                        }
                     }
+                    coreDisplayCache.save(displayScope, refreshed.map { it.info })
                 }
-                coreDisplayCache.save(displayScope, refreshed.map { it.info })
             } finally {
                 if (refreshTicket.get() == ticket) {
                     hasLoadedCoreInfoOnce = true
@@ -1059,7 +1063,7 @@ class CoreRepositoryImpl @Inject constructor(
                     }
                 }
                 RuntimeDependencyHealthChecker.clearPendingIssue(context, variant)
-                refreshCoreInfo()
+                refreshCoreInfoAndAwait()
             }
         }
 
@@ -1634,7 +1638,12 @@ class CoreRepositoryImpl @Inject constructor(
                         }
                         verifyCoreRuntimeDependencies(staging, dependencies.unavailableReason)
                     }
-                    setPendingCoreMutation(pending.copy(repair = pending.repair.copy(missingDependencies = emptyList())))
+                    // The PR lab owns this ready candidate; it is not a user dependency
+                    // repair task and must not trigger the global startup gate.
+                    setPendingCoreMutation(
+                        pending.copy(repair = pending.repair.copy(missingDependencies = emptyList())),
+                        publishDependencyRepair = false
+                    )
                     markOperationAwaitingRepair(operationId)
                     Result.success(pending.repair.copy(missingDependencies = emptyList()))
                 } catch (cancelled: CancellationException) {
@@ -1804,7 +1813,7 @@ class CoreRepositoryImpl @Inject constructor(
                 ) {
                     refreshLatestInstalledCoreState(pending.repair.variant)
                 } else {
-                    refreshCoreInfo()
+                    refreshCoreInfoAndAwait()
                 }
                 clearPendingCoreMutation(operationId, deleteStaging = true)
                 finishCoreOperation(operationId)
@@ -1984,14 +1993,14 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun setPendingCoreMutation(pending: PendingCoreMutation) {
+    private fun setPendingCoreMutation(pending: PendingCoreMutation, publishDependencyRepair: Boolean = true) {
         synchronized(coreOperationLock) {
             val current = _operationState.value
             if (current.operationId != pending.operationId || pendingCoreMutation != null) {
                 throw IOException("已有核心任务正在等待处理，不能覆盖")
             }
             pendingCoreMutation = pending
-            _pendingDependencyRepair.value = pending.repair
+            _pendingDependencyRepair.value = pending.repair.takeIf { publishDependencyRepair }
         }
     }
 
@@ -2726,7 +2735,7 @@ class CoreRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun refreshLatestInstalledCoreState(variant: ApiVariant) {
+    private suspend fun refreshLatestInstalledCoreState(variant: ApiVariant) {
         latestRemoteVersionCache.remove(variant)
         _coreInfoList.value = _coreInfoList.value.map { info ->
             if (info.variant == variant) {
@@ -2745,7 +2754,7 @@ class CoreRepositoryImpl @Inject constructor(
                 info
             }
         }
-        refreshCoreInfo()
+        refreshCoreInfoAndAwait()
     }
 
     private fun buildReleaseInstallMetadata(

@@ -23,7 +23,10 @@ data class CoreDependencyRepairRequest(
     val onlineRepairSupported: Boolean = variant != ApiVariant.Custom,
     val origin: CoreDependencyRepairOrigin = CoreDependencyRepairOrigin.CoreMutation,
     val resumeAction: RuntimeDependencyResumeAction = RuntimeDependencyResumeAction.None
-)
+) {
+    val requiresUserRepair: Boolean
+        get() = missingDependencies.isNotEmpty()
+}
 
 enum class CoreOperationPhase {
     Idle,

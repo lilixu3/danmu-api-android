@@ -39,6 +39,11 @@ class CoreDisplayInfoCache @Inject constructor(
     internal fun readRemoteSnapshots(): List<CachedCoreRemoteInfo> =
         CoreRemoteInfoCodec.decode(prefs.getString("remote_snapshots", null))
 
+    internal fun removeRemoteSnapshots(variant: ApiVariant) {
+        val entries = readRemoteSnapshots().filterNot { it.variantKey == variant.key }
+        prefs.edit().putString("remote_snapshots", CoreRemoteInfoCodec.encode(entries)).apply()
+    }
+
     internal fun saveRemoteSnapshot(variant: ApiVariant, requestedBranch: String,
         snapshot: CoreBranchSnapshot, checkedAt: Long) {
         val entry = CachedCoreRemoteInfo.from(variant, requestedBranch, snapshot, checkedAt)

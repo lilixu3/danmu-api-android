@@ -281,7 +281,7 @@ fun StartupPermissionGateHost(
         pendingDependencyRepair == null &&
         coreDeferredThisLaunch.not()
     val shouldShowDependencyStep = canConfigureSetup &&
-        pendingDependencyRepair != null &&
+        pendingDependencyRepair?.requiresUserRepair == true &&
         coreDeferredThisLaunch.not()
     val shouldShowPermissionStep = !permissionState.localNetworkReady ||
         (runtimeState.runMode == RunMode.Normal && (!permissionState.notificationReady || !permissionState.batteryReady))
