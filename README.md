@@ -221,7 +221,3 @@ C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提�
 **如果你觉得这个项目对你有帮助，欢迎给个 ⭐️ 支持一下！**
 
 </div>
-
-### App 独立增强直连
-
-设置 → 网络设置 → 增强直连，默认关闭。App 内置 Go DNS/ECH/H2/H3 组件，普通模式和 Root 模式均可接入，无需核心实现相关开关；支持巴哈姆特、TMDB、弹弹play与 Animeko，新增来源在设置中勾选，已有代理优先。构建前运行 `scripts/prepare_outbound_kernel.sh`。详细兼容范围、构建和诊断见 [runtime/outbound/README.md](runtime/outbound/README.md)。
