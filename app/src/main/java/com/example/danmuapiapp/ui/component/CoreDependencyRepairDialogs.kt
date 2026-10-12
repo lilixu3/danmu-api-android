@@ -45,6 +45,7 @@ fun CoreDependencyRepairHost(
         uri?.let { onRepairFromArchive(it.toString()) }
     }
     request ?: return
+    if (request.missingDependencies.isEmpty()) return
 
     if (showRequiredPrompt) {
         CoreDependencyRequiredDialog(

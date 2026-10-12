@@ -3,9 +3,11 @@ package com.example.danmuapiapp.ui.screen.core
 import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.data.repository.CoreDisplayInfoCache
 import com.example.danmuapiapp.data.service.GithubAccountService
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.domain.model.*
@@ -18,9 +20,11 @@ import com.example.danmuapiapp.ui.common.cancelTrackedJobs
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -36,10 +40,12 @@ class CoreViewModel @Inject constructor(
     private val runtimeRepo: RuntimeRepository,
     private val settingsRepo: SettingsRepository,
     private val githubProxyService: GithubProxyService,
-    private val githubAccountService: GithubAccountService
+    private val githubAccountService: GithubAccountService,
+    private val coreDisplayCache: CoreDisplayInfoCache
 ) : ViewModel() {
 
     val coreInfoList = coreRepo.coreInfoList
+    val isCoreInfoLoading = coreRepo.isCoreInfoLoading
     val downloadProgress = coreRepo.downloadProgress
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val runtimeState = runtimeRepo.runtimeState
@@ -50,6 +56,34 @@ class CoreViewModel @Inject constructor(
     val customRepoBranch = settingsRepo.customRepoBranch
     val githubAccountStatus = githubAccountService.status
     val proxyOptions = githubProxyService.proxyOptions()
+    val selectedGithubProxyId = githubProxyService.selectedProxyId
+
+    private val initialCoreDisplayInfo = coreDisplayCache.read()
+
+    fun cachedCoreDisplayInfo(variant: ApiVariant): CoreInfo? = initialCoreDisplayInfo
+        ?.takeIf { it.scope == coreDisplayCache.scopeFor() }
+        ?.installedInfo(variant)
+
+    var workspaceRefreshError by mutableStateOf<String?>(null)
+        private set
+    var isRefreshingWorkspace by mutableStateOf(false)
+        private set
+    var isManualWorkspaceRefresh by mutableStateOf(false)
+        private set
+    private var workspaceRefreshJob: Job? = null
+    private var workspaceRefreshKey: String? = null
+    private var workspaceGeneration = 0L
+    private var lastWorkspaceQuotaRefresh = 0L
+    private val workspaceHeadCache = mutableStateMapOf<String, Pair<Long, CoreBranchSnapshot>>().apply {
+        coreDisplayCache.readRemoteSnapshots().forEach { put(it.key, it.checkedAt to it.snapshot()) }
+    }
+
+    fun workspaceEntryFor(variant: ApiVariant): Pair<Long, CoreBranchSnapshot>? {
+        val repo = resolveCoreVariantRepo(variant, customRepo.value)
+        val branch = resolveCoreVariantBranch(variant, customRepo.value, customRepoBranch.value,
+            coreBranchSelections.value).orEmpty()
+        return workspaceHeadCache["${variant.key}:$repo:$branch"]
+    }
 
     var isOperating by mutableStateOf(false)
         private set
@@ -148,16 +182,21 @@ class CoreViewModel @Inject constructor(
     private var activeRevisionPageCacheKey: RevisionPageCacheKey? = null
 
     init {
-        coreRepo.refreshCoreInfo()
         observeRuntimeDrivenCoreRefresh()
         observePendingDependencyRepair()
-        refreshGithubAccount()
+        if (githubAccountService.shouldRefresh() && !githubAccountStatus.value.isLoading) {
+            refreshGithubAccount()
+        }
+        // 启动时只补齐缺失信息；已有远端信息的时效检查仍在进入核心页时进行。
+        if (workspaceEntryFor(runtimeState.value.variant) == null) {
+            refreshWorkspace(runtimeState.value.variant)
+        }
     }
 
     private fun observePendingDependencyRepair() {
         viewModelScope.launch {
             pendingDependencyRepair.collect { request ->
-                if (request == null) {
+                if (request == null || request.missingDependencies.isEmpty()) {
                     showDependencyRequiredPrompt = false
                     showDependencyRepairDialog = false
                 } else if (!showDependencyRepairDialog) {
@@ -172,6 +211,7 @@ class CoreViewModel @Inject constructor(
             runtimeState
                 .map { Triple(it.runMode, it.status, it.variant) }
                 .distinctUntilChanged()
+                .drop(1)
                 .collect {
                     coreRepo.refreshCoreInfo()
                 }
@@ -194,6 +234,83 @@ class CoreViewModel @Inject constructor(
         None,
         Restarting,
         StopTimeout
+    }
+
+    fun refreshWorkspace(variant: ApiVariant, force: Boolean = false) {
+        if (isOperating) return
+        val repo = resolveCoreVariantRepo(variant, customRepo.value)
+        val branch = resolveCoreVariantBranch(
+            variant, customRepo.value, customRepoBranch.value, coreBranchSelections.value
+        ).orEmpty()
+        val key = "${variant.key}:$repo:$branch"
+        if (!force && workspaceRefreshKey == key && workspaceRefreshJob?.isActive == true) return
+        val updateSnapshot = coreWorkspaceUpdateSnapshot(
+            coreInfoList.value.firstOrNull { it.variant == variant }, repo, branch
+        )
+        if (updateSnapshot != null && updateSnapshot.first > (workspaceHeadCache[key]?.first ?: 0L)) {
+            workspaceHeadCache[key] = updateSnapshot
+            coreDisplayCache.saveRemoteSnapshot(variant, branch, updateSnapshot.second, updateSnapshot.first)
+        }
+        val cached = workspaceHeadCache[key]
+        val generation = ++workspaceGeneration
+        workspaceRefreshJob?.cancel()
+        workspaceRefreshError = null
+        workspaceRefreshKey = null
+        if (!force && (repo.isBlank() || !shouldRefreshCoreWorkspace(
+                hasRemoteInfo = cached?.second?.commit?.sha?.isNotBlank() == true,
+                lastCheckedAtMillis = cached?.first ?: 0L,
+                nowMillis = System.currentTimeMillis()
+            ))) {
+            isRefreshingWorkspace = false
+            isManualWorkspaceRefresh = false
+            workspaceRefreshJob = null
+            return
+        }
+        workspaceRefreshKey = key
+        isRefreshingWorkspace = true
+        isManualWorkspaceRefresh = force
+        workspaceRefreshJob = viewModelScope.launch {
+            try {
+                // 本地状态由仓库独立读取；远端请求不用排在 Root 文件扫描后面。
+                if (force) coreRepo.refreshCoreInfo()
+                if (repo.isNotBlank()) {
+                    coreRepo.fetchBranchSnapshot(variant).fold(
+                        onSuccess = { snapshot ->
+                            if (generation == workspaceGeneration) {
+                                val checkedAt = System.currentTimeMillis()
+                                workspaceHeadCache[key] = checkedAt to snapshot
+                                coreDisplayCache.saveRemoteSnapshot(variant, branch, snapshot, checkedAt)
+                            }
+                        },
+                        onFailure = { error ->
+                            if (error is CancellationException) throw error
+                            if (generation == workspaceGeneration) {
+                                workspaceRefreshError = error.message ?: "分支信息读取失败"
+                            }
+                        }
+                    )
+                }
+                if (generation == workspaceGeneration && !showGithubTokenDialog &&
+                    !githubAccountStatus.value.isLoading && (force ||
+                        System.currentTimeMillis() - lastWorkspaceQuotaRefresh >= 60_000L)) {
+                    lastWorkspaceQuotaRefresh = System.currentTimeMillis()
+                    refreshGithubAccount()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == workspaceGeneration) {
+                    workspaceRefreshError = error.message ?: "核心信息刷新失败"
+                }
+            } finally {
+                if (generation == workspaceGeneration) {
+                    isRefreshingWorkspace = false
+                    isManualWorkspaceRefresh = false
+                    workspaceRefreshJob = null
+                    workspaceRefreshKey = null
+                }
+            }
+        }
     }
 
     fun updateVariant(variant: ApiVariant) {
@@ -753,6 +870,7 @@ class CoreViewModel @Inject constructor(
     }
 
     fun refreshGithubAccount() {
+        lastWorkspaceQuotaRefresh = System.currentTimeMillis()
         val generation = beginGithubAccountOperation()
         githubAccountJob = viewModelScope.launch {
             githubAccountService.refresh()

@@ -108,6 +108,13 @@ class SettingsViewModel @Inject constructor(
         get() = envConfigRepoLazy.get()
 
     val runtimeState = runtimeRepo.runtimeState
+    val aboutCoreInfo = coreRepo.coreInfoList
+    val aboutCoreDisplayNames = settingsRepo.coreDisplayNames
+
+    fun refreshAboutInfo() {
+        coreRepo.refreshCoreInfo()
+        refreshWorkDirInfo()
+    }
     val pendingDependencyRepair = coreRepo.pendingDependencyRepair
     val githubProxy = settingsRepo.githubProxy
     val githubAccountStatus = githubAccountService.status

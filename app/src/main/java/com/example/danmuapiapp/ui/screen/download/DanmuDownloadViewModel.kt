@@ -46,7 +46,9 @@ class DanmuDownloadViewModel @Inject constructor(
     runtimeRepository: RuntimeRepository,
     private val downloadRepository: DanmuDownloadRepository,
     private val adminSessionRepository: AdminSessionRepository,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val seriesRefresh: SeriesRefreshService,
+    private val localUploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService
 ) : ViewModel() {
     companion object {
         private const val RATE_LIMIT_ENV_KEY = "RATE_LIMIT_MAX_REQUESTS"
@@ -58,6 +60,67 @@ class DanmuDownloadViewModel @Inject constructor(
     val settings = downloadRepository.settings
     val records = downloadRepository.records
     val queueTasks = downloadRepository.queueTasks
+
+    var refreshingSeriesKey by mutableStateOf<String?>(null)
+        private set
+    internal var missingEpisodes by mutableStateOf<MissingEpisodesState?>(null)
+        private set
+    var lastSync by mutableStateOf<com.example.danmuapiapp.domain.model.DownloadDirectorySyncResult?>(null)
+        private set
+
+    fun refreshSeries(group: DownloadRecordAnimeGroup) {
+        if (refreshingSeriesKey != null) return
+        val base = resolveApiBaseUrl() ?: run { errorMessage = "弹幕源地址无效"; return }
+        refreshingSeriesKey = group.key
+        viewModelScope.launch {
+            try {
+                val result = seriesRefresh.load(base, group.records, settings.value.matchMode)
+                val missing = missingDownloadedEpisodes(result.episodes, group.records)
+                if (missing.isEmpty()) operationMessage = "《${group.title}》源里共 ${result.episodes.size} 集，已经全部下载"
+                else missingEpisodes = MissingEpisodesState(group.title, result.anime.copy(title = group.records.first().animeTitle),
+                    missing, result.episodes.size - missing.size, result.episodes.size, result.way,
+                    missing.map { it.episodeId }.toSet())
+            } catch (e: Exception) { errorMessage = e.message ?: "刷新失败" }
+            finally { refreshingSeriesKey = null }
+        }
+    }
+    fun toggleMissingEpisode(id: Long) {
+        missingEpisodes = missingEpisodes?.let { it.copy(selectedIds = if (id in it.selectedIds) it.selectedIds - id else it.selectedIds + id) }
+    }
+    fun selectAllMissing(select: Boolean) {
+        missingEpisodes = missingEpisodes?.let { it.copy(selectedIds = if (select) it.episodes.map { e -> e.episodeId }.toSet() else emptySet()) }
+    }
+    fun dismissMissing() { missingEpisodes = null }
+    fun downloadMissing() {
+        val state = missingEpisodes ?: return
+        if (settings.value.saveTreeUri.isBlank() && settings.value.saveDirPath.isBlank()) {
+            errorMessage = "请先在下载设置中选择保存目录"; return
+        }
+        val base = resolveApiBaseUrl() ?: return
+        val inputs = state.episodes.filter { it.episodeId in state.selectedIds }.map { episode ->
+            DanmuDownloadInput(apiBaseUrl = base, animeTitle = state.anime.title, episodeTitle = episode.title,
+                episodeId = episode.episodeId, episodeNo = episode.episodeNumber, source = episode.source,
+                format = settings.value.format(), fileNameTemplate = settings.value.fileNameTemplate,
+                conflictPolicy = settings.value.policy(), animeId = state.anime.animeId)
+        }
+        if (inputs.isEmpty()) return
+        val added = downloadRepository.enqueueTasks(inputs)
+        missingEpisodes = null
+        operationMessage = "已加入队列 $added 集"
+        if (!isDownloading) processPendingQueue()
+    }
+    fun selectAllVisible() { selectedEpisodeIds = selectedEpisodeIds + visibleEpisodes().map { it.episodeId } }
+
+    fun invertVisibleSelection() {
+        val visible = visibleEpisodes().map { it.episodeId }.toSet()
+        selectedEpisodeIds = (selectedEpisodeIds - visible) + (visible - selectedEpisodeIds)
+    }
+    fun selectUndownloadedEpisodes() {
+        selectedEpisodeIds = visibleEpisodes().filter { !episodeUiState(it).downloadedBefore && episodeUiState(it).state != EpisodeDownloadState.Success }.map { it.episodeId }.toSet()
+    }
+    fun removeQueueGroup(title: String) {
+        if (!isDownloading) downloadRepository.removeQueueTasks(queueTasks.value.filter { it.animeTitle == title }.map { it.taskId }.toSet())
+    }
 
     var sourceBase by mutableStateOf("")
         private set
@@ -144,6 +207,7 @@ class DanmuDownloadViewModel @Inject constructor(
         private set
 
     private var cancelRequested by mutableStateOf(false)
+    private var cancelRemainingTasks = false
     private var requireQueuePreparationBeforeRun by mutableStateOf(false)
     private val random = Random(System.currentTimeMillis())
 
@@ -160,7 +224,25 @@ class DanmuDownloadViewModel @Inject constructor(
                 fileNameTemplate = config.fileNameTemplate
             }
         }
-        if (settings.value.saveTreeUri.isNotBlank()) {
+        viewModelScope.launch {
+            val seen = records.value.map { it.id }.toMutableSet()
+            records.collect { snapshot ->
+                val fresh = snapshot.filter { it.id !in seen }
+                seen.addAll(snapshot.map { it.id })
+                if (settings.value.autoImportToLocal) fresh.filter { it.statusEnum() == DownloadRecordStatus.Success && it.episodeId > 0 }.forEach { record ->
+                    viewModelScope.launch {
+                        localUploader.importRecord(record).exceptionOrNull()?.let { failure ->
+                            if (failure.message != "已导入，跳过") {
+                                val note = "自动导入未完成：${failure.message}；可在记录里订正后重试"
+                                downloadRepository.noteRecord(record.id, note)
+                                operationMessage = "第${record.episodeNo}集已下载，$note"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (settings.value.saveTreeUri.isNotBlank() || settings.value.saveDirPath.isNotBlank()) {
             syncExistingFiles(showMessageWhenUnchanged = false)
         }
     }
@@ -269,18 +351,20 @@ class DanmuDownloadViewModel @Inject constructor(
     }
 
     private fun syncExistingFiles(showMessageWhenUnchanged: Boolean) {
-        if (isSyncingRecords || isDeletingRecords || settings.value.saveTreeUri.isBlank()) return
+        if (isSyncingRecords || isDeletingRecords) return
+        if (settings.value.saveTreeUri.isBlank() && settings.value.saveDirPath.isBlank()) { errorMessage = "请先设置下载目录"; return }
         viewModelScope.launch {
             isSyncingRecords = true
             val result = downloadRepository.syncExistingFiles()
             result.fold(
                 onSuccess = { summary ->
+                    lastSync = summary
                     if (summary.importedRecords > 0) {
                         refreshCurrentEpisodeStates()
                     }
                     if (summary.importedRecords > 0 || showMessageWhenUnchanged) {
                         operationMessage = buildString {
-                            append("已扫描 ${summary.scannedFiles} 个文件，新增 ${summary.importedRecords} 条记录")
+                            append("已扫描 ${summary.scannedFiles} 个文件，新增 ${summary.importedRecords} 条，清理 ${summary.removedRecords} 条")
                             if (summary.truncated) append("（已达到扫描上限）")
                         }
                     }
@@ -507,6 +591,7 @@ class DanmuDownloadViewModel @Inject constructor(
     }
 
     fun pauseDownload() {
+        cancelRemainingTasks = false
         if (!isDownloading) {
             operationMessage = "当前没有正在执行的下载"
             return
@@ -792,6 +877,7 @@ class DanmuDownloadViewModel @Inject constructor(
                         )
                     }
                     episodeCandidates = episodes
+                    selectedEpisodeIds = episodes.map { it.episodeId }.toSet()
                     episodeStates = initialStates
                     operationMessage = if (episodes.isEmpty()) {
                         "该动漫暂无可下载剧集"
@@ -809,19 +895,31 @@ class DanmuDownloadViewModel @Inject constructor(
     }
 
     fun cancelDownload() {
-        if (!isDownloading) return
+        cancelRemainingTasks = true
+        if (!isDownloading) {
+            cancelPendingTasks()
+            operationMessage = "已取消剩余任务，下载记录与文件保留"
+            return
+        }
         cancelRequested = true
-        progressSummary = "正在取消下载..."
+        progressSummary = "正在取消剩余任务..."
+    }
+
+    private fun cancelPendingTasks() {
+        queueTasks.value.filter { it.statusEnum() in setOf(DownloadQueueStatus.Pending, DownloadQueueStatus.Running) }.forEach { task ->
+            downloadRepository.setQueueTaskStatus(task.taskId, DownloadQueueStatus.Canceled, "已取消")
+            updateEpisodeState(task.episodeId, EpisodeDownloadState.Canceled, 0f, "已取消")
+        }
     }
 
     fun startDownloadSelectedEpisodes() {
-        if (isDownloading || isSearching || isLoadingEpisodes) return
+        if (isSearching || isLoadingEpisodes) return
 
         val anime = currentAnime ?: run {
             errorMessage = "请先选择动漫"
             return
         }
-        if (settings.value.saveTreeUri.isBlank()) {
+        if (settings.value.saveTreeUri.isBlank() && settings.value.saveDirPath.isBlank()) {
             errorMessage = "请先到设置-弹幕下载中配置保存目录"
             return
         }
@@ -852,6 +950,7 @@ class DanmuDownloadViewModel @Inject constructor(
                 animeId = anime.animeId
             )
         }
+        errorMessage = null
         val added = downloadRepository.enqueueTasks(inputs)
         episodeStates = episodeStates.toMutableMap().apply {
             selectedList.forEach { episode ->
@@ -869,12 +968,12 @@ class DanmuDownloadViewModel @Inject constructor(
         } else {
             "所选剧集已在队列中，继续执行队列"
         }
-        processPendingQueue()
+        if (!isDownloading) processPendingQueue()
     }
 
     private fun processPendingQueue() {
         if (isDownloading || isSearching || isLoadingEpisodes) return
-        if (settings.value.saveTreeUri.isBlank()) {
+        if (settings.value.saveTreeUri.isBlank() && settings.value.saveDirPath.isBlank()) {
             errorMessage = "请先到设置-弹幕下载中配置保存目录"
             return
         }
@@ -887,6 +986,8 @@ class DanmuDownloadViewModel @Inject constructor(
         viewModelScope.launch {
             isDownloading = true
             cancelRequested = false
+            cancelRemainingTasks = false
+            errorMessage = null
             val rateLimitBypassSession = prepareRateLimitBypassForDownload()
             var summaryMessage: String? = null
             val prepareChainForThisRun = requireQueuePreparationBeforeRun
@@ -1231,7 +1332,9 @@ class DanmuDownloadViewModel @Inject constructor(
                     retryCount++
                 }
 
-                if (cancelRequested) {
+                // A stop request arriving during HTTP must not erase the success
+                // already saved to disk/history. Only unfinished work returns to pending.
+                if (cancelRequested && finalResult?.isSuccess != true) {
                     revertTaskToPending(task, activeEpisodeId)
                     break
                 }
@@ -1398,9 +1501,10 @@ class DanmuDownloadViewModel @Inject constructor(
                 }
             }
 
+                if (cancelRequested && cancelRemainingTasks) cancelPendingTasks()
                 val remain = queueTasks.value.count { it.statusEnum() == DownloadQueueStatus.Pending }
                 if (cancelRequested) {
-                    progressSummary = "队列已暂停，待处理 $remain 集"
+                    progressSummary = if (cancelRemainingTasks) "剩余任务已取消，成功下载的文件已保留" else "队列已暂停，待处理 $remain 集"
                     summaryMessage = progressSummary
                 } else {
                     progressSummary = "队列执行完成：成功 $success，失败 $failed，跳过 $skipped"

@@ -8,10 +8,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.repository.DanmuPayloadInspector
+import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.RequestRecord
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
+import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
@@ -19,6 +21,8 @@ import com.example.danmuapiapp.ui.screen.download.parseAnimeCandidates
 import com.example.danmuapiapp.ui.screen.download.parseEpisodeCandidates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,17 +41,30 @@ import javax.inject.Inject
 class ApiTestViewModel @Inject constructor(
     private val runtimeRepository: RuntimeRepository,
     private val recordRepository: RequestRecordRepository,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val envConfigRepository: EnvConfigRepository
 ) : ViewModel() {
+    private companion object {
+        const val SEARCH_RESULTS_LAYOUT_KEY = "APP_API_SEARCH_RESULTS_LAYOUT"
+    }
 
     val runtimeState = runtimeRepository.runtimeState
     val logs = runtimeRepository.logs
     val endpoints = ApiTestCatalog.endpoints
 
+    var animeResultsGrid by mutableStateOf(false)
+        private set
+
+    var isSavingAnimeResultsLayout by mutableStateOf(false)
+        private set
+
     var isLoading by mutableStateOf(false)
         private set
 
     var debugResponse by mutableStateOf<ApiDebugResponse?>(null)
+        private set
+
+    var debugCalls by mutableStateOf<List<ApiDebugCall>>(emptyList())
         private set
 
     var requestUrl by mutableStateOf("")
@@ -129,7 +146,45 @@ class ApiTestViewModel @Inject constructor(
         private set
 
     private var manualOriginalInput: String = ""
+    private var manualSelectedEpisode: DownloadEpisodeCandidate? = null
+    private var episodeLoadJob: Job? = null
+    private var manualDanmuJob: Job? = null
     private var uiEventSequence = 0L
+
+    init {
+        viewModelScope.launch {
+            envConfigRepository.loadedEnvVars.collect { values ->
+                if (values != null && !isSavingAnimeResultsLayout) {
+                    animeResultsGrid = values[SEARCH_RESULTS_LAYOUT_KEY]?.trim().equals("grid", ignoreCase = true)
+                }
+            }
+        }
+        envConfigRepository.reload()
+    }
+
+    fun toggleAnimeResultsLayout() {
+        if (isSavingAnimeResultsLayout) return
+        val previous = animeResultsGrid
+        val value = if (previous) "list" else "grid"
+        animeResultsGrid = !previous
+        isSavingAnimeResultsLayout = true
+        viewModelScope.launch {
+            try {
+                envConfigRepository.setValue(SEARCH_RESULTS_LAYOUT_KEY, value)
+                val saved = withContext(Dispatchers.IO) {
+                    DotEnvCodec.parse(envConfigRepository.readCurrentRawContent().getOrThrow())
+                }
+                check(saved[SEARCH_RESULTS_LAYOUT_KEY] == value) { "未能保存布局配置" }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                animeResultsGrid = previous
+                emitNotice("布局保存失败：${error.message ?: "无法写入配置"}", isError = true)
+            } finally {
+                isSavingAnimeResultsLayout = false
+            }
+        }
+    }
 
     fun dismissError() {
         errorMessage = null
@@ -159,10 +214,40 @@ class ApiTestViewModel @Inject constructor(
         autoMatchResult = null
     }
 
+    fun clearManualDanmu() {
+        manualDanmuJob?.cancel()
+        manualDanmuJob = null
+        isLoadingManualDanmu = false
+        loadingEpisodeId = null
+        manualResult = null
+    }
+
+    fun reloadManualDanmu(baseUrl: String) {
+        val anime = manualCurrentAnime ?: return
+        val episode = manualSelectedEpisode ?: return
+        loadManualDanmu(baseUrl, anime, episode)
+    }
+
+    fun clearDebugCalls() {
+        debugCalls = emptyList()
+    }
+
+    fun danmuRequestUrl(baseUrl: String, insight: DanmuInsight): String {
+        val base = resolveApiBaseUrl(baseUrl).orEmpty()
+        return when (val target = insight.exportTarget) {
+            is DanmuExportTarget.Episode -> "$base/api/v2/comment/${target.episodeId}?format=json&duration=true"
+            is DanmuExportTarget.VideoUrl -> "$base/api/v2/comment?url=${urlEncode(target.url)}&format=json&duration=true"
+            null -> ""
+        }
+    }
+
     fun backManualStep() {
         when {
             manualResult != null -> manualResult = null
             manualCurrentAnime != null -> {
+                episodeLoadJob?.cancel()
+                episodeLoadJob = null
+                isLoadingEpisodes = false
                 manualCurrentAnime = null
                 manualEpisodeCandidates = emptyList()
                 loadingAnimeId = null
@@ -221,6 +306,8 @@ class ApiTestViewModel @Inject constructor(
                             bodySizeBytes = response.bodySizeBytes
                         )
                     }
+                    debugCalls = (listOf(ApiDebugCall(built.method, built.url, code, elapsed,
+                        debugResponse?.previewText.orEmpty())) + debugCalls).take(30)
                     recordSuccess(
                         scene = "接口调试/${endpoint.title}",
                         method = built.method,
@@ -233,6 +320,7 @@ class ApiTestViewModel @Inject constructor(
                 onFailure = { throwable ->
                     val message = throwable.message ?: "请求失败"
                     errorMessage = message
+                    debugCalls = (listOf(ApiDebugCall(built.method, built.url, null, elapsed, message)) + debugCalls).take(30)
                     recordFailure(
                         scene = "接口调试/${endpoint.title}",
                         method = built.method,
@@ -353,8 +441,11 @@ class ApiTestViewModel @Inject constructor(
                                 animeTitle = selection.animeTitle,
                                 episodeTitle = selection.episodeTitle.ifBlank { trimmedFileName },
                                 source = selection.source,
+                                sourceUrl = selection.sourceUrl,
                                 pathLabel = "自动匹配",
-                                requestDurationMs = totalElapsed
+                                requestDurationMs = totalElapsed,
+                                posterUrl = selection.posterUrl,
+                                year = selection.year
                             )
                         }
                     }
@@ -404,6 +495,9 @@ class ApiTestViewModel @Inject constructor(
             isSearchingAnime = true
             errorMessage = null
             manualResult = null
+            manualAnimeCandidates = emptyList()
+            manualCurrentAnime = null
+            manualEpisodeCandidates = emptyList()
             successfulManualSearchKeyword = ""
             val startedAt = System.currentTimeMillis()
             lastApiActionStartedAtMs = startedAt
@@ -500,7 +594,10 @@ class ApiTestViewModel @Inject constructor(
                 errorMessage = "URL 解析结果缺少直达地址"
                 return
             }
-            loadManualDanmu(baseUrl = baseUrl, anime = anime, episode = episode)
+            errorMessage = null
+            manualResult = null
+            manualCurrentAnime = anime
+            manualEpisodeCandidates = listOf(episode)
             return
         }
 
@@ -512,7 +609,10 @@ class ApiTestViewModel @Inject constructor(
 
         val url = "$base/api/v2/bangumi/${anime.animeId}"
 
-        viewModelScope.launch {
+        manualCurrentAnime = anime
+        manualEpisodeCandidates = emptyList()
+
+        episodeLoadJob = viewModelScope.launch {
             isLoadingEpisodes = true
             loadingAnimeId = anime.animeId
             errorMessage = null
@@ -567,6 +667,9 @@ class ApiTestViewModel @Inject constructor(
     ) {
         if (isLoadingManualDanmu) return
 
+        if (manualSelectedEpisode != episode) manualResult = null
+        manualSelectedEpisode = episode
+
         val base = resolveApiBaseUrl(baseUrl)
         if (base == null) {
             errorMessage = "弹幕源 Base URL 无效"
@@ -581,7 +684,7 @@ class ApiTestViewModel @Inject constructor(
             "$base/api/v2/comment/${episode.episodeId}?format=json&duration=true"
         }
 
-        viewModelScope.launch {
+        manualDanmuJob = viewModelScope.launch {
             isLoadingManualDanmu = true
             loadingEpisodeId = episode.episodeId
             errorMessage = null

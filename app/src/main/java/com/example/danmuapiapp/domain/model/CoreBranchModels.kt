@@ -30,6 +30,12 @@ data class CoreBranchCatalog(
     val branches: List<String>
 )
 
+data class CoreBranchSnapshot(
+    val repo: String,
+    val branch: String,
+    val commit: CoreRemoteCommit
+)
+
 fun buildCoreBranchCatalog(
     variant: ApiVariant,
     repo: String,

@@ -66,7 +66,10 @@ data class MatchSelection(
     val commentId: Long,
     val animeTitle: String,
     val episodeTitle: String,
-    val source: String
+    val source: String,
+    val posterUrl: String = "",
+    val sourceUrl: String = "",
+    val year: String = ""
 )
 
 data class ApiDebugResponse(
@@ -78,4 +81,12 @@ data class ApiDebugResponse(
     val previewTruncated: Boolean,
     val bodySizeBytes: Int,
     val danmuInsight: DanmuInsight? = null
+)
+
+data class ApiDebugCall(
+    val method: String,
+    val url: String,
+    val statusCode: Int?,
+    val elapsedMs: Long,
+    val preview: String
 )

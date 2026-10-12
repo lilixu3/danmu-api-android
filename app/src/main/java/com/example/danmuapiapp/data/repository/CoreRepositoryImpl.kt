@@ -139,6 +139,7 @@ class CoreRepositoryImpl @Inject constructor(
     private val workDirPrefs = context.getSharedPreferences(WORK_DIR_PREFS, Context.MODE_PRIVATE)
     private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS, Context.MODE_PRIVATE)
     private val candidatePrefs = context.getSharedPreferences(CANDIDATE_PREFS, Context.MODE_PRIVATE)
+    private val coreDisplayCache = CoreDisplayInfoCache(context)
     private val json = Json { ignoreUnknownKeys = true }
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when {
@@ -200,6 +201,7 @@ class CoreRepositoryImpl @Inject constructor(
                 settingsRepository.coreBranchSelections
             ) { customSource, selections -> customSource.repo to selections }
                 .distinctUntilChanged()
+                .drop(1)
                 .collect {
                     refreshCoreInfo()
                 }
@@ -434,17 +436,20 @@ class CoreRepositoryImpl @Inject constructor(
     }
 
     override fun refreshCoreInfo() {
+        // 先让旧读取失效，再取消它，避免旧任务的 finally 提前结束首次加载状态。
+        val ticket = refreshTicket.incrementAndGet()
         refreshAllJob?.cancel()
         if (!hasLoadedCoreInfoOnce) {
             _isCoreInfoLoading.value = true
         }
-        val ticket = refreshTicket.incrementAndGet()
         refreshAllJob = repoScope.launch {
             try {
                 val mode = currentRunMode()
+                val displayScope = coreDisplayCache.scopeFor(mode)
                 ensureCoreDirWatcher(mode)
                 val refreshed = ApiVariant.entries.map { loadCoreState(it, mode) }
                 currentCoroutineContext().ensureActive()
+                if (refreshTicket.get() != ticket) return@launch
                 _coreInfoList.update { current ->
                     refreshed.map { state ->
                         mergeVersionUpdateState(
@@ -454,6 +459,7 @@ class CoreRepositoryImpl @Inject constructor(
                         )
                     }
                 }
+                coreDisplayCache.save(displayScope, refreshed.map { it.info })
             } finally {
                 if (refreshTicket.get() == ticket) {
                     hasLoadedCoreInfoOnce = true
@@ -512,7 +518,9 @@ class CoreRepositoryImpl @Inject constructor(
                 sourceStatus = sourceStatus,
                 desiredSource = desiredSourceText.ifBlank { null }.takeIf { sourceMismatch },
                 pullRequestNumbers = localMetadata?.pullRequestNumbers.orEmpty(),
-                sourceCommitSha = localMetadata?.commitSha.orEmpty()
+                sourceCommitSha = localMetadata?.commitSha.orEmpty(),
+                sourceInstalledAtEpochMillis = localMetadata?.installedAtEpochMillis ?: 0L,
+                sourceCommitPublishedAt = localMetadata?.commitPublishedAt.orEmpty()
             ),
             localMetadata = localMetadata
         )
@@ -693,6 +701,30 @@ class CoreRepositoryImpl @Inject constructor(
         // Older GitHub mirrors may not expose repository metadata or branches.
         return fetchLatestRelease(repo)?.let { CoreRemoteSource(release = it) }
     }
+
+    override suspend fun fetchBranchSnapshot(variant: ApiVariant): Result<CoreBranchSnapshot> =
+        withContext(Dispatchers.IO) {
+            runCatchingCancellable {
+                val repo = resolveRepo(variant)
+                if (repo.isBlank()) throw IOException("请先配置核心仓库")
+                val branch = resolveBranch(variant) ?: resolveDefaultRemoteBranch(repo)
+                    ?: throw IOException("无法读取默认分支")
+                val head = fetchBranchHead(repo, branch)
+                    ?: throw IOException("无法读取分支最新提交")
+                CoreBranchSnapshot(
+                    repo = repo,
+                    branch = branch,
+                    commit = CoreRemoteCommit(
+                        sha = head.sha,
+                        title = head.title,
+                        message = head.message,
+                        author = head.author,
+                        committedAt = head.publishedAt,
+                        htmlUrl = head.htmlUrl
+                    )
+                )
+            }
+        }
 
     override suspend fun fetchBranches(variant: ApiVariant): Result<CoreBranchCatalog> =
         withContext(Dispatchers.IO) {
@@ -1508,87 +1540,126 @@ class CoreRepositoryImpl @Inject constructor(
     override suspend fun preparePullRequestStack(
         variant: ApiVariant,
         pullRequestNumbers: List<Int>
-    ): Result<CoreDependencyRepairRequest> = withContext(Dispatchers.IO) {
-        val operationId = runCatching { beginCoreOperation(variant, "准备 PR 组合") }
-            .getOrElse { return@withContext Result.failure(it) }
-        var stagingDir: File? = null
-        try {
-            val repo = resolveRepo(variant)
-            if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
-            val branch = resolvePullRequestBaseBranch(variant, repo)
-            val mode = currentRunMode()
-            val location = getCoreLocation(variant, mode)
-            val localMetadata = if (hasValidCore(variant, mode)) {
-                readLocalCoreSourceMetadata(variant, mode)
-            } else {
-                null
-            }
-            val canInheritInstalledStack = localMetadata != null &&
-                localMetadata.repo.equals(repo, ignoreCase = true) &&
-                localMetadata.branch.equals(branch, ignoreCase = true)
-            val installedCommitSha = localMetadata
-                ?.takeIf { canInheritInstalledStack }
-                ?.commitSha
-                .orEmpty()
-            val effectivePullRequestNumbers = buildList {
-                if (canInheritInstalledStack) addAll(localMetadata.pullRequestNumbers)
-                addAll(pullRequestNumbers)
-            }.distinct()
-            val staging = createCoreTempDir(location.normalDir, "staging")
-            stagingDir = staging
-            writeOperationMarker(staging, operationId)
+    ): Result<CoreDependencyRepairRequest> {
+        var ownedOperationId: Long? = null
+        return try {
+            withContext(Dispatchers.IO) {
+                val operationId = runCatching { beginCoreOperation(variant, "准备 PR 组合") }
+                    .getOrElse { return@withContext Result.failure(it) }
+                ownedOperationId = operationId
+                var stagingDir: File? = null
+                try {
+                    val repo = resolveRepo(variant)
+                    if (repo.isBlank()) throw IOException("请先配置自定义核心仓库")
+                    val branch = resolvePullRequestBaseBranch(variant, repo)
+                    val mode = currentRunMode()
+                    val location = getCoreLocation(variant, mode)
+                    val localMetadata = if (hasValidCore(variant, mode)) {
+                        readLocalCoreSourceMetadata(variant, mode)
+                    } else {
+                        null
+                    }
+                    val canInheritInstalledStack = localMetadata != null &&
+                        localMetadata.repo.equals(repo, ignoreCase = true) &&
+                        localMetadata.branch.equals(branch, ignoreCase = true)
+                    val installedCommitSha = localMetadata
+                        ?.takeIf { canInheritInstalledStack }
+                        ?.commitSha
+                        .orEmpty()
+                    val effectivePullRequestNumbers = buildList {
+                        if (canInheritInstalledStack) addAll(localMetadata.pullRequestNumbers)
+                        addAll(pullRequestNumbers)
+                    }.distinct()
+                    val staging = createCoreTempDir(location.normalDir, "staging")
+                    stagingDir = staging
+                    writeOperationMarker(staging, operationId)
 
-            val merged = pullRequestMergeService.buildInto(
-                repository = repo,
-                baseBranch = branch,
-                pullRequestNumbers = effectivePullRequestNumbers,
-                destination = staging,
-                preferredBaseCommitSha = installedCommitSha
-            ) { stage, progress ->
-                updateDownloadProgress(
-                    variant = variant,
-                    actionLabel = "合并 PR",
-                    stageText = stage,
-                    progress = progress,
-                    downloadedBytes = 0L,
-                    totalBytes = -1L
-                )
+                    val merged = pullRequestMergeService.buildInto(
+                        repository = repo,
+                        baseBranch = branch,
+                        pullRequestNumbers = effectivePullRequestNumbers,
+                        destination = staging,
+                        preferredBaseCommitSha = installedCommitSha
+                    ) { stage, progress ->
+                        updateDownloadProgress(
+                            variant = variant,
+                            actionLabel = "合并 PR",
+                            stageText = stage,
+                            progress = progress,
+                            downloadedBytes = 0L,
+                            totalBytes = -1L
+                        )
+                    }
+                    val pending = prepareStagedCore(
+                        operationId = operationId,
+                        variant = variant,
+                        actionLabel = "应用 PR 组合",
+                        stagingDir = staging,
+                        targetDir = location.normalDir,
+                        mode = mode,
+                        rootDirPath = location.rootDirPath,
+                        versionHint = merged.version,
+                        sourceMetadata = CoreSourceMetadata(
+                            repo = merged.repository,
+                            branch = merged.baseBranch,
+                            commitSha = merged.baseCommitSha,
+                            commitPublishedAt = System.currentTimeMillis().toString(),
+                            versionLabel = merged.version.orEmpty(),
+                            pullRequestNumbers = merged.pullRequests.map { it.number },
+                            pullRequestHeadShas = merged.pullRequests.map { it.headSha },
+                            localMergeSha = merged.localMergeSha
+                        )
+                    )
+                    if (pending.repair.missingDependencies.isNotEmpty()) {
+                        updateDownloadProgress(
+                            variant = variant,
+                            actionLabel = "合并 PR",
+                            stageText = "正在准备运行环境",
+                            progress = null,
+                            downloadedBytes = 0L,
+                            totalBytes = -1L
+                        )
+                        val dependencies = runtimeDependencyPackManager.installIfAvailable(
+                            coreDir = staging,
+                            variant = variant
+                        ) { stage, progress, downloadedBytes, totalBytes ->
+                            updateDownloadProgress(
+                                variant = variant,
+                                actionLabel = "合并 PR",
+                                stageText = stage,
+                                progress = progress,
+                                downloadedBytes = downloadedBytes,
+                                totalBytes = totalBytes
+                            )
+                        }
+                        verifyCoreRuntimeDependencies(staging, dependencies.unavailableReason)
+                    }
+                    setPendingCoreMutation(pending.copy(repair = pending.repair.copy(missingDependencies = emptyList())))
+                    markOperationAwaitingRepair(operationId)
+                    Result.success(pending.repair.copy(missingDependencies = emptyList()))
+                } catch (cancelled: CancellationException) {
+                    clearPendingCoreMutation(operationId, deleteStaging = true)
+                    stagingDir?.let { runCatching { it.deleteRecursively() } }
+                    finishCoreOperation(operationId)
+                    throw cancelled
+                } catch (error: Exception) {
+                    clearPendingCoreMutation(operationId, deleteStaging = true)
+                    stagingDir?.let { runCatching { it.deleteRecursively() } }
+                    finishCoreOperation(operationId)
+                    Result.failure(error)
+                } finally {
+                    _downloadProgress.value = CoreDownloadProgress()
+                }
             }
-            val pending = prepareStagedCore(
-                operationId = operationId,
-                variant = variant,
-                actionLabel = "应用 PR 组合",
-                stagingDir = staging,
-                targetDir = location.normalDir,
-                mode = mode,
-                rootDirPath = location.rootDirPath,
-                versionHint = merged.version,
-                sourceMetadata = CoreSourceMetadata(
-                    repo = merged.repository,
-                    branch = merged.baseBranch,
-                    commitSha = merged.baseCommitSha,
-                    commitPublishedAt = System.currentTimeMillis().toString(),
-                    versionLabel = merged.version.orEmpty(),
-                    pullRequestNumbers = merged.pullRequests.map { it.number },
-                    pullRequestHeadShas = merged.pullRequests.map { it.headSha },
-                    localMergeSha = merged.localMergeSha
-                )
-            )
-            setPendingCoreMutation(pending)
-            markOperationAwaitingRepair(operationId)
-            Result.success(pending.repair)
         } catch (cancelled: CancellationException) {
-            clearPendingCoreMutation(operationId, deleteStaging = true)
-            stagingDir?.let { runCatching { it.deleteRecursively() } }
-            finishCoreOperation(operationId)
+            // IO 已发布候选任务后，切回界面时仍可能被取消；不要留下无法继续的 PR 任务。
+            withContext(NonCancellable + Dispatchers.IO) {
+                ownedOperationId?.let { operationId ->
+                    clearPendingCoreMutation(operationId, deleteStaging = true)
+                    finishCoreOperation(operationId)
+                }
+            }
             throw cancelled
-        } catch (error: Exception) {
-            clearPendingCoreMutation(operationId, deleteStaging = true)
-            stagingDir?.let { runCatching { it.deleteRecursively() } }
-            finishCoreOperation(operationId)
-            Result.failure(error)
-        } finally {
-            _downloadProgress.value = CoreDownloadProgress()
         }
     }
 
@@ -2548,7 +2619,10 @@ class CoreRepositoryImpl @Inject constructor(
             return
         }
         runCatching {
-            file.writeText(json.encodeToString(metadata), Charsets.UTF_8)
+            file.writeText(
+                json.encodeToString(metadata.copy(installedAtEpochMillis = System.currentTimeMillis())),
+                Charsets.UTF_8
+            )
         }
     }
 

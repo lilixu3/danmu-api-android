@@ -63,6 +63,7 @@ class LocalDanmuFileBrowser @Inject constructor(
 
     /** 弹幕下载页里用户选择的保存目录（SAF 目录授权），能解析成真实路径才使用。 */
     fun configuredDownloadDirectory(): String? {
+        firstExistingDirectory(downloadRepository.settings.value.saveDirPath)?.let { return it }
         val treeUri = runCatching { downloadRepository.settings.value.saveTreeUri }
             .getOrNull()
             ?.trim()
@@ -114,7 +115,7 @@ class LocalDanmuFileBrowser @Inject constructor(
 /** 纯文件系统逻辑，便于单元测试。 */
 internal object LocalDanmuDirectoryListing {
 
-    val supportedExtensions: Set<String> = setOf("xml", "json", "ass", "ssa", "csv", "txt")
+    val supportedExtensions: Set<String> = setOf("xml", "json", "ass", "ssa", "csv", "txt", "binpb")
 
     const val MAX_ENTRIES = 2_000
 

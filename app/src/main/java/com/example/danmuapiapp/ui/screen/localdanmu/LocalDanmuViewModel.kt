@@ -8,7 +8,6 @@ import com.example.danmuapiapp.data.repository.LocalDanmuImportManager
 import com.example.danmuapiapp.data.repository.LocalDanmuFileBrowser
 import com.example.danmuapiapp.data.repository.LocalDanmuImportedIndex
 import com.example.danmuapiapp.data.repository.LocalDanmuMetadataResolver
-import com.example.danmuapiapp.data.repository.LocalDanmuPreviewLoader
 import com.example.danmuapiapp.data.repository.LocalDanmuResourceKey
 import com.example.danmuapiapp.data.repository.LocalDanmuSourceStore
 import com.example.danmuapiapp.data.repository.LocalDanmuUploadHistoryStore
@@ -144,8 +143,8 @@ class LocalDanmuViewModel @Inject constructor(
     private val fileBrowser: LocalDanmuFileBrowser,
     private val sourceStore: LocalDanmuSourceStore,
     private val uploadHistoryStore: LocalDanmuUploadHistoryStore,
-    private val previewLoader: LocalDanmuPreviewLoader,
-    private val runtimeRepository: RuntimeRepository
+    private val runtimeRepository: RuntimeRepository,
+    private val uploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocalDanmuUiState())
@@ -153,6 +152,8 @@ class LocalDanmuViewModel @Inject constructor(
     private var importedIndex: Map<String, String> = emptyMap()
     private var batchItemId = 0L
     private var refreshJob: Job? = null
+    private var detailJob: Job? = null
+    private var previewJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -462,7 +463,10 @@ class LocalDanmuViewModel @Inject constructor(
             fileName = prepared.displayName,
             relativePath = prepared.displayName
         )
+        val imported = LocalDanmuImportedIndex.lookup(importedIndex,
+            LocalDanmuImportedIndex.pathFromUri(prepared.sourceUri).orEmpty(), prepared.displayName, prepared.sizeBytes ?: 0L)
         return LocalDanmuBatchItem(
+            selected = imported == null,
             id = ++batchItemId,
             sourceUri = prepared.sourceUri,
             displayName = prepared.displayName,
@@ -676,11 +680,13 @@ class LocalDanmuViewModel @Inject constructor(
     // ───────────────────────── 详情/预览/删除 ─────────────────────────
 
     fun loadDetail(resourceKey: String) {
+        detailJob?.cancel()
+        previewJob?.cancel()
         val cached = _uiState.value.snapshot.resources.firstOrNull { it.resourceKey == resourceKey }
-        if (cached != null) _uiState.update { it.copy(detailResource = cached) }
-        viewModelScope.launch {
+        if (cached != null) _uiState.update { it.copy(detailResource = cached, previewState = DanmuPreviewDialogState()) }
+        detailJob = viewModelScope.launch {
             repository.loadDetail(resourceKey).fold(
-                onSuccess = { resource -> _uiState.update { it.copy(detailResource = resource) } },
+                onSuccess = { resource -> _uiState.update { if (it.detailResource?.resourceKey == resourceKey) it.copy(detailResource = resource) else it } },
                 onFailure = { error ->
                     if (cached == null) {
                         _uiState.update { it.copy(errorMessage = userMessage(error)) }
@@ -691,7 +697,9 @@ class LocalDanmuViewModel @Inject constructor(
     }
 
     fun dismissDetail() {
-        _uiState.update { it.copy(detailResource = null) }
+        detailJob?.cancel()
+        previewJob?.cancel()
+        _uiState.update { it.copy(detailResource = null, previewState = DanmuPreviewDialogState()) }
     }
 
     // ───────────────────────── 元数据编辑 ─────────────────────────
@@ -848,11 +856,12 @@ class LocalDanmuViewModel @Inject constructor(
     }
 
     fun loadPreview(resourceKey: String) {
+        previewJob?.cancel()
         _uiState.update {
             it.copy(previewState = DanmuPreviewDialogState(loadingRecordId = -1L))
         }
-        viewModelScope.launch {
-            previewLoader.load(resourceKey).fold(
+        previewJob = viewModelScope.launch {
+            repository.loadPreview(resourceKey).fold(
                 onSuccess = { preview ->
                     _uiState.update {
                         it.copy(previewState = DanmuPreviewDialogState(preview = preview))
@@ -868,6 +877,7 @@ class LocalDanmuViewModel @Inject constructor(
     }
 
     fun dismissPreview() {
+        previewJob?.cancel()
         _uiState.update { it.copy(previewState = DanmuPreviewDialogState()) }
     }
 
@@ -988,29 +998,8 @@ class LocalDanmuViewModel @Inject constructor(
         mimeType: String,
         onProgress: (Float) -> Unit
     ): Result<LocalDanmuResource> {
-        val request = LocalDanmuUploadRequest(
-            title = title.trim(),
-            year = year,
-            type = type,
-            season = season,
-            episode = episode,
-            filename = displayName,
-            stagedFile = null,
-            sourceUri = sourceUri,
-            contentLength = sizeBytes,
-            mimeType = mimeType
-        )
-        return repository.upload(request, onProgress).onSuccess { resource ->
-            sourceStore.save(
-                LocalDanmuSourceRef(
-                    resourceKey = resource.resourceKey,
-                    kind = LocalDanmuSourceKind.File,
-                    uri = sourceUri,
-                    displayName = displayName,
-                    format = formatHint,
-                    sizeBytes = sizeBytes ?: 0L
-                )
-            )
-        }
+        return uploader.upload(LocalDanmuBatchItem(id = 0, sourceUri = sourceUri,
+            displayName = displayName, sizeBytes = sizeBytes, formatHint = formatHint, mimeType = mimeType,
+            title = title, year = year, type = type, season = season, episode = episode), onProgress)
     }
 }

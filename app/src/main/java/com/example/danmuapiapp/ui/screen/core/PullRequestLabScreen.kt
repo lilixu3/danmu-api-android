@@ -94,7 +94,6 @@ import com.example.danmuapiapp.domain.model.effectiveStatus
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
-import com.example.danmuapiapp.ui.component.CoreDependencyRepairHost
 import com.example.danmuapiapp.ui.component.AppModalPanel
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
@@ -113,7 +112,6 @@ fun PullRequestLabScreen(
     val coreInfos by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val displayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val progress by viewModel.downloadProgress.collectAsStateWithLifecycle()
-    val pendingRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val installedPrs = coreInfos.firstOrNull { it.variant == viewModel.variant && it.isReady }
         ?.pullRequestNumbers.orEmpty()
@@ -335,17 +333,6 @@ fun PullRequestLabScreen(
         )
     }
 
-    CoreDependencyRepairHost(
-        request = pendingRepair?.takeIf { it.variant == viewModel.variant },
-        showRequiredPrompt = viewModel.showDependencyRequiredPrompt,
-        showRepairDialog = viewModel.showDependencyRepairDialog,
-        onOpenRepair = viewModel::openDependencyRepairDialog,
-        onDismissRequiredPrompt = viewModel::dismissDependencyRequiredPrompt,
-        onOnlineRepair = viewModel::repairPendingDependenciesOnline,
-        onRepairFromArchive = viewModel::repairPendingDependenciesFromArchive,
-        onCancelMutation = viewModel::discardPendingCoreMutation,
-        onDismissRepairDialog = viewModel::dismissDependencyRepairDialog
-    )
 }
 
 @Composable

@@ -27,7 +27,9 @@ data class PushAnimeCandidate(
     val animeId: Long,
     val title: String,
     val episodeCount: Int,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val source: String = "",
+    val typeDescription: String = ""
 )
 
 data class PushEpisodeCandidate(
@@ -104,6 +106,13 @@ class PushDanmuViewModel @Inject constructor(
         private set
 
     var episodeCandidates by mutableStateOf<List<PushEpisodeCandidate>>(emptyList())
+        private set
+
+    var statusText by mutableStateOf("")
+        private set
+    var lastPushedEpisodeId by mutableStateOf<Long?>(null)
+        private set
+    var pushHistory by mutableStateOf<List<String>>(emptyList())
         private set
 
     var resultText by mutableStateOf("")
@@ -425,6 +434,7 @@ class PushDanmuViewModel @Inject constructor(
         val finalUrl = request.pushUrl
 
         viewModelScope.launch {
+            lastPushedEpisodeId = episode.episodeId
             pushingEpisodeIds = pushingEpisodeIds + episode.episodeId
             errorMessage = null
             val startedAt = System.currentTimeMillis()
@@ -437,6 +447,8 @@ class PushDanmuViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { (code, body) ->
+                    statusText = "第${episode.episodeNumber}集推送完成（HTTP $code，${elapsed}ms）"
+                    pushHistory = (listOf("第${episode.episodeNumber}集 · HTTP $code · ${elapsed}ms${if (request.extraHint.isNotBlank()) " · ${request.extraHint}" else ""}") + pushHistory).take(20)
                     resultText = buildString {
                         append("第${episode.episodeNumber}集推送返回：HTTP $code")
                         if (request.extraHint.isNotBlank()) {
@@ -459,6 +471,8 @@ class PushDanmuViewModel @Inject constructor(
                 },
                 onFailure = { throwable ->
                     val msg = throwable.message ?: "推送失败"
+                    resultText = ""
+                    statusText = ""
                     errorMessage = "第${episode.episodeNumber}集推送失败：$msg"
                     recordRepository.addRecord(
                         RequestRecord(
@@ -521,7 +535,9 @@ class PushDanmuViewModel @Inject constructor(
                 animeId = animeId,
                 title = title,
                 episodeCount = episodeCount.coerceAtLeast(0),
-                imageUrl = imageUrl
+                imageUrl = imageUrl,
+                source = item.optString("source").ifBlank { title.substringAfter(" from ", "") },
+                typeDescription = item.optString("typeDescription").ifBlank { Regex("【([^】]+)】").find(title)?.groupValues?.get(1).orEmpty() }
             )
         }
         return out.distinctBy { it.animeId }

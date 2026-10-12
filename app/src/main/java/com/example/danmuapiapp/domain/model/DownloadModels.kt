@@ -313,7 +313,11 @@ data class DanmuDownloadSettings(
     val customBatchSize: Int = DownloadThrottlePreset.Custom.batchSize,
     val customBatchRestMs: Long = DownloadThrottlePreset.Custom.batchRestMs,
     val customBackoffBaseMs: Long = DownloadThrottlePreset.Custom.backoffBaseMs,
-    val customBackoffMaxMs: Long = DownloadThrottlePreset.Custom.backoffMaxMs
+    val customBackoffMaxMs: Long = DownloadThrottlePreset.Custom.backoffMaxMs,
+    val saveDirPath: String = "",
+    val matchMode: String = "match",
+    val autoImportToLocal: Boolean = false,
+    val deleteSourceAfterImport: Boolean = false
 ) {
     fun format(): DanmuDownloadFormat = DanmuDownloadFormat.fromValue(defaultFormat)
     fun policy(): DownloadConflictPolicy = DownloadConflictPolicy.fromKey(conflictPolicy)
@@ -361,8 +365,11 @@ data class DanmuDownloadRecord(
     val danmuCount: Int? = null,
     val httpCode: Int? = null,
     val errorMessage: String? = null,
-    val animeId: Long = 0L
+    val animeId: Long = 0L,
+    val localImportedAt: Long = 0L,
+    val localResourceKey: String = ""
 ) {
+    val importedToLocal: Boolean get() = localImportedAt > 0L
     fun statusEnum(): DownloadRecordStatus {
         return DownloadRecordStatus.entries.firstOrNull { it.key == status } ?: DownloadRecordStatus.Failed
     }
@@ -441,7 +448,10 @@ data class DownloadDirectorySyncResult(
     val scannedFiles: Int,
     val importedRecords: Int,
     val skippedFiles: Int,
-    val truncated: Boolean
+    val truncated: Boolean,
+    val matchedFiles: Int = 0,
+    val removedRecords: Int = 0,
+    val note: String = ""
 )
 
 data class DownloadRecordDeleteResult(
@@ -484,8 +494,8 @@ enum class DanmuPreviewFilter(val label: String) {
 
 fun DanmuPreviewItem.previewFilter(): DanmuPreviewFilter {
     return when (mode.toIntOrNull()) {
-        4 -> DanmuPreviewFilter.Top
-        5 -> DanmuPreviewFilter.Bottom
+        4 -> DanmuPreviewFilter.Bottom
+        5 -> DanmuPreviewFilter.Top
         else -> DanmuPreviewFilter.Scroll
     }
 }

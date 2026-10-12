@@ -37,7 +37,9 @@ internal fun parseAnimeCandidates(raw: String): List<DownloadAnimeCandidate> {
             animeId = animeId,
             title = title,
             episodeCount = count,
-            imageUrl = imageUrl
+            imageUrl = imageUrl,
+            sourceLabel = item.optString("source").ifBlank { extractSourceFromAnimeTitle(title) },
+            typeDescription = item.optString("typeDescription").ifBlank { Regex("【([^】]+)】").find(title)?.groupValues?.get(1).orEmpty() }
         )
     }
     return out.distinctBy { it.animeId }
@@ -196,7 +198,7 @@ internal fun stripSourceTag(rawTitle: String): String {
 internal fun normalizeAnimeTitleForMatch(raw: String): String {
     if (raw.isBlank()) return ""
     val noFrom = raw.replace(Regex("\\s*from\\s+.*$", RegexOption.IGNORE_CASE), "")
-    val noType = noFrom.replace(Regex("【[^】]*】"), "")
+    val noType = noFrom.replace(Regex("【[^】]*】|\\[[^\\]]*]"), "")
     val noYear = noType.replace(Regex("[（(]\\d{4}[)）]"), "")
     return noYear
         .replace(Regex("[\\s\\p{Punct}　【】（）()\\[\\]「」]"), "")
@@ -238,7 +240,7 @@ internal fun canonicalSourceKey(raw: String): String {
 
 internal fun extractAnimeKeywordForSearch(rawAnimeTitle: String): String {
     val noFrom = rawAnimeTitle.replace(Regex("\\s*from\\s+.*$", RegexOption.IGNORE_CASE), "")
-    val noType = noFrom.replace(Regex("【[^】]*】"), "")
+    val noType = noFrom.replace(Regex("【[^】]*】|\\[[^\\]]*]"), "")
     val noYear = noType.replace(Regex("[（(]\\d{4}[)）]"), "")
     val keyword = noYear.trim()
     return if (keyword.isNotBlank()) keyword else noFrom.trim()

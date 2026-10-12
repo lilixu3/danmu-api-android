@@ -83,7 +83,9 @@ data class CoreInfo(
     val remoteCommit: CoreRemoteCommit? = null,
     val updateRelation: CoreUpdateRelation = CoreUpdateRelation.Unknown,
     val updateCheckError: String? = null,
-    val updateCheckedAtEpochMillis: Long? = null
+    val updateCheckedAtEpochMillis: Long? = null,
+    val sourceInstalledAtEpochMillis: Long = 0L,
+    val sourceCommitPublishedAt: String = ""
 ) {
     val isReady: Boolean
         get() = isInstalled && !sourceMismatch

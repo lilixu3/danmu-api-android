@@ -51,7 +51,6 @@ class PullRequestLabViewModel @Inject constructor(
     val coreInfoList = coreRepository.coreInfoList
     val runtimeState = runtimeRepository.runtimeState
     val downloadProgress = coreRepository.downloadProgress
-    val pendingDependencyRepair = coreRepository.pendingDependencyRepair
     val coreDisplayNames = settingsRepository.coreDisplayNames
 
     var pageData by mutableStateOf<CorePullRequestPage?>(null)
@@ -94,17 +93,12 @@ class PullRequestLabViewModel @Inject constructor(
         private set
     var activateAfterInstall by mutableStateOf(true)
         private set
-    var showDependencyRequiredPrompt by mutableStateOf(false)
-        private set
-    var showDependencyRepairDialog by mutableStateOf(false)
-        private set
 
     private var pageLoadJob: Job? = null
     private var detailsJob: Job? = null
     private var buildJob: Job? = null
     private var pageGeneration = 0L
     private var detailsGeneration = 0L
-    private var activateAfterDependencyRepair = false
     private var knownLocallyMergedPullRequests = locallyMergedPullRequestNumbers()
     private var refreshAfterLocalMergeChange = false
     private val pageCache = linkedMapOf<PullRequestPageCacheKey, CachedPullRequestPage>()
@@ -116,19 +110,6 @@ class PullRequestLabViewModel @Inject constructor(
 
     init {
         loadPage(1)
-        viewModelScope.launch {
-            pendingDependencyRepair.collect { request ->
-                if (request == null) {
-                    showDependencyRequiredPrompt = false
-                    showDependencyRepairDialog = false
-                } else if (request.variant == variant &&
-                    request.missingDependencies.isNotEmpty() &&
-                    !showDependencyRepairDialog
-                ) {
-                    showDependencyRequiredPrompt = true
-                }
-            }
-        }
     }
 
     fun loadPage(page: Int, forceRefresh: Boolean = false) {
@@ -476,14 +457,7 @@ class PullRequestLabViewModel @Inject constructor(
                     pullRequestNumbers = selectedPullRequests.map { it.number }
                 ).fold(
                     onSuccess = { request ->
-                        if (request.missingDependencies.isNotEmpty()) {
-                            activateAfterDependencyRepair = shouldActivate
-                            statusMessage = "PR 组合已生成，等待补齐运行时依赖"
-                            showDependencyRequiredPrompt = true
-                        } else {
-                            activateAfterDependencyRepair = false
-                            applyPreparedPullRequest(request, shouldActivate)
-                        }
+                        applyPreparedPullRequest(request, shouldActivate)
                     },
                     onFailure = { error ->
                         when (error) {
@@ -507,8 +481,6 @@ class PullRequestLabViewModel @Inject constructor(
         if (isActivating) return
         buildJob?.cancel()
         buildJob = null
-        isBuilding = false
-        refreshAfterLocalMergeChangeIfIdle()
         statusMessage = "已取消 PR 组合构建，当前核心未变更"
     }
 
@@ -518,64 +490,6 @@ class PullRequestLabViewModel @Inject constructor(
 
     fun dismissError() {
         errorMessage = null
-    }
-
-    fun dismissDependencyRequiredPrompt() {
-        showDependencyRequiredPrompt = false
-    }
-
-    fun openDependencyRepairDialog() {
-        if (pendingDependencyRepair.value?.variant != variant) return
-        showDependencyRequiredPrompt = false
-        showDependencyRepairDialog = true
-    }
-
-    fun dismissDependencyRepairDialog() {
-        showDependencyRepairDialog = false
-    }
-
-    fun repairPendingDependenciesOnline() {
-        repairPendingDependencies(coreRepository::repairPendingDependenciesOnline)
-    }
-
-    fun repairPendingDependenciesFromArchive(archiveUri: String) {
-        repairPendingDependencies { operationId ->
-            coreRepository.repairPendingDependenciesFromArchive(operationId, archiveUri)
-        }
-    }
-
-    private fun repairPendingDependencies(
-        repair: suspend (Long) -> Result<Unit>
-    ) {
-        val request = pendingDependencyRepair.value?.takeIf { it.variant == variant } ?: return
-        showDependencyRequiredPrompt = false
-        showDependencyRepairDialog = false
-        buildJob = viewModelScope.launch {
-            isBuilding = true
-            repair(request.operationId).fold(
-                onSuccess = {
-                    applyPreparedPullRequest(request, activateAfterDependencyRepair)
-                },
-                onFailure = {
-                    errorMessage = it.message ?: "依赖修复失败"
-                    showDependencyRepairDialog = pendingDependencyRepair.value != null
-                }
-            )
-            isBuilding = false
-            refreshAfterLocalMergeChangeIfIdle()
-        }
-    }
-
-    fun discardPendingCoreMutation() {
-        val request = pendingDependencyRepair.value?.takeIf { it.variant == variant } ?: return
-        showDependencyRequiredPrompt = false
-        showDependencyRepairDialog = false
-        viewModelScope.launch {
-            coreRepository.discardPendingCoreMutation(request.operationId).fold(
-                onSuccess = { statusMessage = "已取消 PR 组合，原核心保持不变" },
-                onFailure = { errorMessage = it.message ?: "取消失败" }
-            )
-        }
     }
 
     private suspend fun applyPreparedPullRequest(

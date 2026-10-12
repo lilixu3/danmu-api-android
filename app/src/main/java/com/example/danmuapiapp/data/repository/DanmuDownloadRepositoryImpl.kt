@@ -115,6 +115,65 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         persistSettings(next)
     }
 
+    override fun setSaveDirPath(path: String) {
+        persistSettings(_settings.value.copy(saveDirPath = path.trim()))
+    }
+
+    override fun setImportOptions(autoImport: Boolean, deleteSource: Boolean, matchMode: String) {
+        persistSettings(_settings.value.copy(autoImportToLocal = autoImport,
+            deleteSourceAfterImport = deleteSource, matchMode = matchMode))
+    }
+
+    override fun markRecordsImported(resourceKeys: Map<Long, String>) {
+        if (resourceKeys.isEmpty()) return
+        synchronized(recordsLock) {
+            persistRecordsLocked(_records.value.map { record ->
+                resourceKeys[record.id]?.let { key -> record.copy(
+                    localImportedAt = System.currentTimeMillis(), localResourceKey = key) } ?: record
+            })
+        }
+    }
+
+    override fun noteRecord(recordId: Long, message: String) {
+        synchronized(recordsLock) {
+            persistRecordsLocked(_records.value.map { if (it.id == recordId) it.copy(errorMessage = message) else it })
+        }
+    }
+
+    override suspend fun deleteDownloadedFiles(recordIds: Set<Long>): Result<Int> = withContext(Dispatchers.IO) {
+        runCatching {
+            recordsMutationMutex.withLock {
+                // Keep the history and imported marker; only successful imports may remove a source.
+                val targets = _records.value.filter { it.id in recordIds && it.importedToLocal }
+                var removed = 0
+                targets.map { it.fileUri }.filter { it.isNotBlank() }.distinct().forEach { uri ->
+                    when (deleteLocalFile(uri)) {
+                        LocalFileDeleteState.Deleted -> removed++
+                        LocalFileDeleteState.Missing -> Unit
+                        LocalFileDeleteState.Failed -> error("本地库已导入，但删除源文件失败")
+                    }
+                }
+                removed
+            }
+        }
+    }
+
+    override fun removeQueueTasks(taskIds: Set<Long>) {
+        persistQueueTasks(_queueTasks.value.filterNot { it.taskId in taskIds })
+    }
+
+    private fun outputDirectory(settings: DanmuDownloadSettings, create: Boolean = true): DocumentFile {
+        val path = settings.saveDirPath.trim()
+        if (path.isNotEmpty()) {
+            val directory = java.io.File(path)
+            if (!directory.isDirectory && (!create || !directory.mkdirs())) error("下载目录不存在或无法访问：$path")
+            return DocumentFile.fromFile(directory)
+        }
+        val tree = settings.saveTreeUri.trim()
+        if (tree.isEmpty()) error("请先在下载设置中选择保存目录")
+        return DocumentFile.fromTreeUri(context, tree.toUri()) ?: error("保存目录无效，请重新选择")
+    }
+
     override fun clearSaveTreeUri() {
         val next = _settings.value.copy(saveTreeUri = "", saveDirDisplayName = "")
         persistSettings(next)
@@ -336,14 +395,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         val startedAt = System.currentTimeMillis()
         return runCatching {
             val currentSettings = _settings.value
-            val treeUriText = currentSettings.saveTreeUri.trim()
-            if (treeUriText.isBlank()) {
-                error("请先在下载设置中选择保存目录")
-            }
-
-            val treeUri = treeUriText.toUri()
-            val root = DocumentFile.fromTreeUri(context, treeUri)
-                ?: error("保存目录无效，请重新选择")
+            val root = outputDirectory(currentSettings)
             if (!root.canWrite()) {
                 error("保存目录不可写，请重新授权目录权限")
             }
@@ -372,7 +424,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             val validationWarning = inspection.warning
 
             onProgress(0.50f, "正在准备输出目录")
-            val animeDirName = sanitizeFileComponent(input.animeTitle).ifBlank { "未命名剧集" }
+            val animeDirName = sanitizeFileComponent(com.example.danmuapiapp.ui.screen.download.extractAnimeKeywordForSearch(input.animeTitle)).ifBlank { "未命名剧集" }
             val animeDir = findOrCreateDirectory(root, animeDirName)
                 ?: error("无法创建剧集目录：$animeDirName")
 
@@ -399,7 +451,11 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             }
 
             onProgress(0.72f, "正在写入文件")
-            val targetFile = animeDir.createFile(input.format.mimeType, resolvedName)
+            val targetFile = if (animeDir.uri.scheme == "file") {
+                val file = java.io.File(requireNotNull(animeDir.uri.path), resolvedName)
+                if (!file.createNewFile()) error("创建文件失败：$resolvedName")
+                DocumentFile.fromFile(file)
+            } else animeDir.createFile(input.format.mimeType, resolvedName)
                 ?: error("创建文件失败：$resolvedName")
             writePayload(targetFile.uri, normalizedPayload)
 
@@ -580,6 +636,11 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     private fun deleteLocalFile(uriText: String): LocalFileDeleteState {
         val uri = runCatching { uriText.toUri() }.getOrNull()
             ?: return LocalFileDeleteState.Failed
+        if (uri.scheme == "file") {
+            val file = java.io.File(uri.path ?: return LocalFileDeleteState.Failed)
+            return if (!file.exists()) LocalFileDeleteState.Missing
+                else if (file.delete()) LocalFileDeleteState.Deleted else LocalFileDeleteState.Failed
+        }
         if (uri.scheme != "content") return LocalFileDeleteState.Failed
         val document = runCatching { DocumentFile.fromSingleUri(context, uri) }.getOrNull()
             ?: return LocalFileDeleteState.Failed
@@ -605,10 +666,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     }
 
     private fun syncExistingFilesLocked(): DownloadDirectorySyncResult {
-        val treeUriText = _settings.value.saveTreeUri.trim()
-        if (treeUriText.isBlank()) error("请先选择下载目录")
-        val root = DocumentFile.fromTreeUri(context, treeUriText.toUri())
-            ?: error("下载目录无效，请重新选择")
+        val root = outputDirectory(_settings.value, create = false)
         if (!root.canRead()) error("下载目录不可读，请重新授权目录权限")
 
         val existingUris = _records.value
@@ -622,12 +680,21 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         var visitedFiles = 0
         var skippedFiles = 0
         var truncated = false
+        var scanReliable = true
+        val scannedUris = mutableSetOf<String>()
+        var matchedFiles = 0
 
         while (pendingDirectories.isNotEmpty() && visitedFiles < MAX_SCAN_VISITED_FILES) {
             val node = pendingDirectories.removeFirst()
             if (!visitedDirectories.add(node.directory.uri.toString())) continue
+            if (!node.directory.canRead() || (node.directory.uri.scheme == "file" &&
+                    java.io.File(node.directory.uri.path.orEmpty()).listFiles() == null)) {
+                scanReliable = false
+                continue
+            }
             val children = runCatching { node.directory.listFiles().toList() }
                 .getOrElse {
+                    scanReliable = false
                     Log.w("DanmuDownloadRepo", "扫描目录失败：${node.relativePath}", it)
                     emptyList()
                 }
@@ -648,6 +715,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                     continue
                 }
                 if (!child.isFile) continue
+                scannedUris += child.uri.toString()
                 visitedFiles++
                 if (visitedFiles > MAX_SCAN_VISITED_FILES) {
                     truncated = true
@@ -658,6 +726,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                     skippedFiles++
                     continue
                 }
+                matchedFiles++
                 val uriText = child.uri.toString()
                 if (uriText in existingUris) {
                     skippedFiles++
@@ -678,6 +747,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
 
         val now = System.currentTimeMillis()
         val imported = mutableListOf<DanmuDownloadRecord>()
+        val rejectedCandidates = mutableListOf<DirectoryFileCandidate>()
         val sortedCandidates = candidates
             .sortedWith(
                 compareByDescending<DirectoryFileCandidate> { it.lastModified }
@@ -692,6 +762,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             .forEach { candidate ->
                 val inspection = inspectDirectoryFile(candidate)
                 if (inspection == null || !inspection.valid) {
+                    rejectedCandidates += candidate
                     skippedFiles++
                     return@forEach
                 }
@@ -701,6 +772,15 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 )
                 if (existingUris.add(record.fileUri)) imported += record
             }
+
+        // Old exports can have fields unknown to the inspector. If every matching file
+        // was rejected, recover by extension and leave a visible warning instead of an empty history.
+        if (imported.isEmpty() && rejectedCandidates.isNotEmpty()) {
+            rejectedCandidates.forEach { candidate ->
+                val record = candidate.toDownloadRecord(now, null).copy(errorMessage = "目录恢复：内容格式待预览核对")
+                if (existingUris.add(record.fileUri)) imported += record
+            }
+        }
 
         var persistedImportedCount = 0
         if (imported.isNotEmpty()) {
@@ -717,11 +797,30 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             }
         }
 
+        var removedRecords = 0
+        if (scanReliable && !truncated && (_settings.value.saveDirPath.isNotBlank() || scannedUris.isNotEmpty())) {
+            val configured = _settings.value
+            val prefix = if (configured.saveDirPath.isNotBlank()) {
+                android.net.Uri.fromFile(java.io.File(configured.saveDirPath)).toString().trimEnd('/') + "/"
+            } else configured.saveTreeUri.trim()
+            synchronized(recordsLock) {
+                val retained = _records.value.filter { record ->
+                    val belongs = prefix.isNotBlank() && record.fileUri.startsWith(prefix)
+                    val keep = !belongs || record.importedToLocal || record.statusEnum() != DownloadRecordStatus.Success || record.fileUri in scannedUris
+                    if (!keep) removedRecords++
+                    keep
+                }
+                if (removedRecords > 0) persistRecordsLocked(retained)
+            }
+        }
+
         return DownloadDirectorySyncResult(
             scannedFiles = visitedFiles.coerceAtMost(MAX_SCAN_VISITED_FILES),
             importedRecords = persistedImportedCount,
             skippedFiles = skippedFiles,
-            truncated = truncated
+            truncated = truncated,
+            matchedFiles = matchedFiles, removedRecords = removedRecords,
+            note = if (!scanReliable) "有子目录读取失败，已保留原记录" else ""
         )
     }
 
@@ -1046,6 +1145,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         prefs.edit {
             putString(KEY_SAVE_TREE_URI, next.saveTreeUri)
             putString(KEY_SAVE_DIR_DISPLAY, next.saveDirDisplayName)
+            putString("save_dir_path", next.saveDirPath)
+            putString("match_mode", next.matchMode)
+            putBoolean("auto_import_local", next.autoImportToLocal)
+            putBoolean("delete_source_after_import", next.deleteSourceAfterImport)
             putString(KEY_DEFAULT_FORMAT, next.defaultFormat)
             putString(KEY_FILE_TEMPLATE, next.fileNameTemplate)
             putString(KEY_CONFLICT_POLICY, next.conflictPolicy)
@@ -1110,6 +1213,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         return DanmuDownloadSettings(
             saveTreeUri = prefs.getString(KEY_SAVE_TREE_URI, "").orEmpty(),
             saveDirDisplayName = prefs.getString(KEY_SAVE_DIR_DISPLAY, "").orEmpty(),
+            saveDirPath = prefs.getString("save_dir_path", "").orEmpty(),
+            matchMode = prefs.getString("match_mode", "match").orEmpty(),
+            autoImportToLocal = prefs.getBoolean("auto_import_local", false),
+            deleteSourceAfterImport = prefs.getBoolean("delete_source_after_import", false),
             defaultFormat = prefs.getString(KEY_DEFAULT_FORMAT, DanmuDownloadFormat.Xml.value).orEmpty(),
             fileNameTemplate = prefs.getString(KEY_FILE_TEMPLATE, DanmuDownloadSettings().fileNameTemplate).orEmpty(),
             conflictPolicy = prefs.getString(KEY_CONFLICT_POLICY, DownloadConflictPolicy.Rename.key).orEmpty(),

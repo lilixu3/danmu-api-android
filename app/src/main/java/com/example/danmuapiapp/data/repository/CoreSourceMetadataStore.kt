@@ -15,7 +15,8 @@ internal data class CoreSourceMetadata(
     val versionLabel: String = "",
     val pullRequestNumbers: List<Int> = emptyList(),
     val pullRequestHeadShas: List<String> = emptyList(),
-    val localMergeSha: String = ""
+    val localMergeSha: String = "",
+    val installedAtEpochMillis: Long = 0L
 )
 
 internal object CoreSourceMetadataStore {

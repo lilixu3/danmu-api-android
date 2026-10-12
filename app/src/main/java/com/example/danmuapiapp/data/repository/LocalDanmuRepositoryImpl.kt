@@ -270,6 +270,26 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun loadPreview(resourceKey: String): Result<com.example.danmuapiapp.domain.model.DanmuFilePreview> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runLocalDanmuRequest {
+                val access = resolveRuntimeAccess()
+                withTokenPaths(tokenPaths(access)) { tokenPath ->
+                    val url = buildUrl(access, tokenPath, listOf("api", "v2", "comment")).newBuilder()
+                        .addQueryParameter("url", "local:$resourceKey").addQueryParameter("format", "json").build()
+                    val request = Request.Builder().url(url).applyRuntimeApiAuth(access).get().build()
+                    val (code, body) = executeGetWithRetry(request)
+                    if (code !in 200..299) throw mapError(code, body, LocalDanmuErrorKind.NotFound)
+                    val bytes = body.toByteArray(Charsets.UTF_8)
+                    val resource = cachedSnapshot?.resources?.firstOrNull { it.resourceKey == resourceKey }
+                    val preview = DanmuFilePreviewParser.parse(bytes.inputStream(), com.example.danmuapiapp.domain.model.DanmuDownloadFormat.Json,
+                        resource?.filename?.ifBlank { resource.title } ?: resourceKey, resourceKey, bytes.size.toLong(), 100_000)
+                    if (preview.count <= 0) error("核心返回 0 条弹幕，该资源可能已被清理，请重新导入")
+                    preview
+                }
+            }
+        }
+
     override suspend fun upload(
         request: LocalDanmuUploadRequest,
         onProgress: (Float) -> Unit

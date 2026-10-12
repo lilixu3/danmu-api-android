@@ -1,11 +1,14 @@
 package com.example.danmuapiapp.domain.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * GitHub authentication and REST API core rate-limit snapshot.
  *
  * [tokenValid] is null when no token is configured or validation could not be
  * completed. This keeps connectivity failures distinct from an explicit 401.
  */
+@Serializable
 data class GithubAccountStatus(
     val isLoading: Boolean = false,
     val tokenConfigured: Boolean = false,

@@ -31,12 +31,22 @@ class DownloadSettingsViewModel @Inject constructor(
     }
 
     fun setSaveTree(uri: String, displayName: String) {
+        repository.setSaveDirPath("")
         repository.setSaveTreeUri(uri, displayName)
         syncExistingFiles(messagePrefix = "下载目录已保存")
     }
 
+    fun setSaveDirPath(path: String) {
+        repository.setSaveDirPath(path)
+        syncExistingFiles(messagePrefix = "下载目录已保存")
+    }
+    fun setImportOptions(autoImport: Boolean, deleteSource: Boolean, matchMode: String) {
+        repository.setImportOptions(autoImport, deleteSource, matchMode)
+    }
+
     fun clearSaveTree() {
         repository.clearSaveTreeUri()
+        repository.setSaveDirPath("")
         operationMessage = "已清空下载目录"
     }
 

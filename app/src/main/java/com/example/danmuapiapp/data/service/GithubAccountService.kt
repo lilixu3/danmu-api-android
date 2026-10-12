@@ -8,12 +8,15 @@ import com.example.danmuapiapp.domain.model.GithubAccountStatus
 import com.example.danmuapiapp.domain.model.GithubCoreRateLimit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,6 +26,7 @@ import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,11 +61,20 @@ class GithubAccountService @Inject constructor(
         .callTimeout(15, TimeUnit.SECONDS)
         .build()
     private val refreshMutex = Mutex()
+    private val snapshotPrefs = context.getSharedPreferences("github_quota_snapshot", Context.MODE_PRIVATE)
+    @Volatile private var statusToken = normalizeToken(storedToken())
+    private val initialSnapshot = GithubAccountSnapshotCodec.decode(snapshotPrefs.getString("status", null), statusToken)
+    @Volatile private var lastCheckedAt = initialSnapshot?.checkedAt ?: 0L
     private val _status = MutableStateFlow(
-        GithubAccountStatus(tokenConfigured = storedToken().isNotBlank())
+        initialSnapshot?.status ?: GithubAccountStatus(tokenConfigured = statusToken.isNotBlank())
     )
 
     val status: StateFlow<GithubAccountStatus> = _status.asStateFlow()
+
+    fun shouldRefresh(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        statusToken != normalizeToken(storedToken()) || _status.value.coreRemaining == null ||
+            (_status.value.coreLimit ?: 0) <= 0 ||
+            lastCheckedAt <= 0L || nowMillis < lastCheckedAt || nowMillis - lastCheckedAt > 60_000L
 
     /**
      * Refreshes the account and rate-limit snapshot from GitHub's official API.
@@ -70,16 +83,31 @@ class GithubAccountService @Inject constructor(
     suspend fun refresh(tokenOverride: String? = null): GithubAccountStatus = refreshMutex.withLock {
         val token = normalizeToken(tokenOverride ?: storedToken())
         val configured = token.isNotBlank()
-        _status.value = GithubAccountStatus(
-            isLoading = true,
-            tokenConfigured = configured
-        )
-
-        val refreshed = withContext(Dispatchers.IO) {
-            loadStatus(token)
+        val sameCredential = statusToken == token
+        val saved = if (sameCredential) null else
+            GithubAccountSnapshotCodec.decode(snapshotPrefs.getString("status", null), token)
+        val previous = if (sameCredential) _status.value else
+            saved?.status ?: GithubAccountStatus(tokenConfigured = configured)
+        if (!sameCredential) lastCheckedAt = saved?.checkedAt ?: 0L
+        statusToken = token
+        // 保留已有额度，后台刷新不让卡片先清空、再切回加载状态。
+        _status.value = previous.copy(isLoading = true, error = null)
+        try {
+            val refreshed = withContext(Dispatchers.IO) { loadStatus(token) }
+            val result = retainGithubAccountSnapshot(previous, refreshed)
+            _status.value = result
+            if (refreshed.error == null && refreshed.coreRemaining != null && refreshed.coreLimit != null) {
+                lastCheckedAt = System.currentTimeMillis()
+                if (token == normalizeToken(storedToken())) {
+                    snapshotPrefs.edit().putString("status",
+                        GithubAccountSnapshotCodec.encode(token, refreshed, lastCheckedAt)).apply()
+                }
+            }
+            result
+        } catch (cancelled: CancellationException) {
+            _status.value = previous.copy(isLoading = false)
+            throw cancelled
         }
-        _status.value = refreshed
-        refreshed
     }
 
     private fun loadStatus(token: String): GithubAccountStatus {
@@ -192,6 +220,43 @@ class GithubAccountService @Inject constructor(
             trimmed.startsWith("token ", ignoreCase = true) -> trimmed.substring(6).trim()
             else -> trimmed
         }
+    }
+}
+
+internal fun retainGithubAccountSnapshot(previous: GithubAccountStatus,
+    refreshed: GithubAccountStatus): GithubAccountStatus {
+    val unavailable = refreshed.coreRemaining == null ||
+        (previous.tokenValid == true && refreshed.tokenValid == null && refreshed.error != null)
+    if (!unavailable || previous.coreRemaining == null || refreshed.tokenValid == false) return refreshed
+    return previous.copy(isLoading = false, tokenConfigured = refreshed.tokenConfigured,
+        tokenValid = refreshed.tokenValid ?: previous.tokenValid,
+        login = refreshed.login ?: previous.login, error = refreshed.error)
+}
+
+@Serializable
+internal data class CachedGithubAccountSnapshot(
+    val credentialFingerprint: String,
+    val checkedAt: Long,
+    val status: GithubAccountStatus
+)
+
+internal object GithubAccountSnapshotCodec {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private fun fingerprint(token: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(token.toByteArray(Charsets.UTF_8))
+        .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+
+    fun encode(token: String, status: GithubAccountStatus, checkedAt: Long): String = json.encodeToString(
+        CachedGithubAccountSnapshot(fingerprint(token), checkedAt, status.copy(isLoading = false, error = null)))
+
+    fun decode(raw: String?, token: String): CachedGithubAccountSnapshot? = raw?.let {
+        runCatching { json.decodeFromString<CachedGithubAccountSnapshot>(it) }.getOrNull()
+    }?.takeIf {
+        it.credentialFingerprint == fingerprint(token) && it.checkedAt > 0L &&
+            it.status.tokenConfigured == token.isNotBlank() &&
+            (it.status.coreLimit ?: 0) > 0 && (it.status.coreRemaining ?: -1) >= 0 &&
+            (it.status.coreRemaining ?: 0) <= (it.status.coreLimit ?: 0)
     }
 }
 

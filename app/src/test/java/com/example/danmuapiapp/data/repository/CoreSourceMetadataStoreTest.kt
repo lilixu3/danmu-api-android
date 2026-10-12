@@ -49,5 +49,18 @@ class CoreSourceMetadataStoreTest {
         assertEquals("abc1234", actual.commitSha)
         assertTrue(actual.pullRequestNumbers.isEmpty())
         assertTrue(actual.pullRequestHeadShas.isEmpty())
+        assertEquals(0L, actual.installedAtEpochMillis)
+    }
+
+    @Test fun `installation time round trips independently of remote commit date`() {
+        val metadata = installed.copy(
+            commitPublishedAt = "2026-10-01T08:00:00Z",
+            installedAtEpochMillis = 1791763200000L
+        )
+        val normal = folder.newFile().apply { writeText(Json.encodeToString(metadata)) }
+        val actual = CoreSourceMetadataStore.read(RunMode.Normal, normal, "unused") { null }!!
+        assertEquals(metadata, actual)
+        assertEquals("2026-10-01T08:00:00Z", actual.commitPublishedAt)
+        assertEquals(1791763200000L, actual.installedAtEpochMillis)
     }
 }

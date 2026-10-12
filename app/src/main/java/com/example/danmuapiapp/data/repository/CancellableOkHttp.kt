@@ -5,6 +5,8 @@ import okhttp3.Callback
 import okhttp3.Response
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -37,5 +39,14 @@ internal suspend fun <T> Call.useCancellableResponse(block: suspend (Response) -
     val watcher = launch(kotlinx.coroutines.Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
         try { kotlinx.coroutines.awaitCancellation() } finally { cancel() }
     }
-    try { executeCancellable().use { block(it) } } finally { watcher.cancel() }
+    try {
+        executeCancellable().use { block(it) }
+    } catch (error: IOException) {
+        // Cancelling a streamed read closes its socket; keep that as coroutine
+        // cancellation rather than an I/O failure that can cancel its parent.
+        currentCoroutineContext().ensureActive()
+        throw error
+    } finally {
+        watcher.cancel()
+    }
 }

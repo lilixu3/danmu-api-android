@@ -16,7 +16,7 @@ import java.util.Locale
  */
 internal object LocalDanmuMetadataResolver {
 
-    private val knownExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt", "zip")
+    private val knownExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt", "binpb", "zip")
     private val appTemplateRegex = Regex(
         "^(?<prefix>.+?)_E(?<ep>\\d{1,4})(?:_(?<rest>.+))?\\.[A-Za-z0-9]{1,8}$",
         RegexOption.IGNORE_CASE

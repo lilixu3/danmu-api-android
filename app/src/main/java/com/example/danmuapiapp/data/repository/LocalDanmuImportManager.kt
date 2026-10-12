@@ -22,7 +22,7 @@ class LocalDanmuImportManager @Inject constructor(
 
     companion object {
         const val CORE_MAX_UPLOAD_BYTES = 10L * 1024L * 1024L
-        private val supportedExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt")
+        private val supportedExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt", "binpb")
     }
 
     data class PreparedFile(
@@ -47,7 +47,7 @@ class LocalDanmuImportManager @Inject constructor(
                 extension
             } else {
                 sniffFileFormat(file)
-            } ?: error("不支持的文件格式，仅支持 XML/JSON/ASS/SSA/CSV/TXT")
+            } ?: error("不支持的文件格式，仅支持 XML/JSON/ASS/SSA/CSV/TXT/BINPB")
             val sizeBytes = file.length()
             if (sizeBytes > CORE_MAX_UPLOAD_BYTES) error("单文件不能超过 10 MB")
             PreparedFile(

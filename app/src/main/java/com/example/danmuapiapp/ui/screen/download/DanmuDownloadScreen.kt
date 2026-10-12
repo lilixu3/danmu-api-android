@@ -1,483 +1,304 @@
 package com.example.danmuapiapp.ui.screen.download
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
-import com.example.danmuapiapp.ui.component.AppGlassSurface
-
 import com.example.danmuapiapp.ui.component.AppDialog
-import com.example.danmuapiapp.ui.component.AppDialogStyle
-import com.example.danmuapiapp.ui.component.AppDialogTone
-
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ClearAll
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.DownloadDone
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.FilterAlt
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
-import androidx.compose.material.icons.rounded.Link
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.TaskAlt
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Badge
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
-import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
-import com.example.danmuapiapp.domain.model.DownloadQueueStatus
-import com.example.danmuapiapp.domain.model.DownloadRecordStatus
-import com.example.danmuapiapp.domain.model.renderFileNameTemplatePreview
-import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
-import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
-import com.example.danmuapiapp.ui.theme.appDangerButtonColors
-import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
-import com.example.danmuapiapp.ui.theme.appPrimaryIconButtonColors
+import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
+import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.screen.tools.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@Composable
-fun DanmuDownloadScreen(
-    onBack: () -> Unit,
-    onOpenDownloadSettings: () -> Unit,
-    providedViewModel: DanmuDownloadViewModel? = null
-) {
-    val activity = LocalContext.current.findActivity()
-    val viewModel = providedViewModel ?: hiltViewModel<DanmuDownloadViewModel>(
-        viewModelStoreOwner = checkNotNull(activity) { "无法获取 Activity 作用域" }
-    )
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val records by viewModel.records.collectAsStateWithLifecycle()
-    val queueTasks by viewModel.queueTasks.collectAsStateWithLifecycle()
-    val inEpisodeDetail = viewModel.currentAnime != null
-    val snackbarHostState = remember { SnackbarHostState() }
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    val queueSummary = viewModel.queueSummary()
-    val recordAnimeCount = remember(records) { buildDownloadRecordAnimeGroups(records).size }
-
-    LaunchedEffect(viewModel.operationMessage) {
-        val msg = viewModel.operationMessage
-        if (!msg.isNullOrBlank()) {
-            snackbarHostState.showSnackbar(msg)
-            viewModel.dismissMessage()
-        }
-    }
-
-    Scaffold(
-        containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(top = 16.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        AppGlassIconButton(
-                            onClick = {
-                                if (inEpisodeDetail) viewModel.backToAnimeList() else onBack()
-                            },
-                            size = 38.dp
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(18.dp))
+@Composable fun DanmuDownloadScreen(onBack: () -> Unit, onOpenDownloadSettings: () -> Unit,
+    providedViewModel: DanmuDownloadViewModel? = null) {
+    val activity = LocalContext.current.downloadActivity()
+    val vm = providedViewModel ?: hiltViewModel<DanmuDownloadViewModel>(viewModelStoreOwner = checkNotNull(activity))
+    val importer: DownloadImportViewModel = hiltViewModel()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val records by vm.records.collectAsStateWithLifecycle()
+    val tasks by vm.queueTasks.collectAsStateWithLifecycle()
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val snackbar = remember { SnackbarHostState() }
+    BackHandler(tab == 0 && vm.currentAnime != null) { vm.backToAnimeList() }
+    LaunchedEffect(vm.operationMessage) { vm.operationMessage?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
+    LaunchedEffect(tab, vm.isSyncingRecords) { if (tab == 2 && !vm.isSyncingRecords) importer.refreshMatches() }
+    Scaffold(containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { AppSnackbarHost(snackbar) }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            ToolHeader("弹幕下载", onBack) {
+                ToolIcon(Icons.Outlined.Tune, "下载设置", onOpenDownloadSettings, size = 40)
+                if (tab == 2) ToolIcon(Icons.Outlined.Sync, "同步已有文件", vm::syncExistingFiles,
+                    busy = vm.isSyncingRecords, size = 40)
+            }
+            val active = tasks.count { it.statusEnum() in setOf(DownloadQueueStatus.Pending, DownloadQueueStatus.Running) }
+            val tabs = listOf("搜索下载", if (active > 0) "任务队列 $active" else "任务队列",
+                if (records.isEmpty()) "下载记录" else "下载记录 ${records.size}")
+            Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                shape = RoundedCornerShape(11.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Row(Modifier.height(36.dp)) {
+                    tabs.forEachIndexed { index, label ->
+                        Box(Modifier.weight(1f).fillMaxHeight().background(if (tab == index) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clickable { tab = index }, contentAlignment = Alignment.Center) {
+                            Text(label, fontSize = 12.sp, color = if (tab == index) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (inEpisodeDetail) {
-                                    viewModel.currentAnime?.title ?: "弹幕下载"
-                                } else {
-                                    "弹幕下载中心"
-                                },
-                                style = MaterialTheme.typography.headlineLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = if (inEpisodeDetail) {
-                                    "剧集选择与批量下载"
-                                } else {
-                                    "搜索动漫并管理下载队列"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    AppGlassIconButton(
-                        onClick = onOpenDownloadSettings,
-                        size = 38.dp
-                    ) {
-                        Icon(Icons.Rounded.Settings, "下载设置", Modifier.size(18.dp))
-                    }
-                }
-
-                DownloadPanelCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        StatBadge("活动", queueSummary.active)
-                        StatBadge("队列", queueTasks.size)
-                        StatBadge("记录", records.size, MaterialTheme.colorScheme.tertiary)
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    val summaryText = when {
-                        queueSummary.running > 0 -> "队列运行中：${viewModel.queueRunningStatusText()}"
-                        queueSummary.pending > 0 -> "队列已暂停，剩余 ${queueSummary.pending} 项待处理"
-                        else -> "当前队列空闲，可在搜索页选择剧集后开始下载"
-                    }
-                    Text(
-                        summaryText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                AppGlassSurface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.26f)
-                    )
-                ) {
-                    val queueActive = queueSummary.active
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTab,
-                        containerColor = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ) {
-                        Tab(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            text = { Text("搜索下载") }
-                        )
-                        Tab(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("任务队列")
-                                    if (queueActive > 0) {
-                                        Badge(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        ) {
-                                            Text("$queueActive")
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                        Tab(
-                            selected = selectedTab == 2,
-                            onClick = { selectedTab = 2 },
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("下载记录")
-                                    if (records.isNotEmpty()) {
-                                        Badge(
-                                            containerColor = MaterialTheme.colorScheme.tertiary,
-                                            contentColor = MaterialTheme.colorScheme.onTertiary
-                                        ) {
-                                            Text("$recordAnimeCount")
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-
-                Box(modifier = Modifier.weight(1f)) {
-                    when (selectedTab) {
-                        0 -> SearchDownloadPage(viewModel = viewModel, settings = settings)
-                        1 -> QueuePage(viewModel = viewModel, queueTasks = queueTasks)
-                        2 -> RecordsPage(
-                            records = records,
-                            previewState = viewModel.previewDialogState,
-                            isSyncing = viewModel.isSyncingRecords,
-                            isDeleting = viewModel.isDeletingRecords,
-                            canMutateRecords = !viewModel.isDownloading,
-                            onDeleteRecords = viewModel::deleteRecords,
-                            onSync = viewModel::syncExistingFiles,
-                            onPreviewRecord = viewModel::openRecordPreview,
-                            onDismissPreview = viewModel::dismissRecordPreview
-                        )
                     }
                 }
             }
-
-            if (inEpisodeDetail && selectedTab == 0) {
-                val selectedCount = viewModel
-                    .visibleEpisodes()
-                    .count { viewModel.selectedEpisodeIds.contains(it.episodeId) }
-                AppGlassSurface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter),
-                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
-                    tonalElevation = 6.dp,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "已选 $selectedCount 集",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = "支持跨来源混合下载，重复项会自动去重",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+            when (tab) {
+                0 -> DownloadSearchContent(vm, records, onOpenDownloadSettings) { tab = 1 }
+                1 -> DownloadQueueContent(vm, tasks)
+                else -> DownloadRecordsContent(vm, importer, records, settings, onOpenDownloadSettings)
+            }
+        }
+    }
+    DownloadImportDialog(importer)
+    if (vm.previewDialogState.isVisible) DanmuPreviewDialog(vm.previewDialogState, vm::dismissRecordPreview)
+    vm.missingEpisodes?.let { state ->
+        AppDialog(onDismissRequest = vm::dismissMissing, scrollContent = false, title = { ToolTitle("刷新《${state.title}》", size = 16) },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolHint("源里 ${state.sourceTotal} 集 · 已下载 ${state.downloadedCount} 集 · ${state.way}")
+                ToolTitle("源里有、本地还没下载（${state.episodes.size} 集）", size = 12)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolChip("全选", onClick = { vm.selectAllMissing(true) }); ToolChip("全不选", onClick = { vm.selectAllMissing(false) })
+                }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                    items(state.episodes, key = { it.episodeId }) { episode ->
+                        Row(Modifier.fillMaxWidth().clickable { vm.toggleMissingEpisode(episode.episodeId) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(episode.episodeId in state.selectedIds, { vm.toggleMissingEpisode(episode.episodeId) }, Modifier.size(36.dp))
+                            Text("第${episode.episodeNumber}集", fontSize = 12.sp, modifier = Modifier.width(50.dp))
+                            ToolHint(episode.title, Modifier.weight(1f), maxLines = 1)
                         }
+                    }
+                }
+                ToolHint("下载后可用记录旁的导入按钮把新集导入本地库")
+            } }, dismissButton = { TextButton(vm::dismissMissing) { Text("取消", fontSize = 12.sp) } },
+            confirmButton = { ToolButton("下载 ${state.selectedIds.size} 集", { vm.downloadMissing(); if (vm.missingEpisodes == null) tab = 1 }, enabled = state.selectedIds.isNotEmpty()) })
+    }
+}
+@Composable private fun DownloadSearchContent(vm: DanmuDownloadViewModel, records: List<DanmuDownloadRecord>,
+    openSettings: () -> Unit, openQueue: () -> Unit) {
+    LazyColumn(contentPadding = PaddingValues(14.dp, 6.dp, 14.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { ToolHint("下载在后台进行，可以退出本页。保存位置、格式、模板和限速在右上角下载设置里修改。") }
+        item {
+            ToolCard {
+                ToolTitle("搜索动漫")
+                ToolInput(vm.keyword, vm::updateKeyword, "例如：凡人修仙传", icon = Icons.Outlined.Search, onSubmit = vm::searchAnime)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolChip("本机 127.0.0.1", vm.sourceBase.contains("127.0.0.1"), vm::useLocalBase)
+                    ToolChip("局域网", !vm.sourceBase.contains("127.0.0.1"), vm::useLanBase)
+                }
+                ToolButton("搜索", vm::searchAnime, Modifier.fillMaxWidth(), Icons.Outlined.Search, busy = vm.isSearching)
+            }
+        }
+        vm.errorMessage?.let { error -> item { ToolError(error, vm::clearError) } }
+        val anime = vm.currentAnime
+        if (anime == null) {
+            if (vm.animeCandidates.isEmpty()) item { ToolEmpty(if (vm.hasSearchedAnime) "没有搜索结果" else "搜索后选择番剧与剧集", Icons.Outlined.Download,
+                "支持批量下载与断点查看记录") }
+            items(vm.animeCandidates, key = { it.animeId }) { candidate ->
+                ToolCard(onClick = { vm.openAnimeDetail(candidate) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AnimePosterThumbnail(candidate.imageUrl, candidate.title, Modifier.size(58.dp, 82.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ToolTitle(candidate.title, size = 14)
+                            ToolHint(listOf(candidate.sourceLabel.ifBlank { extractSourceFromAnimeTitle(candidate.title) }, candidate.typeDescription).filter { it.isNotBlank() }.joinToString(" · "))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                ToolHint(if (candidate.episodeCount > 0) "${candidate.episodeCount} 集" else "集数未知", Modifier.weight(1f))
+                                Text("选择剧集", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            val downloaded = vm.episodeCandidates.filter { vm.episodeUiState(it).downloadedBefore || vm.episodeUiState(it).state == EpisodeDownloadState.Success }.map { it.episodeId }.toSet()
+            item {
+                ToolCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ToolTitle(anime.title, Modifier.weight(1f), size = 14)
+                        TextButton(vm::backToAnimeList) { Text("返回结果", fontSize = 12.sp) }
+                    }
+                    ToolHint("共 ${vm.episodeCandidates.size} 集 · 已选 ${vm.selectedEpisodeIds.size} · 已下载 ${vm.episodeCandidates.count { it.episodeId in downloaded }}")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolChip("全选", onClick = vm::selectAllVisible)
+                        ToolChip("全不选", onClick = vm::clearSelection)
+                        ToolChip("反选", onClick = vm::invertVisibleSelection)
+                        ToolChip("只选未下载", onClick = vm::selectUndownloadedEpisodes)
+                    }
+                    if (vm.sourceOptions().size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ToolChip("全部来源", vm.sourceFilter == null, { vm.selectSourceFilter(null) })
+                        vm.sourceOptions().forEach { source -> ToolChip(source, vm.sourceFilter == source, { vm.selectSourceFilter(source) }) }
+                    }
+                    ToolButton("下载 ${vm.selectedEpisodeIds.size} 集", { vm.startDownloadSelectedEpisodes(); if (vm.errorMessage == null) openQueue() },
+                        Modifier.fillMaxWidth(), Icons.Outlined.Download, enabled = vm.selectedEpisodeIds.isNotEmpty())
+                    if (vm.settings.value.saveDirPath.isBlank() && vm.settings.value.saveTreeUri.isBlank())
+                        TextButton(openSettings) { Text("先选择保存目录", fontSize = 12.sp) }
+                }
+            }
+            if (vm.isLoadingEpisodes) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            items(vm.visibleEpisodes(), key = { it.episodeId }) { episode ->
+                val ui = vm.episodeStates[episode.episodeId]
+                ToolCard(onClick = { vm.toggleEpisodeSelection(episode.episodeId) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(episode.episodeId in vm.selectedEpisodeIds, { vm.toggleEpisodeSelection(episode.episodeId) }, Modifier.size(34.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ToolTitle("第${episode.episodeNumber}集  ${episode.title}", size = 12)
+                            ToolHint(listOf(episode.source, if (episode.episodeId in downloaded) "已下载" else "未下载",
+                                ui?.detail.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "))
+                        }
+                        if (episode.episodeId in downloaded) Icon(Icons.Outlined.TaskAlt, "已下载", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable private fun DownloadQueueContent(vm: DanmuDownloadViewModel, tasks: List<DanmuDownloadTask>) {
+    var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var deleting by remember { mutableStateOf<String?>(null) }
+    LazyColumn(contentPadding = PaddingValues(14.dp, 6.dp, 14.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (tasks.isEmpty()) item { ToolEmpty("还没有下载任务", Icons.Outlined.Queue) }
+        else {
+            item { ToolCard {
+                LinearProgressIndicator(progress = { vm.overallProgress }, modifier = Modifier.fillMaxWidth())
+                ToolHint(vm.progressSummary)
+                if (vm.activeTaskAnimeTitle.isNotBlank()) ToolHint("${vm.activeTaskAnimeTitle} · 第${vm.activeTaskEpisodeNo ?: "-"}集\n${vm.activeTaskDetail}")
+                vm.throttleHint?.let { ToolHint(it) }
+            } }
+            item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (vm.isDownloading) {
+                    ToolButton("暂停", vm::pauseDownload, icon = Icons.Outlined.Pause, outlined = true)
+                    ToolButton("取消", vm::cancelDownload, icon = Icons.Outlined.StopCircle, outlined = true)
+                } else {
+                    if (tasks.any { it.statusEnum() == DownloadQueueStatus.Pending }) {
+                        ToolButton("继续", vm::resumePendingQueue, icon = Icons.Outlined.PlayArrow)
+                        ToolButton("取消", vm::cancelDownload, icon = Icons.Outlined.StopCircle, outlined = true)
+                    }
+                    if (tasks.any { it.statusEnum() == DownloadQueueStatus.Failed }) ToolButton("重试失败", vm::retryFailedQueueTasks, outlined = true)
+                    ToolButton("清空", { deleting = "" }, outlined = true)
+                }
+            } }
+            items(vm.animeQueueGroups(), key = { it.animeTitle }) { group ->
+                ToolCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ToolIcon(if (group.animeTitle in expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, "展开剧集", {
+                            expanded = if (group.animeTitle in expanded) expanded - group.animeTitle else expanded + group.animeTitle
+                        })
+                        ToolTitle(extractAnimeKeywordForSearch(group.animeTitle), Modifier.weight(1f), size = 14)
+                        ToolHint("${group.completed}/${group.total}")
+                        ToolIcon(Icons.Outlined.DeleteOutline, "删除任务", { deleting = group.animeTitle }, enabled = !vm.isDownloading, danger = true)
+                    }
+                    LinearProgressIndicator(progress = { group.progress }, modifier = Modifier.fillMaxWidth())
+                    if (group.animeTitle in expanded) {
+                        ToolHint("成功 ${group.success} · 失败 ${group.failed} · 跳过 ${group.skipped} · 取消 ${group.canceled}")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (viewModel.isDownloading) {
-                                AppGlassDangerButton(
-                                    onClick = viewModel::cancelDownload,
-                                ) {
-                                    Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("取消")
-                                }
-                            }
-                            AppGlassButton(
-                                onClick = viewModel::startDownloadSelectedEpisodes,
-                                enabled = !viewModel.isDownloading && selectedCount > 0,
-                                tint = MaterialTheme.colorScheme.primary
-                            ) {
-                                Icon(Icons.Rounded.CloudDownload, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("下载（$selectedCount）")
-                            }
+                            TextButton({ vm.moveQueueGroupUp(group.animeTitle) }) { Text("上移", fontSize = 11.sp) }
+                            TextButton({ vm.moveQueueGroupDown(group.animeTitle) }) { Text("下移", fontSize = 11.sp) }
+                        }
+                        group.episodes.forEach { episode ->
+                            ToolListRow("第${episode.episodeNo}集", episode.status.label, episode.episodeTitle, episode.detail)
                         }
                     }
                 }
             }
         }
     }
-
-    if (viewModel.errorMessage != null) {
-        AppDialog(
-            onDismissRequest = viewModel::clearError,
-            style = AppDialogStyle.Confirm,
-            tone = AppDialogTone.Danger,
-            title = { Text("操作失败") },
-            text = { Text(viewModel.errorMessage.orEmpty()) },
-            confirmButton = { AppGlassButton(onClick = viewModel::clearError) { Text("知道了") } }
-        )
-    }
+    deleting?.let { title -> AppDialog(onDismissRequest = { deleting = null }, title = { ToolTitle(if (title.isEmpty()) "清空队列" else "删除剧集任务", size = 16) },
+        text = { ToolHint("下载记录与磁盘文件会保留。") }, dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
+        confirmButton = { ToolButton("删除", { if (title.isEmpty()) vm.clearQueueTasks() else vm.removeQueueGroup(title); deleting = null }) }) }
 }
-
-private tailrec fun Context.findActivity(): ComponentActivity? {
-    return when (this) {
-        is ComponentActivity -> this
-        is ContextWrapper -> baseContext.findActivity()
-        else -> null
-    }
-}
-
-@Composable
-internal fun ThrottleHintBanner(hint: String) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f),
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f)
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Text(
-                hint,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+@Composable private fun DownloadRecordsContent(vm: DanmuDownloadViewModel, importer: DownloadImportViewModel,
+    records: List<DanmuDownloadRecord>, settings: DanmuDownloadSettings, openSettings: () -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var deleting by remember { mutableStateOf<List<DanmuDownloadRecord>?>(null) }
+    val groups = remember(records) { buildDownloadRecordAnimeGroups(records) }
+    LazyColumn(contentPadding = PaddingValues(14.dp, 6.dp, 14.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Row(verticalAlignment = Alignment.CenterVertically) {
+            ToolHint("共 ${records.size} 条记录 · ${groups.size} 部番剧", Modifier.weight(1f))
+            if (records.isNotEmpty()) TextButton({ deleting = records }) { Text("清空记录", fontSize = 12.sp) }
+        } }
+        vm.errorMessage?.let { error -> item { ToolError(error, vm::clearError) } }
+        vm.lastSync?.let { sync -> item { ToolHint("上次同步：扫描 ${sync.scannedFiles} 个 · 匹配 ${sync.matchedFiles} 个 · 新增 ${sync.importedRecords} 条 · 清理 ${sync.removedRecords} 条${if (sync.note.isNotBlank()) "\n${sync.note}" else ""}${if (sync.truncated) "（扫描已达上限）" else ""}") } }
+        if (records.isEmpty()) {
+            item { ToolEmpty("还没有下载记录", Icons.Outlined.FolderOpen) }
+            item { ToolCard {
+                ToolTitle("下载目录")
+                ToolHint(settings.saveDirPath.ifBlank { settings.saveDirDisplayName.ifBlank { "未设置，右上角下载设置里选择" } })
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ToolButton("重新同步", vm::syncExistingFiles, Modifier.weight(1f), Icons.Outlined.Sync, outlined = true, busy = vm.isSyncingRecords)
+                    ToolButton("选择目录", openSettings, Modifier.weight(1f), Icons.Outlined.FolderOpen)
+                }
+            } }
+        }
+        items(groups, key = { it.key }) { group ->
+            val good = group.records.filter { it.statusEnum() == DownloadRecordStatus.Success }
+            val imported = good.isNotEmpty() && good.all { it.importedToLocal || it.id in importer.importedKeys }
+            ToolCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ToolIcon(if (group.key in expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, "展开记录", {
+                        expanded = if (group.key in expanded) expanded - group.key else expanded + group.key
+                    })
+                    ToolTitle(group.title, Modifier.weight(1f), size = 14)
+                    ToolHint("${group.records.size} 条")
+                    ToolIcon(if (imported) Icons.Outlined.TaskAlt else Icons.Outlined.DownloadForOffline, "整部导入本地弹幕",
+                        { importer.open(good, "导入《${extractAnimeKeywordForSearch(group.title)}》") }, enabled = good.isNotEmpty() && !importer.planning)
+                    ToolIcon(Icons.Outlined.Refresh, "刷新未下载剧集", { vm.refreshSeries(group) }, busy = vm.refreshingSeriesKey == group.key)
+                    ToolIcon(Icons.Outlined.DeleteOutline, "删除整部记录", { deleting = group.records }, enabled = !vm.isDownloading, danger = true)
+                }
+                ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${downloadBytes(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
+                if (group.key in expanded) group.records.forEach { record ->
+                    val isImported = record.importedToLocal || record.id in importer.importedKeys
+                    ToolListRow("第${record.episodeNo}集", record.danmuCount?.let { "$it 条" } ?: record.statusEnum().label,
+                        record.fileName.ifBlank { record.episodeTitle },
+                        "${downloadTime(record.createdAt)} · ${downloadBytes(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",
+                        actions = {
+                            ToolIcon(Icons.Outlined.Visibility, "预览", { vm.openRecordPreview(record) })
+                            ToolIcon(if (isImported) Icons.Outlined.TaskAlt else Icons.Outlined.DownloadForOffline, "导入本地弹幕",
+                                { importer.open(listOf(record)) }, enabled = record.statusEnum() == DownloadRecordStatus.Success && !importer.planning)
+                            ToolIcon(Icons.Outlined.DeleteOutline, "删除记录", { deleting = listOf(record) }, enabled = !vm.isDownloading, danger = true)
+                        })
+                }
+            }
         }
     }
-}
-
-@Composable
-internal fun StatBadge(
-    label: String,
-    value: Int,
-    color: Color = MaterialTheme.colorScheme.primary
-) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.22f))
-    ) {
-        Text(
-            "$label $value",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = color
-        )
+    deleting?.let { targets ->
+        AppDialog(onDismissRequest = { deleting = null }, title = { ToolTitle("删除 ${targets.size} 条下载记录", size = 16) },
+            text = { ToolHint("可以只删除记录，或同时删除对应的磁盘文件。导入到本地库的弹幕会保留。") },
+            dismissButton = { TextButton({ deleting = null }) { Text("取消", fontSize = 12.sp) } },
+            confirmButton = { Row {
+                TextButton({ vm.deleteRecords(targets.map { it.id }.toSet(), false); deleting = null }) { Text("只删记录", fontSize = 12.sp) }
+                TextButton({ vm.deleteRecords(targets.map { it.id }.toSet(), true); deleting = null }) { Text("同时删文件", fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+            } })
     }
 }
-
-@Composable
-internal fun DownloadPanelCard(
-    modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    borderColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-    content: @Composable ColumnScope.() -> Unit
-) {
-    AppGlassSurface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = color,
-        border = BorderStroke(1.dp, borderColor)
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            content = content
-        )
-    }
+private fun Context.downloadActivity(): ComponentActivity? = when (this) {
+    is ComponentActivity -> this
+    is ContextWrapper -> baseContext.downloadActivity()
+    else -> null
 }
-
-@Composable
-internal fun primaryActionButtonColors() = appPrimaryButtonColors()
-
-@Composable
-internal fun primaryActionIconButtonColors() = appPrimaryIconButtonColors()
-
-@Composable
-internal fun primarySelectionFilterChipColors() = FilterChipDefaults.filterChipColors(
-    selectedContainerColor = MaterialTheme.colorScheme.primary,
-    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
-)
+internal fun downloadBytes(bytes: Long): String = if (bytes >= 1024 * 1024) String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0) else "${bytes / 1024} KB"
+internal fun downloadTime(time: Long): String = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))

@@ -1,19 +1,15 @@
 package com.example.danmuapiapp.ui.screen.settings
 
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
-import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,10 +50,11 @@ import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.ui.component.SettingsDivider
+import com.example.danmuapiapp.ui.component.CompactOverviewCard
+import com.example.danmuapiapp.ui.component.CompactOverviewItem
 import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
 import com.example.danmuapiapp.ui.component.SettingsGroup
 import com.example.danmuapiapp.ui.component.SettingsItem
-import com.example.danmuapiapp.ui.component.SettingsPageHeader
 import com.example.danmuapiapp.ui.component.SettingsSwitchItem
 
 @Composable
@@ -145,16 +142,41 @@ fun SettingsHubScreen(
                 .padding(top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            SettingsPageHeader(
-                title = "设置",
-                subtitle = "先看当前结论，再进入二级页调整细节"
+            Text(
+                text = "设置",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground
             )
 
-            SettingsOverviewCard(
-                runModeLabel = runModeLabel,
-                port = state.port,
-                proxyLabel = proxyLabel,
-                adminEnabled = adminSessionState.isAdminMode
+            CompactOverviewCard(
+                title = "当前配置概览",
+                subtitle = "${runModeLabel}模式 · ${state.listenMode.label}",
+                icon = Icons.Rounded.Tune,
+                status = if (state.token.isBlank()) "Token 未设" else "Token 已设",
+                statusColor = if (state.token.isBlank()) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                items = listOf(
+                    CompactOverviewItem("端口", state.port.toString(), onClick = onOpenServiceConfig),
+                    CompactOverviewItem(
+                        label = "线路",
+                        value = if (proxyLabel.contains("直连")) "直连" else proxyLabel,
+                        onClick = onOpenNetwork
+                    ),
+                    CompactOverviewItem(
+                        label = "权限",
+                        value = if (adminSessionState.isAdminMode) "管理员" else "普通",
+                        accent = if (adminSessionState.isAdminMode) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        onClick = onOpenAdminMode
+                    )
+                )
             )
 
             SettingsGroup(title = "核心运行") {
@@ -360,112 +382,6 @@ private tailrec fun Context.findActivity(): Activity? {
         is Activity -> this
         is ContextWrapper -> baseContext.findActivity()
         else -> null
-    }
-}
-
-@Composable
-private fun SettingsOverviewCard(
-    runModeLabel: String,
-    port: Int,
-    proxyLabel: String,
-    adminEnabled: Boolean
-) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = "当前配置概览",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "先看模式、端口、线路和权限状态，再进入二级页改细节",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SettingsOverviewMetric(
-                    modifier = Modifier.weight(1f),
-                    label = "运行模式",
-                    value = runModeLabel,
-                    accent = MaterialTheme.colorScheme.primary
-                )
-                SettingsOverviewMetric(
-                    modifier = Modifier.weight(1f),
-                    label = "监听端口",
-                    value = "TCP $port",
-                    accent = MaterialTheme.colorScheme.tertiary
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SettingsOverviewMetric(
-                    modifier = Modifier.weight(1f),
-                    label = "GitHub 线路",
-                    value = proxyLabel,
-                    accent = MaterialTheme.colorScheme.secondary
-                )
-                SettingsOverviewMetric(
-                    modifier = Modifier.weight(1f),
-                    label = "管理员",
-                    value = if (adminEnabled) "已开启" else "未开启",
-                    accent = if (adminEnabled) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsOverviewMetric(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    accent: Color
-) {
-    AppGlassSurface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = accent,
-                maxLines = 1
-            )
-        }
     }
 }
 

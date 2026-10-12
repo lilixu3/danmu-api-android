@@ -56,7 +56,10 @@ internal fun parseMatchSelection(raw: String): MatchSelection? {
         commentId = best.commentId,
         animeTitle = best.animeTitle,
         episodeTitle = best.episodeTitle,
-        source = best.source
+        source = best.source,
+        posterUrl = best.posterUrl,
+        sourceUrl = best.sourceUrl,
+        year = best.year
     )
 }
 
@@ -568,6 +571,9 @@ private fun scoreMatchObject(
         animeTitle = animeTitle,
         episodeTitle = episodeTitle,
         source = source,
+        posterUrl = readFirstString(obj, listOf("imageUrl", "posterUrl", "image", "cover")),
+        sourceUrl = readFirstString(obj, listOf("url", "sourceUrl")),
+        year = readFirstString(obj, listOf("year")),
         score = score,
         depth = depth
     )
@@ -637,6 +643,9 @@ private data class MatchCandidate(
     val animeTitle: String,
     val episodeTitle: String,
     val source: String,
+    val posterUrl: String,
+    val sourceUrl: String,
+    val year: String,
     val score: Int,
     val depth: Int
 )

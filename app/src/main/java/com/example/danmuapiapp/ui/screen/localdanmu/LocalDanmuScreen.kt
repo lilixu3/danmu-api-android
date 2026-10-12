@@ -1,102 +1,39 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
-import android.app.Activity
-import android.content.Context
+import com.example.danmuapiapp.ui.component.AppDialog
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.AdminPanelSettings
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.LockOpen
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.PlayCircleOutline
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Storage
-import androidx.compose.material.icons.rounded.UploadFile
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.danmuapiapp.domain.model.LocalDanmuGroup
-import com.example.danmuapiapp.domain.model.LocalDanmuResource
-import com.example.danmuapiapp.domain.model.LocalDanmuType
-import com.example.danmuapiapp.domain.model.LocalDanmuWritePermission
+import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
 import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
-import com.example.danmuapiapp.ui.component.AppDialog
-import com.example.danmuapiapp.ui.component.AppDialogStyle
-import com.example.danmuapiapp.ui.component.AppDialogTone
-import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
-import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
-import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.screen.download.DanmuPreviewDialog
+import com.example.danmuapiapp.ui.screen.download.buildDownloadRecordAnimeGroups
+import com.example.danmuapiapp.ui.screen.tools.*
 
 @Composable
 fun LocalDanmuScreen(
@@ -111,7 +48,9 @@ fun LocalDanmuScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var showAdminPrompt by remember { mutableStateOf(false) }
     var showAllFilesAccessPrompt by remember { mutableStateOf(false) }
-    var permissionPromptShown by rememberSaveable { mutableStateOf(false) }
+    val importer: DownloadImportViewModel = hiltViewModel()
+    val downloads by importer.records.collectAsStateWithLifecycle()
+    var chooseDownloads by remember { mutableStateOf(false) }
 
     val allFilesAccessLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -141,14 +80,6 @@ fun LocalDanmuScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // 进入页面先检查权限：没授权就直接弹一次授权提示，避免用户先看到空列表再去找入口。
-    LaunchedEffect(state.allFilesAccessGranted) {
-        if (!state.allFilesAccessGranted && !permissionPromptShown) {
-            permissionPromptShown = true
-            showAllFilesAccessPrompt = true
-        }
     }
 
     val requestAllFilesAccess: () -> Unit = {
@@ -196,1006 +127,174 @@ fun LocalDanmuScreen(
         }
     }
 
-    // 对话框统一在最前面组合：目录面板/上传面板都会 early return，
-    // 放在后面会导致「在上传面板里点去开启没反应，退回列表才弹窗」。
-    LocalDanmuDialogHost(
-        state = state,
-        showAdminPrompt = showAdminPrompt,
-        showAllFilesAccessPrompt = showAllFilesAccessPrompt,
-        onOpenAdminMode = onOpenAdminMode,
-        onDismissAdminPrompt = { showAdminPrompt = false },
-        onDismissAllFilesAccessPrompt = { showAllFilesAccessPrompt = false },
-        onRequestAllFilesAccess = requestAllFilesAccess,
-        onPreview = viewModel::loadPreview,
-        onDismissDetail = viewModel::dismissDetail,
-        onDelete = { resource ->
-            viewModel.dismissDetail()
-            viewModel.requestDelete(resource)
-        },
-        onConfirmDelete = viewModel::confirmDelete,
-        onDismissDelete = viewModel::dismissDelete,
-        onDismissPreview = viewModel::dismissPreview
-    )
-
-    if (state.editState.isVisible) {
-        LocalDanmuEditDialog(
-            state = state.editState,
-            groupFileCount = state.editState.target?.let { target ->
-                localDanmuGroupResources(state.snapshot.resources, target).size.coerceAtLeast(1)
-            } ?: 1,
-            onDismiss = viewModel::dismissEdit,
-            onScopeChange = viewModel::setEditScope,
-            onTitleChange = viewModel::updateEditTitle,
-            onYearChange = viewModel::updateEditYear,
-            onTypeChange = viewModel::updateEditType,
-            onSeasonChange = viewModel::updateEditSeason,
-            onEpisodeChange = viewModel::updateEditEpisode,
-            onFilenameChange = viewModel::updateEditFilename,
-            onSubmit = viewModel::submitEdit
-        )
+    LaunchedEffect(importer.completedVersion) {
+        if (importer.completedVersion > 0) viewModel.refreshNow()
     }
-
+    DownloadImportDialog(importer)
+    if (chooseDownloads) {
+        val groups = buildDownloadRecordAnimeGroups(downloads.filter { it.statusEnum() == DownloadRecordStatus.Success })
+        AppDialog(onDismissRequest = { chooseDownloads = false }, scrollContent = false, title = { ToolTitle("从下载记录导入", size = 16) },
+            text = {
+                if (groups.isEmpty()) ToolHint("还没有成功的下载记录，先在弹幕下载里下载或同步下载目录。")
+                else LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(groups, key = { it.key }) { group ->
+                        ToolListRow("${group.records.size} 集", "已导入 ${group.records.count { it.importedToLocal }}",
+                            group.title, "点此选择并订正导入信息", { chooseDownloads = false; importer.open(group.records, "导入《${com.example.danmuapiapp.ui.screen.download.extractAnimeKeywordForSearch(group.title)}》") },
+                            actions = { Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp)) })
+                    }
+                }
+            }, confirmButton = { TextButton({ chooseDownloads = false }) { Text("取消") } })
+    }
+    LocalDanmuDialogHost(state, showAdminPrompt, showAllFilesAccessPrompt, onOpenAdminMode,
+        { showAdminPrompt = false }, { showAllFilesAccessPrompt = false }, requestAllFilesAccess,
+        viewModel::loadPreview, viewModel::dismissDetail,
+        { resource -> viewModel.dismissDetail(); viewModel.requestDelete(resource) }, viewModel::confirmDelete,
+        viewModel::dismissDelete, viewModel::dismissPreview)
+    if (state.editState.isVisible) LocalDanmuEditDialog(state.editState,
+        state.editState.target?.let { localDanmuGroupResources(state.snapshot.resources, it).size.coerceAtLeast(1) } ?: 1,
+        viewModel::dismissEdit, viewModel::setEditScope, viewModel::updateEditTitle, viewModel::updateEditYear,
+        viewModel::updateEditType, viewModel::updateEditSeason, viewModel::updateEditEpisode,
+        viewModel::updateEditFilename, viewModel::submitEdit)
     if (state.browser.visible) {
-        LocalDanmuDirectoryBrowserPanel(
-            state = state.browser,
-            onBack = viewModel::closeDirectoryBrowser,
-            onOpenParent = viewModel::browseParent,
-            onOpenDefaultDirectory = viewModel::browseDefaultDirectory,
-            onToggleSelectAll = viewModel::toggleBrowserSelectAll,
-            onSetDefaultDirectory = viewModel::setBrowserDefaultDirectory,
-            onToggleSelection = viewModel::toggleBrowserSelection,
-            onImportSelected = viewModel::importSelectedBrowserFiles,
-            onRefresh = { viewModel.browseDirectory(state.browser.path) },
-            onOpenDirectory = viewModel::browseDirectory
-        )
+        LocalDanmuDirectoryBrowserPanel(state.browser, viewModel::closeDirectoryBrowser, viewModel::browseParent,
+            viewModel::browseDefaultDirectory, viewModel::toggleBrowserSelectAll, viewModel::setBrowserDefaultDirectory,
+            viewModel::toggleBrowserSelection, viewModel::importSelectedBrowserFiles,
+            { viewModel.browseDirectory(state.browser.path) }, viewModel::browseDirectory)
         return
     }
-
     if (state.batch.visible) {
-        LocalDanmuBatchPanel(
-            state = state.batch,
-            errorMessage = state.errorMessage,
-            onBack = {
-                viewModel.closeBatch()
-            },
-            onToggleSelected = viewModel::toggleBatchSelected,
-            onRemove = viewModel::removeBatchItem,
-            onUpdateMetadata = viewModel::updateBatchItemMetadata,
-            onRun = viewModel::runBatchImport,
-            onCancel = viewModel::cancelBatchImport,
-            onRetryFailed = viewModel::retryFailedBatch,
-            onDismissError = viewModel::dismissError
-        )
+        LocalDanmuBatchPanel(state.batch, state.errorMessage, viewModel::closeBatch, viewModel::toggleBatchSelected,
+            viewModel::removeBatchItem, viewModel::updateBatchItemMetadata, viewModel::runBatchImport,
+            viewModel::cancelBatchImport, viewModel::retryFailedBatch, viewModel::dismissError)
         return
     }
-
-    Scaffold(
-        containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 18.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 14.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                AppGlassIconButton(onClick = onBack, size = 36.dp) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "返回",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("本地弹幕", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        if (state.totalEpisodeFiles > 0) {
-                            "${state.snapshot.groups.size} 个资源 · ${state.totalEpisodeFiles} 个文件 · ${formatLocalDanmuSize(state.totalSizeBytes)}"
-                        } else {
-                            "手动上传并维护本地弹幕文件"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                AppGlassIconButton(
-                    onClick = viewModel::refreshNow,
-                    enabled = !state.isLoading,
-                    size = 36.dp
-                ) {
-                    if (state.isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新", modifier = Modifier.size(18.dp))
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { AppSnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            ToolHeader("本地弹幕", onBack,
+                "${state.totalEpisodeFiles} 个文件 · ${state.totalDanmuCount} 条弹幕 · ${formatLocalDanmuSize(state.totalSizeBytes)}") {
+                ToolIcon(Icons.Outlined.DownloadForOffline, "从下载记录导入", { requireWrite { chooseDownloads = true } }, size = 36)
+                ToolIcon(Icons.Outlined.UploadFile, "上传弹幕文件", { requireWrite(openImportFlow) }, size = 36)
+                ToolIcon(Icons.Outlined.Refresh, "刷新", viewModel::refreshNow, busy = state.isLoading, size = 36)
+            }
+            if (!state.localSourceEnabled && !state.isLoading) {
+                ToolCard(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                    ToolTitle("本地弹幕源未启用")
+                    ToolHint("播放器尚未使用本地弹幕。选择优先使用本地库，或在其它来源找不到弹幕时使用。")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolButton("优先本地", { requireWrite { viewModel.enableLocalSource(true) } }, icon = Icons.Outlined.VerticalAlignTop, outlined = true)
+                        ToolButton("本地兜底", { requireWrite { viewModel.enableLocalSource(false) } }, icon = Icons.Outlined.VerticalAlignBottom, outlined = true)
                     }
                 }
             }
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 22.dp)
-            ) {
-                // 只反映这次请求的结果：失败就显示原始原因 + 重试/重启服务，
-                // 不做任何能力判定，也不因为“未确认”而隐藏列表。
-                item(key = "import-action") {
-                    LocalDanmuImportCard(
-                        granted = state.allFilesAccessGranted,
-                        canWrite = state.writePermission == LocalDanmuWritePermission.Writable,
-                        onImport = { requireWrite(openImportFlow) },
-                        onGrant = requestAllFilesAccess
-                    )
-                }
-                state.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                    item(key = "error") {
-                        LocalDanmuErrorBanner(
-                            message = message,
-                            onRetry = viewModel::refreshNow,
-                            onRestartService = viewModel::restartService
-                        )
+            ToolInput(state.searchQuery, viewModel::setSearchQuery, "搜索剧名或文件名",
+                Modifier.padding(horizontal = 14.dp, vertical = 8.dp), Icons.Outlined.Search)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolChip("全部", state.typeFilter == null, { viewModel.setTypeFilter(null) })
+                ToolChip("电视剧", state.typeFilter == "tv", { viewModel.setTypeFilter("tv") })
+                ToolChip("电影", state.typeFilter == "movie", { viewModel.setTypeFilter("movie") })
+            }
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(14.dp, 8.dp, 14.dp, 28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                state.errorMessage?.let { error -> item { ToolCard {
+                    ToolError(error, viewModel::dismissError)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolButton("重试", viewModel::refreshNow, outlined = true)
+                        ToolButton("配置", onOpenConfig, outlined = true)
+                        ToolButton("重启服务", viewModel::restartService, outlined = true)
                     }
+                } } }
+                if (state.writePermission != LocalDanmuWritePermission.Writable) item {
+                    ToolCard { ToolHint("当前只读，上传、编辑与删除需要管理员权限。")
+                        ToolButton("管理员模式", onOpenAdminMode, outlined = true) }
                 }
-                if (state.deleteInProgress) {
-                    item(key = "delete-progress") {
-                        DeleteProgressCard(state.deleteProgress)
-                    }
-                }
-                item(key = "stats") { LocalDanmuStatsRow(state) }
-                if (state.writePermission != LocalDanmuWritePermission.Writable) {
-                    item(key = "permission") {
-                        WritePermissionBanner(
-                            permission = state.writePermission,
-                            onOpenAdminMode = onOpenAdminMode,
-                            onOpenConfig = onOpenConfig
-                        )
-                    }
-                }
-                if (!state.localSourceEnabled && state.snapshot.resources.isNotEmpty()) {
-                    item(key = "source") {
-                        LocalSourceBanner(onEnable = viewModel::enableLocalSource)
-                    }
-                }
-                item(key = "search") {
-                    LocalDanmuSearchBar(
-                        query = state.searchQuery,
-                        typeFilter = state.typeFilter,
-                        onQueryChange = viewModel::setSearchQuery,
-                        onTypeChange = viewModel::setTypeFilter
-                    )
-                }
-                if (state.filteredGroups.isEmpty()) {
-                    item(key = "empty") {
-                        LocalDanmuEmptyState(
-                            hasAnyResource = state.snapshot.resources.isNotEmpty(),
-                            onUpload = { requireWrite(openImportFlow) }
-                        )
-                    }
-                } else {
-                    items(
-                        items = state.filteredGroups,
-                        key = { it.groupKey }
-                    ) { group ->
-                        LocalDanmuGroupCard(
-                            group = group,
-                            expanded = group.groupKey in state.expandedGroupKeys,
-                            canWrite = state.writePermission == LocalDanmuWritePermission.Writable,
-                            onToggle = { viewModel.toggleGroup(group.groupKey) },
-                            onOpenDetail = viewModel::loadDetail,
-                            onEditEpisode = viewModel::startEdit,
-                            onDeleteEpisode = viewModel::requestDelete,
-                            onEditSeason = { viewModel.startEditGroup(group) },
-                            onDeleteSeason = { viewModel.requestDeleteGroup(group) },
-                            onDeleteSeries = { viewModel.requestDeleteSeries(group) }
-                        )
+                if (state.deleteInProgress) item { ToolCard { LinearProgressIndicator(Modifier.fillMaxWidth()); ToolHint(state.deleteProgress) } }
+                if (state.filteredGroups.isEmpty() && !state.isLoading) item { ToolEmpty(
+                    if (state.searchQuery.isBlank()) "还没有本地弹幕" else "没有匹配的资源", Icons.Outlined.FolderOpen,
+                    "右上角可上传文件，或从下载记录快速导入") }
+                items(state.filteredGroups, key = { it.groupKey }) { group ->
+                    val expanded = group.groupKey in state.expandedGroupKeys
+                    ToolCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ToolIcon(if (expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                                "展开剧集", { viewModel.toggleGroup(group.groupKey) })
+                            Column(Modifier.weight(1f).clickable { viewModel.toggleGroup(group.groupKey) }) {
+                                ToolTitle(group.title, size = 14, maxLines = 1)
+                                ToolHint("${group.year ?: "未知年份"} · ${LocalDanmuType.fromWire(group.type)?.label ?: group.type} · 第${group.season}季 · ${group.episodes.size} 集")
+                            }
+                            ToolHint("${group.count} 条")
+                            ToolIcon(Icons.Outlined.Edit, "编辑整个分组", { requireWrite { viewModel.startEditGroup(group) } })
+                            ToolIcon(Icons.Outlined.DeleteOutline, "删除整个分组", { requireWrite { viewModel.requestDeleteGroup(group) } }, danger = true)
+                        }
+                        if (expanded) group.episodes.forEach { episode ->
+                            ToolListRow(if (episode.type == "movie") "剧场版" else "第${episode.episode ?: "-"}集", "${episode.count} 条",
+                                episode.filename.ifBlank { episode.resourceKey },
+                                "${episode.format.uppercase()} · ${formatLocalDanmuSize(episode.sizeBytes)} · ${if (episode.status == "ready") "可用" else episode.status}",
+                                { viewModel.loadDetail(episode.resourceKey) }, actions = {
+                                    ToolIcon(Icons.Outlined.Visibility, "预览", { viewModel.loadDetail(episode.resourceKey) })
+                                    ToolIcon(Icons.Outlined.Edit, "编辑这一集", { requireWrite { viewModel.startEdit(episode) } })
+                                    ToolIcon(Icons.Outlined.DeleteOutline, "删除这一集", { requireWrite { viewModel.requestDelete(episode) } }, danger = true)
+                                })
+                        }
                     }
                 }
             }
         }
     }
-
 }
 
 @Composable
-private fun LocalDanmuDialogHost(
-    state: LocalDanmuUiState,
-    showAdminPrompt: Boolean,
-    showAllFilesAccessPrompt: Boolean,
-    onOpenAdminMode: () -> Unit,
-    onDismissAdminPrompt: () -> Unit,
-    onDismissAllFilesAccessPrompt: () -> Unit,
-    onRequestAllFilesAccess: () -> Unit,
-    onPreview: (String) -> Unit,
-    onDismissDetail: () -> Unit,
-    onDelete: (LocalDanmuResource) -> Unit,
-    onConfirmDelete: () -> Unit,
-    onDismissDelete: () -> Unit,
-    onDismissPreview: () -> Unit
-) {
+private fun LocalDanmuDialogHost(state: LocalDanmuUiState, showAdminPrompt: Boolean, showAllFilesAccessPrompt: Boolean,
+    onOpenAdminMode: () -> Unit, onDismissAdminPrompt: () -> Unit, onDismissAllFilesAccessPrompt: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit, onPreview: (String) -> Unit, onDismissDetail: () -> Unit,
+    onDelete: (LocalDanmuResource) -> Unit, onConfirmDelete: () -> Unit, onDismissDelete: () -> Unit, onDismissPreview: () -> Unit) {
     state.detailResource?.let { resource ->
-        LocalDanmuDetailDialog(
-            resource = resource,
-            canWrite = state.writePermission == LocalDanmuWritePermission.Writable,
-            onPreview = { onPreview(resource.resourceKey) },
-            onDismiss = onDismissDetail,
-            onDelete = { onDelete(resource) }
-        )
+        AppDialog(onDismissRequest = { onDismissPreview(); onDismissDetail() }, scrollContent = false,
+            title = { ToolTitle(resource.filename.ifBlank { resource.episodeLabel }, size = 15) },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(resource.title, resource.typeLabel, resource.year.toString(), "第${resource.season}季", resource.episodeLabel)
+                        .forEach { label -> ToolChip(label, onClick = {}) }
+                }
+                ToolHint("弹幕 ${resource.count} 条 · 格式 ${resource.format.ifBlank { "未知" }} · ${formatLocalDanmuSize(resource.sizeBytes)}")
+                if (state.previewState.loadingRecordId != null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                state.previewState.error?.let { ToolError(it) }
+                state.previewState.preview?.let { preview ->
+                    ToolTitle("弹幕预览（前 50 条）", size = 12)
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                        items(preview.items.take(50), key = { it.index }) { item ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val raw = if (item.color.startsWith('#')) item.color.drop(1).toLongOrNull(16) else item.color.toLongOrNull()
+                                val color = if (raw == null || raw == 0xffffffL) MaterialTheme.colorScheme.outlineVariant else Color((raw or 0xff000000L).toInt())
+                                Box(Modifier.size(9.dp).background(color, androidx.compose.foundation.shape.CircleShape))
+                                val seconds = (item.timeSeconds ?: 0.0).toLong().coerceAtLeast(0)
+                                Text("%02d:%02d".format(seconds / 60, seconds % 60), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(item.text, Modifier.weight(1f), fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            } }, dismissButton = {
+                if (state.previewState.preview == null && state.previewState.loadingRecordId == null)
+                    TextButton({ onPreview(resource.resourceKey) }) { Text("预览") }
+            }, confirmButton = { ToolButton("关闭", { onDismissPreview(); onDismissDetail() }) })
     }
-
+    if (state.detailResource == null && state.previewState.isVisible) DanmuPreviewDialog(state.previewState, onDismissPreview)
     if (state.pendingDeleteResources.isNotEmpty()) {
         val resources = state.pendingDeleteResources
-        val count = resources.size
-        val danmuCount = resources.sumOf { it.count }
-        AppDialog(
-            onDismissRequest = onDismissDelete,
-            style = AppDialogStyle.Confirm,
-            tone = AppDialogTone.Danger,
-            icon = { Icon(Icons.Rounded.DeleteOutline, null) },
-            title = { Text(if (count == 1) "确认删除本地弹幕" else "确认批量删除") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        if (count == 1) {
-                            "将删除「${resources.first().title} ${resources.first().episodeLabel}」。"
-                        } else {
-                            "将删除 ${resources.first().title} 的 $count 个文件，共 $danmuCount 条弹幕。"
-                        },
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        "删除后如果仍需要，只能重新上传。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {
-                AppGlassDangerButton(onClick = onConfirmDelete) {
-                    Text("确认删除")
-                }
-            },
-            dismissButton = {
-                AppGlassButton(onClick = onDismissDelete) {
-                    Text("取消")
-                }
-            }
-        )
+        AppDialog(onDismissRequest = onDismissDelete, title = { ToolTitle("确认删除本地弹幕", size = 16) },
+            text = { ToolHint("将删除《${resources.first().title}》的 ${resources.size} 个文件，共 ${resources.sumOf { it.count }} 条弹幕。删除后需要重新导入才能恢复。") },
+            confirmButton = { TextButton(onConfirmDelete) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onDismissDelete) { Text("取消") } })
     }
-
-    if (state.previewState.isVisible) {
-        DanmuPreviewDialog(
-            state = state.previewState,
-            onDismiss = onDismissPreview
-        )
-    }
-
-    if (showAdminPrompt) {
-        AdminModeRequiredDialog(
-            prompt = adminModeRequiredPrompt(
-                target = AdminModeRequiredTarget.LocalDanmu,
-                hasAdminTokenConfigured = state.writePermission != LocalDanmuWritePermission.ReadOnly
-            ),
-            onOpenAdminMode = {
-                onDismissAdminPrompt()
-                onOpenAdminMode()
-            },
-            onDismiss = onDismissAdminPrompt
-        )
-    }
-
-    if (showAllFilesAccessPrompt) {
-        AppDialog(
-            onDismissRequest = onDismissAllFilesAccessPrompt,
-            style = AppDialogStyle.Confirm,
-            tone = AppDialogTone.Warning,
-            icon = { Icon(Icons.Rounded.LockOpen, null) },
-            title = { Text("开启目录直读模式") },
-            text = {
-                Text(
-                    "开启「所有文件访问」后，可以直接浏览弹幕目录并选择文件，" +
-                        "不用每次经过系统文件选择器，也不会因为重启应用而丢失读取授权。\n\n" +
-                        "该权限需要在系统设置中手动开启，仅用于读取本地弹幕文件。"
-                )
-            },
-            confirmButton = {
-                AppGlassButton(onClick = {
-                    onDismissAllFilesAccessPrompt()
-                    onRequestAllFilesAccess()
-                }) { Text("去开启") }
-            },
-            dismissButton = {
-                AppGlassButton(onClick = onDismissAllFilesAccessPrompt) { Text("取消") }
-            }
-        )
-    }
-}
-
-/**
- * 唯一的导入入口：授权后点「导入弹幕文件」进入文件列表；
- * 未授权时直接给出授权说明和按钮，不再让用户在多个入口之间猜。
- */
-@Composable
-private fun LocalDanmuImportCard(
-    granted: Boolean,
-    canWrite: Boolean,
-    onImport: () -> Unit,
-    onGrant: () -> Unit
-) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    if (granted) Icons.Rounded.UploadFile else Icons.Rounded.FolderOpen,
-                    contentDescription = null,
-                    tint = if (granted) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    if (granted) "导入本地弹幕" else "需要「所有文件访问」权限",
-                    style = MaterialTheme.typography.titleSmall
-                )
-            }
-            Text(
-                if (granted) {
-                    "在应用内的文件列表里挑选弹幕文件（XML / JSON / ASS / SSA / CSV / TXT），可多选后统一导入。"
-                } else {
-                    "开启后可以直接浏览本地目录挑选弹幕文件，不再经过系统文件选择器，重启应用也不会失效。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (granted) {
-                AppGlassButton(
-                    onClick = onImport,
-                    enabled = canWrite,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.UploadFile, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("导入弹幕文件")
-                }
-                if (!canWrite) {
-                    Text(
-                        "需要管理员模式才能上传（当前为只读）。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            } else {
-                AppGlassButton(
-                    onClick = onGrant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.LockOpen, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("去授权")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuErrorBanner(
-    message: String,
-    onRetry: () -> Unit,
-    onRestartService: () -> Unit
-) {
-    BannerCard(
-        icon = Icons.Rounded.ErrorOutline,
-        tint = MaterialTheme.colorScheme.error,
-        title = "本地弹幕请求失败",
-        message = message,
-        actionText = "重试",
-        onAction = onRetry,
-        secondaryActionText = "重启服务",
-        onSecondaryAction = onRestartService
-    )
-}
-
-@Composable
-private fun WritePermissionBanner(
-    permission: LocalDanmuWritePermission,
-    onOpenAdminMode: () -> Unit,
-    onOpenConfig: () -> Unit
-) {
-    val message = when (permission) {
-        LocalDanmuWritePermission.ReadOnly ->
-            "当前为只读模式：可以查看列表。上传和删除需要配置 ADMIN_TOKEN，或在核心配置中开启 LOCAL_DANMU_NOT_REQUIRE_ADMIN。"
-        LocalDanmuWritePermission.AdminRequired ->
-            "当前为只读模式：上传和删除需要进入管理员模式。"
-        LocalDanmuWritePermission.Writable -> return
-    }
-    BannerCard(
-        icon = Icons.Rounded.AdminPanelSettings,
-        tint = MaterialTheme.colorScheme.tertiary,
-        title = "只读模式",
-        message = message,
-        actionText = "管理员设置",
-        onAction = onOpenAdminMode,
-        secondaryActionText = "核心配置",
-        onSecondaryAction = onOpenConfig
-    )
-}
-
-@Composable
-private fun LocalSourceBanner(onEnable: (Boolean) -> Unit) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                "搜索还看不到本地弹幕？",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "需要把 local 加入 SOURCE_ORDER，核心才会在搜索和自动匹配时检索已导入的弹幕。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppGlassButton(onClick = { onEnable(true) }) { Text("优先本地") }
-                AppGlassButton(onClick = { onEnable(false) }) { Text("作为补充") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeleteProgressCard(progress: String) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "正在删除 ${progress.ifBlank { "…" }}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                val parts = progress.split('/')
-                val done = parts.getOrNull(0)?.toIntOrNull()
-                val total = parts.getOrNull(1)?.toIntOrNull()
-                if (done != null && total != null && total > 0) {
-                    Spacer(Modifier.height(6.dp))
-                    LinearProgressIndicator(
-                        progress = { (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuStatsRow(state: LocalDanmuUiState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        LocalDanmuStatChip(
-            modifier = Modifier.weight(1f),
-            label = "资源",
-            value = "${state.snapshot.groups.size} 组",
-            accent = MaterialTheme.colorScheme.primary
-        )
-        LocalDanmuStatChip(
-            modifier = Modifier.weight(1f),
-            label = "文件",
-            value = "${state.totalEpisodeFiles} 个",
-            accent = MaterialTheme.colorScheme.secondary
-        )
-        LocalDanmuStatChip(
-            modifier = Modifier.weight(1f),
-            label = "弹幕",
-            value = "${state.totalDanmuCount} 条",
-            accent = MaterialTheme.colorScheme.tertiary
-        )
-        LocalDanmuStatChip(
-            modifier = Modifier.weight(1f),
-            label = "占用",
-            value = formatLocalDanmuSize(state.totalSizeBytes),
-            accent = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun LocalDanmuStatChip(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    accent: Color
-) {
-    AppGlassSurface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuSearchBar(
-    query: String,
-    typeFilter: String?,
-    onQueryChange: (String) -> Unit,
-    onTypeChange: (String?) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            label = { Text("搜索标题或文件名") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            trailingIcon = {
-                if (query.isNotBlank()) {
-                    AppGlassIconButton(onClick = { onQueryChange("") }, size = 32.dp) {
-                        Icon(
-                            Icons.Rounded.Close,
-                            contentDescription = "清空",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = typeFilter == null,
-                onClick = { onTypeChange(null) },
-                label = { Text("全部") }
-            )
-            LocalDanmuType.entries.forEach { type ->
-                FilterChip(
-                    selected = typeFilter == type.wire,
-                    onClick = { onTypeChange(type.wire) },
-                    label = { Text(type.label) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuEmptyState(
-    hasAnyResource: Boolean,
-    onUpload: () -> Unit
-) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                Icons.Rounded.Storage,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(34.dp)
-            )
-            Text(
-                if (hasAnyResource) "没有匹配的本地弹幕" else "还没有导入本地弹幕",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                if (hasAnyResource) {
-                    "换一个关键词或类型筛选试试。"
-                } else {
-                    "和核心一致：每次手动选择一个弹幕文件，文件名会自动解析。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            AppGlassButton(onClick = onUpload) {
-                Icon(Icons.Rounded.UploadFile, null, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.size(6.dp))
-                Text("上传弹幕文件")
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuGroupCard(
-    group: LocalDanmuGroup,
-    expanded: Boolean,
-    canWrite: Boolean,
-    onToggle: () -> Unit,
-    onOpenDetail: (String) -> Unit,
-    onEditEpisode: (LocalDanmuResource) -> Unit,
-    onDeleteEpisode: (LocalDanmuResource) -> Unit,
-    onEditSeason: () -> Unit,
-    onDeleteSeason: () -> Unit,
-    onDeleteSeries: () -> Unit
-) {
-    val typeLabel = LocalDanmuType.fromWire(group.type)?.label ?: group.type.ifBlank { "未知类型" }
-    val seasonText = if (group.type == LocalDanmuType.Movie.wire && group.season == 1) {
-        ""
-    } else {
-        " · 第${group.season}季"
-    }
-    var menuExpanded by remember { mutableStateOf(false) }
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggle)
-                    .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Storage,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        group.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${group.year ?: "年份未知"} · $typeLabel$seasonText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "已上传 ${group.episodeCount} ${if (group.type == LocalDanmuType.Movie.wire) "个文件" else "集"} · " +
-                            "${group.count} 条弹幕 · ${formatLocalDanmuSize(group.sizeBytes)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (canWrite) {
-                    Box {
-                        AppGlassIconButton(
-                            onClick = { menuExpanded = true },
-                            size = 34.dp
-                        ) {
-                            Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "更多操作",
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("编辑本季信息（标题/年份/类型/季）") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onEditSeason()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("删除本季（${group.episodes.size} 集）") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onDeleteSeason()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("删除整部（含所有季）") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onDeleteSeries()
-                                }
-                            )
-                        }
-                    }
-                }
-                Icon(
-                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = if (expanded) "收起" else "展开",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (expanded) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
-                )
-                group.episodes.forEach { resource ->
-                    LocalDanmuEpisodeRow(
-                        resource = resource,
-                        canWrite = canWrite,
-                        onOpenDetail = { onOpenDetail(resource.resourceKey) },
-                        onEdit = { onEditEpisode(resource) },
-                        onDelete = { onDeleteEpisode(resource) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalDanmuEpisodeRow(
-    resource: LocalDanmuResource,
-    canWrite: Boolean,
-    onOpenDetail: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenDetail)
-            .padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            Icons.Rounded.Description,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.size(20.dp)
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                resource.episodeLabel,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                resource.filename.ifBlank { "弹幕文件" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "${resource.count} 条 · ${formatLocalDanmuSize(resource.sizeBytes)} · " +
-                    "${resource.format.ifBlank { "未知格式" }} · ${formatLocalDanmuTime(resource.updatedAt)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (canWrite) {
-            AppGlassIconButton(onClick = onEdit, size = 34.dp) {
-                Icon(
-                    Icons.Rounded.Edit,
-                    contentDescription = "编辑",
-                    modifier = Modifier.size(17.dp)
-                )
-            }
-            AppGlassIconButton(onClick = onDelete, size = 34.dp) {
-                Icon(
-                    Icons.Rounded.DeleteOutline,
-                    contentDescription = "删除",
-                    modifier = Modifier.size(17.dp)
-                )
-            }
-        }
-    }
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 46.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
-    )
-}
-
-@Composable
-private fun LocalDanmuDetailDialog(
-    resource: LocalDanmuResource,
-    canWrite: Boolean,
-    onPreview: () -> Unit,
-    onDismiss: () -> Unit,
-    onDelete: () -> Unit
-) {
-    AppDialog(
-        onDismissRequest = onDismiss,
-        style = AppDialogStyle.Status,
-        tone = AppDialogTone.Info,
-        icon = { Icon(Icons.Rounded.Description, null) },
-        title = { Text("本地弹幕详情") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailRow("标题", resource.title)
-                DetailRow("类型", "${resource.typeLabel} · 第${resource.season}季")
-                DetailRow("集数", resource.episodeLabel)
-                DetailRow("文件名", resource.filename.ifBlank { "未记录" })
-                DetailRow("格式", resource.format.ifBlank { "未记录" })
-                DetailRow("弹幕数量", "${resource.count} 条")
-                DetailRow("文件大小", formatLocalDanmuSize(resource.sizeBytes))
-                DetailRow("更新时间", formatLocalDanmuTime(resource.updatedAt))
-                DetailRow("resourceKey", resource.resourceKey)
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    AppGlassButton(
-                        onClick = onPreview,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            Icons.Rounded.PlayCircleOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Text("预览")
-                    }
-                    if (canWrite) {
-                        AppGlassDangerButton(
-                            onClick = onDelete,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("删除")
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            AppGlassButton(onClick = onDismiss) {
-                Text("关闭")
-            }
-        }
-    )
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(86.dp)
-        )
-        Text(
-            value.ifBlank { "—" },
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(1f)
-        )
-    }
-}
-
-@Composable
-private fun BannerCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    title: String,
-    message: String,
-    actionText: String,
-    onAction: () -> Unit,
-    secondaryActionText: String? = null,
-    onSecondaryAction: (() -> Unit)? = null
-) {
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                Icon(icon, contentDescription = null, tint = tint)
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppGlassButton(onClick = onAction) { Text(actionText) }
-                if (secondaryActionText != null && onSecondaryAction != null) {
-                    AppGlassButton(onClick = onSecondaryAction) {
-                        Text(secondaryActionText)
-                    }
-                }
-            }
-        }
-    }
+    if (showAdminPrompt) AdminModeRequiredDialog(
+        adminModeRequiredPrompt(AdminModeRequiredTarget.LocalDanmu, state.writePermission != LocalDanmuWritePermission.ReadOnly),
+        { onDismissAdminPrompt(); onOpenAdminMode() }, onDismissAdminPrompt)
+    if (showAllFilesAccessPrompt) AppDialog(onDismissRequest = onDismissAllFilesAccessPrompt,
+        title = { ToolTitle("开启目录直读模式", size = 16) },
+        text = { ToolHint("开启所有文件访问权限后，可以直接浏览目录并选择弹幕文件。返回应用后会继续打开文件选择页。") },
+        confirmButton = { ToolButton("去开启", { onDismissAllFilesAccessPrompt(); onRequestAllFilesAccess() }) },
+        dismissButton = { TextButton(onDismissAllFilesAccessPrompt) { Text("取消") } })
 }

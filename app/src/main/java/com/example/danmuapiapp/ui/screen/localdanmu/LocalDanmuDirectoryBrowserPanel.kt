@@ -1,352 +1,87 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.LockOpen
-import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.RadioButtonUnchecked
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.SelectAll
-import androidx.compose.material.icons.rounded.SnippetFolder
-import androidx.compose.material.icons.rounded.Upload
-import androidx.compose.material.icons.rounded.UploadFile
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import com.example.danmuapiapp.data.repository.LocalDanmuFileBrowser
-import com.example.danmuapiapp.ui.component.AppGlassSurface
-import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
-import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import com.example.danmuapiapp.ui.screen.tools.*
 
-/**
- * 目录直读模式的浏览面板：直接列出“所有文件访问”范围内的目录与弹幕文件；
- * 文件始终可以自由勾选一个或多个，底部统一「导入选中」。
- */
-@Composable
-internal fun LocalDanmuDirectoryBrowserPanel(
-    state: LocalDanmuBrowserState,
-    onBack: () -> Unit,
-    onOpenParent: () -> Unit,
-    onOpenDefaultDirectory: () -> Unit,
-    onToggleSelectAll: () -> Unit,
-    onSetDefaultDirectory: () -> Unit,
-    onToggleSelection: (String) -> Unit,
-    onImportSelected: () -> Unit,
-    onRefresh: () -> Unit,
-    onOpenDirectory: (String) -> Unit
-) {
+@Composable internal fun LocalDanmuDirectoryBrowserPanel(state: LocalDanmuBrowserState, onBack: () -> Unit,
+    onOpenParent: () -> Unit, onOpenDefaultDirectory: () -> Unit, onToggleSelectAll: () -> Unit,
+    onSetDefaultDirectory: () -> Unit, onToggleSelection: (String) -> Unit, onImportSelected: () -> Unit,
+    onRefresh: () -> Unit, onOpenDirectory: (String) -> Unit) {
     BackHandler { onBack() }
-
-    Scaffold(
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 18.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 14.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                AppGlassIconButton(onClick = onBack, size = 36.dp) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "返回",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("选择弹幕文件", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        state.path.ifBlank { "正在读取目录…" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                AppGlassIconButton(
-                    onClick = onRefresh,
-                    enabled = !state.isLoading,
-                    size = 36.dp
-                ) {
-                    if (state.isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
+    val latest by rememberUpdatedState(state)
+    val latestToggle by rememberUpdatedState(onToggleSelection)
+    val rowHeight = with(LocalDensity.current) { 48.dp.toPx() }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        ToolHeader("选择弹幕文件", onBack, state.path.ifBlank { "正在读取目录…" }) {
+            ToolIcon(Icons.Outlined.Refresh, "刷新目录", onRefresh, busy = state.isLoading, size = 40)
+        }
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            ToolChip("上一级", onClick = { if (state.parent != null) onOpenParent() })
+            ToolChip("弹幕目录", onClick = onOpenDefaultDirectory)
+            ToolChip(if (state.isDefaultDirectory) "默认目录" else "设为默认", state.isDefaultDirectory, onSetDefaultDirectory)
+            ToolChip(if (state.allSelected) "取消全选" else "全选", onClick = onToggleSelectAll)
+        }
+        ToolHint("已选 ${state.selectedCount} 个 · 勾选框区域可上下拖动连续选择", Modifier.padding(horizontal = 14.dp, vertical = 5.dp))
+        state.error?.let { ToolError(it) }
+        if (state.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (state.truncated) ToolHint("目录文件较多，当前展示已达到上限", Modifier.padding(horizontal = 14.dp))
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 14.dp)) {
+            itemsIndexed(state.rows, key = { _, row -> row.entry.path }) { index, row ->
+                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (row.entry.isDirectory) {
+                        Icon(Icons.Outlined.Folder, null, Modifier.size(32.dp).padding(6.dp), tint = MaterialTheme.colorScheme.primary)
                     } else {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新", modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AppGlassButton(
-                    onClick = onOpenParent,
-                    enabled = state.parent != null && !state.isLoading
-                ) {
-                    Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("上一级")
-                }
-                AppGlassButton(
-                    onClick = onOpenDefaultDirectory,
-                    enabled = !state.isLoading
-                ) {
-                    Icon(Icons.Rounded.SnippetFolder, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("弹幕目录")
-                }
-                if (!state.isDefaultDirectory) {
-                    AppGlassButton(
-                        onClick = onSetDefaultDirectory,
-                        enabled = !state.isLoading && state.path.isNotBlank()
-                    ) {
-                        Icon(Icons.Rounded.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(6.dp))
-                        Text("设为默认")
-                    }
-                }
-            }
-
-            state.error?.let { error ->
-                AppGlassSurface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.ErrorOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            error,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-            }
-
-            if (state.rows.isEmpty() && !state.isLoading && state.error == null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.SnippetFolder,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(34.dp)
-                    )
-                    Text(
-                        "该目录下没有目录或弹幕文件",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "支持 XML / JSON / ASS / SSA / CSV / TXT",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 12.dp)
-            ) {
-                items(items = state.rows, key = { it.entry.path }) { row ->
-                    DirectoryEntryRow(
-                        row = row,
-                        enabled = !state.isLoading,
-                        onClick = {
-                            if (row.entry.isDirectory) {
-                                onOpenDirectory(row.entry.path)
-                            } else {
-                                onToggleSelection(row.entry.path)
-                            }
+                        // Only the checkbox column captures drag selection. Text remains normal scrolling.
+                        Box(Modifier.width(36.dp).fillMaxHeight().pointerInput(state.path, index) {
+                            var startY = 0f
+                            var dragSelecting = true
+                            var lastRange = emptySet<Int>()
+                            detectDragGestures(onDragStart = { pos ->
+                                startY = pos.y
+                                dragSelecting = row.entry.path !in latest.selectedPaths
+                                lastRange = emptySet()
+                            }, onDrag = { change, _ ->
+                                change.consume()
+                                val offset = ((change.position.y - startY) / rowHeight).toInt()
+                                val target = (index + offset).coerceIn(0, latest.rows.lastIndex)
+                                val range = (minOf(index, target)..maxOf(index, target)).toSet()
+                                (range - lastRange).forEach { i ->
+                                    val current = latest.rows[i]
+                                    if (!current.entry.isDirectory && (current.entry.path in latest.selectedPaths) != dragSelecting) latestToggle(current.entry.path)
+                                }
+                                lastRange = range
+                            })
+                        }, contentAlignment = Alignment.Center) {
+                            Checkbox(row.selected, { onToggleSelection(row.entry.path) }, Modifier.size(32.dp))
                         }
-                    )
-                }
-                if (state.truncated) {
-                    item(key = "truncated") {
-                        Text(
-                            "目录条目过多，仅显示前 ${LocalDanmuFileBrowser.MAX_VISIBLE_ENTRIES} 项，请进入子目录查看。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    "已选 ${state.selectedCount} 个文件",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.weight(1f))
-                AppGlassButton(
-                    onClick = onToggleSelectAll,
-                    enabled = !state.isLoading && state.selectablePaths.isNotEmpty()
-                ) {
-                    Icon(
-                        Icons.Rounded.SelectAll,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(if (state.allSelected) "取消全选" else "全选")
-                }
-            }
-
-            AppGlassButton(
-                onClick = onImportSelected,
-                enabled = state.selectedCount > 0 && !state.isLoading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 18.dp)
-            ) {
-                Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.size(6.dp))
-                Text(
-                    if (state.selectedCount > 0) {
-                        "导入选中的 ${state.selectedCount} 个文件"
-                    } else {
-                        "先在列表里勾选弹幕文件"
+                    Column(Modifier.weight(1f).clickable {
+                        if (row.entry.isDirectory) onOpenDirectory(row.entry.path) else onToggleSelection(row.entry.path)
+                    }.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(row.entry.name, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        if (!row.entry.isDirectory) ToolHint("${formatLocalDanmuSize(row.entry.sizeBytes)}${row.importedLabel?.let { " · 已导入 $it" }.orEmpty()}", maxLines = 1)
                     }
-                )
+                    if (row.entry.isDirectory) ToolIcon(Icons.Outlined.ChevronRight, "打开目录", { onOpenDirectory(row.entry.path) })
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
             }
         }
-    }
-}
-
-@Composable
-private fun DirectoryEntryRow(
-    row: LocalDanmuBrowserRow,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    val entry = row.entry
-    val clickable = enabled
-    AppGlassSurface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                when {
-                    entry.isDirectory -> Icons.Rounded.Folder
-                    row.selected -> Icons.Rounded.CheckCircle
-                    else -> Icons.Rounded.RadioButtonUnchecked
-                },
-                contentDescription = null,
-                tint = when {
-                    entry.isDirectory -> MaterialTheme.colorScheme.primary
-                    row.selected -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    entry.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    if (entry.isDirectory) "文件夹" else formatLocalDanmuSize(entry.sizeBytes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            when {
-                row.importedLabel != null -> Text(
-                    row.importedLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                !entry.isDirectory -> Icon(
-                    Icons.Rounded.LockOpen,
-                    contentDescription = "点击勾选",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
+        ToolButton("导入选中 ${state.selectedCount} 个", onImportSelected, Modifier.fillMaxWidth().padding(14.dp),
+            Icons.Outlined.UploadFile, enabled = state.selectedCount > 0 && !state.isLoading)
     }
 }

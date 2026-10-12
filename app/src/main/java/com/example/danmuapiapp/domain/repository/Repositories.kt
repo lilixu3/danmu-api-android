@@ -46,6 +46,7 @@ interface CoreRepository {
     suspend fun refreshCoreInfoAndAwait()
     suspend fun checkUpdate(variant: ApiVariant): GithubRelease?
     suspend fun fetchBranches(variant: ApiVariant): Result<CoreBranchCatalog>
+    suspend fun fetchBranchSnapshot(variant: ApiVariant): Result<CoreBranchSnapshot>
     suspend fun checkAndMarkUpdate(variant: ApiVariant)
     suspend fun checkAllUpdates()
     suspend fun fetchUpdateComparison(variant: ApiVariant): Result<CoreUpdateComparison>
@@ -233,6 +234,12 @@ interface DanmuDownloadRepository {
     val records: StateFlow<List<DanmuDownloadRecord>>
     val queueTasks: StateFlow<List<DanmuDownloadTask>>
     fun setSaveTreeUri(uri: String, displayName: String)
+    fun setSaveDirPath(path: String)
+    fun setImportOptions(autoImport: Boolean, deleteSource: Boolean, matchMode: String)
+    fun markRecordsImported(resourceKeys: Map<Long, String>)
+    fun noteRecord(recordId: Long, message: String)
+    suspend fun deleteDownloadedFiles(recordIds: Set<Long>): Result<Int>
+    fun removeQueueTasks(taskIds: Set<Long>)
     fun clearSaveTreeUri()
     fun setDefaultFormat(format: DanmuDownloadFormat)
     fun setFileNameTemplate(template: String)
@@ -299,6 +306,7 @@ interface LocalDanmuRepository {
     /** @param force 为 true 时忽略内存快照与新鲜度窗口（手动刷新、导入/删除后用）。 */
     suspend fun refresh(force: Boolean = false): Result<LocalDanmuSnapshot>
     suspend fun loadDetail(resourceKey: String): Result<LocalDanmuResource>
+    suspend fun loadPreview(resourceKey: String): Result<DanmuFilePreview>
     suspend fun upload(
         request: LocalDanmuUploadRequest,
         onProgress: (Float) -> Unit = {}

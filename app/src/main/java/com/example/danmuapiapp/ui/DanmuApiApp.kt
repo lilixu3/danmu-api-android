@@ -29,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.ui.component.GlassBottomNavigationBar
 import com.example.danmuapiapp.ui.component.LocalFloatingBottomBarVisible
@@ -42,6 +43,7 @@ import com.example.danmuapiapp.ui.screen.cache.CacheManagementScreen
 import com.example.danmuapiapp.ui.screen.config.ConfigScreen
 import com.example.danmuapiapp.ui.screen.console.ConsoleScreen
 import com.example.danmuapiapp.ui.screen.core.CoreScreen
+import com.example.danmuapiapp.ui.screen.core.CoreViewModel
 import com.example.danmuapiapp.ui.screen.core.PullRequestLabScreen
 import com.example.danmuapiapp.ui.screen.deviceaccess.DeviceAccessScreen
 import com.example.danmuapiapp.ui.screen.diagnostics.DiagnosticsScreen
@@ -165,6 +167,8 @@ private fun StartupWarmupOverlay(title: String, detail: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DanmuApiMainContent() {
+    // 与 Flutter 的 IndexedStack 一样：进入首页时就准备核心页，并在切换页面时保留状态。
+    val coreViewModel: CoreViewModel = hiltViewModel()
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -253,6 +257,7 @@ private fun DanmuApiMainContent() {
             }
             composable(Screen.Core.route) {
                 CoreScreen(
+                    viewModel = coreViewModel,
                     onOpenPullRequestLab = { variant ->
                         navController.navigate(CoreRoute.pullRequestLab(variant.key))
                     }

@@ -52,7 +52,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLocale
@@ -69,9 +68,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.LogEntry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.ui.component.CompactOverviewCard
+import com.example.danmuapiapp.ui.component.CompactOverviewItem
 import com.example.danmuapiapp.ui.component.SectionHeader
 import com.example.danmuapiapp.ui.component.FloatingBottomBarContentSpacer
-import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.text.SimpleDateFormat
@@ -96,9 +96,9 @@ fun ToolsScreen(
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
+    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
-    val coreDisplayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val logPreviewEnabled by viewModel.logPreviewEnabled.collectAsStateWithLifecycle()
     val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
     val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
@@ -142,22 +142,46 @@ fun ToolsScreen(
                 onClick = onOpenAdminMode
             )
         }
-        Text(
-            text = "高频操作在前，排查与追踪在后",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        ToolsOverviewCard(
-            status = runtimeState.status,
-            port = runtimeState.port,
-            variantLabel = coreDisplayNames.resolve(runtimeState.variant),
-            adminEnabled = adminState.isAdminMode,
-            logEnabled = logEnabled,
-            logCount = logs.size,
-            errorCount = errorCount,
-            warnCount = warnCount,
-            onOpenConsole = onOpenConsole
+        val statusColor = when (runtimeState.status) {
+            ServiceStatus.Running -> MaterialTheme.colorScheme.primary
+            ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.tertiary
+            ServiceStatus.Error -> MaterialTheme.colorScheme.error
+            ServiceStatus.Stopped -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        CompactOverviewCard(
+            title = "工作台概览",
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+            subtitle = "${coreDisplayNames.resolve(runtimeState.variant)} · ${runtimeState.runMode.label}模式",
+            icon = Icons.Rounded.Terminal,
+            status = when (runtimeState.status) {
+                ServiceStatus.Running -> "运行中"
+                ServiceStatus.Starting -> "启动中"
+                ServiceStatus.Stopping -> "停止中"
+                ServiceStatus.Error -> "运行异常"
+                ServiceStatus.Stopped -> "未启动"
+            },
+            statusColor = statusColor,
+            items = listOf(
+                CompactOverviewItem("端口", runtimeState.port.toString(), onClick = onOpenConfig),
+                CompactOverviewItem("日志", if (logEnabled) "${logs.size} 条" else "已关闭", onClick = onOpenConsole),
+                CompactOverviewItem(
+                    label = "告警",
+                    value = when {
+                        !logEnabled -> "—"
+                        errorCount > 0 -> "$errorCount 错误"
+                        warnCount > 0 -> "$warnCount 警告"
+                        else -> "无"
+                    },
+                    accent = when {
+                        !logEnabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                        errorCount > 0 -> MaterialTheme.colorScheme.error
+                        warnCount > 0 -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    onClick = onOpenConsole
+                )
+            )
         )
 
         SectionHeader(title = "高频操作")
@@ -325,170 +349,6 @@ private fun AdminModeStatusChip(
                 text = if (enabled) "已开启管理员模式" else "未开启管理员模式",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolsOverviewCard(
-    status: ServiceStatus,
-    port: Int,
-    variantLabel: String,
-    adminEnabled: Boolean,
-    logEnabled: Boolean,
-    logCount: Int,
-    errorCount: Int,
-    warnCount: Int,
-    onOpenConsole: () -> Unit
-) {
-    val accent = when (status) {
-        ServiceStatus.Running -> MaterialTheme.colorScheme.primary
-        ServiceStatus.Starting, ServiceStatus.Stopping -> MaterialTheme.colorScheme.tertiary
-        ServiceStatus.Error -> MaterialTheme.colorScheme.error
-        ServiceStatus.Stopped -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val subtitle = when (status) {
-        ServiceStatus.Running -> "服务已启动 · 端口 $port · $variantLabel，适合直接进入调试与下载"
-        ServiceStatus.Starting -> "服务正在启动，日志会优先反映当前进度"
-        ServiceStatus.Stopping -> "服务正在停止，可先查看日志确认收尾情况"
-        ServiceStatus.Error -> "服务异常，建议优先查看运行日志与请求记录"
-        ServiceStatus.Stopped -> "服务未启动，可先配置参数，再进入调试或下载"
-    }
-    val logSummary = when {
-        !logEnabled -> "已关闭"
-        logCount <= 0 -> "暂无"
-        errorCount > 0 -> "$errorCount 错误"
-        warnCount > 0 -> "$warnCount 警告"
-        else -> "$logCount 条"
-    }
-
-    AppGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            accent.copy(alpha = 0.1f),
-                            Color.Transparent,
-                            Color.Transparent
-                        )
-                    )
-                )
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(accent.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        StatusIndicator(status = status, modifier = Modifier.size(14.dp))
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            text = "工作台概览",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                AppGlassIconButton(
-                    onClick = onOpenConsole,
-                    size = 34.dp
-                ) {
-                    Icon(
-                        Icons.Rounded.Terminal,
-                        contentDescription = "查看日志",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OverviewStatChip(
-                    modifier = Modifier.weight(1f),
-                    label = "当前状态",
-                    value = when (status) {
-                        ServiceStatus.Running -> "运行中"
-                        ServiceStatus.Starting -> "启动中"
-                        ServiceStatus.Stopping -> "停止中"
-                        ServiceStatus.Error -> "异常"
-                        ServiceStatus.Stopped -> "未启动"
-                    },
-                    accent = accent
-                )
-                OverviewStatChip(
-                    modifier = Modifier.weight(1f),
-                    label = "日志概况",
-                    value = logSummary,
-                    accent = if (errorCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                )
-                OverviewStatChip(
-                    modifier = Modifier.weight(1f),
-                    label = "管理员",
-                    value = if (adminEnabled) "已开启" else "未开启",
-                    accent = if (adminEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OverviewStatChip(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    accent: Color
-) {
-    AppGlassSurface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = accent,
-                maxLines = 1
             )
         }
     }
