@@ -108,23 +108,23 @@ test('cancel blocked upload before contacting the helper',async()=>fixture(async
 
 
 test('new sources opt in exact hosts, preserve proxies and carry POST bodies once', async()=>fixture(async({bridge,seen,endpoint})=>{
-  const groups={dandan:['api.danmaku.weeblify.app','nipaplay.aimes-soft.com'],animeko:['api.animeko.org','danmaku-global.myani.org','danmaku-cn.myani.org','s1.animeko.openani.org','api.bangumi.vip']};
-  const extended={...config,sources:['bahamut','tmdb','dandan','animeko']};
+  const groups={dandan:['api.danmaku.weeblify.app','nipaplay.aimes-soft.com'],animeko:['api.animeko.org','danmaku-global.myani.org','danmaku-cn.myani.org','s1.animeko.openani.org','api.bangumi.vip'],douban:['m.douban.com','api.douban.com']};
+  const extended={...config,sources:['bahamut','tmdb','dandan','animeko','douban']};
   assert.deepEqual(validateConfig(extended).sources,extended.sources);
   for(const [source,hosts] of Object.entries(groups)) for(const host of hosts) {
     assert.equal(eligible(new URL('https://'+host+'/x'),{config},{}),false);
     assert.equal(eligible(new URL('https://'+host+'/x'),{config:extended},{}),true);
     assert.equal(eligible(new URL('https://'+host+'.evil.test/x'),{config:extended},{}),false);
     for(const proxy of [source+'@https://proxy.test','@https://proxy.test','http://127.0.0.1:7890']) {
-      assert.equal(eligible(new URL('https://'+host+'/x'),{config:extended},{PROXY_URL:proxy}),false);
+      assert.equal(eligible(new URL('https://'+host+'/x'),{config:extended},{PROXY_URL:proxy}),source!=='animeko');
     }
   }
   bridge.update({config:extended,status:'ready',endpoint,token:'offline-secret'});
-  for(const host of ['api.danmaku.weeblify.app','api.bangumi.vip','danmaku-global.myani.org']) {
+  for(const host of ['api.danmaku.weeblify.app','api.bangumi.vip','danmaku-global.myani.org','api.douban.com']) {
     const response=await fetch('https://'+host+'/search',{method:'POST',body:'one-business-body'});
     assert.equal((await response.json()).body,'one-business-body');
   }
-  assert.equal(seen.length,3);
+  assert.equal(seen.length,4);
   assert.ok(seen.every(request=>request.method==='POST' && request.body==='one-business-body'));
 }));
 
@@ -144,4 +144,78 @@ test('selected-source diagnostics use node fallback, validate responses, respect
   assert.equal((await diagnoseSource('tmdb',snapshot,{}, {fetchImpl:async()=>Response.json({status_message:'Unauthorized'},{status:401})})).ok,true);
   const controller=new AbortController();controller.abort();
   await assert.rejects(diagnoseSource('animeko',snapshot,{}, {signal:controller.signal,fetchImpl:()=>{throw new Error('must not send');}}),{name:'AbortError'});
+});
+
+test('source diagnostics distinguish country blocks from a successful TLS connection',async()=>{
+ const {diagnoseSource}=require('../app/src/main/assets/nodejs-project/app-outbound-diagnostics.js');
+ const snapshot={config:{...config,sources:['dandan']}};
+ for(const text of ['error code: 1009\n','<html><title>Access denied</title><script>errorCode: 1009</script></html>']) {
+  const blocked=await diagnoseSource('dandan',snapshot,{}, {fetchImpl:async()=>new Response(text,{status:403})});
+  assert.equal(blocked.ok,false);assert.equal(blocked.status,403);assert.match(blocked.reason,/地区.*代理/);
+ }
+ await assert.rejects(diagnoseSource('aiyifan',snapshot,{}, {fetchImpl:()=>assert.fail('unsupported source')}),/Invalid source/);
+});
+
+test('Douban opt-in preserves POST body, original query and cookies',async()=>fixture(async({bridge,seen,endpoint})=>{
+ bridge.update({config:{...config,sources:['douban']},status:'ready',endpoint,token:'offline-secret'});
+ const target='https://api.douban.com/v2/movie/search?start=0';
+ await (await fetch(target,{method:'POST',body:'{"q":"test"}',headers:{'Content-Type':'application/json'}})).text();
+ await (await fetch('https://m.douban.com/rexxar/api/v2/search?q=test',{headers:{Cookie:'bid=fixture',Referer:'https://m.douban.com/movie/'}})).text();
+ assert.equal(seen[0].target,target);assert.equal(seen[0].method,'POST');assert.equal(seen[0].body,'{"q":"test"}');
+ assert.equal(seen[1].headers.cookie,'bid=fixture');assert.equal(seen[1].headers.referer,'https://m.douban.com/movie/');
+}));
+
+test('Douban diagnostic uses anonymous public details and keeps Cookie optional',async()=>{
+ const {diagnoseSource}=require('../app/src/main/assets/nodejs-project/app-outbound-diagnostics.js');
+ const snapshot={config:{...config,sources:['douban']}};
+ const good=await diagnoseSource('douban',snapshot,{}, {fetchImpl:async(url,options)=>{
+  assert.equal(new URL(url).hostname,'m.douban.com');assert.equal(options.headers.Referer,'https://m.douban.com/movie/');
+  assert.equal(new URL(url).pathname,'/rexxar/api/v2/movie/36296618');assert.equal(options.headers.Cookie,undefined);
+  return Response.json({id:'36296618',title:'公开详情'});
+ }});
+ assert.equal(good.ok,true);
+ const optional=await diagnoseSource('douban',snapshot,{DOUBAN_COOKIE:'bid=diagnostic-cookie'}, {fetchImpl:async(url,options)=>{
+  assert.equal(options.headers.Cookie,'bid=diagnostic-cookie');return Response.json({id:'36296618',title:'公开详情'});
+ }});
+ assert.equal(optional.ok,true);assert(!JSON.stringify(optional).includes('diagnostic-cookie'));
+ for(const payload of [{banned:true,id:'36296618',title:'blocked'},{id:'unexpected',title:'wrong item'},{subjects:{items:[]}},{id:'36296618',title:''}]) {
+  assert.equal((await diagnoseSource('douban',snapshot,{}, {fetchImpl:async()=>Response.json(payload)})).ok,false);
+ }
+ for(const [status,expected]of [[403,/公开接口.*拒绝/],[429,/频繁/]]) {
+  const result=await diagnoseSource('douban',snapshot,{}, {fetchImpl:async()=>Response.json({error:'forbidden'},{status})});
+  assert.equal(result.ok,false);assert.match(result.reason,expected);
+  assert(!/Cookie|必须登录/.test(result.reason));
+ }
+ assert.equal((await diagnoseSource('douban',snapshot,{}, {fetchImpl:async()=>new Response('<html>captcha</html>')})).ok,false);
+});
+
+test('an anonymous-search rejection cannot mark a reachable Douban detail endpoint offline',async()=>{
+ const {diagnoseSource}=require('../app/src/main/assets/nodejs-project/app-outbound-diagnostics.js');
+ const seen=[];
+ const result=await diagnoseSource('douban',{config:{...config,sources:['douban']}},{},{fetchImpl:async(url)=>{
+  const path=new URL(url).pathname;seen.push(path);
+  if(path.endsWith('/search'))return Response.json({code:103,msg:'need_login'},{status:403});
+  return Response.json({id:36296618,title:'公开详情'});
+ }});
+ assert.equal(result.ok,true);assert.deepEqual(seen,['/rexxar/api/v2/movie/36296618']);
+});
+
+
+test('enhanced-direct TMDB diagnostics use configured keys and distinguish missing from rejected credentials',async()=>{
+ const {diagnoseSource}=require('../app/src/main/assets/nodejs-project/app-outbound-diagnostics.js');
+ const snapshot={config:{...config,sources:['tmdb']}};
+ for(const [key,status,ok,missing] of [['',401,true,true],['fixture-key',200,true,false],['rejected-key',401,false,false]]) {
+  const result=await diagnoseSource('tmdb',snapshot,{TMDB_API_KEY:key},{fetchImpl:async url=>{
+   assert.equal(new URL(url).searchParams.get('api_key'),key || null);
+   return Response.json(status===200?{images:{}}:{status_code:7},{status});
+  }});
+  assert.equal(result.ok,ok);assert.equal(result.configurationRequired===true,missing);
+  if(key)assert(!JSON.stringify(result).includes(key));
+ }
+});
+
+test('explicit core inheritance suppresses an old enhanced choice without disabling other sources',()=>{
+ const snapshot={config:{enabled:true,sources:['bahamut','tmdb'],proxy:{enabled:true,rules:{bahamut:'inherit'}}}};
+ assert.equal(eligible(new URL('https://api.gamer.com.tw/x'),snapshot,{}),false);
+ assert.equal(eligible(new URL('https://api.tmdb.org/x'),snapshot,{}),true);
 });

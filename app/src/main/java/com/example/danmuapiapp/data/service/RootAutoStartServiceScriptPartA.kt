@@ -65,7 +65,7 @@ object RootAutoStartServiceScriptPartA {
                   [ -n "${'$'}NEWLIB" ] && [ -x "${'$'}NEWLIB/libfrpc.so" ] && FRP_LIB="${'$'}NEWLIB/libfrpc.so"
                 fi
               fi
-              FRP_LOG_HELPER="$(dirname "${'$'}FRP_LIB")/libdanmu_outbound.so"
+              FRP_LOG_APK="${'$'}APK"
               ${RootTunnelScripts.selectKernel()}
               [ -x "${'$'}FRP_LIB" ] || { log "frpc kernel missing"; return 0; }
               FRP_PIDFILE="${'$'}FRP_DIR/frpc-root.pid"
@@ -268,7 +268,6 @@ object RootAutoStartServiceScriptPartA {
                 export LD_LIBRARY_PATH="${'$'}LIBDIR"
               fi
               export DANMUAPI_LIBDIR="${'$'}LIBDIR"
-              export DANMU_APP_OUTBOUND_HELPER="${'$'}LIBDIR/libdanmu_outbound.so"
               export DANMU_APP_OUTBOUND_CONFIG='${outboundConfigPath.replace("'", "'\"'\"'")}'
 
               # 使用 DE 目录，避免依赖 CE 解锁后可见

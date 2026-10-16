@@ -65,6 +65,7 @@ fun SettingsHubScreen(
     onOpenWorkDir: () -> Unit,
     onOpenServiceConfig: () -> Unit,
     onOpenDanmuDownload: () -> Unit,
+    onOpenDownloadUpdate: () -> Unit,
     onOpenVideoShellInjection: () -> Unit,
     onOpenNetwork: () -> Unit,
     onOpenBackupRestore: () -> Unit,
@@ -82,7 +83,8 @@ fun SettingsHubScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val runModeLabel = state.runMode.label
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
-    val proxyLabel = viewModel.currentProxyLabel()
+    val selectedGithubProxyId by viewModel.selectedGithubProxyId.collectAsStateWithLifecycle()
+    val proxyLabel = viewModel.proxyOptions.firstOrNull { it.id == selectedGithubProxyId }?.name ?: "官方线路"
     val githubTokenConfigured = githubAccountStatus.tokenConfigured
 
     val runModeSummary = if (state.runMode == RunMode.Root) {
@@ -162,9 +164,9 @@ fun SettingsHubScreen(
                 items = listOf(
                     CompactOverviewItem("端口", state.port.toString(), onClick = onOpenServiceConfig),
                     CompactOverviewItem(
-                        label = "线路",
-                        value = if (proxyLabel.contains("直连")) "直连" else proxyLabel,
-                        onClick = onOpenNetwork
+                        label = "下载",
+                        value = if (proxyLabel.contains("直连")) "官方线路" else proxyLabel,
+                        onClick = onOpenDownloadUpdate
                     ),
                     CompactOverviewItem(
                         label = "权限",
@@ -255,15 +257,22 @@ fun SettingsHubScreen(
             SettingsGroup(title = "网络与数据") {
                 SettingsItem(
                     title = "网络设置",
-                    subtitle = "增强直连、GitHub 下载线路与更新检查",
+                    subtitle = "来源线路、增强直连与 App 代理节点",
                     icon = Icons.Rounded.Public,
                     onClick = onOpenNetwork,
                     trailing = {
                         SettingsStatusBadge(
-                            text = if (proxyLabel.contains("直连")) "GitHub 直连" else "GitHub 已配置",
+                            text = "按来源设置",
                             accent = MaterialTheme.colorScheme.primary
                         )
                     }
+                )
+                SettingsDivider()
+                SettingsItem(
+                    title = "下载与更新",
+                    subtitle = "GitHub 连接、下载镜像与核心更新检查",
+                    icon = Icons.Rounded.CloudDownload,
+                    onClick = onOpenDownloadUpdate
                 )
                 SettingsDivider()
                 SettingsItem(
@@ -293,7 +302,7 @@ fun SettingsHubScreen(
                 SettingsItem(
                     title = "弹幕下载",
                     subtitle = "管理保存路径、格式、命名规则与冲突策略",
-                    icon = Icons.Rounded.CloudDownload,
+                    icon = Icons.Rounded.Folder,
                     onClick = onOpenDanmuDownload
                 )
             }

@@ -307,16 +307,21 @@ private fun normalizePosterUrl(raw: String): String {
 fun SettingsPageHeader(
     title: String,
     subtitle: String,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    actions: @Composable () -> Unit = {}
 ) {
     if (onBack == null) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                actions()
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 subtitle,
@@ -338,12 +343,16 @@ fun SettingsPageHeader(
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    actions()
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     subtitle,

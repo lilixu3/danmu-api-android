@@ -113,15 +113,18 @@ internal object RootTunnelScripts {
 
     /** FIFO keeps the actual frpc PID, while the sink exits on writer EOF. */
     fun logSink(trackLink: Boolean = false): String = """
-        [ -x "${'$'}FRP_LOG_HELPER" ] || { echo '缺少日志组件，请更新完整 APK' >&2; exit 7; }
+        [ -f "${'$'}FRP_LOG_APK" ] || { echo '缺少日志入口 APK' >&2; exit 7; }
+        FRP_LOG_APP_PROCESS=/system/bin/app_process
+        [ -x /system/bin/app_process64 ] && FRP_LOG_APP_PROCESS=/system/bin/app_process64
+        export CLASSPATH="${'$'}FRP_LOG_APK"
         FRP_PIPE="${'$'}FRP_DIR/frpc-log.pipe"
         rm -f "${'$'}FRP_PIPE"
         mkfifo -m 600 "${'$'}FRP_PIPE" || exit 7
         (
           if command -v setsid >/dev/null 2>&1; then
-            exec setsid "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
+            exec setsid "${'$'}FRP_LOG_APP_PROCESS" /system/bin com.example.danmuapiapp.data.tunnel.RootFrpcLogEntry --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
           else
-            exec "${'$'}FRP_LOG_HELPER" --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
+            exec "${'$'}FRP_LOG_APP_PROCESS" /system/bin com.example.danmuapiapp.data.tunnel.RootFrpcLogEntry --bounded-log "${'$'}FRP_LOG" ${if (trackLink) "--frpc-link-state \"\$FRP_DIR/link-state.json\" --frpc-instance \"\$FRP_INSTANCE\"" else ""} < "${'$'}FRP_PIPE"
           fi
         ) 9>&- > /dev/null 2>&1 &
         FRP_LOG_PID=${'$'}!

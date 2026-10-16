@@ -11,7 +11,22 @@ const targets = {
     'https://s1.animeko.openani.org/v2/subjects/400602',
     'https://api.bangumi.vip/v0/episodes?subject_id=400602&limit=1',
   ],
+  // Search may reject anonymous callers independently of network reachability.
+  // Check a public detail document; Cookie remains optional, as in the core.
+  douban: ['https://m.douban.com/rexxar/api/v2/movie/36296618?for_mobile=1'],
 };
+function diagnosticRequest(source, target, env) {
+  // Match the core's TMDB_API_KEY setting; keep credentials out of public results.
+  const url = new URL(target);
+  if (source === 'tmdb' && String(env.TMDB_API_KEY || '').trim()) {
+    url.searchParams.set('api_key', String(env.TMDB_API_KEY).trim());
+  }
+  return {url:url.href,headers:source==='douban' ? {
+    'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    Referer:'https://m.douban.com/movie/','Content-Type':'application/json',
+    ...(env.DOUBAN_COOKIE ? {Cookie:String(env.DOUBAN_COOKIE)} : {}),
+  } : {'User-Agent':'danmu-api-android/connectivity'}};
+}
 async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globalThis.fetch } = {}) {
   const candidates = targets[source];
   if (!candidates) throw new Error('Invalid source');
@@ -26,15 +41,31 @@ async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globa
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     try {
-      const response = await fetchImpl(target, {
-        headers:{'User-Agent':'danmu-api-android/connectivity'},
+      const request=diagnosticRequest(source,target,env);
+      const response = await fetchImpl(request.url, {
+        headers:request.headers,
         signal:AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(Math.min(remaining, source === 'animeko' ? 3500 : 15000))]),
       });
       status = response.status;
-      const data = await response.json();
-      const valid = source === 'tmdb' ? [200,401].includes(status)
+      const text=await response.text();
+      if(status===403 && (/\berror[\s_-]*code\s*[:=]\s*['"]?1009\b/i.test(text) || /Error\s*1009[\s\S]{0,150}(?:Access Denied|country|region)/i.test(text))) {
+        return {ok:false,status,reason:'源站限制当前 IP 所属地区，增强直连无法改变出口地区，请为该来源配置代理',durationMs:Date.now()-started};
+      }
+      if(source==='douban' && [401,403,429].includes(status)) {
+        return {ok:false,status,reason:status===429 ? '豆瓣请求过于频繁，请稍后重试' : '豆瓣公开接口本次拒绝请求，请稍后重试',durationMs:Date.now()-started};
+      }
+      if (source === 'tmdb' && status === 401) {
+        const configurationRequired = !String(env.TMDB_API_KEY || '').trim();
+        return {ok:configurationRequired,status,configurationRequired,
+          reason:configurationRequired ? '已响应，但 API Key 未配置' : '已响应，但 API Key 无效或无权限',
+          durationMs:Date.now()-started};
+      }
+      if(status>=400) {reason=`源站返回 HTTP ${status}`;continue;}
+      let data;try{data=JSON.parse(text);}catch{reason='源站返回非预期内容，可能需要验证';continue;}
+      const valid = source === 'tmdb' ? status === 200
         : status === 200 && (source === 'bahamut' ? Array.isArray(data.anime)
           : source === 'dandan' ? Array.isArray(data.animes)
+          : source === 'douban' ? !data.banned && String(data.id)==='36296618' && typeof data.title==='string' && data.title.trim().length>0
           : Boolean(data.id) || Array.isArray(data.data));
       if (valid) return { ok:true, status, durationMs:Date.now()-started };
       reason = '源站响应异常';
@@ -45,4 +76,4 @@ async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globa
   }
   return { ok:false, status, reason, durationMs:Date.now()-started };
 }
-module.exports = { diagnoseSource, diagnosticSources:Object.keys(targets) };
+module.exports = { diagnoseSource, diagnosticSources:Object.keys(targets), diagnosticTargets:targets, diagnosticRequest };

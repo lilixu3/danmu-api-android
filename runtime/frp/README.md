@@ -28,6 +28,16 @@ runtime/frp/
 绝对路径 exec。文件名必须是 `lib*.so` 才会被当作原生库打包；它本质仍是
 可执行文件，不会被 `System.loadLibrary` 加载。
 
+官方 `linux_amd64` 客户端使用 4 KB ELF 对齐，保留其固定 SHA-256。x86_64
+发行包中的其他共享库仍按 16 KB 检查；此客户端适用于普通 4 KB x86_64
+系统，不声明支持实验性的 x86_64 16 KB 页面模拟环境。arm64 客户端使用
+64 KB ELF 对齐，可通过 16 KB 检查。
+
+`scripts/verify-apk-native.py` 默认严格检查所有 64 位原生文件的 16 KB 对齐。
+普通 x86_64 发行校验可显式传入 `--allow-pinned-x86-frpc`，只接受清单中
+固定哈希、无动态加载器和依赖的 x86_64 `ET_EXEC` 客户端，并在 JSON 的
+`compatibilityLimits` 中记录上述限制；其他共享库不适用此例外。
+
 ## 版本与兼容
 
 - 当前版本：**0.71.0**，与

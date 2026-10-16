@@ -6,9 +6,10 @@ const path = require('path');
 const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
-const { createAppOutboundRuntime } = require('./app-outbound-runtime.js');
+const { createAppOutboundRuntime, networkRuntimeFingerprint } = require('./app-outbound-runtime.js');
 const appManagement = require('./app-management.js');
-const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG, helperPath:process.env.DANMU_APP_OUTBOUND_HELPER};
+const { coreProxyConfig } = require('./app-proxy-routing.js');
+const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG};
 // Resolve current module dir (ESM-safe)
 // (__filename/__dirname already defined above)
 
@@ -22,6 +23,7 @@ const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG, hel
 //    - custom => ./danmu_api_custom
 let handleRequest = null;
 let _directCoreGlobals = null;
+let _loadedCoreDirectory = '';
 let _activeWorkerState = null;
 let _workerSeq = 1;
 let _workerEnabled = true;
@@ -30,6 +32,7 @@ let _workerSupport = null;
 let _WorkerCtor = null;
 let _mainServer = null;
 let _proxyServer = null;
+let _proxyHelperSync = Promise.resolve();
 let _shutdownPromise = null;
 let _directFavoriteSchedulerStop = () => {};
 let _directFavoriteSchedulerSync = async () => {};
@@ -71,7 +74,7 @@ function _getEnvSnapshot() {
   for (const [k, v] of Object.entries(process.env)) {
     out[k] = String(v);
   }
-  if (_appOutbound?.snapshot().config.enabled) out.OUTBOUND_MODE = 'off';
+  if (_appOutbound?.snapshot().config.enabled || _appOutbound?.snapshot().config.proxy?.enabled) out.OUTBOUND_MODE = 'off';
   return out;
 }
 
@@ -263,6 +266,8 @@ function _scheduleWorkerShutdown(state) {
 const _SERVER_CLOSE_TIMEOUT_MS = 350;
 const _WORKER_TERMINATE_TIMEOUT_MS = 350;
 const _LOG_STREAM_CLOSE_TIMEOUT_MS = 120;
+// 弹幕拉取等核心请求的上游等待上限（原 30 秒对慢源偏紧）。
+const _WORKER_REQUEST_TIMEOUT_MS = 60000;
 
 function _closeServer(server) {
   if (!server) return Promise.resolve();
@@ -467,7 +472,7 @@ function _wrapDirectFavoritePersistence(coreHandler) {
   };
 }
 
-function _sendWorkerRequest(state, payload, timeoutMs = 30000) {
+function _sendWorkerRequest(state, payload, timeoutMs = _WORKER_REQUEST_TIMEOUT_MS, signal) {
   return new Promise((resolve, reject) => {
     if (!state || !state.worker || !state.ready) {
       reject(new Error('worker not ready'));
@@ -475,16 +480,28 @@ function _sendWorkerRequest(state, payload, timeoutMs = 30000) {
     }
 
     const id = _workerSeq++;
+    const cancel=()=>{
+      if(!state.pending.delete(id))return;
+      cleanup();
+      if(payload.type==='sourceProbe')_postToWorker(state,{type:'cancelSourceProbe',id});
+      reject(signal?.reason || new Error('worker request cancelled'));
+    };
+    const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
     const timer = setTimeout(() => {
       state.pending.delete(id);
+      cleanup();
+      if(payload.type==='sourceProbe')_postToWorker(state,{type:'cancelSourceProbe',id});
       reject(new Error('worker request timeout'));
     }, timeoutMs);
 
-    state.pending.set(id, { resolve, reject, timer });
+    state.pending.set(id, { resolve:value=>{cleanup();resolve(value);}, reject:error=>{cleanup();reject(error);}, timer });
+    signal?.addEventListener('abort',cancel,{once:true});
+    if(signal?.aborted){cancel();return;}
     try {
       state.worker.postMessage({ type: 'request', id, ...payload });
     } catch (e) {
       clearTimeout(timer);
+      cleanup();
       state.pending.delete(id);
       reject(e);
     }
@@ -596,6 +613,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     if (!mod?.handleRequest) {
       throw new Error(`worker.js missing export: handleRequest (variant=${variantKey})`);
     }
+    await require('./app-proxy-routing.js').bindCoreSourceContext(path.join(__dirname, i.dir));
     let coreGlobals = null;
     for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
       try {
@@ -611,7 +629,8 @@ async function _loadHandleRequestForVariant(options = {}) {
       }
     }
     return {
-      handler: _wrapDirectFavoritePersistence(mod.handleRequest),
+      handler: _wrapDirectFavoritePersistence(require('./app-series-refresh.js').wrapSeriesRefresh(
+        mod.handleRequest, path.join(__dirname, i.dir))),
       info: i,
       variantKey,
       coreGlobals,
@@ -627,6 +646,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     }
     handleRequest = loaded.handler;
     _directCoreGlobals = loaded.coreGlobals || null;
+    _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -645,6 +665,7 @@ async function _loadHandleRequestForVariant(options = {}) {
         }
         handleRequest = loaded.handler;
         _directCoreGlobals = loaded.coreGlobals || null;
+        _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;
@@ -711,6 +732,7 @@ function scheduleConfigReload() {
     // Refresh file logging config if user changed App log settings in .env
     _refreshLogConfig();
     _refreshRuntimeFlags();
+    await _syncForwardProxyHelper();
     // If variant/env changed, refresh handleRequest too.
     try {
       await _loadHandleRequestForVariant();
@@ -778,7 +800,7 @@ const METRICS = {
 };
 
 const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist']);
-const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control', '/__outbound']);
+const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control', '/__outbound', '/__source-probe']);
 const _ACCESS_TRACK_MAX_DEVICES = 240;
 
 let _accessControl = {
@@ -1106,29 +1128,7 @@ function log(...args) {
 }
 
 function _hasForwardProxyHelperDemand() {
-  const raw = String(process.env.PROXY_URL || '').trim();
-  if (!raw) return false;
-  const configs = raw.split(',').map((item) => item.trim()).filter(Boolean);
-  return configs.some((item) => !item.includes('@'));
-}
-
-// Lazy-load optional dependency (keeps the server running even if node_modules is missing).
-// - undefined: not attempted yet
-// - null: attempted but unavailable
-let _HttpsProxyAgentCtor = undefined;
-async function getHttpsProxyAgentCtor() {
-  if (_HttpsProxyAgentCtor !== undefined) return _HttpsProxyAgentCtor;
-  try {
-    const mod = await import('https-proxy-agent');
-    _HttpsProxyAgentCtor = (mod && (mod.HttpsProxyAgent || mod.default)) || null;
-    if (!_HttpsProxyAgentCtor) {
-      log('https-proxy-agent loaded but missing export; forward proxy disabled');
-    }
-  } catch (e) {
-    _HttpsProxyAgentCtor = null;
-    log('https-proxy-agent not found; forward proxy disabled');
-  }
-  return _HttpsProxyAgentCtor;
+  return Boolean(coreProxyConfig(process.env.PROXY_URL).forward);
 }
 
 function ensureDirs() {
@@ -1198,8 +1198,10 @@ function flattenObject(obj, prefix = '') {
   return result;
 }
 
+const _appReservedPaths = new Set(['DANMU_APP_OUTBOUND_CONFIG','DANMUAPI_LIBDIR']);
 function applyEnv(kv, { override = true } = {}) {
   for (const [k, v] of Object.entries(kv)) {
+    if (_appReservedPaths.has(k)) continue;
     if (!override && process.env[k] !== undefined) continue;
     process.env[k] = v;
   }
@@ -2333,6 +2335,34 @@ function createMainServer() {
       maybeReloadConfigOnTraffic();
       _maybeReloadCoreOnTraffic();
 
+      if (strippedPathname === '/__source-probe') {
+        if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
+          res.writeHead(403); res.end('Forbidden'); return;
+        }
+        const probe = require('./app-source-probe.js');
+        const info = _VARIANT_MAP[_getVariant()] || _VARIANT_MAP.stable;
+        const directory = _loadedCoreDirectory || path.join(__dirname, info.dir);
+        const env = _getEnvSnapshot();
+        if (method === 'GET') {
+          res.writeHead(200, {'content-type':'application/json'});
+          res.end(JSON.stringify(probe.catalog(directory, env))); return;
+        }
+        if (method !== 'POST') {res.writeHead(405);res.end();return;}
+        const controller = new AbortController();
+        const disconnect = () => {if(!res.writableEnded)controller.abort();};
+        res.once('close',disconnect);
+        try {
+          const source=fullUrl.searchParams.get('source');
+          const state=_activeWorkerState;
+          const result=state?.ready
+            ? (await _sendWorkerRequest(state,{type:'sourceProbe',source},20000,controller.signal)).result
+            : await probe.probeSource(source, {directory,env,snapshot:_appOutbound?.snapshot(),signal:controller.signal});
+          if(!res.destroyed){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(result));}
+        } catch {if(!res.destroyed){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({connected:false,status:'failed',reason:'来源探测未完成，请检查来源与服务状态'}));}}
+        finally {res.removeListener('close',disconnect);}
+        return;
+      }
+
       // App-owned diagnostic; independent of the selected core version.
       if (strippedPathname === '/__outbound') {
         if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
@@ -2342,15 +2372,15 @@ function createMainServer() {
         if (method !== 'POST') {
           const {status, reason, config} = current;
           res.writeHead(200, {'content-type':'application/json'});
-          res.end(JSON.stringify({status, reason, config})); return;
+          res.end(JSON.stringify({status, reason, config:config ? {...config,proxy:undefined} : undefined})); return;
         }
         const source = fullUrl.searchParams.get('source');
-        if (!['bahamut','tmdb','dandan','animeko'].includes(source)) { res.writeHead(400); res.end('Invalid source'); return; }
+        const {diagnoseSource,diagnosticSources} = require('./app-outbound-diagnostics.js');
+        if (!diagnosticSources.includes(source)) { res.writeHead(400); res.end('Invalid source'); return; }
         if (current.status !== 'ready' || !current.config?.enabled || !current.config.sources.includes(source)) {
           res.writeHead(409, {'content-type':'application/json'});
           res.end(JSON.stringify({ok:false,reason:current.reason || '请先启用对应来源并等待组件就绪'})); return;
         }
-        const {diagnoseSource} = require('./app-outbound-diagnostics.js');
         const controller = new AbortController();
         const disconnect = () => { if (!res.writableEnded) controller.abort(); };
         res.once('close', disconnect);
@@ -2384,6 +2414,7 @@ function createMainServer() {
           time: new Date().toISOString(),
           pid: process.pid,
           node: process.version,
+          networkRuntimeFingerprint,
           uptimeSec: Math.floor(process.uptime()),
           host: HOST,
           ports: { main: PORT, proxy: PROXY_PORT },
@@ -2696,37 +2727,17 @@ function createProxyServer() {
         return;
       }
 
-      // Parse PROXY_URL:
-      // - If it ends with '/', treat as reverse proxy base and append encoded targetUrl
-      // - Otherwise treat as forward proxy (http/https proxy)
-      const proxyConfig = process.env.PROXY_URL || '';
-      let reverseProxyUrl = null;
-      let proxyAgent = null;
+      const proxyUrl = coreProxyConfig(process.env.PROXY_URL).forward;
+      if (!proxyUrl) throw new Error('未配置核心 HTTP 代理');
+      let proxyNode;
+      try {
+        const parsed=new URL(proxyUrl);
+        proxyNode={type:parsed.protocol.slice(0,-1),host:parsed.hostname,port:Number(parsed.port || (parsed.protocol==='https:'?443:80)),
+          username:decodeURIComponent(parsed.username),password:decodeURIComponent(parsed.password)};
+      } catch { throw new Error('核心 HTTP 代理地址无效，请检查 PROXY_URL'); }
 
-      if (proxyConfig) {
-        if (proxyConfig.endsWith('/')) {
-          reverseProxyUrl = proxyConfig;
-        } else {
-          try {
-            const HttpsProxyAgent = await getHttpsProxyAgentCtor();
-            if (HttpsProxyAgent) {
-              proxyAgent = new HttpsProxyAgent(proxyConfig);
-            } else {
-              log('PROXY_URL looks like a forward proxy, but https-proxy-agent is unavailable; forward proxy disabled');
-            }
-          } catch (e) {
-            log('Invalid PROXY_URL for proxy agent:', e?.message || e);
-          }
-        }
-      }
-
-      // Build final URL (reverse proxy preferred)
-      const finalUrl = reverseProxyUrl
-        ? `${reverseProxyUrl}${encodeURIComponent(targetUrl)}`
-        : targetUrl;
-
-      const targetUrlObj = new URL(finalUrl);
-      const protocol = targetUrlObj.protocol === 'https:' ? https : http;
+      const targetUrlObj = new URL(targetUrl);
+      if (!['http:', 'https:'].includes(targetUrlObj.protocol)) throw new Error('仅支持 HTTP/HTTPS 目标');
 
       const requestOptions = {
         hostname: targetUrlObj.hostname,
@@ -2739,15 +2750,13 @@ function createProxyServer() {
         },
       };
 
-      if (proxyAgent && !reverseProxyUrl) requestOptions.agent = proxyAgent;
-
       // Read body if needed
       let bodyBuf = null;
       if (method !== 'GET') {
         bodyBuf = await readRequestBody(req);
       }
 
-      const proxyReq = protocol.request(requestOptions, (proxyRes) => {
+      const proxyReq = require('./app-proxy-routing.js').requestThroughProxy(targetUrlObj,requestOptions,proxyNode,(proxyRes) => {
         // Copy status + headers
         res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
 
@@ -2769,6 +2778,37 @@ function createProxyServer() {
   });
 
   return server;
+}
+
+// Serialize config reloads so rapid edits cannot open duplicate helper listeners.
+function _syncForwardProxyHelper() {
+  const sync = async () => {
+    if (_shutdownPromise || !_mainServer?.listening) return;
+    if (!_hasForwardProxyHelperDemand()) {
+      const previous = _proxyServer;
+      _proxyServer = null;
+      await _closeServer(previous);
+      return;
+    }
+    if (_proxyServer?.listening) return;
+    const server = createProxyServer();
+    _proxyServer = server;
+    try {
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(_listenOptions(PROXY_PORT), () => {
+          log(`Proxy server listening on ${_listenUrl(PROXY_PORT, '/proxy?url=...')}`);
+          resolve();
+        });
+      });
+    } catch (error) {
+      log(`Proxy helper unavailable on ${HOST}:${PROXY_PORT}:`, error.code || 'listen failed');
+      await _closeServer(server);
+      if (_proxyServer === server) _proxyServer = null;
+    }
+  };
+  _proxyHelperSync = _proxyHelperSync.then(sync, sync);
+  return _proxyHelperSync;
 }
 
 async function main() {
@@ -2799,24 +2839,7 @@ async function main() {
     _mainServer.on('error', reject);
   });
 
-  if (_hasForwardProxyHelperDemand()) {
-    _proxyServer = createProxyServer();
-    try {
-      await new Promise((resolve, reject) => {
-        _proxyServer.listen(_listenOptions(PROXY_PORT), () => {
-          log(`Proxy server listening on ${_listenUrl(PROXY_PORT, '/proxy?url=...')}`);
-          resolve();
-        });
-        _proxyServer.on('error', reject);
-      });
-    } catch (e) {
-      log(`Proxy helper unavailable on ${HOST}:${PROXY_PORT}, continue without it:`, e?.message || e);
-      await _closeServer(_proxyServer);
-      _proxyServer = null;
-    }
-  } else {
-    log('Proxy helper disabled (no forward proxy configured in PROXY_URL).');
-  }
+  await _syncForwardProxyHelper();
 
   shutdownFn = () => {
     void _gracefulShutdown(0, 'api');

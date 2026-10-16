@@ -16,9 +16,10 @@ import java.util.Locale
  */
 internal object LocalDanmuMetadataResolver {
 
-    private val knownExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt", "binpb", "zip")
+    private val knownExtensions = setOf("xml", "json", "ass", "ssa", "csv", "txt", "binpb", "zip",
+        "bili", "danuni", "artplayer", "baha", "ddplay", "dplayer", "vod")
     private val appTemplateRegex = Regex(
-        "^(?<prefix>.+?)_E(?<ep>\\d{1,4})(?:_(?<rest>.+))?\\.[A-Za-z0-9]{1,8}$",
+        "^(?<prefix>.+?)_E(?<ep>\\d{1,4})(?:_(?<rest>.+))?$",
         RegexOption.IGNORE_CASE
     )
     private val genericEpisodeRegexes = listOf(
@@ -120,7 +121,7 @@ internal object LocalDanmuMetadataResolver {
             .filter { it.isNotBlank() }
             .toMutableList()
         if (segments.lastOrNull()?.substringAfterLast('.')?.lowercase(Locale.ROOT) in setOf(
-                "xml", "json", "ass", "ssa", "csv", "txt"
+                "xml", "json", "ass", "ssa", "csv", "txt", "binpb"
             )
         ) {
             segments.removeAt(segments.lastIndex)
@@ -130,7 +131,7 @@ internal object LocalDanmuMetadataResolver {
         }
 
         val seasonFolder = filteredSegments.lastOrNull { segment ->
-            extractSeasonOnly(segment) != null
+            Regex("(?i)^(?:S(?:EASON)?\\s*0*\\d{1,2}|第\\s*[0-9一二三四五六七八九十百零两]+\\s*[季部])$").matches(segment)
         }
         val folderSeason = seasonFolder?.let(::extractSeasonOnly)
         val showFolder = filteredSegments
@@ -140,7 +141,7 @@ internal object LocalDanmuMetadataResolver {
                 cleaned.isNotBlank() && !isEpisodeFolder(segment)
             }
 
-        val appTemplate = appTemplateRegex.find(normalizedFile)
+        val appTemplate = appTemplateRegex.find(stripKnownExtension(normalizedFile))
         val templatePrefix = appTemplate?.groups?.get("prefix")?.value
         val templateEpisode = appTemplate?.groups?.get("ep")?.value?.toIntOrNull()
         val templateRest = appTemplate?.groups?.get("rest")?.value.orEmpty()
@@ -358,10 +359,14 @@ internal object LocalDanmuMetadataResolver {
     }
 
     private fun stripKnownExtension(value: String): String {
-        val dotIndex = value.lastIndexOf('.')
-        if (dotIndex <= 0 || dotIndex == value.lastIndex) return value
-        val extension = value.substring(dotIndex + 1).lowercase(Locale.ROOT)
-        return if (extension in knownExtensions) value.substring(0, dotIndex) else value
+        var result = value
+        while (true) {
+            val dotIndex = result.lastIndexOf('.')
+            if (dotIndex <= 0 || dotIndex == result.lastIndex) return result
+            val extension = result.substring(dotIndex + 1).lowercase(Locale.ROOT)
+            if (extension !in knownExtensions) return result
+            result = result.substring(0, dotIndex)
+        }
     }
 
     private fun extractYear(text: String): Int? {

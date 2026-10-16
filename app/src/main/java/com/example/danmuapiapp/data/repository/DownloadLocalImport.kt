@@ -22,8 +22,15 @@ internal data class DownloadImportPlan(val record: DanmuDownloadRecord,
 internal object DownloadLocalImportPlanner {
     fun metadata(record: DanmuDownloadRecord): ResolvedLocalDanmuMetadata {
         val name = record.fileName.ifBlank { record.episodeTitle.ifBlank { record.animeTitle } }
-        val parsed = LocalDanmuMetadataResolver.resolve(fileName = name, relativePath = name)
+        val parsed = LocalDanmuMetadataResolver.resolve(
+            fileName = name,
+            relativePath = record.relativePath.ifBlank { name },
+            contextName = record.animeTitle
+        )
         return parsed.copy(
+            year = LocalDanmuMetadataResolver.resolve(name).year
+                ?: LocalDanmuMetadataResolver.resolve(record.animeTitle + ".xml").year
+                ?: parsed.year,
             title = parsed.title.takeIf { it.isNotBlank() && it != "未命名" }
                 ?: LocalDanmuMetadataResolver.resolve(record.animeTitle + ".xml").title,
             season = parsed.season ?: 1,

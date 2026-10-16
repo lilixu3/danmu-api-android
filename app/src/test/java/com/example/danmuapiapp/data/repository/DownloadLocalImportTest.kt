@@ -26,6 +26,15 @@ class DownloadLocalImportTest {
         assertEquals("测试剧", item.title)
         assertEquals(4, item.episode)
     }
+    @Test fun `quick import uses series and season folders for simple filenames`() {
+        val input = record("E03.bili.xml", episode = 3, title = "测试剧").copy(relativePath = "测试剧(2023)/Season 2/E03.bili.xml")
+        val item = requireNotNull(DownloadLocalImportPlanner.plan(input).item)
+        assertEquals("测试剧", item.title)
+        assertEquals(2023, item.year)
+        assertEquals(2, item.season)
+        assertEquals(3, item.episode)
+        assertTrue(item.canImport)
+    }
     @Test fun `missing filename episode falls back to record number`() {
         val item = requireNotNull(DownloadLocalImportPlanner.plan(record("测试剧(2023).xml", episode = 8)).item)
         assertEquals(8, item.episode)
@@ -102,5 +111,12 @@ class DownloadLocalImportTest {
     }
     @Test fun `unsupported binary is not falsely reported as imported content`() {
         assertNull(normalizeForLocalLibrary(byteArrayOf(0, 1, 2, 3, 0, 5), "demo.danuni.binpb"))
+    }
+    @Test fun `filename and record years are not replaced by a conflicting reused directory`() {
+        val input = record("同名剧(2023)_E01_youku.xml", 1, "同名剧(2023)【电视剧】from youku")
+            .copy(relativePath = "同名剧(2013)【电视剧】from youku/同名剧(2023)_E01_youku.xml")
+        assertEquals(2023, DownloadLocalImportPlanner.metadata(input).year)
+        assertEquals(2023, DownloadLocalImportPlanner.metadata(input.copy(fileName = "E01.xml")).year)
+        assertEquals(2024, DownloadLocalImportPlanner.metadata(input.copy(fileName = "同名剧(2024)_E01.xml")).year)
     }
 }

@@ -1,9 +1,6 @@
 package com.example.danmuapiapp.domain.model
 
 import kotlinx.serialization.Serializable
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 enum class DanmuPayloadKind {
     Json,
@@ -275,29 +272,7 @@ fun renderFileNameTemplatePreview(
     episodeId: Long = 2334455L,
     source: String = "bilibili1"
 ): String {
-    val now = Date()
-    val mapping = linkedMapOf(
-        "animeTitle" to animeTitle,
-        "episodeTitle" to episodeTitle,
-        "episodeNo" to episodeNo.toString(),
-        "episodeNo2" to episodeNo.toString().padStart(2, '0'),
-        "episodeNo3" to episodeNo.toString().padStart(3, '0'),
-        "episodeId" to episodeId.toString(),
-        "source" to source,
-        "format" to format.value,
-        "ext" to format.extension,
-        "date" to SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(now),
-        "datetime" to SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(now)
-    )
-
-    var preview = template.trim().ifBlank { DanmuDownloadSettings().fileNameTemplate }
-    mapping.forEach { (key, value) ->
-        preview = preview.replace("{$key}", value)
-    }
-    if (!preview.contains('.')) {
-        preview += ".${format.extension}"
-    }
-    return preview
+    return renderDownloadFileName(template, format, animeTitle, episodeTitle, episodeNo, episodeId, source)
 }
 
 @Serializable

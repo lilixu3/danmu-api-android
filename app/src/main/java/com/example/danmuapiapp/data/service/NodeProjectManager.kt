@@ -793,10 +793,10 @@ object NodeProjectManager {
     // Runtime scripts can change in a same-version local APK. Refresh host
     // assets without deleting core directories, .env or compatible node_modules.
     private fun hasCurrentOutboundHostAssets(context: Context, targetDir: File): Boolean {
-        return listOf("android-server.js", "app-management.js", "worker-proxy.js", "app-outbound-bridge.js", "app-outbound-runtime.js", "app-outbound-diagnostics.js").all { name ->
+        return runCatching { AppRuntimeAssets.names(context).all { name ->
             val expected = assetSha256(context, "nodejs-project/$name")
             expected != null && expected == fileSha256(File(targetDir, name))
-        }
+        } }.getOrDefault(false)
     }
 
     private fun shouldPreserveBundledNodeModules(context: Context, targetDir: File): Boolean {

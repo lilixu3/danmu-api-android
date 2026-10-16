@@ -60,9 +60,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val connectivityLabels = linkedMapOf(
-    "bahamut" to "巴哈姆特", "tmdb" to "TMDB", "dandan" to "弹弹play", "animeko" to "Animeko"
-)
+private val connectivityLabels = AppOutboundSettings.sourceLabels
 
 @Composable
 internal fun AppOutboundConnectivityDialog(github: Boolean = false, onDismiss: () -> Unit) {
@@ -184,6 +182,7 @@ private fun ConnectivityResultCard(
         targetValue = when {
             result == null -> MaterialTheme.colorScheme.primary
             result.connected -> successColor
+            result.configurationRequired -> MaterialTheme.colorScheme.onSurfaceVariant
             else -> failureColor
         },
         label = "connectivity-result-color"
@@ -236,12 +235,18 @@ private fun ConnectivityResultCard(
                     Text(
                         text = when {
                             result == null -> "检测中"
+                            result.configurationRequired && result.connected -> "已响应 · API Key 未配置"
+                            result.configurationRequired -> "未配置"
                             result.connected -> "已连通"
                             else -> "未连通"
                         },
                         style = MaterialTheme.typography.labelMedium,
                         color = accent
                     )
+                }
+                result?.reason?.takeIf { (!result.connected || result.configurationRequired) && it.isNotBlank() }?.let { reason ->
+                    Text(text = reason, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {

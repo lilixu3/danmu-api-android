@@ -154,6 +154,39 @@ class DownloadRecordHistoryTest {
         assertEquals(300L, groups.single().totalBytes)
     }
 
+    @Test
+    fun `plain and legacy folders for 一瓯春 join the same year group after scanning`() {
+        val older = record(id = 1, animeTitle = "一瓯春(2026)【电视剧】from youku", episodeNo = 1,
+            episodeTitle = "第1集", source = "目录同步").copy(
+            fileName = "一瓯春(2026)【电视剧】from youku_E01_【youku】 第1集 一瓯春 01_youku.xml",
+            relativePath = "一瓯春(2026)【电视剧】from youku/一瓯春_E01.xml")
+        val newer = record(id = 2, animeTitle = "一瓯春", episodeNo = 18,
+            episodeTitle = "第18集", source = "youku").copy(
+            fileName = "一瓯春(2026)【电视剧】from youku_E18_第18集 一瓯春 18_youku.xml",
+            relativePath = "一瓯春/一瓯春_E18.xml")
+        val groups = buildDownloadRecordAnimeGroups(listOf(older, newer))
+        assertEquals(1, groups.size)
+        assertEquals(2, groups.single().episodes.size)
+        assertEquals("一瓯春|2026", groups.single().key)
+    }
+
+    @Test
+    fun `one known year absorbs old scans with no year while multiple versions stay separate`() {
+        val unknown = record(id = 1, animeTitle = "同名剧", episodeNo = 1, episodeTitle = "第一集", source = "目录同步")
+        val known = unknown.copy(id = 2, animeTitle = "同名剧(2023)【电视剧】from tencent", animeId = 22)
+        assertEquals(1, buildDownloadRecordAnimeGroups(listOf(unknown, known)).size)
+        val remake = known.copy(id = 3, animeTitle = "同名剧(2013)【电视剧】from iqiyi", animeId = 33)
+        assertEquals(3, buildDownloadRecordAnimeGroups(listOf(unknown, known, remake)).size)
+    }
+
+    @Test
+    fun `different sources and anime IDs group together but seasons do not`() {
+        val first = record(id = 1, animeTitle = "测试剧 第2季(2023) from tencent", episodeNo = 1, episodeTitle = "第一集", source = "tencent", animeId = 100)
+        val second = first.copy(id = 2, animeTitle = "测试剧 第2季(2023) from iqiyi", source = "iqiyi", animeId = 200)
+        assertEquals(1, buildDownloadRecordAnimeGroups(listOf(first, second)).size)
+        assertEquals(2, buildDownloadRecordAnimeGroups(listOf(first, second.copy(animeTitle = "测试剧 第3季(2023) from iqiyi"))).size)
+    }
+
     private fun record(
         id: Long = 1L,
         animeTitle: String,

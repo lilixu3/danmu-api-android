@@ -29,6 +29,7 @@ object ToolRoute {
     const val DeviceAccess = "tool_device_access"
     const val CacheManagement = "tool_cache_management"
     const val Diagnostics = "tool_diagnostics"
+    const val SourceProbe = "tool_source_probe"
     const val Tunnel = "tool_tunnel"
     const val TunnelSettings = "tool_tunnel_settings"
 }
@@ -46,8 +47,10 @@ object SettingsRoute {
     const val WorkDir = "settings_work_dir"
     const val ServiceConfig = "settings_service_config"
     const val DanmuDownload = "settings_danmu_download"
+    const val DownloadUpdate = "settings_download_update"
     const val VideoShellInjection = "settings_video_shell_injection"
     const val Network = "settings_network"
+    const val Proxy = "settings_proxy"
     const val GithubToken = "settings_github_token"
     const val BackupRestore = "settings_backup_restore"
     const val AdminMode = "settings_admin_mode"

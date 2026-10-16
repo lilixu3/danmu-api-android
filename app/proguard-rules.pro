@@ -50,3 +50,6 @@
 # LSPosed / libxposed 入口由 META-INF/xposed/java_init.list 反射加载，R8 不能移除或改名。
 -keep class com.example.danmuapiapp.xposed.DanmuXposedModule { *; }
 -dontwarn io.github.libxposed.**
+
+# Root FRP FIFO sink is invoked directly by app_process.
+-keep class com.example.danmuapiapp.data.tunnel.RootFrpcLogEntry { *; }

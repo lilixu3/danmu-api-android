@@ -38,6 +38,14 @@
 - App 内直接修改各项参数
 - 改完自动生效无需重启
 
+### 网络线路
+- 来源默认线路按核心能力显示：已接入核心代理的来源显示「沿用核心配置」，其他弹幕源显示「使用设备当前网络」；也可选择增强直连或代理节点。明确选择的 App 节点优先级最高，旧版普通直连迁移为默认线路，已有节点绑定和增强直连选择保留。
+- 原生支持 HTTP、HTTPS、SOCKS5 节点及用户名/密码，可手动添加或粘贴节点链接。没有内置代理内核和订阅功能。
+- 可以连接其他代理客户端提供的本机 HTTP/SOCKS5 端口；节点无效或连接失败不回退直连。
+- 增强直连继续使用 Node OpenSSL 4 ECH/H2/H3；GitHub 下载由 Android 网络层独立处理。
+- 网络页检查实际运行组件版本，Root 服务沿用旧脚本时明确提示停止后重新启动。
+- 使用与验证见 [代理与来源探测](docs/proxy-and-source-probe.md)。
+
 ### 🛠️ 内置工具
 - **接口调试**：直接在 App 内测试 API 是否正常
 - **弹幕推送**：手动推送弹幕到指定视频
@@ -88,7 +96,7 @@
 
 1. **核心管理**：在「设置」页面可以切换稳定版/开发版核心
 2. **服务配置**：在「配置」页面可以修改服务参数
-3. **网络设置**：在「设置」页面可以配置 GitHub 下载线路和增强直连
+3. **网络设置**：为各弹幕来源选择默认线路、增强直连或代理节点；GitHub 下载线路、镜像和核心检查间隔在「下载与更新」独立管理
 
 ---
 
@@ -151,7 +159,7 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 26.11.0 lite（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 26.11.1 lite + OpenSSL 4.0.3（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -166,22 +174,45 @@ cd danmu-api-android
 # 准备 frpc 内核（默认三个 ABI，校验仓库记录的 SHA-256）
 ./scripts/prepare_frp_kernel.sh
 
-# 准备 App 增强直连组件（需要 Go 和 Android NDK，默认三个 ABI）
-./scripts/prepare_outbound_kernel.sh
-
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.11.0
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.11.1
 ```
 
-Node 运行时使用 **26.11.0 lite**，锁定 `fogtape/nodejs-mobile` 于 2026-10-07
-发布的 `v26.11.0-0` 裁剪版本。来源及 SHA-256 见
+Node 运行时使用 **26.11.1 lite + OpenSSL 4.0.3（原生 ECH/H3）**，锁定
+`fogtape/nodejs-mobile` 的 `openssl4/node26.11.1` 分支提交 `a8a46ef5`，
+Actions run `38674319285`、artifact `11945892508`。运行时来自该固定开发提交，
+App 发行附件仅提供三个架构的 APK；运行时 ZIP 不随 App 发行上传。
+来源及 SHA-256 见
 `app/native-runtime-sources.properties`、`app/native-runtime.sha256` 和
-`app/native-runtime-provenance.json`。JNI 桥使用同份发布 ZIP 的头文件与 NDK r29
+`app/native-runtime-provenance.json`。JNI 桥使用同份 ZIP 的头文件与 NDK r29
 重新编译，libc++、libc++abi、libunwind 由 `scripts/build-native-deps.py` 从固定源码重建。
 
-离线构建可将校验通过的 `nodejs-mobile-android-lite-26.11.0-0.zip` 放入
-`dist/nodejs-mobile/v26.11.0-0-lite/`。缺少本地或 Gradle 缓存时下载上述固定发布附件；
+离线构建可将校验通过的 `nodejs-mobile-android-lite-a8a46ef5.zip` 放入
+`dist/nodejs-mobile/openssl4-v26.11.1-a8a46ef5-lite/`。缺少本地或 Gradle 缓存时，从固定上游 Actions 归档下载，需要已认证的 `gh`；
 C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提取旧 APK 的原生库。
+
+构建机也可以显式指定已经准备好的运行时 ZIP，或指向同一 ZIP 的固定 HTTPS 下载地址，这两种方式无需登录 GitHub CLI。
+这两个入口都继续校验来源清单中的归档大小和 SHA-256，不更换运行时版本或接受其他内容：
+
+```bash
+# 只校验 ZIP，无需 NDK 编译；也可把这个参数用于 assembleDebug / assembleRelease
+./gradlew :app:verifyNativeRuntimeArchive --offline -PnativeRuntimeArchive=/path/to/nodejs-mobile-android-lite-a8a46ef5.zip
+
+# 从自建镜像或正式资产地址下载同一 ZIP，无需 gh 登录
+./gradlew :app:verifyNativeRuntimeArchive -PnativeRuntimeArchiveUrl=https://your-host.example/nodejs-mobile-android-lite-a8a46ef5.zip
+```
+
+显式指定的本地文件校验失败会直接报错，不使用缓存代替。公开地址只覆盖下载位置，不能覆盖固定摘要。
+当前来源清单与 provenance 记录均指向固定上游 Actions 归档。Actions 归档有保留期限，长期或离线构建应保留校验通过的本地 ZIP。
+
+手机测试包可用 `-PabiFilters=arm64-v8a` 构建。产出后运行
+`python3 scripts/verify-apk-native.py app/build/outputs/apk/release/app-arm64-v8a-release.apk`，
+检查全部原生库的 LOAD 对齐、RELRO 页保护范围、ZIP 对齐及固定 libnode 摘要。
+压缩存储的库在安装时解压；未压缩的库必须在 APK 中按 16 KB 对齐。
+
+运行时依赖包以 Node 26 为目标。迁移期间，仅额外接受已经在实际 Node 26 上验证过的
+纯 JS Node 24 包 `4be12e7971f079cd357496974113342f6839919a247e24b4fee69a594301c8a7`；
+签名、归档摘要和禁止原生模块的校验仍须通过，其他 Node 24 包不在兼容范围内。
 
 正式构建只读取仓库内的 Node 运行时资产，不会隐式读取相邻的 `danmu_api`
 仓库或根目录 `node_modules.zip`。维护依赖资产时，运行 `python3 scripts/rebuild-node-dependencies.py`，从

@@ -26,9 +26,30 @@ data class AppOutboundSettings(
     val sources: Set<String> = linkedSetOf("bahamut", "tmdb"),
     val httpVersion: String = "auto",
     val dohUrl: String = "",
-    val connectTimeoutMs: Int = 3000
+    val connectTimeoutMs: Int = 3000,
+    val proxy: AppProxySettings = AppProxySettings()
 ) {
+    /** One explicit choice owns the entire source route. Disabled rules stay inactive. */
+    fun withSourceRoute(source: String, route: String): AppOutboundSettings {
+        require(source.isNotBlank() && source != "local") { "此来源不需要网络线路" }
+        require(route in listOf("inherit", "enhanced") || proxy.nodes.any { route == "node:${it.id}" }) { "请选择有效线路" }
+        require(route != "enhanced" || source in supportedSources || source == "github") { "此来源暂不支持增强直连" }
+        val activeSources = if (enabled) sources else emptySet()
+        val enhancedSources = if (source in supportedSources && route == "enhanced") activeSources + source else activeSources - source
+        val activeRules = if (proxy.enabled) proxy.rules.mapValues { (key, value) ->
+            if (!enabled && value == "enhanced" && key != "github") "inherit" else value
+        } else emptyMap()
+        return copy(
+            enabled = enabled || (route == "enhanced" && source in supportedSources),
+            sources = enhancedSources,
+            proxy = proxy.copy(enabled = true,
+                defaultRoute = if (proxy.enabled) proxy.defaultRoute else "inherit",
+                rules = activeRules + (source to route))
+        ).validate()
+    }
+
     fun validate(): AppOutboundSettings {
+        proxy.validate()
         require(sources.all { it in supportedSources }) { "不支持的增强直连来源" }
         require(httpVersion in listOf("auto", "h2", "h3")) { "协议必须为 auto、h2 或 h3" }
         require(connectTimeoutMs in 1..60000) { "连接超时须在 1–60000 毫秒之间" }
@@ -44,10 +65,12 @@ data class AppOutboundSettings(
     fun encode(): String = JSONObject()
         .put("enabled", enabled).put("sources", JSONArray(sources.toList()))
         .put("httpVersion", httpVersion).put("dohUrl", dohUrl.trim())
-        .put("connectTimeoutMs", connectTimeoutMs).toString()
+        .put("connectTimeoutMs", connectTimeoutMs).put("proxy", proxy.json()).toString()
 
     companion object {
-        val supportedSources = listOf("bahamut", "tmdb", "dandan", "animeko")
+        val sourceLabels = linkedMapOf("bahamut" to "巴哈姆特", "tmdb" to "TMDB", "dandan" to "弹弹play",
+            "animeko" to "Animeko", "douban" to "豆瓣")
+        val supportedSources = sourceLabels.keys.toList()
         fun decode(text: String): AppOutboundSettings {
             val value = JSONObject(text)
             val sources = value.optJSONArray("sources")
@@ -57,7 +80,8 @@ data class AppOutboundSettings(
                     (0 until sources.length()).map { sources.getString(it) }.toSet(),
                 httpVersion = value.optString("httpVersion", "auto"),
                 dohUrl = value.optString("dohUrl", ""),
-                connectTimeoutMs = value.optInt("connectTimeoutMs", 3000)
+                connectTimeoutMs = value.optInt("connectTimeoutMs", 3000),
+                proxy = AppProxySettings.decode(value.optJSONObject("proxy"))
             ).validate()
         }
     }
@@ -66,23 +90,33 @@ data class AppOutboundSettings(
 data class AppOutboundConnectivityResult(
     val source: String,
     val connected: Boolean,
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    val reason: String? = null,
+    val configurationRequired: Boolean = false,
+    val unconfirmed: Boolean = false
 )
 
 object AppOutboundSettingsStore {
     private val diagnosticClient by lazy { OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build() }
     private fun directory(context: Context) = File(context.createDeviceProtectedStorageContext().filesDir, "outbound")
     fun configFile(context: Context) = File(directory(context), "settings.json")
-    fun helperFile(context: Context) = File(context.applicationInfo.nativeLibraryDir, "libdanmu_outbound.so")
-    fun read(context: Context): AppOutboundSettings = runCatching {
-        AppOutboundSettings.decode(configFile(context).readText())
+    @Synchronized fun read(context: Context): AppOutboundSettings = runCatching {
+        val raw=configFile(context).readText()
+        val settings=AppOutboundSettings.decode(raw)
+        val proxy=JSONObject(raw).optJSONObject("proxy")
+        val nodes=proxy?.optJSONArray("nodes")
+        val legacy=proxy?.optString("defaultRoute")=="direct" ||
+            proxy?.optJSONObject("rules")?.let { rules -> rules.keys().asSequence().any { rules.optString(it)=="direct" } }==true ||
+            proxy?.has("subscriptions")==true || (0 until (nodes?.length() ?: 0)).any {
+            val node=nodes!!.optJSONObject(it)
+            node?.has("protocolOptions")==true || node?.has("subscriptionId")==true || node?.optString("type") !in AppProxyNode.supportedTypes
+        }
+        if(legacy) save(context,settings)
+        settings
     }.getOrDefault(AppOutboundSettings())
 
-    fun save(context: Context, settings: AppOutboundSettings) {
+    @Synchronized fun save(context: Context, settings: AppOutboundSettings) {
         settings.validate()
-        if (settings.enabled) require(helperFile(context).let { it.isFile && it.canExecute() }) {
-            "当前 APK 未包含可用网络组件，请安装完整构建"
-        }
         val file = configFile(context)
         file.parentFile?.mkdirs()
         val atomic = AtomicFile(file)
@@ -90,11 +124,25 @@ object AppOutboundSettingsStore {
         try {
             stream.write(settings.encode().toByteArray(Charsets.UTF_8))
             atomic.finishWrite(stream)
+            file.setReadable(false, false); file.setReadable(true, true)
+            file.setWritable(false, false); file.setWritable(true, true)
         } catch (error: Throwable) {
             atomic.failWrite(stream)
             throw error
         }
         RootAutoStartModule.scheduleInstalledScriptMigration(context)
+    }
+
+    @Synchronized fun saveProxy(context: Context, proxy: AppProxySettings) {
+        val current = read(context)
+        val enhanced = proxy.rules.filterValues { it == "enhanced" }.keys.intersect(AppOutboundSettings.supportedSources.toSet())
+        save(context, current.copy(proxy = proxy, enabled = current.enabled || (proxy.enabled && enhanced.isNotEmpty()), sources = current.sources + enhanced))
+    }
+
+    @Synchronized fun saveSourceRoute(context: Context, source: String, route: String): AppOutboundSettings {
+        val next = read(context).withSourceRoute(source, route)
+        save(context, next)
+        return next
     }
 
     fun ensureConfig(context: Context): String {
@@ -107,7 +155,6 @@ object AppOutboundSettingsStore {
         val file = configFile(context)
         if (!file.exists()) save(context, AppOutboundSettings())
         NodeBridge.setEnvironmentVariable("DANMU_APP_OUTBOUND_CONFIG", file.absolutePath, true)
-        NodeBridge.setEnvironmentVariable("DANMU_APP_OUTBOUND_HELPER", helperFile(context).absolutePath, true)
     }
 
     suspend fun diagnose(context: Context, source: String): AppOutboundConnectivityResult {
@@ -122,7 +169,9 @@ object AppOutboundSettingsStore {
             AppOutboundConnectivityResult(
                 source = source,
                 connected = response.isSuccessful && result?.optBoolean("ok") == true,
-                durationMs = result?.optLong("durationMs", -1L)?.takeIf { it >= 0L }
+                durationMs = result?.optLong("durationMs", -1L)?.takeIf { it >= 0L },
+                reason = result?.optString("reason")?.takeIf { it.isNotBlank() },
+                configurationRequired = result?.optBoolean("configurationRequired") == true
             )
         }
     }

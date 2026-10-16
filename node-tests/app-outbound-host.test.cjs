@@ -16,44 +16,46 @@ async function waitFor(fn, timeout=15000) {
 }
 async function freePort(){const server=net.createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const port=server.address().port;await new Promise(resolve=>server.close(resolve));return port;}
 for(const workerEnabled of [true,false]) {
- test(`unmodified core uses App transport; shared helper survives core switch (${workerEnabled?'Worker':'direct import'})`,{timeout:25000},async()=>{
+ test(`unmodified core uses App transport; native backend survives core switch (${workerEnabled?'Worker':'direct import'})`,{timeout:25000},async()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'app-outbound-host-'));
   let child,logs='';
   try {
-   for(const file of fs.readdirSync(runtimeRoot))if(file.endsWith('.js') || file==='package.json')fs.copyFileSync(path.join(runtimeRoot,file),path.join(directory,file));
+   for(const file of fs.readdirSync(runtimeRoot))if(file.endsWith('.js') || file==='package.json' || file==='app-runtime-assets.json')fs.copyFileSync(path.join(runtimeRoot,file),path.join(directory,file));
    fs.symlinkSync(path.join(runtimeRoot,'node_modules'),path.join(directory,'node_modules'));
    fs.mkdirSync(path.join(directory,'config'));
    fs.mkdirSync(path.join(directory,'outbound'));
    const configPath=path.join(directory,'outbound/settings.json');
-   fs.writeFileSync(configPath,JSON.stringify({enabled:true,sources:['bahamut','tmdb','dandan','animeko'],httpVersion:'h2'}));
+   fs.writeFileSync(configPath,JSON.stringify({enabled:true,sources:['bahamut','tmdb','dandan','animeko','douban'],httpVersion:'h2'}));
    fs.writeFileSync(path.join(directory,'config/.env'),`TOKEN=\nDANMU_API_VARIANT=stable\nOUTBOUND_MODE=auto\nDANMU_API_WORKER=${workerEnabled}\n`);
    for(const variant of ['stable','custom']){
     const coreDir=path.join(directory,'danmu_api_'+variant);fs.mkdirSync(coreDir);
     fs.writeFileSync(path.join(coreDir,'package.json'),' {"type":"module"}');
     fs.writeFileSync(path.join(coreDir,'worker.js'),`export async function handleRequest(req,env){
       const source=new URL(req.url).searchParams.get('source');
-      const host=source==='dandan'?'api.danmaku.weeblify.app':source==='animeko'?'danmaku-global.myani.org':'api.gamer.com.tw';
+      const host=({dandan:'api.danmaku.weeblify.app',animeko:'danmaku-global.myani.org',douban:'m.douban.com'})[source]||'api.gamer.com.tw';
       const response=await fetch('https://'+host+'/offline-probe');
       return Response.json({variant:'${variant}',coreOutbound:env.OUTBOUND_MODE,result:await response.json()});
     }`);
    }
-   const helperPath=path.join(directory,'fake-helper');
-   fs.writeFileSync(helperPath,`#!${process.execPath}
-const http=require('node:http');
-const server=http.createServer((req,res)=>{
- if(req.headers['x-danmu-outbound-token']!==process.env.DANMU_OUTBOUND_TOKEN){res.writeHead(401,{'X-Danmu-Outbound-Error':'1'});res.end();return;}
- req.resume();req.on('end',()=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({via:'app-helper',helperPid:process.pid,targetHost:new URL(req.headers['x-danmu-outbound-target']).hostname,id:400602,animes:[{}]}));});
-});
-server.listen(0,'127.0.0.1',()=>console.log(JSON.stringify({ready:true,appProtocol:1,url:'http://127.0.0.1:'+server.address().port})));
-process.stdin.resume();process.stdin.on('end',()=>server.close());process.on('SIGTERM',()=>server.close());
-`);fs.chmodSync(helperPath,0o755);
+   // Inject only the upstream session, keeping the real authenticated native
+   // adapter and host/Worker wiring. The runtime requires no child executable.
+   const nativeFile=path.join(directory,'app-outbound-native.js');
+   fs.appendFileSync(nativeFile,`
+const realStart=module.exports.startNativeOutbound;
+module.exports.startNativeOutbound=config=>realStart(config,{transport:{
+ async request(target,method,headers,body,signal,res){
+  res.writeHead(200,{'content-type':'application/json'});
+  res.end(JSON.stringify({via:'node-native',helperPid:process.pid,targetHost:target.hostname,id:target.hostname==='m.douban.com'?'36296618':400602,title:'offline detail',animes:[{}]}));
+ },close(){}
+}});
+`);
    const port=await freePort();const base=`http://127.0.0.1:${port}`;
-   child=spawn(process.execPath,[path.join(directory,'main.js')],{cwd:directory,env:{...process.env,DANMU_API_HOME:directory,DANMU_API_PORT:String(port),DANMU_API_HOST:'127.0.0.1',DANMU_APP_OUTBOUND_CONFIG:configPath,DANMU_APP_OUTBOUND_HELPER:helperPath,PROXY_URL:''},stdio:['ignore','pipe','pipe']});
+   child=spawn(process.execPath,[path.join(directory,'main.js')],{cwd:directory,env:{...process.env,DANMU_API_HOME:directory,DANMU_API_PORT:String(port),DANMU_API_HOST:'127.0.0.1',DANMU_APP_OUTBOUND_CONFIG:configPath,PROXY_URL:''},stdio:['ignore','pipe','pipe']});
    child.stdout.on('data',data=>logs+=data);child.stderr.on('data',data=>logs+=data);
    await waitFor(async()=>{const response=await fetch(base+'/__health');return response.ok;});
    const first=await (await fetch(base+'/api/probe')).json();
-   assert.equal(first.variant,'stable');assert.equal(first.coreOutbound,'off');assert.equal(first.result.via,'app-helper');
-   for(const [source,host] of [['dandan','api.danmaku.weeblify.app'],['animeko','danmaku-global.myani.org']]) {
+   assert.equal(first.variant,'stable');assert.equal(first.coreOutbound,'off');assert.equal(first.result.via,'node-native');
+   for(const [source,host] of [['dandan','api.danmaku.weeblify.app'],['animeko','danmaku-global.myani.org'],['douban','m.douban.com']]) {
      const result=await (await fetch(base+'/api/probe?source='+source)).json();
      assert.equal(result.result.targetHost,host);assert.equal(result.result.helperPid,first.result.helperPid);
      const diagnostic=await (await fetch(base+'/__outbound?source='+source,{method:'POST'})).json();

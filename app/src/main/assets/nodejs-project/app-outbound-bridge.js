@@ -14,10 +14,17 @@ const SOURCES = new Map([
   ['danmaku-cn.myani.org', 'animeko'],
   ['s1.animeko.openani.org', 'animeko'],
   ['api.bangumi.vip', 'animeko'],
+  ['m.douban.com', 'douban'],
+  ['api.douban.com', 'douban'],
 ]);
+const { routeFor, proxyFetch, requestThroughProxy, setProxySettingsReader, coreProxySources } = require('./app-proxy-routing.js');
 const PREFIX = 'x-danmu-outbound-';
+// 单次弹幕源请求（巴哈 / TMDB / 弹弹play / Ani）的增强直连预算：
+// 慢源给到 60 秒，超时仍按 TimeoutError 失败。
+const SOURCE_REQUEST_BUDGET_MS = 60000;
 
 function hasProxy(source, env) {
+  if (!coreProxySources.has(source)) return false;
   return String(env.PROXY_URL || '').split(',').some(raw => {
     const entry = raw.trim();
     if (!entry) return false;
@@ -26,12 +33,16 @@ function hasProxy(source, env) {
   });
 }
 function eligible(target, snapshot, env, options = {}) {
+  const route = routeFor(target, snapshot?.config?.proxy);
+  if (route.mode === 'direct' || route.mode === 'proxy') return false;
+  const selected = snapshot?.config?.proxy?.enabled && snapshot.config.proxy.rules?.[route.source];
+  if (selected === 'inherit' || selected === 'direct') return false;
   if (!snapshot?.config?.enabled) return false;
   const source = SOURCES.get(target.hostname);
   if (!source || target.protocol !== 'https:' || (target.port && target.port !== '443') || target.username || target.password) return false;
-  if (!snapshot.config.sources.includes(source) || hasProxy(source, env)) return false;
+  if (!snapshot.config.sources.includes(source) || (route.mode !== 'enhanced' && hasProxy(source, env))) return false;
   // Respect explicitly selected transports and proxy agents. Ordinary keepalive
-  // agents remain eligible; pooling happens in Go for those requests.
+  // agents remain eligible; pooling happens in Node for those requests.
   if (options.dispatcher || /proxy/i.test(options.agent?.constructor?.name || '')) return false;
   if (['ca', 'cert', 'key', 'createConnection', 'rejectUnauthorized'].some(key => key in options)) return false;
   return true;
@@ -118,6 +129,7 @@ function nodeHeaders(headers) {
 // cache; all workers receive the same endpoint owned by the host runtime.
 function installBridge({ snapshot = {}, env = () => process.env } = {}) {
   let current = snapshot;
+  setProxySettingsReader(() => current.config?.proxy);
   let stopped = false;
   const requests = new Set();
   const nativeFetch = globalThis.fetch;
@@ -125,10 +137,25 @@ function installBridge({ snapshot = {}, env = () => process.env } = {}) {
 
   async function enhancedFetch(input, init) {
     const initialURL = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+    const route = routeFor(initialURL, current.config?.proxy);
+    if (!stopped && route.mode === 'proxy') {
+      const controller=new AbortController();requests.add(controller);
+      try {
+        const response=await proxyFetch(input,init,{...route,stopSignal:controller.signal},nativeFetch);
+        const reader=response.body?.getReader();
+        if(!reader){requests.delete(controller);return decorateResponse(response,response.url,response.redirected,response.type);}
+        const cleanup=()=>requests.delete(controller);
+        const body=new ReadableStream({
+          async pull(stream){try{const part=await reader.read();if(part.done){cleanup();stream.close();}else stream.enqueue(part.value);}catch(error){cleanup();stream.error(error);}},
+          async cancel(reason){cleanup();await reader.cancel(reason);},
+        });
+        return decorateResponse(new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers}),response.url,response.redirected,response.type);
+      }catch(error){requests.delete(controller);throw error;}
+    }
     if (stopped || !eligible(initialURL, current, env(), init || {})) return nativeFetch(input, init);
     ready(current);
     let request = new Request(input, init);
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + SOURCE_REQUEST_BUDGET_MS;
     const redirectMode = request.redirect;
     let replayBody = await readBody(request, deadline);
     request = new Request(request.url, {method:request.method, headers:request.headers, body:replayBody, signal:request.signal, redirect:redirectMode});
@@ -196,10 +223,17 @@ function installBridge({ snapshot = {}, env = () => process.env } = {}) {
       if (stopped) return original.apply(this, args);
       let parsed;
       try { parsed = normalizeRequest(args, protocol); } catch { return original.apply(this, args); }
+      const route = routeFor(parsed.target, current.config?.proxy);
+      if (route.mode === 'proxy') {
+        const options = {...parsed.options, headers:parsed.options.headers || {}, signal:parsed.options.signal || AbortSignal.timeout(SOURCE_REQUEST_BUDGET_MS)};
+        const request = requestThroughProxy(parsed.target, options, route.node, parsed.callback);
+        requests.add(request); request.once('close',()=>requests.delete(request));
+        return request;
+      }
       if (!eligible(parsed.target, current, env(), parsed.options)) return original.apply(this, args);
       ready(current);
       const endpoint = new URL(current.endpoint);
-      const budget = 30000;
+      const budget = SOURCE_REQUEST_BUDGET_MS;
       const headers = Object.fromEntries(helperHeaders(nodeHeaders(parsed.options.headers), parsed.target, current, budget));
       const request = originals.httpRequest.call(http, {
         hostname:endpoint.hostname, port:endpoint.port, path:'/proxy', method:parsed.options.method || 'GET',

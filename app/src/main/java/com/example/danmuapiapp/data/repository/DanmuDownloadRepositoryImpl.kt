@@ -4,6 +4,7 @@ import com.example.danmuapiapp.data.network.newOutboundCall
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.core.content.edit
 import androidx.core.net.toUri
@@ -41,12 +42,6 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
-import java.nio.ByteBuffer
-import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.ArrayDeque
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,7 +71,6 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         private const val MAX_QUEUE_TASKS = 1200
         private const val MAX_SCAN_VISITED_FILES = 2_000
         private const val MAX_SCAN_DEPTH = 8
-        private const val MAX_SCAN_INSPECT_BYTES = 16L * 1024L * 1024L
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -424,8 +418,12 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             val validationWarning = inspection.warning
 
             onProgress(0.50f, "正在准备输出目录")
-            val animeDirName = sanitizeFileComponent(com.example.danmuapiapp.ui.screen.download.extractAnimeKeywordForSearch(input.animeTitle)).ifBlank { "未命名剧集" }
-            val animeDir = findOrCreateDirectory(root, animeDirName)
+            val preferredDirName = com.example.danmuapiapp.domain.model.sanitizeDownloadFileName(com.example.danmuapiapp.domain.model.cleanDownloadAnimeTitle(input.animeTitle)).ifBlank { "未命名剧集" }
+            val directories = root.listFiles().filter { it.isDirectory }
+            val animeDirName = DownloadRecordRecovery.seriesDirectory(
+                preferredDirName, com.example.danmuapiapp.domain.model.sanitizeDownloadFileName(input.animeTitle), directories.mapNotNull { it.name }
+            )
+            val animeDir = directories.firstOrNull { it.name == animeDirName } ?: root.createDirectory(animeDirName)
                 ?: error("无法创建剧集目录：$animeDirName")
 
             val template = input.fileNameTemplate.trim().ifBlank { DanmuDownloadSettings().fileNameTemplate }
@@ -559,6 +557,36 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun availableDownloadRecordIds(records: List<DanmuDownloadRecord>): Result<Set<Long>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val presence = mutableMapOf<String, Boolean>()
+                records.filter { record ->
+                    if (record.statusEnum() != DownloadRecordStatus.Success) return@filter false
+                    if (record.importedToLocal) return@filter true
+                    val text = record.fileUri.trim()
+                    if (text.isEmpty()) return@filter false
+                    presence.getOrPut(text) {
+                        val uri = text.toUri()
+                        if (uri.scheme == "file") {
+                            val file = java.io.File(requireNotNull(uri.path))
+                            if (!file.exists() && file.parentFile?.canRead() == false) {
+                                error("下载目录无法访问，请检查权限后重试")
+                            }
+                            file.isFile && file.length() > 0L
+                        } else {
+                            context.contentResolver.query(uri, arrayOf(
+                                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                                DocumentsContract.Document.COLUMN_SIZE
+                            ), null, null, null)?.use { cursor ->
+                                cursor.moveToFirst() && (cursor.isNull(1) || cursor.getLong(1) > 0L)
+                            } ?: error("无法读取下载文件信息，请检查目录权限")
+                        }
+                    }
+                }.map { it.id }.toSet()
+            }
+        }
+
     override suspend fun deleteRecords(
         recordIds: Set<Long>,
         deleteLocalFiles: Boolean
@@ -666,91 +694,30 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     }
 
     private fun syncExistingFilesLocked(): DownloadDirectorySyncResult {
-        val root = outputDirectory(_settings.value, create = false)
+        val configured = _settings.value
+        val root = outputDirectory(configured, create = false)
         if (!root.canRead()) error("下载目录不可读，请重新授权目录权限")
 
         val existingUris = _records.value
             .map { it.fileUri.trim() }
             .filter(String::isNotBlank)
             .toMutableSet()
-        val candidates = mutableListOf<DirectoryFileCandidate>()
-        val pendingDirectories = ArrayDeque<DirectoryScanNode>()
-        val visitedDirectories = mutableSetOf<String>()
-        pendingDirectories.add(DirectoryScanNode(root, relativePath = "", depth = 0))
-        var visitedFiles = 0
-        var skippedFiles = 0
-        var truncated = false
-        var scanReliable = true
-        val scannedUris = mutableSetOf<String>()
-        var matchedFiles = 0
-
-        while (pendingDirectories.isNotEmpty() && visitedFiles < MAX_SCAN_VISITED_FILES) {
-            val node = pendingDirectories.removeFirst()
-            if (!visitedDirectories.add(node.directory.uri.toString())) continue
-            if (!node.directory.canRead() || (node.directory.uri.scheme == "file" &&
-                    java.io.File(node.directory.uri.path.orEmpty()).listFiles() == null)) {
-                scanReliable = false
-                continue
-            }
-            val children = runCatching { node.directory.listFiles().toList() }
-                .getOrElse {
-                    scanReliable = false
-                    Log.w("DanmuDownloadRepo", "扫描目录失败：${node.relativePath}", it)
-                    emptyList()
-                }
-            for (child in children) {
-                val name = child.name?.trim().orEmpty()
-                if (name.isBlank()) continue
-                val relativePath = if (node.relativePath.isBlank()) {
-                    name
-                } else {
-                    "${node.relativePath}/$name"
-                }
-                if (child.isDirectory) {
-                    if (node.depth < MAX_SCAN_DEPTH) {
-                        pendingDirectories.add(
-                            DirectoryScanNode(child, relativePath, node.depth + 1)
-                        )
-                    }
-                    continue
-                }
-                if (!child.isFile) continue
-                scannedUris += child.uri.toString()
-                visitedFiles++
-                if (visitedFiles > MAX_SCAN_VISITED_FILES) {
-                    truncated = true
-                    break
-                }
-                val format = DanmuDownloadFormat.fromFileName(name)
-                if (format == null) {
-                    skippedFiles++
-                    continue
-                }
-                matchedFiles++
-                val uriText = child.uri.toString()
-                if (uriText in existingUris) {
-                    skippedFiles++
-                    continue
-                }
-                candidates += DirectoryFileCandidate(
-                    file = child,
-                    format = format,
-                    relativePath = relativePath,
-                    lastModified = child.lastModified().takeIf { it > 0L } ?: 0L,
-                    bytes = child.length().coerceAtLeast(0L)
-                )
-            }
-        }
-        if (pendingDirectories.isNotEmpty() || visitedFiles >= MAX_SCAN_VISITED_FILES) {
-            truncated = true
-        }
+        val scan = DownloadDirectoryScanner.scan(
+            rootUri = root.uri.toString(),
+            existingUris = existingUris,
+            maxFiles = MAX_SCAN_VISITED_FILES,
+            maxDepth = MAX_SCAN_DEPTH
+        ) { uri -> listDirectoryEntries(uri.toUri(), existingUris) }
+        var skippedFiles = scan.skippedFiles
+        var truncated = scan.truncated
+        var unreadableFiles = 0
 
         val now = System.currentTimeMillis()
         val imported = mutableListOf<DanmuDownloadRecord>()
-        val rejectedCandidates = mutableListOf<DirectoryFileCandidate>()
-        val sortedCandidates = candidates
+        val rejectedCandidates = mutableListOf<DownloadDirectoryScanner.Candidate>()
+        val sortedCandidates = scan.candidates
             .sortedWith(
-                compareByDescending<DirectoryFileCandidate> { it.lastModified }
+                compareByDescending<DownloadDirectoryScanner.Candidate> { it.lastModified }
                     .thenBy { it.relativePath }
             )
         if (sortedCandidates.size > MAX_RECORDS) {
@@ -761,15 +728,17 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             .take(MAX_RECORDS)
             .forEach { candidate ->
                 val inspection = inspectDirectoryFile(candidate)
-                if (inspection == null || !inspection.valid) {
+                if (inspection == null) {
+                    unreadableFiles++
+                    skippedFiles++
+                    return@forEach
+                }
+                if (!inspection.valid) {
                     rejectedCandidates += candidate
                     skippedFiles++
                     return@forEach
                 }
-                val record = candidate.toDownloadRecord(
-                    createdAtFallback = now,
-                    danmuCount = inspection.count
-                )
+                val record = candidate.toDownloadRecord(createdAtFallback = now)
                 if (existingUris.add(record.fileUri)) imported += record
             }
 
@@ -777,7 +746,7 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         // was rejected, recover by extension and leave a visible warning instead of an empty history.
         if (imported.isEmpty() && rejectedCandidates.isNotEmpty()) {
             rejectedCandidates.forEach { candidate ->
-                val record = candidate.toDownloadRecord(now, null).copy(errorMessage = "目录恢复：内容格式待预览核对")
+                val record = candidate.toDownloadRecord(now).copy(errorMessage = "目录恢复：内容格式待预览核对")
                 if (existingUris.add(record.fileUri)) imported += record
             }
         }
@@ -798,15 +767,14 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         }
 
         var removedRecords = 0
-        if (scanReliable && !truncated && (_settings.value.saveDirPath.isNotBlank() || scannedUris.isNotEmpty())) {
-            val configured = _settings.value
+        if (scan.reliable && !truncated && (configured.saveDirPath.isNotBlank() || scan.scannedUris.isNotEmpty())) {
             val prefix = if (configured.saveDirPath.isNotBlank()) {
                 android.net.Uri.fromFile(java.io.File(configured.saveDirPath)).toString().trimEnd('/') + "/"
             } else configured.saveTreeUri.trim()
             synchronized(recordsLock) {
                 val retained = _records.value.filter { record ->
                     val belongs = prefix.isNotBlank() && record.fileUri.startsWith(prefix)
-                    val keep = !belongs || record.importedToLocal || record.statusEnum() != DownloadRecordStatus.Success || record.fileUri in scannedUris
+                    val keep = !belongs || record.importedToLocal || record.statusEnum() != DownloadRecordStatus.Success || record.fileUri in scan.scannedUris
                     if (!keep) removedRecords++
                     keep
                 }
@@ -815,150 +783,89 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         }
 
         return DownloadDirectorySyncResult(
-            scannedFiles = visitedFiles.coerceAtMost(MAX_SCAN_VISITED_FILES),
+            scannedFiles = scan.scannedFiles,
             importedRecords = persistedImportedCount,
             skippedFiles = skippedFiles,
             truncated = truncated,
-            matchedFiles = matchedFiles, removedRecords = removedRecords,
-            note = if (!scanReliable) "有子目录读取失败，已保留原记录" else ""
+            matchedFiles = scan.matchedFiles, removedRecords = removedRecords,
+            note = listOfNotNull(
+                "有子目录读取失败，已保留原记录".takeIf { !scan.reliable },
+                "有 $unreadableFiles 个文件为空或无法读取，已跳过".takeIf { unreadableFiles > 0 }
+            ).joinToString("；")
         )
     }
 
-    private fun inspectDirectoryFile(candidate: DirectoryFileCandidate): DanmuPayloadInspection? {
-        val payload = if (candidate.bytes in 0..MAX_SCAN_INSPECT_BYTES) {
-            readFileWithinLimit(candidate.file.uri, MAX_SCAN_INSPECT_BYTES)
-        } else {
-            null
-        }
-        if (payload != null) {
-            return DanmuPayloadInspector.inspect(payload, candidate.format)
-        }
-        val prefix = readFilePrefix(candidate.file.uri, 64 * 1024) ?: return null
-        return DanmuPayloadInspection(valid = isPlausiblePayloadPrefix(prefix, candidate.format))
-    }
-
-    private fun readFileWithinLimit(uri: Uri, limit: Long): ByteArray? {
-        val stream = context.contentResolver.openInputStream(uri) ?: return null
-        return stream.use { input ->
-            val output = ByteArrayOutputStream()
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                total += read
-                if (total > limit) return@use null
-                output.write(buffer, 0, read)
+    /** Read metadata once per directory; SAF columns are fetched together in one query. */
+    private fun listDirectoryEntries(
+        directory: Uri,
+        existingUris: Set<String>
+    ): List<DownloadDirectoryScanner.Entry>? = runCatching<List<DownloadDirectoryScanner.Entry>?> {
+        if (directory.scheme == "file") {
+            val children = java.io.File(directory.path.orEmpty()).listFiles() ?: return@runCatching null
+            return@runCatching children.mapNotNull { child ->
+                val isDirectory = child.isDirectory
+                if (!isDirectory && !child.isFile) return@mapNotNull null
+                val uri = Uri.fromFile(child).toString()
+                val needsMetadata = !isDirectory && uri !in existingUris &&
+                    DanmuDownloadFormat.fromFileName(child.name) != null
+                DownloadDirectoryScanner.Entry(
+                    uri = uri,
+                    name = child.name,
+                    isDirectory = isDirectory,
+                    lastModified = if (needsMetadata) child.lastModified() else 0L,
+                    bytes = if (needsMetadata) child.length() else 0L
+                )
             }
-            output.toByteArray()
         }
-    }
-
-    private fun readFilePrefix(uri: Uri, limit: Int): ByteArray? {
-        val stream = context.contentResolver.openInputStream(uri) ?: return null
-        return stream.use { input ->
-            val output = ByteArrayOutputStream(limit)
-            val buffer = ByteArray(minOf(DEFAULT_BUFFER_SIZE, limit))
-            var remaining = limit
-            while (remaining > 0) {
-                val read = input.read(buffer, 0, minOf(buffer.size, remaining))
-                if (read < 0) break
-                output.write(buffer, 0, read)
-                remaining -= read
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            directory, DocumentsContract.getDocumentId(directory)
+        )
+        context.contentResolver.query(childrenUri, columns, null, null, null)?.use { cursor ->
+            buildList<DownloadDirectoryScanner.Entry> {
+                while (cursor.moveToNext()) {
+                    val documentId = cursor.getString(0) ?: error("目录返回了无效文件信息")
+                    val name = cursor.getString(1)?.takeIf { it.isNotBlank() }
+                        ?: error("目录返回了无效文件名")
+                    val mime = cursor.getString(2).orEmpty()
+                    // Preserve unknown entries instead of treating an incomplete listing as deletion.
+                    if (mime.isBlank()) error("目录返回了无效文件类型")
+                    add(DownloadDirectoryScanner.Entry(
+                        uri = DocumentsContract.buildDocumentUriUsingTree(directory, documentId).toString(),
+                        name = name,
+                        isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR,
+                        bytes = if (cursor.isNull(3)) 0L else cursor.getLong(3),
+                        lastModified = if (cursor.isNull(4)) 0L else cursor.getLong(4)
+                    ))
+                }
             }
-            output.toByteArray()
         }
-    }
+    }.onFailure {
+        Log.w("DanmuDownloadRepo", "读取下载目录失败", it)
+    }.getOrNull()
 
-    private fun isPlausiblePayloadPrefix(
-        prefix: ByteArray,
-        format: DanmuDownloadFormat
-    ): Boolean {
-        if (format == DanmuDownloadFormat.DanuniBinPb) return true
-        val text = prefix.toString(Charsets.UTF_8).removePrefix("\uFEFF").trimStart()
-        return when (format) {
-            DanmuDownloadFormat.Xml,
-            DanmuDownloadFormat.BiliXml -> text.startsWith("<?xml") || text.startsWith("<i")
-            DanmuDownloadFormat.Json,
-            DanmuDownloadFormat.DdplayJson -> text.startsWith("{") && text.contains("\"comments\"")
-            DanmuDownloadFormat.ArtplayerJson,
-            DanmuDownloadFormat.VodJson -> text.startsWith("{") && text.contains("\"danmuku\"")
-            DanmuDownloadFormat.BahaJson ->
-                text.startsWith("{") && text.contains("\"data\"") && text.contains("\"danmu\"")
-            DanmuDownloadFormat.DanuniJson -> text.startsWith("[")
-            DanmuDownloadFormat.DplayerJson -> text.startsWith("{") && text.contains("\"data\"")
-            DanmuDownloadFormat.DanuniBinPb -> true
-        }
-    }
-
-    private fun DirectoryFileCandidate.toDownloadRecord(
-        createdAtFallback: Long,
-        danmuCount: Int?
-    ): DanmuDownloadRecord {
-        val fileName = file.name?.trim().orEmpty().ifBlank { "已有弹幕.${format.extension}" }
-        val suffixLength = format.extension.length + 1
-        val baseName = if (
-            fileName.length > suffixLength &&
-            fileName.lowercase().endsWith(".${format.extension}")
-        ) {
-            fileName.dropLast(suffixLength)
-        } else {
-            fileName.substringBeforeLast('.', fileName)
-        }
-        val parentPath = relativePath.substringBeforeLast('/', missingDelimiterValue = "")
-        val animeTitle = parentPath.substringAfterLast('/').ifBlank { "已有弹幕" }
-        val episodeNo = extractEpisodeNumber(baseName)
-        val uriText = file.uri.toString()
-        return DanmuDownloadRecord(
-            id = stableDirectoryRecordId(uriText),
-            createdAt = lastModified.takeIf { it > 0L } ?: createdAtFallback,
-            animeTitle = animeTitle,
-            episodeTitle = baseName.ifBlank { fileName },
-            episodeId = 0L,
-            episodeNo = episodeNo,
-            source = "目录同步",
-            format = format.value,
-            status = DownloadRecordStatus.Success.key,
-            fileName = fileName,
-            relativePath = relativePath,
-            fileUri = uriText,
-            durationMs = 0L,
-            bytes = bytes,
-            danmuCount = danmuCount,
-            httpCode = null,
-            errorMessage = null
+    private fun inspectDirectoryFile(candidate: DownloadDirectoryScanner.Candidate): DanmuPayloadInspection? {
+        val prefix = runCatching {
+            context.contentResolver.openInputStream(candidate.uri.toUri())?.use { input ->
+                DownloadDirectoryScanner.readPrefix(input)
+            }
+        }.onFailure {
+            Log.w("DanmuDownloadRepo", "读取已有弹幕文件失败", it)
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        return DanmuPayloadInspection(
+            valid = DownloadDirectoryScanner.isPlausiblePrefix(prefix, candidate.format)
         )
     }
 
-    private fun extractEpisodeNumber(fileName: String): Int {
-        val patterns = listOf(
-            Regex("(?i)E(?:P)?(\\d{1,4})"),
-            Regex("第\\s*(\\d{1,4})\\s*[集话]")
-        )
-        return patterns.firstNotNullOfOrNull { pattern ->
-            pattern.find(fileName)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        } ?: 0
-    }
-
-    private fun stableDirectoryRecordId(uri: String): Long {
-        val digest = MessageDigest.getInstance("SHA-256").digest(uri.toByteArray(Charsets.UTF_8))
-        val value = ByteBuffer.wrap(digest).long and Long.MAX_VALUE
-        return value.takeIf { it != 0L } ?: 1L
-    }
-
-    private data class DirectoryScanNode(
-        val directory: DocumentFile,
-        val relativePath: String,
-        val depth: Int
-    )
-
-    private data class DirectoryFileCandidate(
-        val file: DocumentFile,
-        val format: DanmuDownloadFormat,
-        val relativePath: String,
-        val lastModified: Long,
-        val bytes: Long
-    )
+    private fun DownloadDirectoryScanner.Candidate.toDownloadRecord(
+        createdAtFallback: Long
+    ): DanmuDownloadRecord = DownloadRecordRecovery.record(this, createdAtFallback)
 
     private fun requestDanmuPayload(url: String): HttpPayload {
         val request = Request.Builder()
@@ -1026,36 +933,10 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
         return (prettyText.trimEnd() + "\n").toByteArray(Charsets.UTF_8)
     }
 
-    private fun buildOutputFileName(template: String, input: DanmuDownloadInput): String {
-        val fallbackTemplate = DanmuDownloadSettings().fileNameTemplate
-        var output = template.ifBlank { fallbackTemplate }
-        val date = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
-        val dateTime = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val mapping = linkedMapOf(
-            "animeTitle" to input.animeTitle,
-            "episodeTitle" to input.episodeTitle,
-            "episodeNo" to input.episodeNo.toString(),
-            "episodeNo2" to input.episodeNo.toString().padStart(2, '0'),
-            "episodeNo3" to input.episodeNo.toString().padStart(3, '0'),
-            "episodeId" to input.episodeId.toString(),
-            "source" to input.source.ifBlank { "unknown" },
-            "format" to input.format.value,
-            "ext" to input.format.extension,
-            "date" to date,
-            "datetime" to dateTime
+    private fun buildOutputFileName(template: String, input: DanmuDownloadInput): String =
+        com.example.danmuapiapp.domain.model.renderDownloadFileName(
+            template, input.format, input.animeTitle, input.episodeTitle, input.episodeNo, input.episodeId, input.source
         )
-        mapping.forEach { (key, value) ->
-            output = output.replace("{$key}", value)
-        }
-        var sanitized = sanitizeFileComponent(output)
-        if (sanitized.isBlank()) {
-            sanitized = "episode_${input.episodeId}.${input.format.extension}"
-        }
-        if (!sanitized.contains('.')) {
-            sanitized += ".${input.format.extension}"
-        }
-        return sanitized
-    }
 
     private fun resolveOutputFileName(
         parent: DocumentFile,
@@ -1074,45 +955,15 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 desiredName
             }
             DownloadConflictPolicy.Rename -> {
-                val (baseName, ext) = splitFileName(desiredName)
                 var index = 1
                 while (index < 9999) {
-                    val candidate = if (ext.isBlank()) {
-                        "$baseName($index)"
-                    } else {
-                        "$baseName($index).$ext"
-                    }
+                    val candidate = com.example.danmuapiapp.domain.model.numberedDownloadFileName(desiredName, index)
                     if (parent.findFile(candidate) == null) return candidate
                     index++
                 }
                 error("文件重命名次数超限：$desiredName")
             }
         }
-    }
-
-    private fun splitFileName(name: String): Pair<String, String> {
-        val dot = name.lastIndexOf('.')
-        if (dot <= 0 || dot == name.lastIndex) {
-            return name to ""
-        }
-        return name.substring(0, dot) to name.substring(dot + 1)
-    }
-
-    private fun findOrCreateDirectory(parent: DocumentFile, name: String): DocumentFile? {
-        parent.listFiles().firstOrNull { it.isDirectory && it.name == name }?.let { return it }
-        return parent.createDirectory(name)
-    }
-
-    private fun sanitizeFileComponent(raw: String): String {
-        val replaced = raw
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            .replace(Regex("[\\u0000-\\u001F\\u007F]"), "_")
-            .replace('\n', '_')
-            .replace('\r', '_')
-            .trim()
-            .trim('.')
-        val collapsed = replaced.replace(Regex("\\s+"), " ")
-        return collapsed.take(120)
     }
 
     private fun sanitizeCustomThrottle(

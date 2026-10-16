@@ -652,7 +652,6 @@ object RootRuntimeController {
 
             export CLASSPATH="${'$'}APP_APK"
             export DANMUAPI_LIBDIR="${'$'}LIB_DIR"
-            export DANMU_APP_OUTBOUND_HELPER="${'$'}LIB_DIR/libdanmu_outbound.so"
             export DANMU_APP_OUTBOUND_CONFIG=${shellQuote(outboundConfigPath)}
             if [ -n "${'$'}LD_LIBRARY_PATH" ]; then
               export LD_LIBRARY_PATH="${'$'}LIB_DIR:${'$'}LD_LIBRARY_PATH"

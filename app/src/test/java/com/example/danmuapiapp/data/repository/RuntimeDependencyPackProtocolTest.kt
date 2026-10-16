@@ -7,6 +7,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuntimeDependencyPackProtocolTest {
+    @Test fun `Node 26 accepts only the verified signed JS archive from Node 24`() {
+        val digest = RuntimeDependencyPackProtocol.VERIFIED_NODE24_JS_PACK
+        assertEquals(26, RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR)
+        assertTrue(RuntimeDependencyPackProtocol.acceptsNodeVersion(26, "a".repeat(64)))
+        assertTrue(RuntimeDependencyPackProtocol.acceptsNodeVersion(24, digest))
+        assertFalse(RuntimeDependencyPackProtocol.acceptsNodeVersion(24, "a".repeat(64)))
+        assertFalse(RuntimeDependencyPackProtocol.acceptsNodeVersion(25, digest))
+        assertFalse(RuntimeDependencyPackProtocol.acceptsNodeVersion(27, digest))
+    }
+
     @Test
     fun `稳定和开发核心共用在线依赖包而自定义核心仅允许导入`() {
         assertTrue(RuntimeDependencyPackProtocol.supportsOnlineRepair(ApiVariant.Stable))

@@ -66,6 +66,8 @@ function applyEnvSnapshot(snapshot) {
 
 applyEnvSnapshot(initialEnv);
 const appOutboundBridge = installBridge({snapshot:data.outbound});
+let appOutboundSnapshot=data.outbound;
+const sourceProbes=new Map();
 
 let handleRequest = null;
 let coreGlobals = null;
@@ -214,7 +216,8 @@ async function loadWorker() {
   if (!mod?.handleRequest) {
     throw new Error('worker.js missing handleRequest export');
   }
-  handleRequest = mod.handleRequest;
+  await require('./app-proxy-routing.js').bindCoreSourceContext(path.join(projectDir, variantDir));
+  handleRequest = require('./app-series-refresh.js').wrapSeriesRefresh(mod.handleRequest, path.join(projectDir, variantDir));
   for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
     try {
       const globalsUrl = pathToFileURL(path.join(projectDir, variantDir, globalsRel)).href;
@@ -249,6 +252,25 @@ async function handleMessage(msg) {
   if (msg.type === 'setEnv') {
     applyEnvSnapshot(msg.env || {});
     appOutboundBridge.update(msg.outbound);
+    appOutboundSnapshot=msg.outbound;
+    return;
+  }
+
+  if (msg.type === 'cancelSourceProbe') {
+    sourceProbes.get(msg.id)?.abort();
+    return;
+  }
+  if (msg.type === 'sourceProbe') {
+    const controller=new AbortController();
+    sourceProbes.set(msg.id,controller);
+    try {
+      const result=await require('./app-source-probe.js').probeSource(msg.source,{
+        directory:path.join(projectDir,variantDir),env:process.env,snapshot:appOutboundSnapshot,signal:controller.signal,
+      });
+      parentPort.postMessage({type:'response',id:msg.id,result});
+    } catch {
+      parentPort.postMessage({type:'error',id:msg.id,error:'当前核心的来源探测未完成'});
+    } finally {sourceProbes.delete(msg.id);}
     return;
   }
 
@@ -320,6 +342,7 @@ async function main() {
   parentPort.on('close', () => {
     try { favoriteSchedulerStop(); } catch {}
     appOutboundBridge.stop();
+    for(const controller of sourceProbes.values())controller.abort();
   });
 }
 

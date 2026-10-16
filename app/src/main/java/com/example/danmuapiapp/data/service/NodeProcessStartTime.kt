@@ -17,3 +17,10 @@ internal fun hasNodeProcessExceededMinUptime(
     minUptimeMs: Long
 ): Boolean = nowElapsedMs >= startedElapsedMs &&
     nowElapsedMs - startedElapsedMs >= minUptimeMs
+
+/** A previous process's exit marker must not identify a reused PID as stopped. */
+internal fun isStoppedNodeProcessIdentity(marker: String, pid: Int, startedElapsedMs: Long): Boolean {
+    val fields = marker.trim().split(' ')
+    return pid > 0 && startedElapsedMs >= 0L && fields.size == 2 &&
+        fields[0].toIntOrNull() == pid && fields[1].toLongOrNull() == startedElapsedMs
+}

@@ -20,8 +20,8 @@ val enableNativeBuild = (findProperty("enableNativeBuild") as? String)?.toBoolea
 val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-val defaultVersionName = "1.0.5.108"
-val defaultVersionCode = 196
+val defaultVersionName = "1.0.5.115"
+val defaultVersionCode = 212
 val configuredVersionName = findProperty("versionName")
     ?.toString()
     ?.trim()
@@ -55,6 +55,13 @@ val configuredAbiFilters = if (rawAbiFilters.isEmpty()) defaultReleaseAbis else 
 val preparedNativeRuntimeDir = layout.buildDirectory.dir("prepared-native-runtime").get().asFile
 val nativeRuntimeChecksumFile = file("native-runtime.sha256")
 val nativeRuntimeSourcesFile = file("native-runtime-sources.properties")
+val nativeRuntimeArchiveOverride = findProperty("nativeRuntimeArchive")?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(rootProject::file)
+val nativeRuntimeArchiveUrlOverride = findProperty("nativeRuntimeArchiveUrl")?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.also {
+    val uri = runCatching { URI(it) }.getOrNull()
+    require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) {
+        "nativeRuntimeArchiveUrl 必须是无凭据的 HTTPS 地址；归档大小与 SHA-256 仍按仓库清单校验"
+    }
+}
 val requestedTaskNames = gradle.startParameter.taskNames.map { it.lowercase() }
 val isBundleTaskRequested = requestedTaskNames.any { it.contains("bundle") }
 
@@ -190,6 +197,7 @@ val useProjectSigning = resolvedStoreFile != null &&
 android {
     namespace = "com.example.danmuapiapp"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.example.danmuapiapp"
@@ -294,7 +302,6 @@ android {
             // 内网穿透内核：普通模式要从 nativeLibraryDir 直接 exec libfrpc.so
             // （useLegacyPackaging=true 会在安装时解压到 lib 目录）。
             jniDirs += File(project.rootDir, "runtime/frp").absolutePath
-            jniDirs += layout.buildDirectory.dir("prepared-outbound-jni").get().asFile.absolutePath
             jniLibs.directories.clear()
             jniLibs.directories.addAll(jniDirs)
         }
@@ -437,7 +444,7 @@ val androidRuntimeExcludedNodeModules = setOf(
     "@electric-sql/pglite-tools",
     "drizzle-orm",
     // Node >= 16.5 内置 node:stream/web；web-streams-polyfill 仅作为
-    // fetch-blob 在无原生 ReadableStream 环境的兜底，内嵌 Node 26 永不触达。
+    // fetch-blob 在无原生 ReadableStream 环境的兜底，内嵌 Node 24 永不触达。
     "web-streams-polyfill"
 )
 
@@ -539,7 +546,7 @@ fun pruneNodeModuleRuntimeNoise(rootDir: java.io.File) {
     rootDir.walkTopDown().filter { it.isDirectory && it.name == ".history" }
         .toList().forEach { it.deleteRecursively() }
 
-    // Node 26 require(esm) 返回 ESM namespace，dan-any 打包产物对
+    // Node 24 require(esm) 返回 ESM namespace，dan-any 打包产物对
     // fast-xml-builder 的 interop 会把整个 namespace 塞进 .default，
     // 使 `new o.default()` 失效。仅 CJS 理论路径受影响（生产全走 ESM），
     // 此处做幂等防护补丁，保证该调用点在两种模块体系下均可构造。
@@ -994,7 +1001,7 @@ fun sha256(file: File): String {
 /**
  * 16KB 页对齐门禁：Android 15+ 的 16KB 内核设备（仅 64 位 ABI）要求
  * 可执行段按 16KB 对齐加载；armeabi-v7a 不存在 16KB 内核，仅需 ≥4KB。
- * 解析 ELF program header 校验所有 PT_LOAD 的 p_align，覆盖上游
+ * 解析 ELF program header 校验 PT_LOAD 对齐/偏移与 GNU_RELRO 末尾，覆盖上游
  * libnode.so / libc++_shared.so 与本地编译的 libnative-lib.so，
  * 防止任一环节的对齐回归静默进入 APK。
  */
@@ -1043,10 +1050,20 @@ fun assertElfLoadAlignment(file: File, relativePath: String = file.relativeTo(pr
         var sawLoad = false
         for (i in 0 until phnum) {
             val base = phoff + i * phentsize
-            if (u32At(base) != 1L) continue
+            val kind = u32At(base)
+            if (kind == 0x6474e552L) {
+                val address = if (is64) u64At(base + 16) else u32At(base + 8)
+                val size = if (is64) u64At(base + 40) else u32At(base + 20)
+                if ((address + size) % minRequired != 0L) {
+                    throw GradleException("$relativePath 的 GNU_RELRO 末尾未按 ${minRequired}B 页对齐")
+                }
+            }
+            if (kind != 1L) continue
             sawLoad = true
             val align = if (is64) u64At(base + 48) else u32At(base + 28)
-            if (align < minRequired) {
+            val offset = if (is64) u64At(base + 8) else u32At(base + 4)
+            val address = if (is64) u64At(base + 16) else u32At(base + 8)
+            if (align < minRequired || offset % minRequired != address % minRequired) {
                 throw GradleException(
                     "$relativePath 的 PT_LOAD 对齐为 ${align}B，低于 ${minRequired}B 页要求" +
                         "（${if (minRequired == 16384L) "16KB 内核设备无法加载" else "文件异常"}）"
@@ -1054,6 +1071,7 @@ fun assertElfLoadAlignment(file: File, relativePath: String = file.relativeTo(pr
             }
         }
         if (!sawLoad) throw GradleException("ELF 缺少 PT_LOAD 段：${file.name}")
+
     }
 }
 
@@ -1113,12 +1131,17 @@ fun readNativeRuntimeReleaseSources(): Pair<String, Map<String, NativeRuntimeRel
         NativeRuntimeReleaseSource(
             abi = abi,
             assetName = required("$abi.asset"),
-            url = required("$abi.url"),
+            url = nativeRuntimeArchiveUrlOverride ?: required("$abi.url"),
             size = required("$abi.size").toLongOrNull()?.takeIf { it in 1..(128L * 1024L * 1024L) }
                 ?: throw GradleException("原生运行时来源清单中的 $abi.size 非法"),
             sha256 = sha,
-            githubActionsArtifact = sourceKind == "github-actions"
+            githubActionsArtifact = nativeRuntimeArchiveUrlOverride == null && sourceKind == "github-actions"
         )
+    }
+    if (nativeRuntimeArchiveOverride != null || nativeRuntimeArchiveUrlOverride != null) {
+        require(sources.values.map { it.sha256 to it.size }.distinct().size == 1) {
+            "nativeRuntimeArchive/nativeRuntimeArchiveUrl 只适用于所有 ABI 共用同一 ZIP 的来源清单"
+        }
     }
     return releaseVersion to sources
 }
@@ -1204,6 +1227,7 @@ fun compileJniBridge(
         "-std=c++20", "-O2", "-fPIC", "-shared",
         "-I", includeDir.absolutePath,
         "-Wl,-z,max-page-size=16384",
+        "-Wl,-z,common-page-size=16384",
         "-Wl,-soname,libnative-lib.so",
         "-o", outFile.absolutePath,
         bridgeSource.absolutePath,
@@ -1257,6 +1281,10 @@ fun resolveNativeRuntimeZip(
     fun isValid(candidate: File): Boolean =
         candidate.isFile && candidate.length() == source.size && sha256(candidate) == source.sha256
 
+    nativeRuntimeArchiveOverride?.let {
+        if (!isValid(it)) throw GradleException("指定的 nativeRuntimeArchive 缺失或大小/SHA-256 与仓库清单不匹配")
+        return it
+    }
     if (isValid(localReleaseApk)) return localReleaseApk
     if (isValid(cacheApk)) return cacheApk
     if (offline) throw GradleException("离线构建缺少原生运行时缓存：${source.assetName}")
@@ -1342,6 +1370,8 @@ fun registerNativeRuntimeTasks(): Pair<TaskProvider<*>, TaskProvider<*>> {
     inputs.file("src/main/cpp/native-lib.cpp")
     inputs.file(rootProject.file("scripts/build-native-deps.py"))
     inputs.property("configuredAbiFilters", configuredAbiFilters.joinToString(","))
+    nativeRuntimeArchiveOverride?.let { inputs.file(it) }
+    inputs.property("nativeRuntimeArchiveUrl", nativeRuntimeArchiveUrlOverride ?: "")
     outputs.dir(preparedNativeRuntimeDir)
     doLast {
         val checksums = readNativeRuntimeChecksums()
@@ -1591,6 +1621,20 @@ val verifyNativeRuntimeInputsTask = tasks.register("verifyNativeRuntimeInputs") 
 
 val (prepareNativeRuntimeTask, verifyNativeRuntimeInputsTask) = registerNativeRuntimeTasks()
 
+// Check the portable archive without an NDK build or a GitHub login.
+tasks.register("verifyNativeRuntimeArchive") {
+    inputs.file(nativeRuntimeSourcesFile)
+    nativeRuntimeArchiveOverride?.let { inputs.file(it) }
+    inputs.property("nativeRuntimeArchiveUrl", nativeRuntimeArchiveUrlOverride ?: "")
+    doLast {
+        val (version, sources) = readNativeRuntimeReleaseSources()
+        val source = sources.getValue(configuredAbiFilters.first())
+        val archive = resolveNativeRuntimeZip(source, version, rootProject.projectDir,
+            gradle.gradleUserHomeDir, gradle.startParameter.isOffline)
+        logger.lifecycle("原生运行时归档校验通过：${archive.name}，SHA-256=${source.sha256}")
+    }
+}
+
 fun verifyFrpcKernels(required: Boolean) {
     val directory = rootProject.file("runtime/frp")
     val checksums = File(directory, "SHA256SUMS").takeIf { it.isFile }?.readLines().orEmpty()
@@ -1693,69 +1737,8 @@ tasks.matching {
     dependsOn(prepareNativeRuntimeTask)
 }
 
-// App-owned Go helper. Release APKs must contain every selected ABI. Debug
-// builds may omit it, but the settings switch refuses to enable a missing helper.
-val outboundKernelStageLock = Any()
-fun verifyOutboundKernels(required: Boolean) = synchronized(outboundKernelStageLock) {
-    val directory = File(project.rootDir, "runtime/outbound")
-    val problems = mutableListOf<String>()
-    for (abi in configuredAbiFilters) {
-        val kernel = File(directory, "$abi/libdanmu_outbound.so")
-        val checked = layout.buildDirectory.file("prepared-outbound-jni/$abi/libdanmu_outbound.so").get().asFile
-        if (!kernel.isFile || kernel.length() == 0L) {
-            checked.delete()
-            problems += "$abi 缺少增强直连组件"
-            continue
-        }
-        val inputs = File(directory, "$abi/BUILD.inputs").takeIf { it.isFile }?.readLines().orEmpty()
-            .mapNotNull { line ->
-                val parts = line.trim().split(Regex("\\s+"), limit = 2)
-                if (parts.size == 2) parts[1] to parts[0] else null
-            }.toMap()
-        val expectedInputs = File(directory, "src").listFiles().orEmpty()
-            .filter { it.isFile && (it.extension == "go" || it.name in setOf("go.mod", "go.sum")) }
-            .map { it.relativeTo(project.rootDir).invariantSeparatorsPath }.toSet() + "scripts/prepare_outbound_kernel.sh"
-        fun hash(file: File): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(64 * 1024)
-                while (true) { val n = input.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
-            }
-            return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-        }
-        val binaryHash = File(directory, "$abi/BUILD.binary").takeIf { it.isFile }?.readText()?.trim()
-        if (inputs.keys != expectedInputs || inputs.any { (path, digest) ->
-                val source = File(project.rootDir, path); !source.isFile || hash(source) != digest
-            } || binaryHash != hash(kernel)) {
-            checked.delete()
-            problems += "$abi 增强直连组件与当前源码或构建参数不一致"
-            continue
-        }
-        // Reuse the existing ELF page-alignment validator with its expected
-        // ABI-relative staging path; never strip or mutate the source artifact.
-        checked.parentFile.mkdirs()
-        kernel.copyTo(checked, overwrite = true)
-        assertElfLoadAlignment(checked, "outbound/$abi/libdanmu_outbound.so")
-    }
-    if (problems.isNotEmpty()) {
-        val message = problems.joinToString("；") + "。请运行 scripts/prepare_outbound_kernel.sh ${configuredAbiFilters.joinToString(" ")}"
-        if (required) throw GradleException(message) else logger.warn(message)
-    }
-}
-val verifyOutboundReleaseTask = tasks.register("verifyOutboundReleaseKernels") {
-    doLast { verifyOutboundKernels(required = true) }
-}
-val verifyOutboundDebugTask = tasks.register("verifyOutboundDebugKernels") {
-    doLast { verifyOutboundKernels(required = false) }
-}
+// Enhanced outbound uses Node TLS/QUIC and Android DoH; no executable helper.
 val testAppOutboundTask = tasks.register<Exec>("testAppOutboundBridge") {
     workingDir(project.rootDir)
-    commandLine("node", "--test", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs", "node-tests/security-discovery-host.test.cjs")
+    commandLine("node", "--test", "node-tests/app-proxy-routing.test.cjs", "node-tests/app-proxy-host.test.cjs", "node-tests/app-source-probe.test.cjs", "node-tests/app-outbound-native.test.cjs", "node-tests/app-outbound-dns.test.cjs", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs", "node-tests/security-discovery-host.test.cjs", "node-tests/app-series-refresh.test.cjs")
 }
-tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyOutboundReleaseTask) }
-tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(verifyOutboundDebugTask) }
-
-tasks.matching {
-    (it.name.startsWith("merge") && (it.name.endsWith("JniLibFolders") || it.name.endsWith("NativeLibs"))) ||
-        (it.name.startsWith("strip") && it.name.endsWith("DebugSymbols"))
-}.configureEach { dependsOn(if (name.contains("Release")) verifyOutboundReleaseTask else verifyOutboundDebugTask) }

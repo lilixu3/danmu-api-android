@@ -1,3 +1,6 @@
-159e171207bc1dd432caa22c665938092c0d5e29babb26f2eac369890f5019d1  libnode/bin/arm64-v8a/libnode.so
-6ba117bc50fd365991277ed92a34806370bc560403c4dc3705bea3d2904616b3  libnode/bin/armeabi-v7a/libnode.so
-bfd525ae74a98831d5685c6afb3bfd9a6b217f683fb4a62380a8079ef9b4ed54  libnode/bin/x86_64/libnode.so
+# Node 26.11.1 lite + OpenSSL 4.0.3（ECH/H3）。
+# fogtape/nodejs-mobile run 38674319285 artifact 11945892508。
+# JNI 与 C++ 运行库由本次构建从源码重编，全部使用 16 KB ELF 对齐。
+823c2acd4efa345d739389dd6e2463ccf53ba3a5a760d7db1d41dde7dbf73196  libnode/bin/arm64-v8a/libnode.so
+fe85a706855ee2d11829847305540165e3df783cae182ce1db41691666df73ee  libnode/bin/armeabi-v7a/libnode.so
+f6e7e9007e8d5b55ceea53185e8a5eeaf9f790806779f6d7eb2fcf21988507da  libnode/bin/x86_64/libnode.so

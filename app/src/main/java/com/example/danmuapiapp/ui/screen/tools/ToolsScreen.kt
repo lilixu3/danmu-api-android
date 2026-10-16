@@ -92,6 +92,7 @@ fun ToolsScreen(
     onOpenAdminMode: () -> Unit,
     onOpenCacheManagement: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenSourceProbe: () -> Unit,
     onOpenTunnel: () -> Unit,
     viewModel: ToolsViewModel = hiltViewModel()
 ) {
@@ -265,6 +266,14 @@ fun ToolsScreen(
                 onClick = onOpenConsole
             )
         }
+        ToolEntryCard(
+            title = "来源探测",
+            subtitle = "查看已启用来源的响应、耗时与连接线路",
+            imageVector = Icons.Rounded.Public,
+            accent = MaterialTheme.colorScheme.tertiary,
+            badge = "网络",
+            onClick = onOpenSourceProbe
+        )
         ToolEntryCard(
             title = "运行诊断",
             subtitle = "检查核心、端口、工作目录、缓存接口与 GitHub 状态",

@@ -7,6 +7,23 @@ import org.junit.Test
 class NodeServiceLifecyclePolicyTest {
 
     @Test
+    fun `controlled stop retires idle process after cleanup`() {
+        assertTrue(shouldRetireStoppedNodeProcess(true, true, false, false))
+    }
+
+    @Test
+    fun `retirement must not kill a new start or desired runtime`() {
+        assertFalse(shouldRetireStoppedNodeProcess(false, true, false, false))
+        assertFalse(shouldRetireStoppedNodeProcess(true, true, true, false))
+        assertFalse(shouldRetireStoppedNodeProcess(true, false, false, false))
+    }
+
+    @Test
+    fun `host destruction must preserve native invocation and startup work`() {
+        assertFalse(shouldRetireStoppedNodeProcess(true, true, false, true))
+    }
+
+    @Test
     fun `copy address must preserve sticky restart while desired running`() {
         assertTrue(shouldPreserveNodeServiceSticky(desiredRunning = true, stopRequested = false))
     }

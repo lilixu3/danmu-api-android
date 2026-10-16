@@ -234,6 +234,10 @@ internal fun canonicalSourceKey(raw: String): String {
         "iqiyi", "qiyi" -> "iqiyi"
         "imgo", "mango", "mgtv", "hunantv" -> "imgo"
         "douyin", "xigua" -> "xigua"
+        "dandanplay", "ddplay", "dandan" -> "dandan"
+        "baha", "bahamut" -> "bahamut"
+        "360kan", "360" -> "360"
+        "ani", "animeko" -> "animeko"
         else -> key
     }
 }

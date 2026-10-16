@@ -25,3 +25,11 @@ internal fun shouldReportUnexpectedNodeServiceDestroy(
     val controlledStop = serviceStopRequested || stopping || !desiredRunning
     return hadActiveRuntime && !controlledStop
 }
+
+/** Retire only the idle process left by a completed stop, after host cleanup. */
+internal fun shouldRetireStoppedNodeProcess(
+    currentStopCommand: Boolean,
+    stopRequested: Boolean,
+    desiredRunning: Boolean,
+    runtimeActive: Boolean
+): Boolean = currentStopCommand && stopRequested && !desiredRunning && !runtimeActive

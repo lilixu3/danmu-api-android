@@ -1498,19 +1498,21 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     private suspend fun recoverStaleNormalProcessIfNeeded(port: Int): Boolean {
-        val staleProcess = confirmStaleNormalProcess(port, NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS)
-        if (!staleProcess) return true
+        val stalePid = confirmStaleNormalProcess(port, NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS)
+            ?: return true
+        if (NodeService.recoveryCandidatePid(context) != stalePid) return true
 
-        addLog(LogLevel.Warn, "检测到普通模式残留进程，启动前先回收旧进程")
-        val killed = NodeService.killProcessIfRunning(context)
+        addLog(LogLevel.Info, "普通模式启动前回收未监听端口的旧服务进程，PID=$stalePid")
+        val killed = NodeService.killProcessIfRunning(context, expectedPid = stalePid)
+        if (!killed && NodeService.recoveryCandidatePid(context) != stalePid) return true
         if (!killed && NodeService.isProcessRunning(context)) {
             markError("普通模式残留进程回收失败，请重试启动")
             addLog(LogLevel.Error, "普通模式残留进程回收失败：无法结束 :node 进程")
             return false
         }
 
-        val stopped = waitForNormalProcessStopped(
-            port = port,
+        val stopped = waitForNormalProcessReclaimed(
+            expectedPid = stalePid,
             timeoutMs = NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS
         )
         if (!stopped) {
@@ -1524,15 +1526,18 @@ class RuntimeRepositoryImpl @Inject constructor(
         return true
     }
 
-    private suspend fun confirmStaleNormalProcess(port: Int, timeoutMs: Long): Boolean {
+    private suspend fun confirmStaleNormalProcess(port: Int, timeoutMs: Long): Int? {
+        val expectedPid = NodeService.recoveryCandidatePid(context) ?: return null
         val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
         while (System.currentTimeMillis() < deadline) {
-            if (!NodeService.isProcessRunning(context)) return false
-            if (port in 1..65535 && isPortOpen(port)) return false
+            if (NodeService.recoveryCandidatePid(context) != expectedPid) return null
+            if (port in 1..65535 && isPortOpen(port)) return null
             delay(180)
         }
-        return NodeService.isProcessRunning(context) &&
-            (port !in 1..65535 || !isPortOpen(port))
+        return expectedPid.takeIf {
+            NodeService.recoveryCandidatePid(context) == expectedPid &&
+                (port !in 1..65535 || !isPortOpen(port))
+        }
     }
 
     private fun markStarting(message: String? = null) {
@@ -2951,17 +2956,13 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun isNormalProcessStopped(port: Int): Boolean {
-        return !isNormalProcessRunning() && !isPortOpen(port)
-    }
-
-    private suspend fun waitForNormalProcessStopped(port: Int, timeoutMs: Long): Boolean {
+    private suspend fun waitForNormalProcessReclaimed(expectedPid: Int, timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (isNormalProcessStopped(port)) return true
+            if (NodeService.recoveryCandidatePid(context) != expectedPid) return true
             delay(180)
         }
-        return isNormalProcessStopped(port)
+        return NodeService.recoveryCandidatePid(context) != expectedPid
     }
 
     @Suppress("DEPRECATION")

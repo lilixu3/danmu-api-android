@@ -2,6 +2,10 @@ package com.example.danmuapiapp.ui.screen.download
 
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
+import com.example.danmuapiapp.domain.model.cleanDownloadAnimeTitle
+import com.example.danmuapiapp.data.repository.DownloadLocalImportPlanner
+import com.example.danmuapiapp.data.repository.LocalDanmuMetadataResolver
+import java.util.Locale
 
 internal fun buildAnimeDownloadHistorySummary(
     anime: DownloadAnimeCandidate,
@@ -63,8 +67,14 @@ internal fun isNeutralHistorySource(raw: String): Boolean {
 internal fun buildDownloadRecordAnimeGroups(
     records: List<DanmuDownloadRecord>
 ): List<DownloadRecordAnimeGroup> {
-    return records
-        .groupBy(::downloadAnimeGroupKey)
+    // Flutter groups by clean title and year. A single known year also identifies older scans
+    // whose folder name omitted the year; multiple known years stay separate.
+    return records.groupBy { recordLibraryTitle(it).lowercase(Locale.ROOT) }.values
+        .flatMap { bucket ->
+            val years = bucket.mapNotNull(::recordLibraryYear).toSet()
+            val fallbackYear = years.singleOrNull()
+            bucket.groupBy { "${recordLibraryTitle(it).lowercase(Locale.ROOT)}|${recordLibraryYear(it) ?: fallbackYear ?: ""}" }.entries
+        }
         .map { (key, groupedRecords) ->
             val sortedRecords = groupedRecords.sortedByDescending { it.createdAt }
             val latest = sortedRecords.first()
@@ -126,21 +136,18 @@ internal fun buildDownloadRecordEpisodeGroups(
         )
 }
 
-private fun downloadAnimeGroupKey(record: DanmuDownloadRecord): String {
-    return normalizeRecordLibraryAnimeKey(record.animeTitle).ifBlank {
-        record.animeId.takeIf { it > 0L }?.let { "anime-$it" }
-            ?: record.animeTitle.trim().lowercase().ifBlank { "unknown-anime" }
-    }
+private fun recordLibraryTitle(record: DanmuDownloadRecord): String {
+    val raw = cleanDownloadAnimeTitle(record.animeTitle)
+    if (raw.isNotBlank() && raw !in setOf("已有弹幕", "未命名剧集", "未命名", "弹幕下载") &&
+        !Regex("(?i)^(?:S(?:eason)?\\s*\\d+|第[0-9一二三四五六七八九十]+季)$").matches(raw)) return raw
+    val metadata = DownloadLocalImportPlanner.metadata(record)
+    return metadata.title + if ((metadata.season ?: 1) > 1) " 第${metadata.season}季" else ""
 }
 
-private fun normalizeRecordLibraryAnimeKey(raw: String): String {
-    return raw
-        .replace(Regex("\\s*from\\s+.*$", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("【[^】]*】"), "")
-        .replace(Regex("[\\s\\p{Punct}　【】（）()\\[\\]「」]"), "")
-        .lowercase()
-        .trim()
-}
+private fun recordLibraryYear(record: DanmuDownloadRecord): Int? =
+    LocalDanmuMetadataResolver.resolve(record.fileName).year
+        ?: LocalDanmuMetadataResolver.resolve(record.animeTitle + ".xml").year
+        ?: DownloadLocalImportPlanner.metadata(record).year
 
 private fun extractAnimeYear(raw: String): String {
     return Regex("[（(](\\d{4})[)）]")

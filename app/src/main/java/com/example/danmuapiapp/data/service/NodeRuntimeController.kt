@@ -63,6 +63,32 @@ internal class NodeRuntimeController private constructor(private val context: Co
     fun attach(host: Host) { hosts.attach(host) }
     fun detach(host: Host) { hosts.detach(host) }
 
+    fun stoppedProcessRetirementTicket(): Long? = synchronized(stateLock) {
+        if (serviceStopRequested && !isRunning && !isStopping && startupStartedAtMs == 0L) {
+            commands.commandVersion
+        } else null
+    }
+
+    /** Called after Service destruction and ordered FRP cleanup, never on host loss alone. */
+    fun retireStoppedProcess(ticket: Long) {
+        mainHandler.post {
+            synchronized(stateLock) {
+                val active = isRunning || isStopping || startupStartedAtMs > 0L ||
+                    nodeThread?.isAlive == true || nativeInvocation.isActive
+                if (shouldRetireStoppedNodeProcess(
+                        currentStopCommand = commands.acceptsStopCallback(ticket),
+                        stopRequested = serviceStopRequested,
+                        desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(context),
+                        runtimeActive = active
+                    )
+                ) {
+                    logLifecycle("受控停止清理完成，退出空闲 :node 进程")
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }
+            }
+        }
+    }
+
     fun hasActiveRuntime(): Boolean = synchronized(stateLock) {
         isRunning || isStopping || nodeThread?.isAlive == true || startupStartedAtMs > 0L
     }
@@ -293,7 +319,7 @@ internal class NodeRuntimeController private constructor(private val context: Co
                         var crashThrowable: Throwable? = null
                         try {
                             exitCode = NodeBridge.startNodeWithArguments(
-                                arrayOf("node", "${projectDir.absolutePath}/main.js")
+                                arrayOf("node", "--experimental-quic", "${projectDir.absolutePath}/main.js")
                             )
                         } catch (t: Throwable) {
                             crashThrowable = t
@@ -405,6 +431,8 @@ internal class NodeRuntimeController private constructor(private val context: Co
             if (nodeThread === Thread.currentThread()) nodeThread = null
             decideNodeRuntimeExitAction(stopping, exitCode, crashThrowable)
         }
+        // Distinguish a completed invocation from a young process still starting.
+        NodeService.recordStoppedProcess(context)
         when (exitAction) {
             NodeRuntimeExitAction.ReportError -> {
                 val startupFailure = StartupFailureStore.readNormal(context)

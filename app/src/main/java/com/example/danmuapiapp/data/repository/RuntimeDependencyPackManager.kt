@@ -284,7 +284,7 @@ class RuntimeDependencyPackManager @Inject constructor(
     private fun validateManifest(manifest: RuntimePackManifest) {
         if (manifest.schema != RuntimeDependencyPackProtocol.MANIFEST_SCHEMA ||
             manifest.runtimeProtocol != RuntimeDependencyPackProtocol.RUNTIME_PROTOCOL ||
-            manifest.nodeMajor != RuntimeDependencyPackProtocol.EMBEDDED_NODE_MAJOR ||
+            !RuntimeDependencyPackProtocol.acceptsNodeVersion(manifest.nodeMajor, manifest.artifactSha256) ||
             manifest.serial <= 0L ||
             manifest.dependencies.isEmpty() ||
             manifest.packages.isEmpty()

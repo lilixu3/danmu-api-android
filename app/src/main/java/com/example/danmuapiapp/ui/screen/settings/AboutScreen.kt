@@ -143,7 +143,7 @@ fun AboutScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel
                 }
                 Spacer(Modifier.height(12.dp))
                 AboutExpandable(Icons.Outlined.Explore, "使用指南", "三步，让弹幕出现在屏幕上") {
-                    AboutGuideStep("01", "准备好你的服务", "在首页或核心页安装稳定版、开发版核心，然后点击「启动服务」。在线下载较慢时，到「设置 → 网络设置」切换 GitHub 线路。")
+                    AboutGuideStep("01", "准备好你的服务", "在首页或核心页安装稳定版、开发版核心，然后点击「启动服务」。在线下载较慢时，到「设置 → 下载与更新」切换 GitHub 线路。")
                     AboutGuideStep("02", "复制接口地址", "点击首页的局域网地址，复制完整接口地址。其他设备需要连接同一局域网。端口与 Token 可在「设置 → 服务配置」中调整。")
                     AboutGuideStep("03", "连接你喜欢的播放器", "在播放器中找到「自定义弹幕 API」，粘贴刚才的地址。播放视频时搜索弹幕，再选择对应剧集即可。")
                     AboutNote("还有更多玩法", "在「工具 → 本地弹幕」导入本地文件，用「弹幕下载」批量保存剧集弹幕。来源、过滤与合并规则可在「工具 → 配置管理」中调整。")
@@ -169,7 +169,7 @@ fun AboutScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel
                 AboutExpandable(Icons.Outlined.FavoriteBorder, "开源与致谢", "感谢每一份让弹幕相遇的贡献") {
                     AboutNote("技术信息", "界面使用 Kotlin 与 Jetpack Compose 构建，弹幕核心通过 nodejs-mobile 在手机上运行。服务与界面分开运行，可选择普通或 Root 运行模式。")
                     Spacer(Modifier.height(16.dp))
-                    AboutNote("增强直连组件", "来源增强直连使用 Go、quic-go 与 ECH，源码位于项目 runtime/outbound/src，采用 AGPL-3.0。")
+                    AboutNote("增强直连组件", "来源增强直连使用 Node.js 原生 TLS/QUIC，GitHub 增强直连使用 OkHttp/DoH。相关源码与第三方许可见项目仓库。")
                     Spacer(Modifier.height(16.dp))
                     AboutLinkRow(Icons.Outlined.Code, "App 源码", "lilixu3/danmu-api-android") { context.openAboutUrl(ABOUT_PROJECT_URL) }
                     AboutLinkRow(Icons.Outlined.Verified, "弹幕核心 · 稳定版", "huangxd-/danmu_api") { context.openAboutUrl("https://github.com/huangxd-/danmu_api") }

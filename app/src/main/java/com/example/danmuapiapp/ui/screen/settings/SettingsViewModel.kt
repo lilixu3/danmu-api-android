@@ -141,6 +141,7 @@ class SettingsViewModel @Inject constructor(
     val fileLogEnabled = settingsRepo.fileLogEnabled
     val adminSessionState = adminSessionRepository.sessionState
     val proxyOptions = githubProxyService.proxyOptions()
+    val selectedGithubProxyId = githubProxyService.selectedProxyId
 
     var normalBootAutoStartEnabled by mutableStateOf(
         NormalAutoStartPrefs.isBootAutoStartEnabled(context)

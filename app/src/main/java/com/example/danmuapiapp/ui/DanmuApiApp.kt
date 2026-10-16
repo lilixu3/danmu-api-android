@@ -56,8 +56,11 @@ import com.example.danmuapiapp.ui.screen.settings.AboutScreen
 import com.example.danmuapiapp.ui.screen.settings.AdminModeScreen
 import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
 import com.example.danmuapiapp.ui.screen.settings.DownloadSettingsScreen
+import com.example.danmuapiapp.ui.screen.settings.DownloadUpdateSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
 import com.example.danmuapiapp.ui.screen.settings.HarmonyGuideScreen
+import com.example.danmuapiapp.ui.screen.settings.ProxySettingsScreen
+import com.example.danmuapiapp.ui.screen.tools.SourceProbeScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.RuntimeAndDirScreen
 import com.example.danmuapiapp.ui.screen.settings.ServiceConfigScreen
@@ -282,6 +285,7 @@ private fun DanmuApiMainContent() {
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
                     onOpenCacheManagement = { navController.navigate(ToolRoute.CacheManagement) },
                     onOpenDiagnostics = { navController.navigate(ToolRoute.Diagnostics) },
+                    onOpenSourceProbe = { navController.navigate(ToolRoute.SourceProbe) },
                     onOpenTunnel = { navController.navigate(ToolRoute.Tunnel) }
                 )
             }
@@ -293,6 +297,7 @@ private fun DanmuApiMainContent() {
                     onOpenWorkDir = { navController.navigate(SettingsRoute.WorkDir) },
                     onOpenServiceConfig = { navController.navigate(SettingsRoute.ServiceConfig) },
                     onOpenDanmuDownload = { navController.navigate(SettingsRoute.DanmuDownload) },
+                    onOpenDownloadUpdate = { navController.navigate(SettingsRoute.DownloadUpdate) },
                     onOpenVideoShellInjection = { navController.navigate(SettingsRoute.VideoShellInjection) },
                     onOpenNetwork = { navController.navigate(SettingsRoute.Network) },
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
@@ -324,11 +329,17 @@ private fun DanmuApiMainContent() {
             composable(SettingsRoute.DanmuDownload) {
                 DownloadSettingsScreen(onBack = { navController.popBackStack() })
             }
+            composable(SettingsRoute.DownloadUpdate) {
+                DownloadUpdateSettingsScreen(onBack = { navController.popBackStack() })
+            }
             composable(SettingsRoute.VideoShellInjection) {
                 VideoShellInjectionSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.Network) {
                 NetworkSettingsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(SettingsRoute.Proxy) {
+                ProxySettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.GithubToken) {
                 GithubTokenScreen(onBack = { navController.popBackStack() })
@@ -387,6 +398,9 @@ private fun DanmuApiMainContent() {
                     onBack = { navController.popBackStack() },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) }
                 )
+            }
+            composable(ToolRoute.SourceProbe) {
+                SourceProbeScreen(onBack = { navController.popBackStack() })
             }
             composable(ToolRoute.Diagnostics) {
                 DiagnosticsScreen(onBack = { navController.popBackStack() })

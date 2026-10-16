@@ -107,6 +107,8 @@ class GithubProxyService @Inject constructor(
     }
 
     fun buildUrlCandidates(originalUrl: String): List<String> {
+        val routing = AppOutboundSettingsStore.read(context).proxy
+        if (routing.enabled && routing.rules["github"].orEmpty() !in listOf("", "inherit")) return listOf(originalUrl)
         val option = currentSelectedOption()
         if (!hasUserSelectedProxy() || option.isOriginal) return listOf(originalUrl)
         return buildProxyCandidates(option.baseUrl, originalUrl)

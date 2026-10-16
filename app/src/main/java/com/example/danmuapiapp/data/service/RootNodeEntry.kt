@@ -40,7 +40,7 @@ object RootNodeEntry {
                 tmpDir = runtimeRoot?.resolve("cache/tmp") ?: File("/data/local/tmp"),
                 homeDir = runtimeRoot
             )
-            NodeBridge.startNodeWithArguments(arrayOf("node", entry))
+            NodeBridge.startNodeWithArguments(arrayOf("node", "--experimental-quic", entry))
         } catch (t: Throwable) {
             System.err.println("RootNodeEntry crashed: ${t.message}")
             t.printStackTrace()

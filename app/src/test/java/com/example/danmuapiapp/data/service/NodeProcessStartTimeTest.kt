@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NodeProcessStartTimeTest {
+
+    @Test
+    fun `completed invocation marker identifies only its original process`() {
+        assertTrue(isStoppedNodeProcessIdentity("123 3599000", 123, 3599000))
+        assertFalse(isStoppedNodeProcessIdentity("123 3599000", 124, 3599000))
+        assertFalse(isStoppedNodeProcessIdentity("123 3599000", 123, 3600000))
+        assertFalse(isStoppedNodeProcessIdentity("123 broken", 123, 3599000))
+    }
     private fun stat(ticks: String): String =
         "123 (node (worker) process) " + (listOf("S") + List(18) { "0" } + ticks + "0").joinToString("  ")
 

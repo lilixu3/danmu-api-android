@@ -284,6 +284,8 @@ interface DanmuDownloadRepository {
         previewLimit: Int = 50000
     ): Result<DanmuFilePreview>
     suspend fun syncExistingFiles(): Result<DownloadDirectorySyncResult>
+    /** Verify file presence without parsing payloads; imported records remain available in the library. */
+    suspend fun availableDownloadRecordIds(records: List<DanmuDownloadRecord>): Result<Set<Long>>
     suspend fun deleteRecords(
         recordIds: Set<Long>,
         deleteLocalFiles: Boolean

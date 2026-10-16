@@ -240,6 +240,34 @@ class NodeService : Service() {
             return findProcessPid(context) != null
         }
 
+        /** A newborn process may still be preparing its runtime without a listening port. */
+        fun recoveryCandidatePid(context: Context): Int? =
+            findProcessPid(context)?.takeIf {
+                isRecordedStoppedProcess(context, it) || hasProcessExceededMinUptime(it)
+            }
+
+        internal fun recordStoppedProcess(context: Context) {
+            val pid = android.os.Process.myPid()
+            val started = readProcessStartedElapsedMs(pid) ?: return
+            runCatching {
+                val marker = java.io.File(context.noBackupFilesDir, "node-runtime-exit")
+                val pending = java.io.File(marker.parentFile, "${marker.name}.$pid.pending")
+                pending.writeText("$pid $started")
+                check(pending.renameTo(marker)) { "Cannot publish stopped Node process identity" }
+            }.onFailure {
+                AppDiagnosticLogger.w(context, TAG, "无法记录普通模式进程退出标记：${it.message}")
+            }
+        }
+
+        private fun isRecordedStoppedProcess(context: Context, pid: Int): Boolean {
+            val started = readProcessStartedElapsedMs(pid) ?: return false
+            return runCatching {
+                val marker = java.io.File(context.noBackupFilesDir, "node-runtime-exit")
+                marker.isFile && marker.length() <= 128 &&
+                    isStoppedNodeProcessIdentity(marker.readText(), pid, started)
+            }.getOrDefault(false)
+        }
+
         fun killProcessIfRunning(context: Context, expectedPid: Int? = null): Boolean {
             val pid = findProcessPid(context) ?: return false
             if (expectedPid != null && pid != expectedPid) return false
@@ -524,9 +552,13 @@ class NodeService : Service() {
         tunnelCommands.execute { tunnelSupervisor?.stop(); tunnelSupervisor = null }
     }
 
-    private fun closeTunnelCommands() {
+    private fun closeTunnelCommands(afterStop: () -> Unit = {}) {
         tunnelCommandsClosed = true
-        tunnelCommands.close { tunnelSupervisor?.stop(); tunnelSupervisor = null }
+        tunnelCommands.close {
+            tunnelSupervisor?.stop()
+            tunnelSupervisor = null
+            afterStop()
+        }
     }
 
     private fun handleNotificationDismissed(startId: Int): Int {
@@ -991,7 +1023,6 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
-        closeTunnelCommands()
         val appContext = applicationContext
         val desiredRunning = NodeKeepAlivePrefs.isDesiredRunning(appContext)
         val unexpected = runtime.isUnexpectedServiceDestroy(serviceStopRequested, desiredRunning)
@@ -1001,6 +1032,10 @@ class NodeService : Service() {
         )
         // Service 销毁不代表 JNI 已退出。解绑宿主即可，保留控制器、线程及启动/停止任务。
         runtime.detach(runtimeHost)
+        val retirementTicket = if (!unexpected) runtime.stoppedProcessRetirementTicket() else null
+        closeTunnelCommands {
+            retirementTicket?.let(runtime::retireStoppedProcess)
+        }
         serviceStopRequested = true
         stopEndpointInfoNetworkMonitor()
         scope.cancel()

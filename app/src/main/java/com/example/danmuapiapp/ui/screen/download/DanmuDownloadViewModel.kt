@@ -74,13 +74,18 @@ class DanmuDownloadViewModel @Inject constructor(
         refreshingSeriesKey = group.key
         viewModelScope.launch {
             try {
+                missingEpisodes = null
                 val result = seriesRefresh.load(base, group.records, settings.value.matchMode)
-                val missing = missingDownloadedEpisodes(result.episodes, group.records)
-                if (missing.isEmpty()) operationMessage = "《${group.title}》源里共 ${result.episodes.size} 集，已经全部下载"
-                else missingEpisodes = MissingEpisodesState(group.title, result.anime.copy(title = group.records.first().animeTitle),
+                val available = downloadRepository.availableDownloadRecordIds(group.records).getOrThrow()
+                val missing = missingDownloadedEpisodes(result.episodes, group.records, available)
+                if (missing.isEmpty()) operationMessage = if (result.confirmedFresh)
+                    "《${group.title}》源里共 ${result.episodes.size} 集，已经全部下载或导入本地"
+                    else "《${group.title}》当前集列表共 ${result.episodes.size} 集，未发现待下载集；尚未确认源端最新列表，请稍后重试"
+                else missingEpisodes = MissingEpisodesState(group.title, result.anime,
                     missing, result.episodes.size - missing.size, result.episodes.size, result.way,
                     missing.map { it.episodeId }.toSet())
-            } catch (e: Exception) { errorMessage = e.message ?: "刷新失败" }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { errorMessage = e.message ?: "刷新失败" }
             finally { refreshingSeriesKey = null }
         }
     }

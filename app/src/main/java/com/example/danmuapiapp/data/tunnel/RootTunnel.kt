@@ -61,7 +61,7 @@ object RootTunnel {
             appendLine("  echo \"already:\$1\"; exit 0")
             appendLine("fi")
             appendLine("rm -f \"\$FRP_PID\" \"\$FRP_PID.start\" \"\$FRP_PID.version\" 2>/dev/null || true")
-            appendLine("FRP_LOG_HELPER=${shellQuote(File(context.applicationInfo.nativeLibraryDir, "libdanmu_outbound.so").absolutePath)}")
+            appendLine("FRP_LOG_APK=${shellQuote(context.applicationInfo.sourceDir)}")
             appendLine("frpc_new_instance || exit 6")
             appendLine(RootTunnelScripts.logSink(trackLink = true))
             appendLine("if command -v setsid >/dev/null 2>&1; then")
