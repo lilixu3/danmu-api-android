@@ -214,6 +214,7 @@ fun ProxySettingsScreen(onBack: () -> Unit) {
 
 internal fun routeTitle(route: String, config: AppProxySettings, source: String): String = when (route) {
     "inherit" -> AppProxySourceCatalog.inheritLabel(source)
+    "direct" -> "设备当前网络"
     "local" -> "本地文件"; "legacy" -> "沿用核心配置 · 核心代理"; "mirror" -> "下载镜像"; else -> config.label(route)
 }
 
@@ -245,10 +246,10 @@ private fun SourceRouteRow(source: String, route: String, config: AppProxySettin
 @Composable
 internal fun SourceRouteEditor(source: String, initial: String, config: AppProxySettings, busy: Boolean, nodeChecks: ConnectivityChecks,
     onProbeNodes: (List<AppProxyNode>) -> Unit, onDismiss: () -> Unit, onAddNode: () -> Unit, onAdvanced: () -> Unit, onSave: (String) -> Unit) {
-    var selected by remember(source) { mutableStateOf(if (initial in listOf("legacy", "mirror", "direct")) "inherit" else initial) }
+    var selected by remember(source) { mutableStateOf(if (initial in listOf("legacy", "mirror")) "inherit" else initial) }
     var query by remember { mutableStateOf("") }
     val visibleNodes = config.nodes.filter { it.name.contains(query, true) || it.host.contains(query, true) }
-    val valid = selected in listOf("inherit", "enhanced") || config.nodes.any { selected == "node:${it.id}" }
+    val valid = selected in listOf("inherit", "enhanced", "direct") || config.nodes.any { selected == "node:${it.id}" }
     AppDialog(onDismissRequest = onDismiss, style = AppDialogStyle.Selection, scrollContent = false,
         title = { Text(AppProxySourceCatalog.label(source)) }, text = {
         Column(Modifier.fillMaxWidth()) {
@@ -260,7 +261,7 @@ internal fun SourceRouteEditor(source: String, initial: String, config: AppProxy
                     HorizontalDivider(Modifier.width(20.dp))
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(routeTitle(selected, config, source), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(if (selected.startsWith("node:")) "通过此节点访问" else if (selected == "enhanced") "优化直连，不更换出口地区" else if (source in AppProxySourceCatalog.coreProxySources) "按核心配置访问" else if (source == "github") "沿用下载与更新线路" else "使用设备当前网络", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (selected.startsWith("node:")) "通过此节点访问" else if (selected == "direct") "绕过核心和 App 代理，使用设备默认网络" else if (selected == "enhanced") "优化直连，不更换出口地区" else if (source in AppProxySourceCatalog.coreProxySources) "按核心配置访问" else if (source == "github") "沿用下载与更新线路" else "使用设备当前网络", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.Rounded.ArrowForward, null, Modifier.size(18.dp))
                     Icon(Icons.Rounded.Public, null, Modifier.size(24.dp))
@@ -271,6 +272,9 @@ internal fun SourceRouteEditor(source: String, initial: String, config: AppProxy
                 item { RouteMethod(AppProxySourceCatalog.inheritLabel(source), if (source == "github") "沿用下载与更新设置中的线路" else if (source in AppProxySourceCatalog.coreProxySources) "使用核心代理设置；未配置时使用设备当前网络" else "通过设备当前网络访问此来源", Icons.Rounded.Route, selected == "inherit", !busy) { selected = "inherit" } }
                 if (source in AppOutboundSettings.supportedSources || source == "github") item {
                     RouteMethod("增强直连", if (source == "github") "优化 GitHub 域名解析，仍使用当前出口" else "优化域名解析与安全连接，仍使用当前出口", Icons.Rounded.Bolt, selected == "enhanced", !busy) { selected = "enhanced" }
+                }
+                if (source in AppProxySourceCatalog.coreProxySources) item {
+                    RouteMethod("设备当前网络", "绕过核心和 App 代理；设备 VPN 或路由策略仍可能影响连接", Icons.Rounded.Smartphone, selected == "direct", !busy) { selected = "direct" }
                 }
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -290,7 +294,7 @@ internal fun SourceRouteEditor(source: String, initial: String, config: AppProxy
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Text(if (source in AppProxySourceCatalog.coreProxySources) "选择 App 代理节点时优先使用该节点；沿用核心配置时恢复核心代理规则。" else "选择 App 代理节点时优先使用该节点；未指定节点时使用该来源的默认线路。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (source in AppProxySourceCatalog.coreProxySources) "默认沿用核心代理配置；可单独选择设备当前网络或指定 App 节点。" else "选择 App 代理节点时优先使用该节点；未指定节点时使用该来源的默认线路。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (selected == "enhanced" && source != "github") IconButton(enabled = !busy, onClick = onAdvanced) { Icon(Icons.Rounded.Tune, "增强直连连接参数") }
                 Button(enabled = valid && !busy, onClick = { onSave(selected) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (busy) "正在保存…" else "使用这条线路") }

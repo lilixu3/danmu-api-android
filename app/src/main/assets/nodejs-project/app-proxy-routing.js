@@ -32,7 +32,7 @@ function coreProxyConfig(raw) {
   const entries = String(raw || '').split(',').map(value => value.trim()).filter(Boolean);
   return {entries, forward:entries.find(value => /^https?:\/\//i.test(value)) || ''};
 }
-const migrateRoute = route => route === 'direct' ? 'inherit' : route;
+const migrateDefaultRoute = route => route === 'direct' ? 'inherit' : route;
 function validateProxyConfig(input = {}) {
   const rawNodes = Array.isArray(input.nodes) ? input.nodes : [];
   if (rawNodes.length > 1000) throw new Error('代理节点不能超过 1000 个');
@@ -59,9 +59,13 @@ function validateProxyConfig(input = {}) {
   const validRule = value => typeof value === 'string' && value.length <= 200 && !/[\r\n]/.test(value);
   const rules = input.rules && typeof input.rules === 'object' && !Array.isArray(input.rules) ? input.rules : {};
   if (Object.keys(rules).length > 1000 || !Object.values(rules).every(validRule)) throw new Error('来源分流规则无效');
-  const defaultRoute = input.defaultRoute || 'inherit';
+  const supportsDeviceRoute = Number.isInteger(input.routeVersion) && input.routeVersion >= 2;
+  const defaultRoute = migrateDefaultRoute(input.defaultRoute || 'inherit');
   if (!validRule(defaultRoute)) throw new Error('默认线路无效');
-  return { enabled:input.enabled === true, defaultRoute:migrateRoute(defaultRoute), rules:Object.fromEntries(Object.entries(rules).map(([source,rule])=>[source,migrateRoute(rule)])), nodes };
+  const normalizedRules=Object.fromEntries(Object.entries(rules).map(([source,route])=>[
+    source,!supportsDeviceRoute && route==='direct'?'inherit':route
+  ]));
+  return { enabled:input.enabled === true, routeVersion:2, defaultRoute, rules:normalizedRules, nodes };
 }
 async function bindCoreSourceContext(directory) {
   const { pathToFileURL } = require('node:url');
@@ -128,8 +132,9 @@ function routeFor(target, proxy, source = sourceFor(target)) {
   if (forcedRoute.getStore()) return {...forcedRoute.getStore(),source};
   if (!proxy?.enabled) return { mode:'inherit', source };
   // An explicit source choice also overrides old App default-node rules.
-  const rule = migrateRoute(proxy.rules?.[source] ?? proxy.defaultRoute ?? 'inherit');
+  const rule = proxy.rules?.[source] ?? (coreProxySources.has(source) ? 'inherit' : proxy.defaultRoute ?? 'inherit');
   if (['inherit','enhanced'].includes(rule)) return { mode:rule, source };
+  if (rule === 'direct') return { mode:'direct', source };
   const node = proxy.nodes?.find(item => rule === 'node:' + item.id);
   return { mode:'proxy', node, source }; // A deleted binding fails closed.
 }

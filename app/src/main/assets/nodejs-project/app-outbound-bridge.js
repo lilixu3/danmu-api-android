@@ -10,6 +10,7 @@ const SOURCES = new Map([
   ['api.danmaku.weeblify.app', 'dandan'],
   ['nipaplay.aimes-soft.com', 'dandan'],
   ['api.animeko.org', 'animeko'],
+  ['api.bgm.tv', 'animeko'],
   ['danmaku-global.myani.org', 'animeko'],
   ['danmaku-cn.myani.org', 'animeko'],
   ['s1.animeko.openani.org', 'animeko'],

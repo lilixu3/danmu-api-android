@@ -1,35 +1,28 @@
 {
-  "nodeVersion": "26.11.1",
+  "nodeVersion": "26.12.0",
   "opensslVersion": "4.0.3",
   "variant": "lite",
   "profile": "danmu-android-lite-ech-h3",
   "source": {
-    "kind": "github-actions",
+    "kind": "release",
     "repository": "fogtape/nodejs-mobile",
-    "branch": "openssl4/node26.11.1",
-    "sourceCommit": "a8a46ef5c94228a5a247d8aa1ba59a7212eed061",
-    "sourceTree": "7b3803dc0f15a07cf49786ebcba308d37a5ed435",
-    "recipeCommit": "a8a46ef5c94228a5a247d8aa1ba59a7212eed061",
-    "runId": 38674319285,
-    "artifactId": 11945892508,
-    "artifactCreatedAt": "2026-10-15T03:18:49Z",
-    "statusWhenDownloaded": "in_progress",
-    "buildAndPackageConclusion": "success",
-    "artifactName": "nodejs-mobile-android-lite",
-    "localAssetName": "nodejs-mobile-android-lite-a8a46ef5.zip",
-    "artifactSize": 78654504,
-    "artifactSha256": "3f1cbf69e2190d8cd9d1b02edb01d2011be51074f18cdac88e9c72c4dfd60e20",
-    "url": "https://api.github.com/repos/fogtape/nodejs-mobile/actions/artifacts/11945892508/zip",
-    "curatedValidationRuns": {
-      "lite": "https://github.com/fogtape/nodejs-mobile/actions/runs/38673845218",
-      "full": "https://github.com/fogtape/nodejs-mobile/actions/runs/38674504609"
-    },
-    "conclusion": "success"
+    "tag": "v26.12.0-0",
+    "sourceCommit": "764f001a9b3d87bdd619f3454e77604ab1842ce2",
+    "sourceTree": "48d300ec15fe3f152d51299f430dca7752ca98fb",
+    "recipeCommit": "333a98671a310515d78db8f5d18258f7ed0c636f",
+    "releaseUrl": "https://github.com/fogtape/nodejs-mobile/releases/tag/v26.12.0-0",
+    "publishedAt": "2026-10-18T10:01:23Z",
+    "prerelease": true,
+    "assetId": 653137883,
+    "localAssetName": "nodejs-mobile-android-lite-26.12.0-0.zip",
+    "artifactSize": 76308321,
+    "artifactSha256": "828502ae3285a43179de96c7cee52651d8c8d3831f86823320113f9fe0156872",
+    "url": "https://github.com/fogtape/nodejs-mobile/releases/download/v26.12.0-0/nodejs-mobile-android-lite-26.12.0-0.zip"
   },
   "files": {
-    "libnode/bin/arm64-v8a/libnode.so": "823c2acd4efa345d739389dd6e2463ccf53ba3a5a760d7db1d41dde7dbf73196",
-    "libnode/bin/armeabi-v7a/libnode.so": "fe85a706855ee2d11829847305540165e3df783cae182ce1db41691666df73ee",
-    "libnode/bin/x86_64/libnode.so": "f6e7e9007e8d5b55ceea53185e8a5eeaf9f790806779f6d7eb2fcf21988507da"
+    "libnode/bin/arm64-v8a/libnode.so": "695df887ec166270fca05492b6b43fb96ce16822a59577fd73ec4e12a04cb931",
+    "libnode/bin/armeabi-v7a/libnode.so": "8491312feb6f6e8bcfaeeb35124cc42e4caee13ce7c19815018df6e47cce01f6",
+    "libnode/bin/x86_64/libnode.so": "7775b71ff85e01d4dc7e04330277d0eb2cf1494814766bd75d7e907a21dcadda"
   },
   "headers": {
     "include/node/cppgc/allocation.h": "68ab91824ec63d5b7a3d679eefca271d0679a1a44f56a5bf0ba20cc0ad10fc2f",
@@ -85,7 +78,7 @@
     "include/node/node_api_types.h": "a25356630d3058f0a0c8937d9f297e9471e037fda58c2696d8a505c2bd99cb00",
     "include/node/node_buffer.h": "42db024cf1ae62db1a9a23477ee9927e9b7ed04999bd4498371b144962a31525",
     "include/node/node_object_wrap.h": "388ec1ec65215ccfd90d5a48ca50e5cdc88a37f9614b7d6e7ad5fd26cca850ed",
-    "include/node/node_version.h": "31e5efa6cf9595edd02b2d4ba51f5884da1e9a587abad99126477073eb9c26ce",
+    "include/node/node_version.h": "6f14117326f9dfd4d8818e9774fe5f6f4aab198e2b1a031736437e359a69e44f",
     "include/node/uv.h": "bb9ed99b80cd22c58361bffdfbb2aa7029ce0391cde616745c0072a6f3c03219",
     "include/node/uv/aix.h": "bed77e4cf6c06f1224e681cbe607eff04713ca0c1e1f4a102e6a6565ee3f02aa",
     "include/node/uv/bsd.h": "963533ff4b16f72a204a8c760896a857c54d0ac50570f1793e3bef1f2ae8b35f",
@@ -185,8 +178,8 @@
         "libc++abi",
         "libunwind"
       ],
-      "startedAt": "2026-10-15T03:21:17.799311+00:00",
-      "completedAt": "2026-10-15T03:23:25.760071+00:00",
+      "startedAt": "2026-10-18T10:19:17.272944+00:00",
+      "completedAt": "2026-10-18T10:20:42.519809+00:00",
       "sha256": "a70c591d387210a0ad2d243320ca3b89f84041ee00c022d8cbe2b8a22d5a1bb0",
       "cmakeCommand": [
         "cmake",
@@ -195,7 +188,7 @@
         "-S",
         "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/runtimes",
         "-B",
-        "/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-arm64-v8a-36bhs8np",
+        "/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-arm64-v8a-a1yowc4h",
         "-C",
         "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/libcxx/cmake/caches/AndroidNDK.cmake",
         "-DCMAKE_SYSTEM_NAME=Android",
@@ -203,7 +196,7 @@
         "-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a",
         "-DCMAKE_SYSTEM_VERSION=24",
         "-DCMAKE_ANDROID_STL_TYPE=none",
-        "-DCMAKE_USER_MAKE_RULES_OVERRIDE=/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-arm64-v8a-36bhs8np/android-rules.cmake",
+        "-DCMAKE_USER_MAKE_RULES_OVERRIDE=/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-arm64-v8a-a1yowc4h/android-rules.cmake",
         "-DCMAKE_SYSTEM_PROCESSOR=aarch64",
         "-DCMAKE_C_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang",
         "-DCMAKE_CXX_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang++",
@@ -245,26 +238,174 @@
         "-DCMAKE_CXX_FLAGS=-DHAS_THREAD_LOCAL -ffunction-sections -fdata-sections",
         "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-soname,libc++_shared.so -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--gc-sections"
       ]
+    },
+    "armeabi-v7a": {
+      "kind": "source-built",
+      "abi": "armeabi-v7a",
+      "androidApi": 24,
+      "ndkVersion": "29.0.14206865",
+      "llvmCommit": "5e96669f06077099aa41290cdb4c5e6fa0f59349",
+      "androidToolchainCommit": "1dab3288f660d43a6cb2479107e2b54b3ab0a2a1",
+      "sourceTreeSha256": "76347840128522bf2342ff200e93aec037cd9660c8080cf82a3b8f3795258429",
+      "components": [
+        "libc++",
+        "libc++abi",
+        "libunwind"
+      ],
+      "startedAt": "2026-10-18T10:20:53.024236+00:00",
+      "completedAt": "2026-10-18T10:22:12.770716+00:00",
+      "sha256": "4c10eafaa80d6716f9812fe28a18b8c85cca8c5404b706317af17ee27e8017ce",
+      "cmakeCommand": [
+        "cmake",
+        "-G",
+        "Unix Makefiles",
+        "-S",
+        "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/runtimes",
+        "-B",
+        "/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-armeabi-v7a-6yi_bg1d",
+        "-C",
+        "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/libcxx/cmake/caches/AndroidNDK.cmake",
+        "-DCMAKE_SYSTEM_NAME=Android",
+        "-DCMAKE_ANDROID_NDK=/data/data/com.termux/files/home/android-ndk-tmp",
+        "-DCMAKE_ANDROID_ARCH_ABI=armeabi-v7a",
+        "-DCMAKE_SYSTEM_VERSION=24",
+        "-DCMAKE_ANDROID_STL_TYPE=none",
+        "-DCMAKE_USER_MAKE_RULES_OVERRIDE=/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-armeabi-v7a-6yi_bg1d/android-rules.cmake",
+        "-DCMAKE_SYSTEM_PROCESSOR=arm",
+        "-DCMAKE_C_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang++",
+        "-DCMAKE_ASM_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang",
+        "-DCMAKE_C_COMPILER_TARGET=armv7a-linux-androideabi24",
+        "-DCMAKE_CXX_COMPILER_TARGET=armv7a-linux-androideabi24",
+        "-DCMAKE_ASM_COMPILER_TARGET=armv7a-linux-androideabi24",
+        "-DCMAKE_SYSROOT=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/sysroot",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DLIBCXX_HAS_PTHREAD_LIB=OFF",
+        "-DLIBCXX_HAS_GCC_LIB=OFF",
+        "-DLIBCXXABI_HAS_PTHREAD_LIB=OFF",
+        "-DLIBCXXABI_HAS_GCC_LIB=OFF",
+        "-DLIBUNWIND_HAS_PTHREAD_LIB=OFF",
+        "-DLIBUNWIND_HAS_GCC_LIB=OFF",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DANDROID_NATIVE_API_LEVEL=24",
+        "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
+        "-DLLVM_INCLUDE_TESTS=OFF",
+        "-DLIBCXX_INCLUDE_TESTS=OFF",
+        "-DLIBCXXABI_INCLUDE_TESTS=OFF",
+        "-DLIBUNWIND_INCLUDE_TESTS=OFF",
+        "-DLIBCXX_INCLUDE_BENCHMARKS=OFF",
+        "-DLIBCXX_ENABLE_STATIC=OFF",
+        "-DLIBCXX_ENABLE_SHARED=ON",
+        "-DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF",
+        "-DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON",
+        "-DLIBCXXABI_ENABLE_SHARED=OFF",
+        "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
+        "-DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY=ON",
+        "-DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY=ON",
+        "-DLIBUNWIND_ENABLE_SHARED=OFF",
+        "-DLIBUNWIND_ENABLE_STATIC=ON",
+        "-DLIBCXX_ENABLE_TIME_ZONE_DATABASE=OFF",
+        "-DLIBCXX_ABI_NAMESPACE=__ndk1",
+        "-DLIBCXX_ABI_VERSION=1",
+        "-DLIBCXX_LIBRARY_VERSION=",
+        "-DCMAKE_PLATFORM_NO_VERSIONED_SONAME=ON",
+        "-DCMAKE_CXX_FLAGS=-DHAS_THREAD_LOCAL -ffunction-sections -fdata-sections",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-soname,libc++_shared.so -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--gc-sections"
+      ]
+    },
+    "x86_64": {
+      "kind": "source-built",
+      "abi": "x86_64",
+      "androidApi": 24,
+      "ndkVersion": "29.0.14206865",
+      "llvmCommit": "5e96669f06077099aa41290cdb4c5e6fa0f59349",
+      "androidToolchainCommit": "1dab3288f660d43a6cb2479107e2b54b3ab0a2a1",
+      "sourceTreeSha256": "76347840128522bf2342ff200e93aec037cd9660c8080cf82a3b8f3795258429",
+      "components": [
+        "libc++",
+        "libc++abi",
+        "libunwind"
+      ],
+      "startedAt": "2026-10-18T10:22:21.335792+00:00",
+      "completedAt": "2026-10-18T10:23:57.181232+00:00",
+      "sha256": "aaa82ead0501183cb2bfa8885b54cf229a6ad41a3d7f9ab796a930d10265d7d0",
+      "cmakeCommand": [
+        "cmake",
+        "-G",
+        "Unix Makefiles",
+        "-S",
+        "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/runtimes",
+        "-B",
+        "/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-x86_64-pbpnf1cx",
+        "-C",
+        "/data/data/com.termux/files/home/.cache/danmu-llvm-r29/source/libcxx/cmake/caches/AndroidNDK.cmake",
+        "-DCMAKE_SYSTEM_NAME=Android",
+        "-DCMAKE_ANDROID_NDK=/data/data/com.termux/files/home/android-ndk-tmp",
+        "-DCMAKE_ANDROID_ARCH_ABI=x86_64",
+        "-DCMAKE_SYSTEM_VERSION=24",
+        "-DCMAKE_ANDROID_STL_TYPE=none",
+        "-DCMAKE_USER_MAKE_RULES_OVERRIDE=/data/data/com.termux/files/home/danmu-api-android/build/native-dependencies/libcxx-x86_64-pbpnf1cx/android-rules.cmake",
+        "-DCMAKE_SYSTEM_PROCESSOR=x86_64",
+        "-DCMAKE_C_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang++",
+        "-DCMAKE_ASM_COMPILER=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/bin/clang",
+        "-DCMAKE_C_COMPILER_TARGET=x86_64-linux-android24",
+        "-DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-android24",
+        "-DCMAKE_ASM_COMPILER_TARGET=x86_64-linux-android24",
+        "-DCMAKE_SYSROOT=/data/data/com.termux/files/home/android-ndk-tmp/toolchains/llvm/prebuilt/linux-aarch64/sysroot",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DLIBCXX_HAS_PTHREAD_LIB=OFF",
+        "-DLIBCXX_HAS_GCC_LIB=OFF",
+        "-DLIBCXXABI_HAS_PTHREAD_LIB=OFF",
+        "-DLIBCXXABI_HAS_GCC_LIB=OFF",
+        "-DLIBUNWIND_HAS_PTHREAD_LIB=OFF",
+        "-DLIBUNWIND_HAS_GCC_LIB=OFF",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DANDROID_NATIVE_API_LEVEL=24",
+        "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
+        "-DLLVM_INCLUDE_TESTS=OFF",
+        "-DLIBCXX_INCLUDE_TESTS=OFF",
+        "-DLIBCXXABI_INCLUDE_TESTS=OFF",
+        "-DLIBUNWIND_INCLUDE_TESTS=OFF",
+        "-DLIBCXX_INCLUDE_BENCHMARKS=OFF",
+        "-DLIBCXX_ENABLE_STATIC=OFF",
+        "-DLIBCXX_ENABLE_SHARED=ON",
+        "-DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF",
+        "-DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON",
+        "-DLIBCXXABI_ENABLE_SHARED=OFF",
+        "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
+        "-DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY=ON",
+        "-DLIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY=ON",
+        "-DLIBUNWIND_ENABLE_SHARED=OFF",
+        "-DLIBUNWIND_ENABLE_STATIC=ON",
+        "-DLIBCXX_ENABLE_TIME_ZONE_DATABASE=OFF",
+        "-DLIBCXX_ABI_NAMESPACE=__ndk1",
+        "-DLIBCXX_ABI_VERSION=1",
+        "-DLIBCXX_LIBRARY_VERSION=",
+        "-DCMAKE_PLATFORM_NO_VERSIONED_SONAME=ON",
+        "-DCMAKE_CXX_FLAGS=-DHAS_THREAD_LOCAL -ffunction-sections -fdata-sections",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-soname,libc++_shared.so -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--gc-sections"
+      ]
     }
   },
   "builtLibraries": {
     "arm64-v8a": {
       "libnode.so": {
-        "bytes": 71308112,
-        "sha256": "823c2acd4efa345d739389dd6e2463ccf53ba3a5a760d7db1d41dde7dbf73196",
+        "bytes": 71373648,
+        "sha256": "695df887ec166270fca05492b6b43fb96ce16822a59577fd73ec4e12a04cb931",
         "loadAlignment": [
           "0x4000",
           "0x4000",
           "0x4000"
         ],
         "relroEnd": [
-          "0x43dc000"
+          "0x43ec000"
         ],
         "relroPaddingSafe": true
       },
       "libnative-lib.so": {
         "bytes": 7928,
-        "sha256": "ef35c3ee869481367276636e9b903767356300250c855e78a9c2ad13d6903a60",
+        "sha256": "695cb57cc97ac12b1b7bc16201a4d3482b798a4a283b952f27a03b3197f97472",
         "loadAlignment": [
           "0x4000",
           "0x4000",
@@ -288,6 +429,87 @@
         ],
         "relroPaddingSafe": true
       }
+    },
+    "armeabi-v7a": {
+      "libnode.so": {
+        "bytes": 64237712,
+        "sha256": "8491312feb6f6e8bcfaeeb35124cc42e4caee13ce7c19815018df6e47cce01f6",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x3d30000"
+        ],
+        "relroPaddingSafe": true
+      },
+      "libnative-lib.so": {
+        "bytes": 5484,
+        "sha256": "6aa49ff93dbc4de64d6868a20cb2f403c8e4c206ce7c40eb4cd5297e7a5741de",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x8000"
+        ],
+        "relroPaddingSafe": true
+      },
+      "libc++_shared.so": {
+        "bytes": 1141864,
+        "sha256": "4c10eafaa80d6716f9812fe28a18b8c85cca8c5404b706317af17ee27e8017ce",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x11c000"
+        ],
+        "relroPaddingSafe": true
+      }
+    },
+    "x86_64": {
+      "libnode.so": {
+        "bytes": 73520136,
+        "sha256": "7775b71ff85e01d4dc7e04330277d0eb2cf1494814766bd75d7e907a21dcadda",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x45f4000"
+        ],
+        "relroPaddingSafe": true
+      },
+      "libnative-lib.so": {
+        "bytes": 7960,
+        "sha256": "03f7ae18596cafafb7eebf143362d41a7aa86cef56c27e12b45e6f1ee755642f",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x8000"
+        ],
+        "relroPaddingSafe": true
+      },
+      "libc++_shared.so": {
+        "bytes": 1325792,
+        "sha256": "aaa82ead0501183cb2bfa8885b54cf229a6ad41a3d7f9ab796a930d10265d7d0",
+        "loadAlignment": [
+          "0x4000",
+          "0x4000",
+          "0x4000"
+        ],
+        "relroEnd": [
+          "0x148000"
+        ],
+        "relroPaddingSafe": true
+      }
     }
   },
   "linkerFlags": [
@@ -295,41 +517,154 @@
     "-Wl,-z,common-page-size=16384"
   ],
   "validation": {
-    "androidBuildAndBootH3Smoke": "https://github.com/fogtape/nodejs-mobile/actions/runs/38674319285",
-    "androidCuratedLite": {
-      "runId": 38673845218,
-      "passed": 221,
-      "failed": 0,
-      "napiAddon": "passed"
+    "runtimeArchive": {
+      "sizeAndSha256": "passed",
+      "zipIntegrity": "passed"
     },
-    "androidCuratedFull": {
-      "runId": 38674504609,
-      "passed": 221,
-      "failed": 0,
-      "napiAddon": "passed"
+    "nativeRuntimeInputs": "passed, all three ABIs",
+    "sourceProbeRegression": {
+      "passed": 74,
+      "failed": 0
     },
-    "nodeH3EchInterop": {
-      "status": 201,
-      "echAccepted": true,
-      "certificateVerified": true,
-      "requestBody": "verified",
-      "responseCookies": 2
+    "embeddedNodeRegression": {
+      "version": "26.12.0",
+      "passed": 136,
+      "failed": 0
+    },
+    "bilibiliLiveProbe": {
+      "status": "ok",
+      "httpStatus": 200,
+      "cookieConfigured": false
     },
     "devicePageSize": 4096,
-    "note": "16 KB static ELF/ZIP checks; device JNI verification runs on a 4 KB kernel.",
-    "apk": {
+    "note": "16 KB static ELF/ZIP checks; local runtime execution uses this device, not a 16 KB guest.",
+    "androidJniSmoke": {
+      "nodeVersion": "v26.12.0",
+      "opensslVersion": "4.0.3",
+      "icuVersion": "78.3",
+      "jniVersionAndNodeStart": "passed",
+      "gbkAndBig5": "passed",
+      "chineseCollationAndTimeZone": "passed",
+      "liteProfile": "passed",
+      "echSupported": true,
+      "quicSupported": true
+    },
+    "androidUnitTests": {
+      "tests": 959,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "localNativeInterop": {
+      "tlsEch": "passed, certificate verified, accepted status 1",
+      "http3Post": "passed, certificate verified, response status 201",
+      "postBody": "verified",
+      "responseCookies": 2,
+      "requests": 1
+    },
+    "sourceProbeLive": {
+      "bilibili": {
+        "status": "ok",
+        "httpStatus": 200,
+        "durationMs": 215
+      },
+      "tencent": {
+        "status": "ok",
+        "httpStatus": 200,
+        "durationMs": 196
+      },
+      "youku": {
+        "status": "ok",
+        "httpStatus": 200,
+        "durationMs": 533
+      },
+      "renren": {
+        "status": "ok",
+        "httpStatus": 200,
+        "durationMs": 1236
+      }
+    },
+    "releaseBuild": {
+      "versionName": "1.0.5.116",
+      "versionCode": 213,
+      "result": "passed",
+      "jvmHeap": "4g",
+      "maxWorkers": 1
+    },
+    "releaseApks": {
+      "armeabi-v7a": {
+        "apk": "app-1.0.5.116-213-armeabi-v7a.apk",
+        "bytes": 38036883,
+        "sha256": "f5e3884094e6cf1a2004e3c577c1b302755fb38e0e014966e711c92e0913f6d0",
+        "signature": "verified, same certificate as 1.0.5.115",
+        "versionName": "1.0.5.116",
+        "versionCode": 213,
+        "elfAndZipAlignment": "passed",
+        "compatibilityLimits": []
+      },
+      "arm64-v8a": {
+        "apk": "app-1.0.5.116-213-arm64-v8a.apk",
+        "bytes": 38854615,
+        "sha256": "bff305292140a107482e407d1cbb057b45564d2742e64da3ff3b709656029635",
+        "signature": "verified, same certificate as 1.0.5.115",
+        "versionName": "1.0.5.116",
+        "versionCode": 213,
+        "elfAndZipAlignment": "passed",
+        "compatibilityLimits": []
+      },
+      "x86_64": {
+        "apk": "app-1.0.5.116-213-x86_64.apk",
+        "bytes": 40794269,
+        "sha256": "864b4f7c8f3453e906e591e4b46a8eda0174f80f5603ddcc689d9f08fa75e40b",
+        "signature": "verified, same certificate as 1.0.5.115",
+        "versionName": "1.0.5.116",
+        "versionCode": 213,
+        "elfAndZipAlignment": "passed",
+        "compatibilityLimits": [
+          "Pinned static x86_64 frpc supports 4 KB kernels; experimental x86_64 16 KB page-size emulation is not supported."
+        ]
+      }
+    },
+    "packagedAssetConsistency": {
+      "result": "passed",
+      "abis": [
+        "armeabi-v7a",
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "scriptsPerApk": 15
+    },
+    "finalApkJniSmoke": {
       "abi": "arm64-v8a",
-      "versionName": "1.0.5.108-node26-ech-h3",
-      "versionCode": 196,
-      "bytes": 38736052,
-      "sha256": "83de87c2d4e8b83263c0a6374dd4ca6c0425e313b70b0d6a58d05a347afdea46",
-      "signature": "verified, APK v2",
-      "nativeLibraries": 6,
-      "elfAndZipAlignment": "passed",
-      "jniNodeStart": "passed",
-      "tlsEch": "passed, certificate verified",
-      "h3Post": "passed",
-      "h3WithEch": "passed, certificate verified"
+      "bridge": "actual release APK NodeBridge",
+      "nodeVersion": "26.12.0",
+      "opensslVersion": "4.0.3",
+      "result": "passed, exit=0",
+      "gbkAndBig5": "passed",
+      "chineseCollationAndTimeZone": "passed",
+      "echAndQuicCapabilities": "passed",
+      "sourceProbes": {
+        "bilibili": {
+          "status": "ok",
+          "httpStatus": 200,
+          "durationMs": 165
+        },
+        "tencent": {
+          "status": "ok",
+          "httpStatus": 200,
+          "durationMs": 202
+        },
+        "youku": {
+          "status": "ok",
+          "httpStatus": 200,
+          "durationMs": 695
+        },
+        "renren": {
+          "status": "ok",
+          "httpStatus": 200,
+          "durationMs": 1217
+        }
+      }
     }
   },
   "licenseRecords": [
@@ -347,7 +682,7 @@
     },
     {
       "path": "runtime/native-dependencies-licenses/node-LICENSE.txt",
-      "sha256": "66233b87054d6bca9b0c2f23b027bb2caf1ebd961a6f981616d098dade33af34"
+      "sha256": "12d632aa78f637d8c899f19d4549538c477b6df3836fe86731cd821f750abac8"
     }
   ]
 }

@@ -1,6 +1,6 @@
-# Node 26.11.1 lite + OpenSSL 4.0.3（ECH/H3）。
-# fogtape/nodejs-mobile run 38674319285 artifact 11945892508。
+# Node 26.12.0 lite + OpenSSL 4.0.3（ECH/H3）。
+# fogtape/nodejs-mobile Release v26.12.0-0，源码快照 764f001a。
 # JNI 与 C++ 运行库由本次构建从源码重编，全部使用 16 KB ELF 对齐。
-823c2acd4efa345d739389dd6e2463ccf53ba3a5a760d7db1d41dde7dbf73196  libnode/bin/arm64-v8a/libnode.so
-fe85a706855ee2d11829847305540165e3df783cae182ce1db41691666df73ee  libnode/bin/armeabi-v7a/libnode.so
-f6e7e9007e8d5b55ceea53185e8a5eeaf9f790806779f6d7eb2fcf21988507da  libnode/bin/x86_64/libnode.so
+695df887ec166270fca05492b6b43fb96ce16822a59577fd73ec4e12a04cb931  libnode/bin/arm64-v8a/libnode.so
+8491312feb6f6e8bcfaeeb35124cc42e4caee13ce7c19815018df6e47cce01f6  libnode/bin/armeabi-v7a/libnode.so
+7775b71ff85e01d4dc7e04330277d0eb2cf1494814766bd75d7e907a21dcadda  libnode/bin/x86_64/libnode.so

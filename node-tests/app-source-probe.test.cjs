@@ -5,7 +5,7 @@ const {catalog,probeSource,targetFor}=require('../app/src/main/assets/nodejs-pro
 const {bindCoreSourceContext}=require('../app/src/main/assets/nodejs-project/app-proxy-routing.js');
 const coreResolver=`init(env){this.env=env;},makeProxyUrl(target){
  const entries=String(this.env.PROXY_URL || '').split(',').map(x=>x.trim());
- const specific=entries.find(x=>x.startsWith('aiyifan@') || x.startsWith('tmdb@'));
+ const specific=entries.find(x=>x.startsWith('aiyifan@') || x.startsWith('tmdb@') || x.startsWith('animeko@'));
  if(specific){const base=new URL(specific.slice(specific.indexOf('@')+1)),url=new URL(target);url.protocol=base.protocol;url.host=base.host;url.pathname=base.pathname.replace(/\\/$/,'')+url.pathname;return url.href;}
  const universal=entries.find(x=>x.startsWith('@'));if(universal)return universal.slice(1).replace(/\\/$/,'')+'/'+target;
  return target;
@@ -20,6 +20,15 @@ async function fixture(action,resolver=coreResolver) {
  fs.writeFileSync(path.join(directory,'configs/envs.js'),"static ALLOWED_SOURCES=['aiyifan','douban','local','newsource','tmdb','custom','other','vod'];");
  fs.writeFileSync(path.join(directory,'sources/newsource.js'),"const url='https://api.new-source.test/path';");
  try {await bindCoreSourceContext(directory);await action(directory);}finally{await bindCoreSourceContext('');fs.rmSync(directory,{recursive:true,force:true});}
+}
+function payloadFor(source) {
+ if(source==='bahamut')return {anime:[]};
+ if(source==='bilibili')return {code:0,data:{result:[]}};
+ if(source==='animeko')return {id:400602};
+ if(source==='tmdb')return {images:{}};
+ if(source==='douban')return {id:'36296618',title:'fixture'};
+ if(source==='dandan')return {animes:[]};
+ return {ret:200};
 }
 test('catalog follows current enabled configuration and discovers added sources',()=>fixture(async directory=>{
  assert.deepEqual(catalog(directory,{SOURCE_ORDER:'aiyifan,local'}).enabled,['aiyifan','local']);
@@ -46,7 +55,7 @@ test('exit region uses the same source domain and route; colo is not the exit lo
  const seen=[];
  const result=await probeSource('douban',{directory,env:{},snapshot:{config:{enabled:true,sources:['douban'],proxy:{enabled:true,rules:{douban:'inherit'}}}},signal:new AbortController().signal,
  fetchImpl:async(url,init)=>{seen.push({url,route:routeFor(new URL(url),{}).mode,redirect:init.redirect});
-  return url.endsWith('/cdn-cgi/trace')?new Response(trace('m.douban.com')):new Response('{}',{headers:{'cf-ray':'fixture'}});}});
+  return url.endsWith('/cdn-cgi/trace')?new Response(trace('m.douban.com')):Response.json(payloadFor('douban'),{headers:{'cf-ray':'fixture'}});}});
  assert.equal(result.region,'香港');assert.equal(result.regionEvidence,'same-domain');assert.equal(result.regionHost,'m.douban.com');
  assert.equal(seen.length,2);assert.equal(seen[1].url,'https://m.douban.com/cdn-cgi/trace');assert.equal(seen[1].route,'inherit');assert.equal(seen[1].redirect,'manual');
 }));
@@ -57,18 +66,18 @@ for(const [name,body,status] of [
  ['unknown country',trace('m.douban.com','XX'),200]
 ])test('does not claim exit region from '+name,()=>fixture(async directory=>{
  const result=await probeSource('douban',{directory,env:{},snapshot:{},signal:new AbortController().signal,
- fetchImpl:async url=>url.endsWith('/cdn-cgi/trace')?new Response(body,{status}):new Response('{}',{headers:{server:'cloudflare'}})});
+  fetchImpl:async url=>url.endsWith('/cdn-cgi/trace')?new Response(body,{status}):Response.json(payloadFor('douban'),{headers:{server:'cloudflare'}})});
  assert.equal(result.region,'未确认');assert.equal(result.regionEvidence,'unknown');assert.equal(result.connected,true);
 }));
 test('each probe samples its own domain route and never reuses a global egress cache',()=>fixture(async directory=>{
  let calls=0;
- const opts={directory,env:{},snapshot:{},signal:new AbortController().signal,fetchImpl:async url=>url.endsWith('/cdn-cgi/trace')?new Response(trace('m.douban.com',++calls===1?'HK':'US')):new Response('{}',{headers:{'cf-ray':'fixture'}})};
+ const opts={directory,env:{},snapshot:{},signal:new AbortController().signal,fetchImpl:async url=>url.endsWith('/cdn-cgi/trace')?new Response(trace('m.douban.com',++calls===1?'HK':'US')):Response.json(payloadFor('douban'),{headers:{'cf-ray':'fixture'}})};
  assert.equal((await probeSource('douban',opts)).region,'香港');assert.equal((await probeSource('douban',opts)).region,'美国');assert.equal(calls,2);
 }));
 test('a reverse proxy cannot substantiate the source exit location',()=>fixture(async directory=>{
  const seen=[];
  const result=await probeSource('aiyifan',{directory,env:{PROXY_URL:'@https://reverse.test'},snapshot:{},signal:new AbortController().signal,
- fetchImpl:async url=>{seen.push(url);return new Response('{}',{headers:{server:'cloudflare'}});}});
+  fetchImpl:async url=>{seen.push(url);return Response.json(payloadFor('aiyifan'),{headers:{server:'cloudflare'}});}});
  assert.equal(result.routeType,'core');assert.equal(result.region,'未确认');assert.equal(seen.length,1);
 }));
 
@@ -138,7 +147,52 @@ for(const selection of ['inherit','direct','node:one'])test('aiyifan dedicated r
   snapshot:{config:{proxy:{enabled:true,rules:{aiyifan:selection},nodes:[{id:'one',name:'App node'}]}}},signal:new AbortController().signal,
   fetchImpl:async url=>{assert.equal(new URL(url).hostname,selection==='node:one'?'api.tripdata.app':'reverse.test');
    if(selection!=='node:one')assert(new URL(url).pathname.startsWith('/prefix/api/'));return Response.json({ret:200});}});
- assert.equal(result.routeType,selection==='node:one'?'app':'core');
+ assert.equal(result.routeType,selection==='node:one'?'app':selection==='direct'?'direct':'core');
+}));
+
+test('five core-proxy sources inherit the configured core route without an App proxy node',()=>fixture(async directory=>{
+ const targets=[];
+ for(const source of ['bahamut','tmdb','bilibili','animeko','aiyifan']) {
+  const result=await probeSource(source,{directory,env:{PROXY_URL:'http://proxy.example:8080',SOURCE_ORDER:source},snapshot:{},signal:new AbortController().signal,
+   resolveTarget:(url)=>({url:'http://127.0.0.1:15321/proxy?url='+encodeURIComponent(url),kind:'核心 HTTP 代理',forward:true}),
+   fetchImpl:async url=>{targets.push(url);assert.equal(new URL(url).hostname,'127.0.0.1');return Response.json(payloadFor(source));}});
+  assert.equal(result.status,'ok',source);assert.equal(result.routeType,'core',source);assert.equal(result.route,'核心 HTTP 代理',source);
+ }
+ assert.equal(targets.length,5);
+}));
+
+test('an explicit device-network override bypasses the configured core proxy',()=>fixture(async directory=>{
+ const target=targetFor('aiyifan',directory,{});
+ const result=await probeSource('aiyifan',{directory,env:{PROXY_URL:'aiyifan@https://reverse.test'},
+  snapshot:{config:{proxy:{enabled:true,routeVersion:2,rules:{aiyifan:'direct'}}}},signal:new AbortController().signal,
+  resolveTarget:()=>assert.fail('explicit device-network route must not call the core proxy resolver'),
+  fetchImpl:async url=>{assert.equal(url,target);return Response.json(payloadFor('aiyifan'));}});
+ assert.equal(result.status,'ok');assert.equal(result.routeType,'direct');assert.equal(result.route,'设备当前网络');
+}));
+
+test('Animeko falls back to another endpoint after an invalid response',()=>fixture(async directory=>{
+ const seen=[];
+ const result=await probeSource('animeko',{directory,env:{SOURCE_ORDER:'animeko'},snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async url=>{seen.push(url);return url.includes('api.bangumi.vip')?new Response('<html>challenge</html>',{status:200}):Response.json(payloadFor('animeko'));}});
+ assert.equal(seen.length,2);assert.match(seen[0],/api\.bangumi\.vip/);assert.match(seen[1],/api\.bgm\.tv/);
+ assert.equal(result.status,'ok');assert.equal(result.probeHost,'api.bgm.tv');assert.equal(result.routeType,'direct');
+}));
+
+for(const [source,host] of [['tencent','v.qq.com'],['youku','www.youku.com'],['renren','rrsp.com.cn']])test(source+' homepage responses larger than the body limit still count as reachable',()=>fixture(async directory=>{
+ let response;
+ const result=await probeSource(source,{directory,env:{SOURCE_ORDER:source},snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async url=>{assert.equal(new URL(url).hostname,host);response=new Response('x'.repeat(40*1024),{headers:{'content-type':'text/html'}});return response;}});
+ assert.equal(result.connected,true);assert.equal(result.status,'ok');assert.equal(result.httpStatus,200);
+ assert.equal(response.bodyUsed,true);
+}));
+
+test('HTTP challenges and response-body failures remain connected after headers arrive',()=>fixture(async directory=>{
+ const html=await probeSource('aiyifan',{directory,env:{},snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async()=>new Response('<html>challenge</html>',{status:200})});
+ assert.equal(html.connected,true);assert.equal(html.status,'restricted');assert.match(html.reason,/非 JSON|响应格式/);
+ const broken=await probeSource('aiyifan',{directory,env:{},snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async()=>({status:200,headers:new Headers(),body:{getReader:()=>({read:async()=>{throw new Error('socket reset')},cancel:async()=>{}})}})});
+ assert.equal(broken.connected,true);assert.equal(broken.status,'restricted');assert.match(broken.reason,/网络已通/);assert.equal(broken.durationMs>=0,true);
 }));
 
 test('an explicit App node is not blocked by a malformed core reverse proxy',()=>fixture(async directory=>{
@@ -152,14 +206,16 @@ for(const source of ['douban','newsource'])for(const proxy of ['@https://reverse
  test('unsupported core source uses device network: '+source+' '+proxy,()=>fixture(async directory=>{
   const target=targetFor(source,directory,{});
   const result=await probeSource(source,{directory,env:{PROXY_URL:proxy},snapshot:{},signal:new AbortController().signal,
-   fetchImpl:async url=>{assert.equal(new URL(url).href,new URL(target).href);return Response.json({ok:true});}});
+   fetchImpl:async url=>{assert.equal(new URL(url).href,new URL(target).href);return Response.json(payloadFor(source));}});
   assert.equal(result.route,'使用设备当前网络');assert.equal(result.routeType,'direct');assert.equal(result.status,'ok');
  }));
 }
 for(const source of ['bahamut','tmdb','bilibili','animeko','aiyifan'])test('supported core source retains core default label: '+source,()=>fixture(async directory=>{
- const result=await probeSource(source,{directory,env:{SOURCE_ORDER:source},snapshot:{},signal:new AbortController().signal,
-  fetchImpl:async()=>Response.json({ok:true})});
- assert.equal(result.route,'沿用核心配置');
+ const env={SOURCE_ORDER:source,...(source==='animeko'?{PROXY_URL:'animeko@https://reverse.test'}:{})};
+ const result=await probeSource(source,{directory,env,snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async()=>Response.json(payloadFor(source))});
+ assert.equal(result.route,source==='animeko'?'核心反向代理':'沿用核心配置');
+ if(source==='animeko')assert.equal(result.routeType,'core');
 }));
 
 for(const [version,resolver,expectedRoute] of [
@@ -196,4 +252,32 @@ test('core forward region diagnostics retain the core actual helper port',()=>fi
   fetchImpl:async url=>{urls.push(url);assert.equal(new URL(url).port,'15321');const target=new URL(new URL(url).searchParams.get('url'));
    return target.pathname==='/cdn-cgi/trace'?new Response(trace('api.tmdb.org')):new Response('{}',{headers:{server:'cloudflare'}});}});
  assert.equal(urls.length,2);assert.equal(result.region,'香港');
+}));
+
+test('Bilibili source probe checks the core WBI bootstrap endpoint and preserves its Cookie',()=>fixture(async directory=>{
+ const cookie='SESSDATA=probe-secret';
+ const result=await probeSource('bilibili',{directory,env:{SOURCE_ORDER:'bilibili',BILIBILI_COOKIE:cookie},snapshot:{},signal:new AbortController().signal,
+  fetchImpl:async(url,options)=>{
+   const target=new URL(url);
+   assert.equal(target.href,'https://api.bilibili.com/x/web-interface/nav');
+   assert.match(options.headers['User-Agent'],/Chrome\/120/);
+   assert.equal(options.headers.Referer,'https://www.bilibili.com/');
+   assert.equal(options.headers.Cookie,cookie);
+   return Response.json({code:0,data:{isLogin:false,wbi_img:{}}});
+  }});
+ assert.equal(result.status,'ok');assert.equal(result.connected,true);assert(!JSON.stringify(result).includes(cookie));
+}));
+
+test('Bilibili anonymous nav is reachable when WBI keys are available; actual denials remain restricted',()=>fixture(async directory=>{
+ const options={directory,env:{SOURCE_ORDER:'bilibili'},snapshot:{},signal:new AbortController().signal};
+ const anonymous={code:-101,message:'账号未登录',data:{isLogin:false,wbi_img:{
+  img_url:'https://i0.hdslb.com/bfs/wbi/0123456789abcdef0123456789abcdef.png',
+  sub_url:'https://i0.hdslb.com/bfs/wbi/fedcba9876543210fedcba9876543210.png',
+ }}};
+ const reachable=await probeSource('bilibili',{...options,fetchImpl:async()=>Response.json(anonymous)});
+ assert.equal(reachable.status,'ok');assert.equal(reachable.connected,true);
+ for(const response of [Response.json({code:-101,data:{isLogin:false}}),Response.json({code:-352,data:{}}),new Response('blocked',{status:412})]) {
+  const denied=await probeSource('bilibili',{...options,fetchImpl:async()=>response});
+  assert.equal(denied.status,'restricted');assert.equal(denied.connected,true);
+ }
 }));

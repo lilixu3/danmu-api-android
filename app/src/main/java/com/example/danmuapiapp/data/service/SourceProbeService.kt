@@ -20,7 +20,7 @@ data class SourceProbeResult(val source: String,val status: String,val connected
     val routeType: String,val region: String,val regionNote: String,val reason: String,val external: String,val testedAt: Long = System.currentTimeMillis(),
     val regionEvidence: String = "unknown",val regionHost: String = "",val probeHost: String = "",val httpStatus: Int? = null,
     val configurationRequired: Boolean = false) {
-    fun connectivityResult() = AppOutboundConnectivityResult(source, connected, durationMs.takeIf { connected }, reason, configurationRequired, unconfirmed = status == "unsupported")
+    fun connectivityResult() = AppOutboundConnectivityResult(source, connected && status != "failed", durationMs.takeIf { connected && status != "failed" }, reason, configurationRequired, unconfirmed = status == "unsupported")
 }
 object SourceProbeService {
     private val client by lazy {OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).callTimeout(30,TimeUnit.SECONDS).build()}

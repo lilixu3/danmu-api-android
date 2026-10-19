@@ -159,7 +159,7 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ### 开发环境要求
 - Android Studio Arctic Fox 或更高版本
 - JDK 17 或更高版本
-- Node.js 26.11.1 lite + OpenSSL 4.0.3（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 26.12.0 lite + OpenSSL 4.0.3（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -175,20 +175,20 @@ cd danmu-api-android
 ./scripts/prepare_frp_kernel.sh
 
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.11.1
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.12.0
 ```
 
-Node 运行时使用 **26.11.1 lite + OpenSSL 4.0.3（原生 ECH/H3）**，锁定
-`fogtape/nodejs-mobile` 的 `openssl4/node26.11.1` 分支提交 `a8a46ef5`，
-Actions run `38674319285`、artifact `11945892508`。运行时来自该固定开发提交，
+Node 运行时使用 **26.12.0 lite + OpenSSL 4.0.3（原生 ECH/H3）**，锁定
+`fogtape/nodejs-mobile` 的 `v26.12.0-0` 预发布版（源码快照 `764f001a`，
+配方提交 `333a9867`）。运行时来自该固定 Release 资产，
 App 发行附件仅提供三个架构的 APK；运行时 ZIP 不随 App 发行上传。
 来源及 SHA-256 见
 `app/native-runtime-sources.properties`、`app/native-runtime.sha256` 和
 `app/native-runtime-provenance.json`。JNI 桥使用同份 ZIP 的头文件与 NDK r29
 重新编译，libc++、libc++abi、libunwind 由 `scripts/build-native-deps.py` 从固定源码重建。
 
-离线构建可将校验通过的 `nodejs-mobile-android-lite-a8a46ef5.zip` 放入
-`dist/nodejs-mobile/openssl4-v26.11.1-a8a46ef5-lite/`。缺少本地或 Gradle 缓存时，从固定上游 Actions 归档下载，需要已认证的 `gh`；
+离线构建可将校验通过的 `nodejs-mobile-android-lite-26.12.0-0.zip` 放入
+`dist/nodejs-mobile/v26.12.0-0-lite/`。缺少本地或 Gradle 缓存时，从固定上游 Release 公开地址下载，无需登录 GitHub CLI；
 C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提取旧 APK 的原生库。
 
 构建机也可以显式指定已经准备好的运行时 ZIP，或指向同一 ZIP 的固定 HTTPS 下载地址，这两种方式无需登录 GitHub CLI。
@@ -196,14 +196,14 @@ C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提�
 
 ```bash
 # 只校验 ZIP，无需 NDK 编译；也可把这个参数用于 assembleDebug / assembleRelease
-./gradlew :app:verifyNativeRuntimeArchive --offline -PnativeRuntimeArchive=/path/to/nodejs-mobile-android-lite-a8a46ef5.zip
+./gradlew :app:verifyNativeRuntimeArchive --offline -PnativeRuntimeArchive=/path/to/nodejs-mobile-android-lite-26.12.0-0.zip
 
 # 从自建镜像或正式资产地址下载同一 ZIP，无需 gh 登录
-./gradlew :app:verifyNativeRuntimeArchive -PnativeRuntimeArchiveUrl=https://your-host.example/nodejs-mobile-android-lite-a8a46ef5.zip
+./gradlew :app:verifyNativeRuntimeArchive -PnativeRuntimeArchiveUrl=https://your-host.example/nodejs-mobile-android-lite-26.12.0-0.zip
 ```
 
 显式指定的本地文件校验失败会直接报错，不使用缓存代替。公开地址只覆盖下载位置，不能覆盖固定摘要。
-当前来源清单与 provenance 记录均指向固定上游 Actions 归档。Actions 归档有保留期限，长期或离线构建应保留校验通过的本地 ZIP。
+当前来源清单与 provenance 记录均指向固定上游 Release 资产，长期或离线构建应保留校验通过的本地 ZIP。
 
 手机测试包可用 `-PabiFilters=arm64-v8a` 构建。产出后运行
 `python3 scripts/verify-apk-native.py app/build/outputs/apk/release/app-arm64-v8a-release.apk`，

@@ -45,21 +45,26 @@ class AppProxySettingsTest {
         assertTrue(networkRuntimeNeedsRestart("new-hash",""));assertTrue(networkRuntimeNeedsRestart("new-hash","old-hash"))
         assertFalse(networkRuntimeNeedsRestart("new-hash","new-hash"))
     }
-    @Test fun `old direct choices inherit core while selected App nodes keep highest priority`() {
-        val settings=AppOutboundSettings.decode("""{"proxy":{"enabled":true,"defaultRoute":"direct",
+    @Test fun `old global direct defaults migrate while per-source device network choices remain explicit`() {
+        val settings=AppOutboundSettings.decode("""{"proxy":{"enabled":true,"routeVersion":2,"defaultRoute":"direct",
             "rules":{"aiyifan":"direct","tmdb":"node:one","douban":"enhanced"},
             "nodes":[{"id":"one","name":"HTTP","host":"proxy.test","port":2080,"username":"user","password":"pass"}]}}""")
         assertEquals("inherit",settings.proxy.defaultRoute)
-        assertEquals("inherit",settings.proxy.rules["aiyifan"])
+        assertEquals("direct",settings.proxy.rules["aiyifan"])
         assertEquals("node:one",settings.proxy.rules["tmdb"])
         assertEquals("enhanced",settings.proxy.rules["douban"])
         assertEquals("pass",settings.proxy.nodes.single().password)
-        assertFalse(settings.encode().contains("\"direct\""))
+        assertTrue(settings.encode().contains("\"direct\""))
         assertEquals(settings,AppOutboundSettings.decode(settings.encode()))
         val catalog=ProxySourceCatalog(listOf("aiyifan","tmdb"),setOf("aiyifan"),setOf("aiyifan","tmdb"))
-        assertEquals("legacy",settings.sourceRoute("aiyifan",catalog))
+        assertEquals("direct",settings.sourceRoute("aiyifan",catalog))
         assertEquals("node:one",settings.sourceRoute("tmdb",catalog))
         assertEquals("沿用核心配置",settings.proxy.label("inherit"))
+    }
+    @Test fun `old per-source direct route keeps its historical core-inherit meaning`() {
+        val settings=AppOutboundSettings.decode("""{"proxy":{"enabled":true,"rules":{"aiyifan":"direct"}}}""")
+        assertEquals("inherit",settings.proxy.rules["aiyifan"])
+        assertTrue(settings.encode().contains("\"routeVersion\":2"))
     }
     @Test fun `explicit inheritance overrides an old default node without changing another source binding`() {
         val node=AppProxyNode(id="one",name="HTTP",host="proxy.test")
@@ -69,7 +74,20 @@ class AppProxySettingsTest {
         assertEquals("inherit",inherited.sourceRoute("aiyifan",catalog))
         assertEquals("node:one",inherited.sourceRoute("tmdb",catalog))
         assertEquals("node:one",inherited.sourceRoute("douban",catalog))
-        assertThrows(IllegalArgumentException::class.java) {inherited.withSourceRoute("aiyifan","direct")}
+        val direct=inherited.withSourceRoute("aiyifan","direct")
+        assertEquals("direct",direct.sourceRoute("aiyifan",catalog))
+        assertEquals("node:one",direct.sourceRoute("tmdb",catalog))
+    }
+    @Test fun `core proxy sources inherit core config even when App has a global default node`() {
+        val node=AppProxyNode(id="one",name="HTTP",host="proxy.test")
+        val settings=AppOutboundSettings(proxy=AppProxySettings(true,"node:one",listOf(node)))
+        val catalog=ProxySourceCatalog(listOf("bahamut","tmdb","bilibili","animeko","aiyifan","douban"),emptySet(),
+            setOf("bahamut","tmdb","bilibili","animeko","aiyifan"))
+        for(source in AppProxySourceCatalog.coreProxySources) assertEquals("legacy",settings.sourceRoute(source,catalog))
+        assertEquals("node:one",settings.sourceRoute("douban",catalog))
+        val override=settings.withSourceRoute("bilibili","node:one")
+        assertEquals("node:one",override.sourceRoute("bilibili",catalog))
+        assertEquals("legacy",override.sourceRoute("tmdb",catalog))
     }
     @Test fun `default labels and legacy proxy attribution follow core source support`() {
         val supported=setOf("bahamut","tmdb","bilibili","animeko","aiyifan")

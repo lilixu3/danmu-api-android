@@ -1,8 +1,11 @@
 package com.example.danmuapiapp.ui.screen.push
 
 import java.net.URLEncoder
+import java.net.URLDecoder
+import java.net.URI
 import java.util.Locale
 import kotlin.math.abs
+import com.example.danmuapiapp.data.util.resolvePushTargetAddress
 
 /**
  * 推送请求拼装器：
@@ -44,12 +47,12 @@ object PushEpisodeRequestComposer {
         fontRaw: String,
         envDanmuFontSize: Int?,
     ): PrepareResult {
-        val target = targetRaw.trim()
-        if (target.isBlank()) {
+        val target = resolvePushTargetAddress(targetRaw)
+        if (target == null) {
             return PrepareResult.Error(
                 ValidationError(
                     field = ErrorField.TARGET,
-                    fieldMessage = "请输入推送地址",
+                    fieldMessage = "请输入有效的 HTTP 或 HTTPS 推送地址",
                 )
             )
         }
@@ -138,32 +141,27 @@ object PushEpisodeRequestComposer {
     }
 
     private fun buildPushUrl(targetInput: String, sourceUrl: String): String {
-        val targetRaw = targetInput.trim()
-        require(targetRaw.isNotBlank()) { "请输入推送地址" }
-
-        val normalizedTarget = ensureHttpPrefix(targetRaw)
+        val normalizedTarget = requireNotNull(resolvePushTargetAddress(targetInput)) { "推送地址无效" }
+        val uri = URI(normalizedTarget)
         val encodedSource = urlEncode(sourceUrl)
-        val pathIndex = normalizedTarget.lowercase(Locale.ROOT).indexOf("path=")
-
-        if (pathIndex >= 0) {
-            val prefix = normalizedTarget.substring(0, pathIndex + "path=".length)
-            return prefix + encodedSource
+        val parameters = uri.rawQuery.orEmpty().split('&').filter { it.isNotEmpty() }
+        var replacedPath = false
+        val updated = parameters.mapNotNull { parameter ->
+            val key = runCatching { URLDecoder.decode(parameter.substringBefore('='), "UTF-8") }.getOrNull()
+            if (key == "path") {
+                if (replacedPath) null else {
+                    replacedPath = true
+                    "path=$encodedSource"
+                }
+            } else parameter
+        }.toMutableList()
+        if (!replacedPath) {
+            if (parameters.isEmpty() && uri.path.trimEnd('/') == "/action") {
+                updated += listOf("do=refresh", "type=danmaku")
+            }
+            updated += "path=$encodedSource"
         }
-
-        val base = normalizedTarget.trimEnd('/')
-        return "$base/action?do=refresh&type=danmaku&path=$encodedSource"
-    }
-
-    private fun ensureHttpPrefix(url: String): String {
-        val trimmed = url.trim()
-        return if (
-            trimmed.startsWith("http://", ignoreCase = true) ||
-            trimmed.startsWith("https://", ignoreCase = true)
-        ) {
-            trimmed
-        } else {
-            "http://$trimmed"
-        }
+        return "${uri.scheme}://${uri.rawAuthority}${uri.rawPath}?${updated.joinToString("&")}"
     }
 
     private fun urlEncode(raw: String): String {

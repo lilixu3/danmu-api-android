@@ -1,18 +1,28 @@
 package com.example.danmuapiapp.ui.screen.push
 
-import com.example.danmuapiapp.data.network.newOutboundCall
-
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.danmuapiapp.data.network.newOutboundCall
+import com.example.danmuapiapp.data.service.PushTargetHistoryStore
+import com.example.danmuapiapp.data.util.resolvePushTargetAddress
+import com.example.danmuapiapp.domain.model.AdminSessionState
 import com.example.danmuapiapp.domain.model.RequestRecord
+import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -78,11 +88,31 @@ class PushDanmuViewModel @Inject constructor(
     runtimeRepository: RuntimeRepository,
     private val envConfigRepo: EnvConfigRepository,
     private val recordRepository: RequestRecordRepository,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val adminSessionRepo: AdminSessionRepository,
+    @ApplicationContext context: Context
 ) : ViewModel() {
 
     val runtimeState = runtimeRepository.runtimeState
     val envVars = envConfigRepo.envVars
+    val adminSessionState: StateFlow<AdminSessionState> = adminSessionRepo.sessionState
+
+    private val targetHistoryStore = PushTargetHistoryStore(context)
+    private val _recentTargets = MutableStateFlow(targetHistoryStore.recent())
+    val recentTargets: StateFlow<List<String>> = _recentTargets.asStateFlow()
+
+    private val _savedDefaultTarget = MutableStateFlow("")
+    val savedDefaultTarget: StateFlow<String> = _savedDefaultTarget.asStateFlow()
+
+    private val _defaultTargetLoaded = MutableStateFlow(false)
+    val defaultTargetLoaded: StateFlow<Boolean> = _defaultTargetLoaded.asStateFlow()
+
+    var isSavingDefaultTarget by mutableStateOf(false)
+        private set
+    var targetSaveMessage by mutableStateOf<String?>(null)
+        private set
+    var targetSaveFailed by mutableStateOf(false)
+        private set
 
     var isSearching by mutableStateOf(false)
         private set
@@ -140,6 +170,62 @@ class PushDanmuViewModel @Inject constructor(
             level = PushClientSupportLevel.CompatibilityVerified
         )
     )
+
+    init {
+        viewModelScope.launch {
+            envConfigRepo.loadedEnvVars.filterNotNull().collect { env ->
+                _savedDefaultTarget.value = env[PUSH_TARGET_CONFIG_KEY].orEmpty().trim()
+                _defaultTargetLoaded.value = true
+            }
+        }
+    }
+
+    fun rememberTarget(target: String) {
+        val normalized = target.trim()
+        if (normalized.isBlank()) return
+        _recentTargets.value = targetHistoryStore.remember(normalized)
+    }
+
+    fun forgetTarget(target: String) {
+        _recentTargets.value = targetHistoryStore.remove(target)
+    }
+
+    fun clearTargetSaveMessage() {
+        targetSaveMessage = null
+        targetSaveFailed = false
+    }
+
+    fun saveDefaultTarget(target: String) {
+        val normalized = resolvePushTargetAddress(target)
+        if (normalized == null) {
+            targetSaveFailed = true
+            targetSaveMessage = "请填写有效的 HTTP 或 HTTPS 推送地址"
+            return
+        }
+        if (!adminSessionState.value.isAdminMode) {
+            targetSaveFailed = true
+            targetSaveMessage = "当前为只读模式，请先开启管理员模式后再保存默认目标"
+            return
+        }
+        if (isSavingDefaultTarget) return
+
+        isSavingDefaultTarget = true
+        clearTargetSaveMessage()
+        viewModelScope.launch {
+            try {
+                persistDefaultPushTarget(envConfigRepo, normalized)
+                _savedDefaultTarget.value = normalized
+                targetSaveMessage = "已保存为默认推送目标"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                targetSaveFailed = true
+                targetSaveMessage = "保存失败：${error.message ?: "请检查配置写入权限"}"
+            } finally {
+                isSavingDefaultTarget = false
+            }
+        }
+    }
 
     fun clearResult() {
         resultText = ""
@@ -447,6 +533,7 @@ class PushDanmuViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { (code, body) ->
+                    if (code in 200..299) rememberTarget(prepared.target)
                     statusText = "第${episode.episodeNumber}集推送完成（HTTP $code，${elapsed}ms）"
                     pushHistory = (listOf("第${episode.episodeNumber}集 · HTTP $code · ${elapsed}ms${if (request.extraHint.isNotBlank()) " · ${request.extraHint}" else ""}") + pushHistory).take(20)
                     resultText = buildString {

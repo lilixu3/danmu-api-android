@@ -120,7 +120,7 @@ fun SourceProbeScreen(onBack: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 ProbeMetric("已响应", ok, green, Modifier.weight(1f))
                 ProbeMetric("接口受限", restricted, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-                ProbeMetric("未响应", failed, green, Modifier.weight(1f))
+                ProbeMetric("未响应", failed, MaterialTheme.colorScheme.error, Modifier.weight(1f))
             }
             if (running || loading) LinearProgressIndicator(Modifier.fillMaxWidth()) else HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             error?.let { Text(it, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -152,7 +152,7 @@ fun SourceProbeScreen(onBack: () -> Unit) {
                 items(visible, key = { it }) { source ->
                     val result = results[source]
                     val probing = source in pending
-                    val color = when { probing -> MaterialTheme.colorScheme.primary; result?.status == "failed" -> green; result?.status == "restricted" -> MaterialTheme.colorScheme.tertiary; result?.connected == true -> green; else -> MaterialTheme.colorScheme.outline }
+                    val color = when { probing -> MaterialTheme.colorScheme.primary; result?.status == "failed" -> MaterialTheme.colorScheme.error; result?.status == "restricted" -> MaterialTheme.colorScheme.tertiary; result?.connected == true -> green; else -> MaterialTheme.colorScheme.outline }
                     val status = when {
                         probing -> "探测中"
                         result?.configurationRequired == true && result.connected -> "已响应 · API Key 未配置"

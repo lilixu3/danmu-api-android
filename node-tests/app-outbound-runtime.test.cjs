@@ -19,9 +19,9 @@ test('in-process backend shares endpoint, reconfigures and stops without executa
   assert.equal((await (await fetch('https://api.gamer.com.tw/probe')).json()).pid,process.pid);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'status.json'))).status,'ready');
   await runtime.refresh();assert.equal(runtime.snapshot().endpoint,first.endpoint);
-  fs.writeFileSync(configPath,JSON.stringify({enabled:true,httpVersion:'h2',proxy:{enabled:true,rules:{aiyifan:'direct'}}}));
+  fs.writeFileSync(configPath,JSON.stringify({enabled:true,httpVersion:'h2',proxy:{enabled:true,routeVersion:2,rules:{aiyifan:'direct'}}}));
   await runtime.refresh();assert.equal(runtime.snapshot().endpoint,first.endpoint);
-  assert.equal(runtime.snapshot().config.proxy.rules.aiyifan,'inherit');
+  assert.equal(runtime.snapshot().config.proxy.rules.aiyifan,'direct');
   fs.writeFileSync(configPath,JSON.stringify({enabled:true,httpVersion:'auto'}));await runtime.refresh();
   assert.equal(runtime.snapshot().status,'ready');assert.notEqual(runtime.snapshot().token,first.token);
   await assert.rejects(nativeFetch(first.endpoint+'/proxy'));

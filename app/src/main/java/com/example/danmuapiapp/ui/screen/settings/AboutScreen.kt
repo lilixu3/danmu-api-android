@@ -53,6 +53,8 @@ import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
+import com.example.danmuapiapp.ui.theme.glassBorderColor
+import com.example.danmuapiapp.ui.theme.glassSurfaceColor
 import kotlinx.coroutines.launch
 
 private const val ABOUT_PROJECT_URL = "https://github.com/lilixu3/danmu-api-android"
@@ -234,8 +236,8 @@ private fun AboutBrandIntro() {
 
 @Composable
 private fun AboutCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    AppGlassSurface(modifier = modifier, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))) {
+    AppGlassSurface(modifier = modifier, shape = RoundedCornerShape(22.dp), color = glassSurfaceColor(),
+        border = BorderStroke(1.dp, glassBorderColor())) {
         Column(content = content)
     }
 }

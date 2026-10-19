@@ -32,7 +32,7 @@ data class AppOutboundSettings(
     /** One explicit choice owns the entire source route. Disabled rules stay inactive. */
     fun withSourceRoute(source: String, route: String): AppOutboundSettings {
         require(source.isNotBlank() && source != "local") { "此来源不需要网络线路" }
-        require(route in listOf("inherit", "enhanced") || proxy.nodes.any { route == "node:${it.id}" }) { "请选择有效线路" }
+        require(route in listOf("inherit", "enhanced", "direct") || proxy.nodes.any { route == "node:${it.id}" }) { "请选择有效线路" }
         require(route != "enhanced" || source in supportedSources || source == "github") { "此来源暂不支持增强直连" }
         val activeSources = if (enabled) sources else emptySet()
         val enhancedSources = if (source in supportedSources && route == "enhanced") activeSources + source else activeSources - source
@@ -105,9 +105,10 @@ object AppOutboundSettingsStore {
         val settings=AppOutboundSettings.decode(raw)
         val proxy=JSONObject(raw).optJSONObject("proxy")
         val nodes=proxy?.optJSONArray("nodes")
-        val legacy=proxy?.optString("defaultRoute")=="direct" ||
-            proxy?.optJSONObject("rules")?.let { rules -> rules.keys().asSequence().any { rules.optString(it)=="direct" } }==true ||
-            proxy?.has("subscriptions")==true || (0 until (nodes?.length() ?: 0)).any {
+        val oldDirect=proxy?.let { value -> value.optString("defaultRoute")=="direct" ||
+            (value.optInt("routeVersion",1)<2 && value.optJSONObject("rules")?.let { rules -> rules.keys().asSequence().any {rules.optString(it)=="direct"} }==true)
+        }==true
+        val legacy=oldDirect || proxy?.has("subscriptions")==true || (0 until (nodes?.length() ?: 0)).any {
             val node=nodes!!.optJSONObject(it)
             node?.has("protocolOptions")==true || node?.has("subscriptionId")==true || node?.optString("type") !in AppProxyNode.supportedTypes
         }

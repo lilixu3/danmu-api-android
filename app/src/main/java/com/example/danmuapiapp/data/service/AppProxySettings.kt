@@ -59,14 +59,14 @@ data class AppProxySettings(val enabled: Boolean = false, val defaultRoute: Stri
     fun validate(): AppProxySettings {
         require(nodes.size<=1000 && nodes.map {it.id}.distinct().size==nodes.size) {"节点过多或标识重复"}
         nodes.forEach {it.validate()}
-        require(defaultRoute!="enhanced") {"增强直连请按受支持的来源选择"}
-        require((rules.values+defaultRoute).all {it in listOf("inherit","enhanced") || it.startsWith("node:")}) {"线路规则无效"}
+        require(defaultRoute !in listOf("enhanced","direct")) {"增强直连和设备网络请按来源单独选择"}
+        require(rules.values.all {it in listOf("inherit","enhanced","direct") || it.startsWith("node:")}) {"线路规则无效"}
         return this
     }
-    fun json(): JSONObject = JSONObject().put("enabled",enabled).put("defaultRoute",defaultRoute)
+    fun json(): JSONObject = JSONObject().put("enabled",enabled).put("routeVersion",2).put("defaultRoute",defaultRoute)
         .put("nodes",JSONArray(nodes.map {it.json()})).put("rules",JSONObject(rules))
     fun label(route: String): String = when(route) {
-        "inherit"->"沿用核心配置";"enhanced"->"增强直连"
+        "inherit"->"沿用核心配置";"enhanced"->"增强直连";"direct"->"设备当前网络"
         else->nodes.firstOrNull {"node:${it.id}"==route}?.name ?: "节点已失效，请重新选择"
     }
     companion object {
@@ -78,10 +78,13 @@ data class AppProxySettings(val enabled: Boolean = false, val defaultRoute: Stri
             // Keep their rule IDs so a removed node fails closed until explicitly replaced.
             val nodes=(0 until list.length()).mapNotNull {runCatching {AppProxyNode.decode(list.getJSONObject(it))}.getOrNull()}.distinctBy {it.id}
             val rules=o.optJSONObject("rules") ?: JSONObject()
-            // The removed direct choice now inherits core configuration. Keep node bindings intact.
-            fun migrate(route: String) = if (route == "direct") "inherit" else route
-            return AppProxySettings(o.optBoolean("enabled"),migrate(o.optString("defaultRoute","inherit")),nodes,
-                rules.keys().asSequence().associateWith {migrate(rules.getString(it))}).validate()
+            val supportsDeviceRoute=o.optInt("routeVersion",1)>=2
+            // Before routeVersion 2, "direct" meant restoring the core route.
+            val defaultRoute=if(o.optString("defaultRoute","inherit")=="direct") "inherit" else o.optString("defaultRoute","inherit")
+            return AppProxySettings(o.optBoolean("enabled"),defaultRoute,nodes,
+                rules.keys().asSequence().associateWith {key ->
+                    rules.getString(key).let {if(!supportsDeviceRoute && it=="direct") "inherit" else it}
+                }).validate()
         }
     }
 }
@@ -104,7 +107,7 @@ data class ProxySourceCatalog(val sources: List<String>, val enabled: Set<String
 fun AppOutboundSettings.sourceRoute(source: String, catalog: ProxySourceCatalog, githubRoute: String = "inherit"): String {
     if (source == "local") return "local"
     val selected = if (proxy.enabled) {
-        proxy.rules[source] ?: if (source == "github") "inherit" else proxy.defaultRoute
+        proxy.rules[source] ?: if (source == "github" || source in AppProxySourceCatalog.coreProxySources) "inherit" else proxy.defaultRoute
     } else "inherit"
     if (selected != "inherit") return if (selected == "enhanced" && !enabled && source != "github") "inherit" else selected
     if (source == "github") return if (githubRoute == "direct") "inherit" else githubRoute
@@ -135,8 +138,11 @@ object AppProxySourceCatalog {
     fun load(context: Context): ProxySourceCatalog {
         val catalog=EnvVarConfigLoader.loadCatalog(context)
         val all=catalog.firstOrNull { it.key == "SOURCE_ORDER" }?.options.orEmpty()
-        val file=File(NodeProjectManager.projectDir(context),"config/.env")
-        val raw=if(RuntimeModePrefs.get(context)==RunMode.Root) RootShell.exec("cat ${shellQuote(file.absolutePath)}",3000).let { if(!it.ok) error("无法读取 Root 配置") else it.stdout }
+        val mode = RuntimeModePrefs.get(context)
+        // The no-mode projectDir overload always points at the normal workspace.
+        // Match configuration management so Root mode never reads its stale copy.
+        val file=File(NodeProjectManager.projectDir(context, mode),"config/.env")
+        val raw=if(mode==RunMode.Root) RootShell.exec("cat ${shellQuote(file.absolutePath)}",3000).let { if(!it.ok) error("无法读取 Root 配置") else it.stdout }
             else if(file.exists()) file.readText() else ""
         val env=EnvVarConfigLoader.loadDefaultValues(context) + DotEnvCodec.parse(raw)
         val active=(env["SOURCE_ORDER"] ?: "douban,360,renren,hanjutv").split(',').map { it.trim() }.filter { it.isNotBlank() }.toSet()

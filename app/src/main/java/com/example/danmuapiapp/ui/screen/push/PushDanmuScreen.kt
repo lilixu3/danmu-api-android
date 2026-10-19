@@ -1,6 +1,6 @@
 package com.example.danmuapiapp.ui.screen.push
 
-import com.example.danmuapiapp.ui.component.AppDialog
+import android.content.ClipData
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -15,9 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.ClipEntry
-import android.content.ClipData
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,30 +25,40 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.util.RuntimeUrlParser
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
+import com.example.danmuapiapp.ui.component.AppModalPanel
 import com.example.danmuapiapp.ui.screen.tools.*
 import kotlinx.coroutines.launch
-import java.net.URI
 
 @Composable fun PushDanmuScreen(onBack: () -> Unit, viewModel: PushDanmuViewModel = hiltViewModel()) {
     val runtime by viewModel.runtimeState.collectAsStateWithLifecycle()
     val env by viewModel.envVars.collectAsStateWithLifecycle()
+    val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
     val defaultFont = env["DANMU_FONT_SIZE"]?.toIntOrNull()
     val localBase = RuntimeUrlParser.extractBase(runtime.localUrl)
     val lanBase = RuntimeUrlParser.extractBase(runtime.lanUrl)
     val lanIp = remember(runtime.lanUrl) { PushLanScanner.resolveSelfLanIpv4(runtime.lanUrl).orEmpty() }
-    var target by rememberSaveable { mutableStateOf(defaultPushTarget(lanIp)) }
-    var source by rememberSaveable { mutableStateOf(lanBase.ifBlank { localBase }) }
+    val savedTarget by viewModel.savedDefaultTarget.collectAsStateWithLifecycle()
+    val defaultTargetLoaded by viewModel.defaultTargetLoaded.collectAsStateWithLifecycle()
+    val recentTargets by viewModel.recentTargets.collectAsStateWithLifecycle()
+    var target by rememberSaveable { mutableStateOf("") }
+    val source = lanBase.ifBlank { localBase }
     var keyword by rememberSaveable { mutableStateOf("") }
     var offset by rememberSaveable { mutableStateOf("0") }
     var font by rememberSaveable { mutableStateOf("") }
     var showTarget by rememberSaveable { mutableStateOf(false) }
     var jump by rememberSaveable { mutableStateOf("") }
     var highlighted by rememberSaveable { mutableStateOf<Long?>(null) }
+    var targetInitialized by rememberSaveable { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
-    LaunchedEffect(localBase, lanBase) { if (source.isBlank()) source = lanBase.ifBlank { localBase } }
+    LaunchedEffect(lanIp, defaultTargetLoaded, savedTarget) {
+        if (!targetInitialized && defaultTargetLoaded) {
+            target = resolveDefaultPushTarget(savedTarget, lanIp)
+            targetInitialized = true
+        }
+    }
     BackHandler(viewModel.currentAnime != null) { viewModel.backToAnimeList() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         ToolHeader("弹幕推送", onBack) {
@@ -183,35 +193,36 @@ import java.net.URI
             } }
         }
     }
-    if (showTarget) AppDialog(onDismissRequest = { showTarget = false }, scrollContent = false, title = { ToolTitle("推送目标", size = 16) },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ToolHint("推送地址")
-            ToolInput(target, { target = it }, "192.168.1.8:9978 或带 path= 的完整地址")
-            ToolHint("只填 IP:端口会自动补齐推送接口；完整地址中的 path 参数会替换为弹幕地址。当前支持 OK影视。")
-            ToolTitle("弹幕源地址", size = 12)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolChip("本机 127.0.0.1", source == localBase, { source = localBase })
-                ToolChip("局域网 ${lanIp.ifBlank { "无 IP" }}", source == lanBase, { if (lanBase.isNotBlank()) source = lanBase })
-            }
-            ToolInput(source, { source = it }, "弹幕源 Base URL")
-            ToolHint("推送到盒子时请使用盒子能够访问的局域网源地址。")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ToolTitle("局域网设备", Modifier.weight(1f), size = 12)
-                ToolButton("扫描", { viewModel.scanLanDevices(runtime.lanUrl) }, icon = Icons.Outlined.Radar, busy = viewModel.isScanningLan)
-            }
-            ToolHint("本机 ${lanIp.ifBlank { "未获取 IP，请连接 Wi-Fi" }}\n${viewModel.lanScanStatus}")
-            if (viewModel.lanDevices.isNotEmpty()) viewModel.lanDevices.forEach { device ->
-                ToolListRow(if (device.isSelf) "本机" else "设备", device.latencyMs?.let { "${it}ms" }.orEmpty(), device.ip,
-                    device.supportLabel, { target = device.targetTemplate }, actions = {
-                        ToolIcon(Icons.Outlined.ContentCopy, "复制设备地址", { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("设备地址", device.targetTemplate))) } })
-                    })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton({ target = defaultPushTarget(lanIp) }) { Text("填入默认", fontSize = 11.sp) }
-                TextButton(viewModel::clearLanScan) { Text("清空扫描", fontSize = 11.sp) }
-            }
-        } }, confirmButton = { ToolButton("完成", { showTarget = false }) })
+    if (showTarget) AppModalPanel(
+        onDismissRequest = { showTarget = false },
+        maxWidth = 560.dp,
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        PushTargetDialog(
+            target = target,
+            onTargetChange = {
+                viewModel.clearTargetSaveMessage()
+                targetInitialized = true
+                target = it
+            },
+            lanIp = lanIp,
+            savedDefaultTarget = savedTarget,
+            effectiveDefaultTarget = resolveDefaultPushTarget(savedTarget, lanIp),
+            recentTargets = recentTargets,
+            isAdminMode = adminState.isAdminMode,
+            isSavingDefault = viewModel.isSavingDefaultTarget,
+            saveMessage = viewModel.targetSaveMessage,
+            saveFailed = viewModel.targetSaveFailed,
+            onClearSaveMessage = viewModel::clearTargetSaveMessage,
+            onForgetTarget = viewModel::forgetTarget,
+            onSaveDefaultTarget = viewModel::saveDefaultTarget,
+            onScan = { viewModel.scanLanDevices(runtime.lanUrl) },
+            isScanning = viewModel.isScanningLan,
+            scanStatus = viewModel.lanScanStatus,
+            devices = viewModel.lanDevices,
+            onClearScan = viewModel::clearLanScan,
+            onCopy = { value -> scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("推送地址", value))) } },
+            onDismissRequest = { showTarget = false }
+        )
+    }
 }
-private fun defaultPushTarget(ip: String): String = "http://${ip.ifBlank { "127.0.0.1" }}:9978/action?do=refresh&type=danmaku&path="
-private fun summarizePushHost(raw: String): String = runCatching { URI(if (raw.contains("://")) raw else "http://$raw").authority }
-    .getOrNull()?.takeIf { it.isNotBlank() } ?: raw.take(32).ifBlank { "未设置" }

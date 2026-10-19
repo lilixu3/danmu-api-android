@@ -46,4 +46,12 @@ class SourceProbeResultTest {
         assertEquals("未连通", connectivityStatusLabel(connectivity, false))
         assertEquals("检测中…", connectivityStatusLabel(connectivity, true))
     }
+
+    @Test fun `failed response-body read cannot stay connected or retain latency`() {
+        val result = decodeSourceProbeResult("tmdb", JSONObject("""{"status":"failed","connected":true,"durationMs":38}"""), "")
+        val connectivity = result.connectivityResult()
+        assertFalse(connectivity.connected)
+        assertNull(connectivity.durationMs)
+        assertEquals("未连通", connectivityStatusLabel(connectivity, false))
+    }
 }

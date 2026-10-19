@@ -3,8 +3,12 @@ const { eligible } = require('./app-outbound-bridge.js');
 const targets = {
   bahamut: ['https://api.gamer.com.tw/mobile_app/anime/v1/search.php?kw=' + encodeURIComponent('葬送的芙莉蓮')],
   tmdb: ['https://api.tmdb.org/3/configuration'],
+  // The core calls nav before its WBI-signed search; legacy unsigned search is often rejected with 412.
+  bilibili: ['https://api.bilibili.com/x/web-interface/nav'],
   dandan: ['https://api.danmaku.weeblify.app/ddp/v1?path=/v2/search/anime?keyword=' + encodeURIComponent('葬送的芙莉莲')],
   animeko: [
+    'https://api.bgm.tv/v0/subjects/400602',
+    'https://api.bangumi.vip/v0/subjects/400602',
     'https://api.animeko.org/v2/subjects/400602',
     'https://danmaku-global.myani.org/v2/subjects/400602',
     'https://danmaku-cn.myani.org/v2/subjects/400602',
@@ -25,7 +29,20 @@ function diagnosticRequest(source, target, env) {
     'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     Referer:'https://m.douban.com/movie/','Content-Type':'application/json',
     ...(env.DOUBAN_COOKIE ? {Cookie:String(env.DOUBAN_COOKIE)} : {}),
+  } : source==='bilibili' ? {
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Referer:'https://www.bilibili.com/',
+    Cookie:String(env.BILIBILI_COOKIE || ''),
   } : {'User-Agent':'danmu-api-android/connectivity'}};
+}
+function validBilibiliNav(data) {
+  if (!data || typeof data !== 'object' || !data.data || typeof data.data !== 'object') return false;
+  if (data.code === 0) return true;
+  // Anonymous nav replies carry -101 (not logged in) while still serving WBI keys.
+  const wbi = data.data.wbi_img;
+  return data.code === -101 && data.data.isLogin === false
+    && typeof wbi?.img_url === 'string' && wbi.img_url.trim().length > 0
+    && typeof wbi?.sub_url === 'string' && wbi.sub_url.trim().length > 0;
 }
 async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globalThis.fetch } = {}) {
   const candidates = targets[source];
@@ -64,6 +81,7 @@ async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globa
       let data;try{data=JSON.parse(text);}catch{reason='源站返回非预期内容，可能需要验证';continue;}
       const valid = source === 'tmdb' ? status === 200
         : status === 200 && (source === 'bahamut' ? Array.isArray(data.anime)
+          : source === 'bilibili' ? validBilibiliNav(data)
           : source === 'dandan' ? Array.isArray(data.animes)
           : source === 'douban' ? !data.banned && String(data.id)==='36296618' && typeof data.title==='string' && data.title.trim().length>0
           : Boolean(data.id) || Array.isArray(data.data));
@@ -76,4 +94,4 @@ async function diagnoseSource(source, snapshot, env, { signal, fetchImpl = globa
   }
   return { ok:false, status, reason, durationMs:Date.now()-started };
 }
-module.exports = { diagnoseSource, diagnosticSources:Object.keys(targets), diagnosticTargets:targets, diagnosticRequest };
+module.exports = { diagnoseSource, diagnosticSources:Object.keys(targets), diagnosticTargets:targets, diagnosticRequest, validBilibiliNav };

@@ -98,12 +98,21 @@ for(const type of ['http','socks5']) {
 }
 test('routing aliases, localhost exclusion, deleted binding, inherited legacy rule and concurrent source isolation',async()=>{
  const config={enabled:true,nodes:[],rules:{imgo:'direct',aiyifan:'node:deleted'},defaultRoute:'node:default'};
- assert.equal(routing.withSource('mango',()=>routing.routeFor(new URL('https://source.test'),config)).mode,'inherit');
+ assert.equal(routing.withSource('mango',()=>routing.routeFor(new URL('https://source.test'),config)).mode,'direct');
+ assert.equal(routing.withSource('imgo',()=>routing.routeFor(new URL('https://source.test'),config)).mode,'direct');
  assert.equal(routing.routeFor(new URL('http://127.0.0.1'),config).mode,'inherit');
  assert.equal(routing.routeFor(new URL('https://api.tripdata.app'),config).node,undefined);
  assert.equal(routing.withRoute({mode:'direct'},()=>routing.routeFor(new URL('https://other.test'),config)).mode,'direct');
  const values=await Promise.all(['aiyifan','mango'].map(source=>routing.withSource(source,async()=>{await new Promise(r=>setTimeout(r,5));return routing.routeFor(new URL('https://source.test'),config).mode;})));
- assert.deepEqual(values,['proxy','inherit']);
+ assert.deepEqual(values,['proxy','direct']);
+});
+test('core proxy sources inherit core config over an App-wide default; direct remains per-source',()=>{
+ const node={id:'one',name:'one',type:'http',host:'127.0.0.1',port:8080};
+ const config={enabled:true,defaultRoute:'node:one',nodes:[node],rules:{}};
+ for(const source of routing.coreProxySources)assert.equal(routing.withSource(source,()=>routing.routeFor(new URL('https://source.test'),config)).mode,'inherit');
+ assert.equal(routing.withSource('douban',()=>routing.routeFor(new URL('https://source.test'),config)).mode,'proxy');
+ config.rules.tmdb='direct';
+ assert.equal(routing.withSource('tmdb',()=>routing.routeFor(new URL('https://api.tmdb.org'),config)).mode,'direct');
 });
 test('core source context works without editing core; explicit routes bypass legacy URL rewriting',async()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'app-proxy-core-'));
@@ -122,22 +131,26 @@ test('core source context works without editing core; explicit routes bypass leg
   assert.equal(sourceLogContext.run('aiyifan',()=>Globals.makeProxyUrl('https://source.test')),'https://source.test');
   selected='inherit';
   assert.equal(sourceLogContext.run('aiyifan',()=>Globals.makeProxyUrl('https://source.test')),'https://legacy.test/https://source.test');
-  selected='direct'; // Upgrade compatibility must restore core rewriting too.
-  assert.equal(sourceLogContext.run('aiyifan',()=>Globals.makeProxyUrl('https://source.test')),'https://legacy.test/https://source.test');
+  selected='direct';
+  assert.equal(sourceLogContext.run('aiyifan',()=>Globals.makeProxyUrl('https://source.test')),'https://source.test');
   assert.equal(sourceLogContext.run('douban',()=>Globals.makeProxyUrl('https://source.test')),'https://legacy.test/https://source.test');
  }finally{await routing.bindCoreSourceContext('');fs.rmSync(directory,{recursive:true,force:true});}
 });
 
-test('old direct rules inherit core; explicit App node bindings remain highest priority',()=>{
- const config=routing.validateProxyConfig({enabled:true,defaultRoute:'direct',rules:{aiyifan:'direct',tmdb:'node:one'},
+test('global direct defaults migrate to core inheritance; per-source direct and App node overrides remain explicit',()=>{
+ const config=routing.validateProxyConfig({enabled:true,routeVersion:2,defaultRoute:'direct',rules:{aiyifan:'direct',tmdb:'node:one'},
   nodes:[{id:'one',type:'http',host:'proxy.test',port:2080,username:'user',password:'pass'}]});
- assert.equal(config.defaultRoute,'inherit');assert.equal(config.rules.aiyifan,'inherit');
- assert.equal(routing.routeFor(new URL('https://api.tripdata.app'),config).mode,'inherit');
+ assert.equal(config.defaultRoute,'inherit');assert.equal(config.rules.aiyifan,'direct');
+ assert.equal(routing.routeFor(new URL('https://api.tripdata.app'),config).mode,'direct');
  const selected=routing.routeFor(new URL('https://api.tmdb.org'),config);
  assert.equal(selected.mode,'proxy');assert.equal(selected.node.id,'one');assert.equal(selected.node.password,'pass');
  const defaults={...config,defaultRoute:'node:one'};
- assert.equal(routing.routeFor(new URL('https://api.tripdata.app'),defaults).mode,'inherit');
+ assert.equal(routing.routeFor(new URL('https://api.tripdata.app'),defaults).mode,'direct');
  assert.equal(routing.routeFor(new URL('https://unlisted.test'),defaults).node.id,'one');
+});
+test('old per-source direct rules migrate to core inheritance once',()=>{
+ const config=routing.validateProxyConfig({enabled:true,rules:{aiyifan:'direct'}});
+ assert.equal(config.routeVersion,2);assert.equal(config.rules.aiyifan,'inherit');
 });
 test('core proxy parsing distinguishes authenticated forward URLs from source and universal reverse rules',()=>{
  const forward='https://u%40ser:p%3Aass@proxy.test:2080/';

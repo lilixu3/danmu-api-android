@@ -138,12 +138,23 @@ test('selected-source diagnostics use node fallback, validate responses, respect
     if(seen.length===1) throw new Error('primary unavailable');
     return Response.json({id:400602});
   }});
-  assert.equal(result.ok,true);assert.deepEqual(seen,['api.animeko.org','danmaku-global.myani.org']);
+  assert.equal(result.ok,true);assert.deepEqual(seen,['api.bgm.tv','api.bangumi.vip']);
   assert.equal((await diagnoseSource('animeko',snapshot,{PROXY_URL:'animeko@https://proxy.test'},{fetchImpl:()=>{throw new Error('must not send');}})).httpStatus,409);
   assert.equal((await diagnoseSource('dandan',snapshot,{}, {fetchImpl:async()=>new Response('<html>challenge</html>')})).ok,false);
   assert.equal((await diagnoseSource('tmdb',snapshot,{}, {fetchImpl:async()=>Response.json({status_message:'Unauthorized'},{status:401})})).ok,true);
   const controller=new AbortController();controller.abort();
   await assert.rejects(diagnoseSource('animeko',snapshot,{}, {signal:controller.signal,fetchImpl:()=>{throw new Error('must not send');}}),{name:'AbortError'});
+});
+
+test('Bilibili diagnostic request follows the core nav endpoint and browser headers',()=>{
+  const {diagnosticRequest,diagnosticTargets}=require('../app/src/main/assets/nodejs-project/app-outbound-diagnostics.js');
+  const cookie='SESSDATA=diagnostic-secret';
+  const request=diagnosticRequest('bilibili',diagnosticTargets.bilibili[0],{BILIBILI_COOKIE:cookie});
+  const target=new URL(request.url);
+  assert.equal(target.href,'https://api.bilibili.com/x/web-interface/nav');
+  assert.match(request.headers['User-Agent'],/Chrome\/120/);
+  assert.equal(request.headers.Referer,'https://www.bilibili.com/');
+  assert.equal(request.headers.Cookie,cookie);
 });
 
 test('source diagnostics distinguish country blocks from a successful TLS connection',async()=>{

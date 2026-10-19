@@ -1,0 +1,1378 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#edf1f6">
+<title>推送目标弹窗 · 交互原型</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #e9edf3;
+    --page-2: #dce5ef;
+    --dialog: #fafbfd;
+    --surface-low: #f7f8fa;
+    --surface-high: #f2f4f7;
+    --surface-active: #e7ebf0;
+    --text: #1d232c;
+    --text-2: #626c79;
+    --text-3: #7b8592;
+    --line: #d3dae4;
+    --line-soft: rgba(211, 218, 228, .72);
+    --primary: #476f9e;
+    --primary-strong: #365f8e;
+    --primary-soft: rgba(71, 111, 158, .085);
+    --primary-line: rgba(71, 111, 158, .24);
+    --success: #2f704c;
+    --success-soft: #e3f3e9;
+    --warning: #7a5315;
+    --danger: #b74450;
+    --scrim: rgba(24, 34, 47, .28);
+    --chip: #f2f4f7;
+    --shadow: 0 28px 90px rgba(43, 59, 77, .26);
+    --radius-dialog: 24px;
+    --radius-card: 12px;
+    --radius-row: 11px;
+  }
+
+  body[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #12171d;
+    --page-2: #1a222c;
+    --dialog: #30343a;
+    --surface-low: #34383f;
+    --surface-high: #3a3f46;
+    --surface-active: #424850;
+    --text: #f5f6f8;
+    --text-2: #cdd1d7;
+    --text-3: #aeb4bc;
+    --line: #555c65;
+    --line-soft: rgba(85, 92, 101, .76);
+    --primary: #7dcfff;
+    --primary-strong: #65b8e6;
+    --primary-soft: rgba(125, 207, 255, .10);
+    --primary-line: rgba(125, 207, 255, .30);
+    --success: #ace7c1;
+    --success-soft: rgba(28, 59, 48, .88);
+    --warning: #f2d091;
+    --danger: #f2a0a6;
+    --scrim: rgba(3, 7, 12, .60);
+    --chip: #3a3f46;
+    --shadow: 0 28px 90px rgba(0, 0, 0, .52);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(circle at 16% 10%, rgba(125, 166, 211, .22), transparent 30%),
+      radial-gradient(circle at 90% 92%, rgba(110, 145, 179, .16), transparent 34%),
+      linear-gradient(145deg, var(--page), var(--page-2));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 22px 14px;
+    transition: background .25s ease, color .25s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, input { font: inherit; }
+  button { color: inherit; }
+
+  .preview-toolbar {
+    width: min(430px, 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 12px;
+    color: var(--text-2);
+  }
+
+  .preview-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+
+  .preview-title::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-soft);
+  }
+
+  .theme-switch {
+    display: inline-flex;
+    padding: 3px;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--dialog) 82%, transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  .theme-switch button {
+    border: 0;
+    background: transparent;
+    color: var(--text-2);
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 10.5px;
+    cursor: pointer;
+  }
+
+  .theme-switch button.active {
+    color: var(--primary);
+    background: var(--primary-soft);
+    font-weight: 650;
+  }
+
+  .phone-shell {
+    position: relative;
+    width: min(430px, 100%);
+    height: min(880px, calc(100dvh - 82px));
+    min-height: 700px;
+    border: 1px solid rgba(255, 255, 255, .32);
+    border-radius: 34px;
+    overflow: hidden;
+    background: var(--dialog);
+    box-shadow: var(--shadow), 0 0 0 8px rgba(255, 255, 255, .15);
+    transition: background .25s ease, box-shadow .25s ease;
+    isolation: isolate;
+  }
+
+  body[data-theme="dark"] .phone-shell {
+    box-shadow: var(--shadow), 0 0 0 8px rgba(255, 255, 255, .045);
+  }
+
+  .app-screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background:
+      radial-gradient(circle at 100% 0%, var(--primary-soft), transparent 32%),
+      var(--dialog);
+    transition: background .25s ease;
+  }
+
+  .statusbar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    font-size: 10px;
+    font-weight: 650;
+    color: var(--text-2);
+    opacity: .74;
+  }
+
+  .status-dots { display: flex; gap: 3px; align-items: center; }
+  .status-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; display: block; }
+  .status-dots i:nth-child(2) { opacity: .7; }
+  .status-dots i:nth-child(3) { opacity: .42; }
+
+  .app-topbar {
+    height: 58px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px 0 10px;
+    gap: 4px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .app-topbar h1 {
+    margin: 0;
+    flex: 1;
+    font-size: 17px;
+    line-height: 1.2;
+    letter-spacing: -.01em;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: none;
+    transition: background .15s ease, color .15s ease, transform .12s ease;
+  }
+
+  .icon-btn:hover { background: var(--surface-high); color: var(--text); }
+  .icon-btn:active { transform: scale(.94); }
+
+  .icon { width: 19px; height: 19px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .icon.sm { width: 16px; height: 16px; }
+  .icon.xs { width: 13px; height: 13px; }
+
+  .app-content {
+    padding: 12px 13px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .app-card {
+    border: 1px solid var(--line-soft);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--dialog) 88%, var(--surface-high));
+    padding: 13px;
+  }
+
+  .app-card-title { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; font-weight: 700; margin-bottom: 10px; }
+  .tiny-pill { font-size: 9px; color: var(--primary); background: var(--primary-soft); border-radius: 6px; padding: 3px 7px; }
+  .fake-input { height: 38px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--dialog); display: flex; align-items: center; gap: 8px; padding: 0 11px; color: var(--text-3); font-size: 11px; }
+  .fake-lines { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+  .fake-line { height: 7px; border-radius: 99px; background: var(--surface-high); }
+  .fake-line.w70 { width: 70%; }
+  .fake-line.w45 { width: 45%; }
+  .fake-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+  .fake-thumb { width: 40px; height: 54px; border-radius: 9px; background: var(--surface-high); flex: none; }
+  .fake-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .fake-button { height: 34px; border-radius: 10px; background: var(--surface-high); }
+
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--scrim);
+    backdrop-filter: blur(2px);
+    z-index: 5;
+    opacity: 1;
+    transition: opacity .18s ease;
+  }
+
+  .modal {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100% - 24px);
+    max-height: calc(100% - 26px);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    background: var(--dialog);
+    color: var(--text);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-dialog);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, .24);
+    overflow: hidden;
+    transition: opacity .18s ease, transform .18s ease, background .25s ease;
+  }
+
+  .modal.closed,
+  .scrim.closed {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .modal.closed { transform: translate(-50%, -48%) scale(.985); }
+
+  .modal-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 16px 12px 18px;
+    flex: none;
+  }
+
+  .modal-head h2 {
+    margin: 0;
+    font-size: 19px;
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: -.02em;
+  }
+
+  .modal-head p {
+    margin: 4px 0 0;
+    color: var(--text-2);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  .modal-head .icon-btn { margin-top: -1px; }
+
+  .modal-body {
+    padding: 0 16px 15px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .modal-body::-webkit-scrollbar { width: 4px; }
+  .modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+
+  .block { padding-top: 13px; }
+  .block:first-child { padding-top: 2px; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 1px 8px;
+  }
+
+  .section-head h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.3;
+    font-weight: 700;
+    letter-spacing: .005em;
+  }
+
+  .section-note {
+    color: var(--text-3);
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+
+  .current-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 8px 11px 12px;
+    border: 1px solid var(--primary-line);
+    border-radius: var(--radius-card);
+    background: var(--primary-soft);
+  }
+
+  .current-symbol {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--dialog) 62%, transparent);
+    border: 1px solid var(--primary-line);
+  }
+
+  .current-copy { min-width: 0; flex: 1; }
+
+  .current-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    padding-right: 2px;
+  }
+
+  .current-line strong {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .current-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+    color: var(--text-2);
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+
+  .current-editor {
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid var(--primary-line);
+  }
+
+  .current-editor[hidden] { display: none; }
+
+  .current-editor .segmented { margin-bottom: 7px; }
+
+  .current-editor .input-shell { background: var(--dialog); }
+
+  .editor-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 8px;
+  }
+
+  .editor-actions .primary-button {
+    width: auto;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 10.5px;
+    border-radius: 8px;
+    flex: 1;
+  }
+
+  .editor-actions .ghost-button {
+    flex: 1;
+    height: 32px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 0 11px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .editor-actions .ghost-button:hover { background: var(--surface-high); color: var(--text); }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 3px var(--success-soft);
+    flex: none;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 5px;
+    font-size: 9.5px;
+    line-height: 1;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .tag.default { color: var(--primary); background: color-mix(in srgb, var(--primary) 13%, transparent); }
+  .tag.recent { color: var(--text-2); background: color-mix(in srgb, var(--text-2) 11%, transparent); }
+  .tag.success { color: var(--success); background: var(--success-soft); }
+
+  .save-hint .icon.xs { flex: none; color: currentColor; }
+
+  .choice-list {
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: var(--surface-low);
+  }
+
+  .choice-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--line-soft);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 10px 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: background .14s ease;
+  }
+
+  .choice-row:last-child { border-bottom: 0; }
+  .choice-row:hover { background: color-mix(in srgb, var(--primary) 4%, transparent); }
+  .choice-row:active { background: var(--primary-soft); }
+
+  .choice-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    color: var(--text-2);
+    background: var(--chip);
+  }
+
+  .choice-copy { flex: 1; min-width: 0; }
+  .choice-address {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: -.015em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .choice-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+    color: var(--text-3);
+    font-size: 10px;
+  }
+
+  .choice-action {
+    flex: none;
+    color: var(--primary);
+    font-size: 10.5px;
+    font-weight: 650;
+    padding-left: 2px;
+  }
+
+  .empty-choice {
+    margin: 0;
+    padding: 13px 12px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-row);
+    color: var(--text-2);
+    background: var(--surface-low);
+    font-size: 10.5px;
+    line-height: 1.55;
+  }
+
+  .scan-card {
+    width: 100%;
+    min-height: 58px;
+    padding: 11px 11px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-row);
+    background: var(--surface-low);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+
+  .scan-card:hover,
+  .scan-card.active { border-color: var(--primary-line); background: var(--primary-soft); }
+
+  .add-symbol {
+    width: 29px;
+    height: 29px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+  }
+
+  .scan-copy { flex: 1; min-width: 0; }
+  .scan-copy strong { display: block; font-size: 11.5px; line-height: 1.35; font-weight: 700; }
+  .scan-copy small { display: flex; align-items: center; margin-top: 2px; color: var(--text-3); font-size: 9.5px; line-height: 1.35; }
+  .scan-copy small .status-dot { flex: none; }
+  .scan-copy .status-dot { display: inline-block; margin-right: 5px; vertical-align: 1px; }
+
+  .scan-end {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 650;
+  }
+
+  .scan-end .chevron { color: currentColor; width: 14px; height: 14px; }
+
+  .panel {
+    margin-top: 9px;
+    padding: 11px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-card);
+    background: var(--surface-low);
+    animation: reveal .18s ease both;
+  }
+
+  @keyframes reveal {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .panel[hidden] { display: none; }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 8px;
+  }
+
+  .panel-title strong { display: block; font-size: 11.5px; }
+  .panel-title small { display: block; margin-top: 2px; color: var(--text-3); font-size: 9.5px; }
+
+  .text-button {
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--primary);
+    font-size: 10.5px;
+    font-weight: 650;
+    padding: 5px 7px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .text-button:hover { background: var(--primary-soft); }
+  .text-button:disabled { color: var(--text-3); cursor: default; background: transparent; }
+
+  .device-list { border-top: 1px solid var(--line-soft); }
+  .device-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 3px;
+    border: 0;
+    border-bottom: 1px solid var(--line-soft);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .device-row:last-child { border-bottom: 0; }
+  .device-row:hover { background: var(--primary-soft); }
+
+  .device-symbol {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-2);
+    background: var(--chip);
+  }
+
+  .device-copy { flex: 1; min-width: 0; }
+  .device-copy strong { display: block; font-size: 11px; font-weight: 650; }
+  .device-copy small { display: block; margin-top: 2px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9.5px; }
+  .device-state { flex: none; font-size: 9px; color: var(--text-3); }
+
+  .segmented {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 9px;
+    background: var(--surface-high);
+    margin-bottom: 8px;
+  }
+
+  .segmented button {
+    border: 0;
+    border-radius: 7px;
+    padding: 5px 9px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .segmented button.active {
+    color: var(--primary);
+    background: var(--dialog);
+    font-weight: 650;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .07);
+  }
+
+  .input-shell {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--dialog);
+    padding: 0 4px 0 10px;
+  }
+
+  .input-shell:focus-within { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+
+  .input-shell input {
+    min-width: 0;
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10.5px;
+  }
+
+  .input-shell input::placeholder { color: var(--text-3); font-family: inherit; }
+
+  .chevron { width: 16px; height: 16px; color: var(--text-3); flex: none; transition: transform .16s ease; }
+  .chevron.open { transform: rotate(180deg); }
+
+  .modal-foot {
+    flex: none;
+    padding: 10px 16px calc(13px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line-soft);
+    background: color-mix(in srgb, var(--dialog) 94%, var(--surface-low));
+    box-shadow: 0 -10px 26px color-mix(in srgb, var(--dialog) 72%, transparent);
+  }
+
+  .save-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 16px;
+    margin: 0 1px 8px;
+    color: var(--text-3);
+    font-size: 9.5px;
+    line-height: 1.4;
+  }
+
+  .save-hint.success { color: var(--success); }
+
+  .primary-button {
+    width: 100%;
+    height: 40px;
+    border: 0;
+    border-radius: 11px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    transition: background .15s ease, transform .12s ease, opacity .15s ease;
+  }
+
+  body[data-theme="dark"] .primary-button { color: #031a28; }
+  .primary-button:hover:not(:disabled) { background: var(--primary-strong); }
+  .primary-button:active:not(:disabled) { transform: scale(.99); }
+  .primary-button:disabled {
+    color: var(--text-3);
+    background: var(--surface-high);
+    cursor: default;
+    opacity: 1;
+  }
+
+  .reopen {
+    position: absolute;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 2;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    background: var(--dialog);
+    color: var(--primary);
+    padding: 9px 14px;
+    font-size: 11px;
+    font-weight: 650;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .14);
+    cursor: pointer;
+  }
+
+  .reopen[hidden] { display: none; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 520px) {
+    body {
+      padding: 0;
+      background: var(--page);
+      display: block;
+      min-height: 100dvh;
+    }
+
+    .preview-toolbar { display: none; }
+
+    .phone-shell {
+      width: 100%;
+      height: 100dvh;
+      min-height: 100dvh;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .statusbar { height: calc(24px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+    .modal { width: calc(100% - 18px); max-height: calc(100dvh - 18px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+    .modal-foot { padding-bottom: calc(13px + env(safe-area-inset-bottom)); }
+  }
+
+  @media (max-height: 760px) {
+    .modal-head { padding-top: 14px; padding-bottom: 9px; }
+    .modal-head p { margin-top: 2px; }
+    .block { padding-top: 10px; }
+    .current-card { padding-top: 9px; padding-bottom: 9px; }
+    .scan-card { min-height: 54px; padding-top: 9px; padding-bottom: 9px; }
+    .modal-foot { padding-top: 8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body data-theme="light">
+<svg class="sr-only" aria-hidden="true">
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M20 4L9.5 14.5M20 4l-6.7 16-3.8-5.5L4 10.7 20 4z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3.5 9.5a13 13 0 0 1 17 0M6.5 12.6a8.5 8.5 0 0 1 11 0M9.6 15.7a4 4 0 0 1 4.8 0"/><circle cx="12" cy="19" r="1"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20l4.3-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.3 16 4 20z"/><path d="M13.8 6.5l3.7 3.7"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-antenna" viewBox="0 0 24 24"><path d="M5 20l7-16M19 20L12 4M8 15h8M6.5 19h11"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M15 15l4.5 4.5"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="7" ry="3"/><path d="M5 5.5v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6M5 11.5v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M12 18v3"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M10 6h4M11 18h2"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 5v5h5"/><path d="M5.2 10A8 8 0 1 1 4 14"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 4.5h11v16l-5.5-3.5-5.5 3.5v-16z"/></symbol>
+</svg>
+
+<div class="preview-toolbar" aria-label="预览设置">
+  <span class="preview-title">推送目标弹窗 · 交互原型</span>
+  <div class="theme-switch" role="group" aria-label="主题">
+    <button type="button" class="active" data-theme-choice="light">浅色</button>
+    <button type="button" data-theme-choice="dark">深色</button>
+  </div>
+</div>
+
+<div class="phone-shell">
+  <div class="app-screen" aria-hidden="true">
+    <div class="statusbar">
+      <span>14:26</span>
+      <span class="status-dots"><i></i><i></i><i></i></span>
+    </div>
+    <header class="app-topbar">
+      <button class="icon-btn" tabindex="-1"><svg class="icon"><use href="#i-back"/></svg></button>
+      <h1>弹幕推送</h1>
+      <button class="icon-btn" tabindex="-1"><svg class="icon"><use href="#i-antenna"/></svg></button>
+      <button class="icon-btn" tabindex="-1"><svg class="icon"><use href="#i-copy"/></svg></button>
+    </header>
+    <main class="app-content">
+      <section class="app-card">
+        <div class="app-card-title"><span>搜索动漫</span><span class="tiny-pill">仅支持 OK影视</span></div>
+        <div class="fake-input"><svg class="icon sm"><use href="#i-search"/></svg><span>例如：凡人修仙传</span></div>
+        <div class="fake-lines"><span class="fake-line w70"></span><span class="fake-line w45"></span></div>
+      </section>
+      <section class="app-card">
+        <div class="app-card-title"><span>推送设置</span><span class="tiny-pill">192.168.1.30</span></div>
+        <div class="fake-grid"><span class="fake-button"></span><span class="fake-button"></span></div>
+        <div class="fake-row"><span class="fake-thumb"></span><div style="flex:1"><div class="fake-line w70"></div><div class="fake-line w45" style="margin-top:7px"></div></div></div>
+        <div class="fake-row"><span class="fake-thumb"></span><div style="flex:1"><div class="fake-line w70"></div><div class="fake-line w45" style="margin-top:7px"></div></div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+
+  <section class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <header class="modal-head">
+      <div style="flex:1;min-width:0">
+        <h2 id="dialogTitle">推送目标</h2>
+        <p>选择电视或盒子接收弹幕的地址</p>
+      </div>
+      <button class="icon-btn" id="closeButton" type="button" aria-label="关闭">
+        <svg class="icon"><use href="#i-close"/></svg>
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <section class="block" aria-labelledby="currentHeading">
+        <div class="section-head">
+          <h3 id="currentHeading">当前使用</h3>
+          <span class="section-note">推送时立即使用</span>
+        </div>
+        <div class="current-card">
+          <span class="current-symbol"><svg class="icon"><use href="#i-check"/></svg></span>
+          <div class="current-copy">
+            <div class="current-line">
+              <strong id="currentHost">192.168.1.30:9978</strong>
+              <span class="tag default" id="currentTag">配置默认</span>
+            </div>
+            <div class="current-meta">
+              <span class="status-dot"></span>
+              <span id="currentMeta">来自配置默认，打开后自动使用</span>
+            </div>
+            <div class="current-editor" id="currentEditor" hidden>
+              <div class="segmented" role="tablist" aria-label="编辑方式">
+                <button type="button" class="active" data-editor-mode="host">只填 IP:端口</button>
+                <button type="button" data-editor-mode="full">完整推送地址</button>
+              </div>
+              <div class="input-shell">
+                <input id="currentInput" type="text" spellcheck="false" autocomplete="off" aria-label="新的推送地址">
+              </div>
+              <div class="editor-actions">
+                <button class="primary-button" id="applyCurrent" type="button">应用</button>
+                <button class="ghost-button" id="applyAndSave" type="button">应用并保存</button>
+              </div>
+            </div>
+          </div>
+          <button class="icon-btn" id="editButton" type="button" aria-label="编辑当前推送地址" title="编辑当前推送地址" aria-expanded="false">
+            <svg class="icon"><use href="#i-edit"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="block" aria-labelledby="switchHeading">
+        <div class="section-head">
+          <h3 id="switchHeading">快速切换</h3>
+          <span class="section-note" id="choiceCount">最近 3 个地址</span>
+        </div>
+        <div class="choice-list" id="choiceList"></div>
+        <p class="empty-choice" id="choiceEmpty" hidden>暂无其他地址。可以点上方编辑按钮填写，或扫描局域网设备。</p>
+      </section>
+
+      <section class="block" aria-labelledby="addHeading">
+        <div class="section-head">
+          <h3 id="addHeading">局域网设备</h3>
+          <span class="section-note">选择后立即切换</span>
+        </div>
+        <button class="scan-card" id="scanToggle" type="button" aria-expanded="false">
+          <span class="add-symbol"><svg class="icon sm"><use href="#i-wifi"/></svg></span>
+          <span class="scan-copy">
+            <strong>扫描同一 Wi-Fi 下的设备</strong>
+            <small><span id="scanSummary">查找电视或盒子上的 OK影视</span></small>
+          </span>
+          <span class="scan-end"><span id="scanActionText">扫描</span><svg class="chevron" id="scanChevron"><use href="#i-chevron"/></svg></span>
+        </button>
+
+        <div class="panel" id="scanPanel" hidden>
+          <div class="panel-head">
+            <div class="panel-title">
+              <strong>局域网设备</strong>
+              <small id="lanStatus">本机 192.168.1.20 · 等待扫描</small>
+            </div>
+            <button class="text-button" id="rescanButton" type="button">重新扫描</button>
+          </div>
+          <div class="device-list" id="deviceList"></div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="modal-foot">
+      <div class="save-hint" id="saveHint">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>写入配置管理后，下次打开会自动使用当前地址。</span>
+      </div>
+      <button class="primary-button" id="saveDefault" type="button">
+        <svg class="icon sm"><use href="#i-bookmark"/></svg>
+        <span>保存为配置默认</span>
+      </button>
+    </footer>
+  </section>
+
+  <button class="reopen" id="reopenButton" type="button" hidden>重新打开推送目标</button>
+</div>
+
+<script>
+  const DEFAULT_URL = 'http://192.168.1.30:9978/action?do=refresh&type=danmaku&path=';
+  const RECENT_URLS = [
+    'http://192.168.1.88:9978/action?do=refresh&type=danmaku&path=',
+    'http://192.168.1.21:10008/action?do=refresh&type=danmaku&path=',
+    'http://192.168.31.6:9978/action?do=refresh&type=danmaku&path='
+  ];
+  const DEVICES = [
+    { name: '客厅电视', url: 'http://192.168.1.88:9978/action?do=refresh&type=danmaku&path=', state: '已验证 OK 接口', verified: true, icon: 'tv' },
+    { name: '卧室电视', url: 'http://192.168.1.21:10008/action?do=refresh&type=danmaku&path=', state: '9978 端口可达', verified: false, icon: 'tv' },
+    { name: '本机', url: 'http://192.168.1.20:9978/action?do=refresh&type=danmaku&path=', state: '当前手机', verified: true, icon: 'phone' }
+  ];
+
+  let defaultUrl = DEFAULT_URL;
+  let currentUrl = DEFAULT_URL;
+  let currentOrigin = 'recent';
+  let editorMode = 'host';
+  let editing = false;
+  let saveFeedbackTimer = null;
+
+  const $ = (id) => document.getElementById(id);
+  const modal = $('modal');
+  const scrim = $('scrim');
+  const reopenButton = $('reopenButton');
+  const choiceList = $('choiceList');
+  const choiceEmpty = $('choiceEmpty');
+  const choiceCount = $('choiceCount');
+  const saveButton = $('saveDefault');
+  const saveHint = $('saveHint');
+  const currentEditor = $('currentEditor');
+  const currentInput = $('currentInput');
+  const applyCurrent = $('applyCurrent');
+  const applyAndSave = $('applyAndSave');
+
+  function hostOf(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return '未设置';
+    try {
+      return new URL(value.includes('://') ? value : 'http://' + value).host;
+    } catch {
+      return value.replace(/^https?:\/\//, '').split('/')[0];
+    }
+  }
+
+  function sameTarget(left, right) {
+    return String(left || '').trim() === String(right || '').trim();
+  }
+
+  function fullFromHost(raw) {
+    const value = String(raw || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!value) return '';
+    return 'http://' + value + '/action?do=refresh&type=danmaku&path=';
+  }
+
+  function currentOriginLabel() {
+    if (sameTarget(currentUrl, defaultUrl)) return '配置默认';
+    if (currentOrigin === 'device') return '局域网设备';
+    if (currentOrigin === 'manual') return '手动填写';
+    return '最近使用';
+  }
+
+  function currentOriginMeta() {
+    if (sameTarget(currentUrl, defaultUrl)) return '来自配置管理，打开后自动使用';
+    if (currentOrigin === 'device') return '来自局域网扫描，仅本次选择';
+    if (currentOrigin === 'manual') return '手动填写，仅本次选择';
+    return '上次推送成功，仅本次选择';
+  }
+
+  function dedupeChoices() {
+    const result = [];
+    const seen = new Set();
+    const push = (url, origin, meta) => {
+      if (!url || sameTarget(url, currentUrl)) return;
+      if (seen.has(url)) return;
+      seen.add(url);
+      result.push({ url, origin, meta });
+    };
+
+    if (!sameTarget(defaultUrl, currentUrl)) {
+      push(defaultUrl, 'default', '来自配置管理');
+    }
+    RECENT_URLS.forEach((url) => push(url, 'recent', '上次推送成功'));
+    return result;
+  }
+
+  function render() {
+    const isDefault = sameTarget(currentUrl, defaultUrl);
+    $('currentHost').textContent = hostOf(currentUrl);
+    $('currentTag').textContent = currentOriginLabel();
+    $('currentTag').className = 'tag ' + (currentOriginLabel() === '配置默认' ? 'default' : 'recent');
+    $('currentMeta').textContent = currentOriginMeta();
+
+    const choices = dedupeChoices();
+    choiceList.innerHTML = '';
+    choiceList.hidden = choices.length === 0;
+    choiceEmpty.hidden = choices.length !== 0;
+    choiceCount.textContent = choices.length === 0
+      ? '暂无其他地址'
+      : choices.length + ' 个可切换地址';
+
+    choices.forEach((choice) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'choice-row';
+      row.innerHTML = `
+        <span class="choice-icon"><svg class="icon sm"><use href="#${choice.origin === 'default' ? 'i-bookmark' : 'i-history'}"/></svg></span>
+        <span class="choice-copy">
+          <span class="choice-address">${hostOf(choice.url)}</span>
+          <span class="choice-meta">
+            <span class="tag ${choice.origin === 'default' ? 'default' : 'recent'}">${choice.origin === 'default' ? '配置默认' : '最近使用'}</span>
+            <span>${choice.meta}</span>
+          </span>
+        </span>
+        <span class="choice-action">切换</span>
+      `;
+      row.addEventListener('click', () => {
+        currentUrl = choice.url;
+        currentOrigin = choice.origin === 'default' ? 'default' : 'recent';
+        closeEditor();
+        clearSaveFeedback();
+        render();
+      });
+      choiceList.appendChild(row);
+    });
+
+    saveButton.disabled = isDefault;
+    saveButton.innerHTML = isDefault
+      ? '<svg class="icon sm"><use href="#i-check"/></svg><span>已是配置默认</span>'
+      : '<svg class="icon sm"><use href="#i-bookmark"/></svg><span>保存为配置默认</span>';
+
+    if (isDefault) {
+      saveHint.classList.remove('success');
+      saveHint.innerHTML = '<span class="status-dot" aria-hidden="true"></span><span>当前地址与配置管理中的默认地址一致。</span>';
+    } else if (!saveHint.classList.contains('success')) {
+      saveHint.innerHTML = '<span class="status-dot" aria-hidden="true"></span><span>保存后，下次打开会自动使用当前地址。</span>';
+    }
+
+    renderDevices();
+    updateEditorInput();
+    syncScanSummary();
+  }
+
+  function syncScanSummary() {
+    if (!$('scanPanel').hidden) return;
+    const summary = $('scanSummary');
+    if (!summary.dataset.scanned) {
+      summary.textContent = '查找电视或盒子上的 OK影视';
+    }
+  }
+
+  function renderDevices() {
+    const list = $('deviceList');
+    list.innerHTML = '';
+    DEVICES.forEach((device) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'device-row';
+      const isCurrent = sameTarget(currentUrl, device.url);
+      row.innerHTML = `
+        <span class="device-symbol"><svg class="icon sm"><use href="#i-${device.icon}"/></svg></span>
+        <span class="device-copy">
+          <strong>${device.name}${isCurrent ? ' · 使用中' : ''}</strong>
+          <small>${hostOf(device.url)}</small>
+        </span>
+        <span class="device-state">${isCurrent ? '当前' : device.state}</span>
+      `;
+      row.addEventListener('click', () => {
+        currentUrl = device.url;
+        currentOrigin = 'device';
+        closeEditor();
+        clearSaveFeedback();
+        render();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function setTheme(theme) {
+    document.body.dataset.theme = theme;
+    document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.themeChoice === theme);
+    });
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#12171d' : '#edf1f6');
+  }
+
+  function closeDialog() {
+    modal.classList.add('closed');
+    scrim.classList.add('closed');
+    reopenButton.hidden = false;
+  }
+
+  function openDialog() {
+    modal.classList.remove('closed');
+    scrim.classList.remove('closed');
+    reopenButton.hidden = true;
+  }
+
+  function clearSaveFeedback() {
+    if (saveFeedbackTimer) {
+      clearTimeout(saveFeedbackTimer);
+      saveFeedbackTimer = null;
+    }
+    saveHint.classList.remove('success');
+  }
+
+  function updateEditorMode(mode) {
+    editorMode = mode;
+    document.querySelectorAll('[data-editor-mode]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.editorMode === mode);
+    });
+    updateEditorInput();
+  }
+
+  function updateEditorInput() {
+    if (editorMode === 'host') {
+      currentInput.value = hostOf(currentUrl);
+      currentInput.placeholder = '例如 192.168.1.88:9978';
+    } else {
+      currentInput.value = currentUrl;
+      currentInput.placeholder = '例如 http://192.168.1.88:9978/action?do=refresh&type=danmaku&path=';
+    }
+    applyCurrent.disabled = !currentInput.value.trim();
+    applyAndSave.disabled = !currentInput.value.trim();
+  }
+
+  function openEditor() {
+    editing = true;
+    currentEditor.hidden = false;
+    $('editButton').classList.add('active');
+    $('editButton').setAttribute('aria-expanded', 'true');
+    $('scanPanel').hidden = true;
+    $('scanToggle').classList.remove('active');
+    $('scanToggle').setAttribute('aria-expanded', 'false');
+    $('scanChevron').classList.remove('open');
+    $('scanActionText').textContent = '扫描';
+    updateEditorInput();
+    currentInput.focus();
+    currentInput.select();
+  }
+
+  function closeEditor() {
+    editing = false;
+    currentEditor.hidden = true;
+    $('editButton').classList.remove('active');
+    $('editButton').setAttribute('aria-expanded', 'false');
+  }
+
+  function trimmedEditorValue() {
+    return editorMode === 'host' ? fullFromHost(currentInput.value) : currentInput.value.trim();
+  }
+
+  function applyEditorValue(origin = 'manual') {
+    const next = trimmedEditorValue();
+    if (!next) return false;
+    currentUrl = next;
+    currentOrigin = origin;
+    clearSaveFeedback();
+    closeEditor();
+    render();
+    return true;
+  }
+
+  function saveCurrentAsDefault() {
+    if (sameTarget(currentUrl, defaultUrl)) return;
+    defaultUrl = currentUrl;
+    currentOrigin = 'default';
+    clearSaveFeedback();
+    closeEditor();
+    render();
+    saveHint.classList.add('success');
+    saveHint.innerHTML = '<svg class="icon xs" aria-hidden="true"><use href="#i-check"/></svg><span>已写入配置管理，下次打开会自动使用。</span>';
+    saveFeedbackTimer = setTimeout(() => {
+      saveHint.classList.remove('success');
+      render();
+    }, 3200);
+  }
+
+  document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+    button.addEventListener('click', () => setTheme(button.dataset.themeChoice));
+  });
+
+  $('closeButton').addEventListener('click', closeDialog);
+  scrim.addEventListener('click', closeDialog);
+  reopenButton.addEventListener('click', openDialog);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (editing) closeEditor();
+      else closeDialog();
+    }
+  });
+
+  $('editButton').addEventListener('click', () => {
+    if (editing) closeEditor();
+    else openEditor();
+  });
+
+  document.querySelectorAll('[data-editor-mode]').forEach((button) => {
+    button.addEventListener('click', () => updateEditorMode(button.dataset.editorMode));
+  });
+
+  currentInput.addEventListener('input', () => {
+    applyCurrent.disabled = !currentInput.value.trim();
+    applyAndSave.disabled = !currentInput.value.trim();
+  });
+
+  currentInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyEditorValue();
+    }
+  });
+
+  applyCurrent.addEventListener('click', () => applyEditorValue());
+  applyAndSave.addEventListener('click', () => {
+    if (applyEditorValue()) saveCurrentAsDefault();
+  });
+
+  $('saveDefault').addEventListener('click', saveCurrentAsDefault);
+
+  $('scanToggle').addEventListener('click', () => {
+    const panel = $('scanPanel');
+    const willOpen = panel.hidden;
+    panel.hidden = !willOpen;
+    $('scanToggle').classList.toggle('active', willOpen);
+    $('scanToggle').setAttribute('aria-expanded', String(willOpen));
+    $('scanChevron').classList.toggle('open', willOpen);
+    if (willOpen) {
+      closeEditor();
+      initializeScan();
+    }
+    if (!willOpen) $('scanToggle').classList.remove('active');
+    $('scanActionText').textContent = willOpen ? '收起' : '扫描';
+  });
+
+  function initializeScan() {
+    if (scanInitialized) {
+      $('lanStatus').textContent = '本机 192.168.1.20 · 已发现 ' + DEVICES.length + ' 台设备';
+      return;
+    }
+    scanInitialized = true;
+    $('rescanButton').click();
+  }
+
+  let scanInitialized = false;
+
+  $('rescanButton').addEventListener('click', () => {
+    const button = $('rescanButton');
+    button.disabled = true;
+    button.textContent = '扫描中…';
+    $('scanSummary').textContent = '正在扫描同一 Wi-Fi 下的设备';
+    $('lanStatus').textContent = '本机 192.168.1.20 · 正在扫描';
+    $('scanToggle').classList.add('active');
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = '重新扫描';
+      $('lanStatus').textContent = '本机 192.168.1.20 · 已发现 ' + DEVICES.length + ' 台设备';
+      $('scanSummary').textContent = '已发现 ' + DEVICES.length + ' 台设备';
+      $('scanSummary').dataset.scanned = 'true';
+      renderDevices();
+    }, 720);
+  });
+
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    setTheme('dark');
+  } else {
+    setTheme('light');
+  }
+
+  render();
+</script>
+</body>
+</html>
