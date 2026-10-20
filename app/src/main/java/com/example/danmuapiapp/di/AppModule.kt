@@ -51,7 +51,12 @@ abstract class RepositoryModule {
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
     @Provides @Singleton
-    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
-        return GithubOutboundNetwork.createClient(context)
+    fun provideGithubApiQuota(@ApplicationContext context: Context): com.example.danmuapiapp.data.service.GithubApiQuota =
+        com.example.danmuapiapp.data.service.GithubApiQuota.get(context)
+
+    @Provides @Singleton
+    fun provideOkHttpClient(@ApplicationContext context: Context, quota: com.example.danmuapiapp.data.service.GithubApiQuota): OkHttpClient {
+        return GithubOutboundNetwork.createClient(context).newBuilder()
+            .addInterceptor(com.example.danmuapiapp.data.network.GithubQuotaInterceptor(quota)).build()
     }
 }

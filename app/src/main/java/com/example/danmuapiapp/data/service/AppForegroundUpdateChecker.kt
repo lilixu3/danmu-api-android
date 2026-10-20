@@ -18,7 +18,8 @@ import javax.inject.Singleton
 @Singleton
 class AppForegroundUpdateChecker @Inject constructor(
     @ApplicationContext context: Context,
-    private val appUpdateService: AppUpdateService
+    private val appUpdateService: AppUpdateService,
+    private val apiQuota: GithubApiQuota
 ) {
     companion object {
         private const val AUTO_CHECK_INTERVAL_MS = 10 * 60 * 1000L // 10 分钟
@@ -38,6 +39,7 @@ class AppForegroundUpdateChecker @Inject constructor(
     val latestUpdate: StateFlow<AppUpdateService.CheckResult?> = _latestUpdate.asStateFlow()
 
     fun onAppResume() {
+        if (apiQuota.blocked() != null) return
         val now = System.currentTimeMillis()
         if (now - lastAutoCheckTime.get() < AUTO_CHECK_INTERVAL_MS) return
         if (!isAutoChecking.compareAndSet(false, true)) return
@@ -45,7 +47,7 @@ class AppForegroundUpdateChecker @Inject constructor(
         scope.launch {
             try {
                 persistLastAutoCheckTime(now)
-                appUpdateService.checkLatestRelease().onSuccess { info ->
+                GithubQuotaRequestContext.automatically { appUpdateService.checkLatestRelease() }.onSuccess { info ->
                     if (!info.hasUpdate) {
                         _latestUpdate.value = null
                         return@onSuccess
@@ -56,6 +58,8 @@ class AppForegroundUpdateChecker @Inject constructor(
                     }
                     // A previous HTML/partial result can lack assets. Refresh same-version metadata too.
                     _latestUpdate.value = mergeForegroundAppUpdateResult(_latestUpdate.value, info)
+                }.onFailure { error ->
+                    if (error is GithubQuotaExhaustedException) persistLastAutoCheckTime(0L)
                 }
             } finally {
                 isAutoChecking.set(false)

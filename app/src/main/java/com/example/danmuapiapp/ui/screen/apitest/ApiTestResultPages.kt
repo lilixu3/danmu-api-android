@@ -148,9 +148,15 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
         episodes.filter { filter.isBlank() || it.title.contains(filter.trim(), ignoreCase = true) ||
             it.episodeNumber.toString() == filter.trim() }
     }
+    val episodeListState = rememberLazyListState()
+    LaunchedEffect(anime?.animeId, anime?.directUrl, visible) {
+        val currentIndex = visible.indexOfFirst { it.directUrl.isNotBlank() && it.directUrl == anime?.directUrl }
+        if (currentIndex >= 0 && filter.isBlank()) episodeListState.scrollToItem(currentIndex)
+    }
     Column(Modifier.fillMaxSize()) {
         ApiPageHeader(anime?.title ?: "选择剧集", onBack,
-            listOfNotNull(anime?.sourceLabel?.ifBlank { "未知来源" }, "${episodes.size} 集").joinToString(" · "))
+            listOfNotNull(anime?.sourceLabel?.ifBlank { "未知来源" },
+                if (anime?.directUrl?.isNotBlank() == true) "${episodes.size} 个播放条目" else "${episodes.size} 集").joinToString(" · "))
         when {
             viewModel.isLoadingEpisodes -> ApiLoading()
             viewModel.errorMessage != null && episodes.isEmpty() -> ApiEmpty("获取剧集失败", viewModel.errorMessage.orEmpty()) {
@@ -159,12 +165,16 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
             anime == null -> ApiEmpty("请返回选择番剧")
             episodes.isEmpty() -> ApiEmpty("该动漫暂无剧集")
             else -> {
+                if (anime.directMetadataNotice.isNotBlank()) {
+                    Text(anime.directMetadataNotice, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 ApiInput(filter, { filter = it }, "筛选集数（例如 12）", Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     leading = Icons.Rounded.Search, trailing = {
                         if (filter.isNotEmpty()) IconButton(onClick = { filter = "" }) { Icon(Icons.Rounded.Close, "清空筛选", Modifier.size(16.dp)) }
                     })
                 if (visible.isEmpty()) ApiEmpty("没有匹配的剧集", "换个集数或清空筛选")
-                else LazyColumn(contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp),
+                else LazyColumn(state = episodeListState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(visible, key = { index, episode -> "$index:${episode.episodeId}:${episode.directUrl}" }) { _, episode ->
                         ApiCard(radius = 14, onClick = { if (!viewModel.isLoadingManualDanmu) onSelect(anime, episode) }) {
@@ -172,7 +182,8 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
                                 Text(episode.title.ifBlank { "第 ${episode.episodeNumber} 集" }, Modifier.weight(1f),
                                     fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.width(8.dp))
-                                Text("弹幕", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(if (anime.directUrl.isNotBlank() && episode.directUrl == anime.directUrl) "当前链接 · 弹幕" else "弹幕",
+                                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
                                 Icon(Icons.Rounded.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                             }
                         }

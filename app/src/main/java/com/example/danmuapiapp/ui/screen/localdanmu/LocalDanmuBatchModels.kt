@@ -39,7 +39,10 @@ data class LocalDanmuBatchItem(
     val selected: Boolean = true,
     val status: LocalDanmuBatchStatus = LocalDanmuBatchStatus.Ready,
     val message: String = "",
-    val progress: Float = 0f
+    val progress: Float = 0f,
+    val expectedSessionKey: String = "",
+    val detectedType: LocalDanmuType = type,
+    val detectedEpisode: Int? = episode
 ) {
     val validationError: String?
         get() = LocalDanmuResourceKey.validateUpload(
@@ -61,11 +64,21 @@ data class LocalDanmuBatchItem(
 
     val episodeLabel: String
         get() = when {
+            type == LocalDanmuType.Unknown -> "类型待确认"
             type == LocalDanmuType.Movie -> "正片"
             season != null && episode != null -> "第${season}季 第${episode}集"
             episode != null -> "第${episode}集"
             else -> "未识别集数"
         }
+}
+
+internal fun applyImportType(items: List<LocalDanmuBatchItem>, type: LocalDanmuType?): List<LocalDanmuBatchItem> = items.map { item ->
+    if (!item.selected || item.status == LocalDanmuBatchStatus.Success || item.status == LocalDanmuBatchStatus.Uploading) item
+    else {
+        val resolved = type ?: item.detectedType
+        item.copy(type = resolved, episode = if (resolved == LocalDanmuType.Movie) null else item.detectedEpisode,
+            status = LocalDanmuBatchStatus.Ready, message = "")
+    }
 }
 
 data class LocalDanmuBatchState(

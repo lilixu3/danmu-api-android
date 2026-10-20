@@ -17,7 +17,11 @@ internal fun buildAnimeSearchResultPresentation(
     val source = anime.sourceLabel.ifBlank {
         extractSourceFromAnimeTitle(anime.title).ifBlank { "来源未知" }
     }
-    val episodeCountText = if (anime.episodeLabel.isNotBlank()) {
+    val episodeCountText = if (anime.directUrl.isNotBlank() && anime.directEpisodes.isNotEmpty()) {
+        "${anime.directEpisodes.size} 个播放条目" + anime.episodeLabel.takeIf { it.isNotBlank() }?.let { " · 当前 $it" }.orEmpty()
+    } else if (anime.directUrl.isNotBlank() && anime.directMetadataNotice.isNotBlank()) {
+        "当前链接" + anime.episodeLabel.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+    } else if (anime.episodeLabel.isNotBlank()) {
         anime.episodeLabel
     } else if (anime.episodeCount > 0) {
         "${anime.episodeCount} 集"

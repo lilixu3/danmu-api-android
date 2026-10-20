@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -30,7 +31,6 @@ fun ServiceConfigScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     var portText by remember(state.port) { mutableStateOf(state.port.toString()) }
     var tokenText by remember(state.token) { mutableStateOf(state.token) }
@@ -44,14 +44,13 @@ fun ServiceConfigScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

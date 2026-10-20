@@ -5,10 +5,10 @@ import com.example.danmuapiapp.data.network.newOutboundCall
 import android.content.Context
 import android.net.Uri
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
-import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.service.RuntimeDataAccess
+import com.example.danmuapiapp.data.service.RuntimeDataContext
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeApiAccess
-import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
@@ -82,13 +82,11 @@ class LocalDanmuRepositoryImpl @Inject constructor(
     private val adminSessionRepository: AdminSessionRepository,
     private val envConfigRepository: EnvConfigRepository,
     private val sourceStore: LocalDanmuSourceStore,
-    private val coreCacheReader: LocalDanmuCoreCacheReader,
+    private val runtimeData: RuntimeDataAccess,
     private val runtimeRepository: RuntimeRepository
 ) : LocalDanmuRepository {
 
     companion object {
-        private const val RUNTIME_PREFS_NAME = "runtime"
-        private const val DEFAULT_PORT = 9321
         private const val DEFAULT_SOURCE_ORDER = "douban,360,renren,hanjutv"
         private const val LOCAL_SOURCE_KEY = "local"
         // 核心（Node）空闲 keep-alive 只有 5 秒，而 OkHttp 默认把空闲连接留 5 分钟，
@@ -99,7 +97,6 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         private const val CACHE_FRESH_WINDOW_MS = 60_000L
     }
 
-    private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var cachedSnapshot: LocalDanmuSnapshot? = null
     @Volatile private var cachedAtMillis: Long = 0L
@@ -108,6 +105,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
     private val localApiConnectionPool = okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS)
     private val localHttpClient = httpClient.newBuilder()
         .connectionPool(localApiConnectionPool)
+        .retryOnConnectionFailure(false)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
         .writeTimeout(5, TimeUnit.MINUTES)
@@ -115,6 +113,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         .build()
     private val requestHttpClient = httpClient.newBuilder()
         .connectionPool(localApiConnectionPool)
+        .retryOnConnectionFailure(false)
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
@@ -143,12 +142,8 @@ class LocalDanmuRepositoryImpl @Inject constructor(
             }
             .stateIn(scope, SharingStarted.Eagerly, false)
 
-    /**
-     * 列表加载：新鲜缓存 → 直读核心缓存目录（快）→ 接口兜底（慢，旧核心还要全量解析）。
-     * 任何一条路径成功都会刷新内存快照，页面进出不再每次等接口。
-     */
-    override suspend fun refresh(force: Boolean): Result<LocalDanmuSnapshot> {
-        val fingerprint = cacheFingerprint()
+    override suspend fun refresh(force: Boolean): Result<LocalDanmuSnapshot> = runScoped { target ->
+        val fingerprint = target.sessionKey
         if (!force) {
             val cached = cachedSnapshot
             if (cached != null &&
@@ -160,36 +155,15 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                     "LocalDanmu",
                     "使用本地快照缓存：资源 ${cached.resources.size} 个"
                 )
-                return Result.success(cached)
+                return@runScoped cached
             }
         }
-        readFromCoreCache(fingerprint)?.let { return Result.success(it) }
-        return refreshFromApi(fingerprint)
+        refreshFromApi(target).getOrThrow()
     }
 
-    /** 直读核心缓存目录里的资源元数据（不触发核心解析）。失败时返回 null，由调用方回退接口。 */
-    private suspend fun readFromCoreCache(fingerprint: String): LocalDanmuSnapshot? {
-        val result = coreCacheReader.readResources()
-        val resources = result.getOrElse { error ->
-            AppDiagnosticLogger.i(
-                context,
-                "LocalDanmu",
-                "直读核心缓存不可用（${error.message}），回退到接口"
-            )
-            return null
-        }
-        AppDiagnosticLogger.i(
-            context,
-            "LocalDanmu",
-            "直读核心缓存成功：资源 ${resources.size} 个"
-        )
-        return publishSnapshot(resources, fingerprint)
-    }
-
-    /** 接口兜底：任何核心版本都能用，只是旧核心可能很慢。 */
-    private suspend fun refreshFromApi(fingerprint: String): Result<LocalDanmuSnapshot> {
+    private suspend fun refreshFromApi(target: RuntimeDataContext): Result<LocalDanmuSnapshot> {
         return runLocalDanmuRequest {
-            val access = resolveRuntimeAccess()
+            val access = target.access
             val paths = tokenPaths(access)
             AppDiagnosticLogger.i(
                 context,
@@ -213,7 +187,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                     "LocalDanmu",
                     "refresh 成功: 资源 ${resources.size} 个"
                 )
-                publishSnapshot(resources, fingerprint)
+                publishSnapshot(resources, target)
             } catch (error: LocalDanmuApiException) {
                 AppDiagnosticLogger.w(
                     context,
@@ -225,18 +199,21 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         }
     }
 
-    /** 统一发布快照：分组一律由 app 自己构建，直读与接口两条路径结果一致。 */
     private fun publishSnapshot(
         resources: List<LocalDanmuResource>,
-        fingerprint: String
+        target: RuntimeDataContext
     ): LocalDanmuSnapshot {
+        runtimeData.requireCurrent(target)
+        val scoped = resources.map { it.copy(libraryId = target.libraryId, sessionKey = target.sessionKey) }
         val snapshot = LocalDanmuSnapshot(
-            resources = resources,
-            groups = buildGroups(resources)
+            resources = scoped,
+            groups = buildGroups(scoped),
+            libraryId = target.libraryId,
+            sessionKey = target.sessionKey
         )
         cachedSnapshot = snapshot
         cachedAtMillis = System.currentTimeMillis()
-        cachedFingerprint = fingerprint
+        cachedFingerprint = target.sessionKey
         return snapshot
     }
 
@@ -244,16 +221,16 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         cachedAtMillis = 0L
     }
 
-    /** 工作目录或核心变体变化时，内存快照立即失效。 */
-    private fun cacheFingerprint(): String {
-        val projectDir = runCatching { RuntimePaths.normalProjectDir(context).absolutePath }.getOrDefault("")
-        val variant = runCatching { runtimeRepository.runtimeState.value.variant.key }.getOrDefault("")
-        return "$projectDir|$variant"
+    private suspend fun <T> runScoped(expected: String = "", mutation: Boolean = false,
+        block: suspend (RuntimeDataContext) -> T): Result<T> = runLocalDanmuRequest {
+        runtimeData.withRuntime(expected) { target ->
+            try { block(target) } finally { if (mutation) invalidateCache() }
+        }
     }
 
-    override suspend fun loadDetail(resourceKey: String): Result<LocalDanmuResource> {
-        return runLocalDanmuRequest {
-            val access = resolveRuntimeAccess()
+    override suspend fun loadDetail(resourceKey: String, expectedSessionKey: String): Result<LocalDanmuResource> {
+        return runScoped(expectedSessionKey) { target ->
+            val access = target.access
             val paths = tokenPaths(access)
             withTokenPaths(paths) { tokenPath ->
                 val (code, body) = executeGet(
@@ -265,15 +242,15 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                     throw mapError(code, body, notFoundKind = LocalDanmuErrorKind.NotFound)
                 }
                 val root = decodeObject(body, "detail")
-                parseResource(root.optJSONObject("resource") ?: JSONObject())
+                parseResource(root.optJSONObject("resource") ?: JSONObject()).copy(libraryId = target.libraryId, sessionKey = target.sessionKey)
             }
         }
     }
 
-    override suspend fun loadPreview(resourceKey: String): Result<com.example.danmuapiapp.domain.model.DanmuFilePreview> =
+    override suspend fun loadPreview(resourceKey: String, expectedSessionKey: String): Result<com.example.danmuapiapp.domain.model.DanmuFilePreview> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runLocalDanmuRequest {
-                val access = resolveRuntimeAccess()
+            runScoped(expectedSessionKey) { target ->
+                val access = target.access
                 withTokenPaths(tokenPaths(access)) { tokenPath ->
                     val url = buildUrl(access, tokenPath, listOf("api", "v2", "comment")).newBuilder()
                         .addQueryParameter("url", "local:$resourceKey").addQueryParameter("format", "json").build()
@@ -294,7 +271,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         request: LocalDanmuUploadRequest,
         onProgress: (Float) -> Unit
     ): Result<LocalDanmuResource> {
-        return runLocalDanmuRequest {
+        return runScoped(request.expectedSessionKey, mutation = true) { target ->
             val stagedFile = request.stagedFile
             if ((stagedFile == null || !stagedFile.isFile) && request.sourceUri.isBlank()) {
                 throw LocalDanmuApiException(
@@ -310,7 +287,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                     "单文件不能超过 10 MB"
                 )
             }
-            val access = resolveRuntimeAccess()
+            val access = target.access
             val paths = tokenPaths(access)
             withTokenPaths(paths) { tokenPath ->
                 val (code, body) = executeUpload(access, tokenPath, request, onProgress)
@@ -330,14 +307,14 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                         LocalDanmuErrorKind.Server,
                         "核心未返回已保存的资源信息"
                     )
-                parseResource(resource)
+                parseResource(resource).copy(libraryId = target.libraryId, sessionKey = target.sessionKey)
             }
         }.onSuccess { invalidateCache() }
     }
 
-    override suspend fun delete(resourceKey: String): Result<Unit> {
-        return runLocalDanmuRequest {
-            val access = resolveRuntimeAccess()
+    override suspend fun delete(resourceKey: String, expectedSessionKey: String): Result<Unit> {
+        return runScoped(expectedSessionKey, mutation = true) { target ->
+            val access = target.access
             val paths = tokenPaths(access)
             withTokenPaths(paths) { tokenPath ->
                 val (code, body) = executeDelete(
@@ -358,7 +335,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                     )
                 }
             }
-            sourceStore.remove(listOf(resourceKey))
+            sourceStore.remove(target.libraryId, listOf(resourceKey))
         }.onSuccess { invalidateCache() }
     }
 
@@ -372,8 +349,8 @@ class LocalDanmuRepositoryImpl @Inject constructor(
             )
         }
         val body = buildLocalDanmuPatchBody(patch)
-        return runLocalDanmuRequest {
-            val access = resolveRuntimeAccess()
+        return runScoped(patch.expectedSessionKey, mutation = true) { target ->
+            val access = target.access
             val paths = tokenPaths(access)
             withTokenPaths(paths) { tokenPath ->
                 val (code, responseBody) = executePatch(
@@ -418,7 +395,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
                 }
                 LocalDanmuUpdateResult(
                     scope = root.optString("scope").ifBlank { patch.scope.wire },
-                    resources = updated
+                    resources = updated.map { it.copy(libraryId = target.libraryId, sessionKey = target.sessionKey) }
                 )
             }
         }.onSuccess { invalidateCache() }
@@ -426,6 +403,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
 
     override suspend fun deleteMany(
         resourceKeys: Collection<String>,
+        expectedSessionKey: String,
         onProgress: (completed: Int, total: Int) -> Unit
     ): Result<Int> {
         val keys = resourceKeys.filter { it.isNotBlank() }.distinct()
@@ -433,7 +411,7 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         var completed = 0
         var success = 0
         keys.forEach { key ->
-            delete(key).onSuccess { success++ }
+            delete(key, expectedSessionKey).onSuccess { success++ }
             completed++
             onProgress(completed, keys.size)
         }
@@ -460,24 +438,6 @@ class LocalDanmuRepositoryImpl @Inject constructor(
             envConfigRepository.reload()
             next
         }
-    }
-
-    private fun resolveRuntimeAccess(): RuntimeApiAccess {
-        val base = RuntimeApiAccessResolver.resolve(context, runtimePrefs, DEFAULT_PORT)
-        val runtimeState = runtimeRepository.runtimeState.value
-        val port = runtimeState.port.takeIf { it in 1..65535 } ?: base.port
-        val runtimeToken = RuntimeTokenNormalizer.normalizeInput(runtimeState.token)
-            .ifBlank { base.runtimeToken }
-        val tokenPaths = if (runtimeToken.isBlank()) {
-            emptyList()
-        } else {
-            listOf("/${runtimeToken.trim('/')}")
-        }
-        return RuntimeApiAccess(
-            port = port,
-            runtimeToken = runtimeToken,
-            tokenPaths = tokenPaths
-        )
     }
 
     private fun tokenPaths(access: RuntimeApiAccess): List<String> {
@@ -779,17 +739,17 @@ class LocalDanmuRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * 只解析 `resources`：响应里的 `groups[].episodes` 与它是重复数据（每集约一半体积），
-     * 分组由 app 自己用 [buildGroups] 构建，直读与接口两条路径结果完全一致。
-     */
     private fun parseSnapshot(raw: String): LocalDanmuSnapshot {
         val root = decodeObject(raw, "list")
-        val resources = root.optJSONArray("resources")
-            ?.let { array -> (0 until array.length()).mapNotNull { index ->
-                array.optJSONObject(index)?.let(::parseResource)
-            } }
-            .orEmpty()
+        val array = root.optJSONArray("resources")
+            ?: throw LocalDanmuApiException(LocalDanmuErrorKind.Server, "当前核心未返回有效的弹幕列表")
+        val resources = (0 until array.length()).map { index ->
+            val resource = array.optJSONObject(index)?.let(::parseResource)
+            if (resource == null || resource.resourceKey.isBlank()) {
+                throw LocalDanmuApiException(LocalDanmuErrorKind.Server, "弹幕列表包含无效资源，未覆盖已有导入状态")
+            }
+            resource
+        }
         return LocalDanmuSnapshot(
             resources = resources,
             groups = buildGroups(resources)

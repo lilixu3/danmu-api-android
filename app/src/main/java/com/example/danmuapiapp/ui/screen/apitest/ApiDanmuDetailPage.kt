@@ -1,7 +1,6 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -38,6 +37,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
+import com.example.danmuapiapp.ui.component.AppToast
 import java.util.Locale
 
 @Composable
@@ -179,7 +179,7 @@ private fun DetailHero(insight: DanmuInsight, sourceCount: Int, fileName: String
                             val canOpen = target.startsWith("https://") || target.startsWith("http://")
                             IconButton(onClick = {
                                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, target.toUri())) }
-                                    .onFailure { Toast.makeText(context, "无法打开来源地址", Toast.LENGTH_SHORT).show() }
+                                    .onFailure { AppToast.error("无法打开来源地址") }
                             }, enabled = canOpen, modifier = Modifier.size(34.dp)) {
                                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, "打开来源地址", Modifier.size(17.dp))
                             }

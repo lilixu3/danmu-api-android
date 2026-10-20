@@ -77,5 +77,5 @@ test('runtime fingerprint covers every shipped host script and changes for DNS n
  const names=['app-runtime-assets.json',...scripts];
  const fingerprint=changed=>{const hash=crypto.createHash('sha256');for(const name of names){hash.update(name+'\0');hash.update(fs.readFileSync(path.join(directory,name)));if(name===changed)hash.update('changed');}return hash.digest('hex');};
  assert.equal(fingerprint(),require('../app/src/main/assets/nodejs-project/app-outbound-runtime.js').networkRuntimeFingerprint);
- for(const name of ['android-server.js','worker-proxy.js','app-outbound-dns.js','app-outbound-native.js','app-series-refresh.js'])assert.notEqual(fingerprint(name),fingerprint());
+ for(const name of ['android-server.js','worker-proxy.js','app-outbound-dns.js','app-outbound-native.js','app-series-refresh.js','app-url-metadata.js'])assert.notEqual(fingerprint(name),fingerprint());
 });

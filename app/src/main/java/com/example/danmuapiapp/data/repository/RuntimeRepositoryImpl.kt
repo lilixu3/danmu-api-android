@@ -28,6 +28,7 @@ import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.data.service.RootRuntimeController
 import com.example.danmuapiapp.data.service.RootRuntimeNotificationManager
 import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.service.RuntimeDataAccess
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RootAutoStartModule
 import com.example.danmuapiapp.data.service.RootAutoStartPrefs
@@ -64,7 +65,8 @@ class RuntimeRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val adminSessionRepository: AdminSessionRepository,
-    private val coreRepository: CoreRepository
+    private val coreRepository: CoreRepository,
+    private val runtimeData: RuntimeDataAccess
 ) : RuntimeRepository {
 
     companion object {
@@ -434,7 +436,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             try {
                 operationMutex.withLock {
                     runCatching {
-                        block()
+                        runtimeData.transition { block() }
                     }.onFailure {
                         handleRuntimeOperationFailure(action, it)
                     }
@@ -472,7 +474,7 @@ class RuntimeRepositoryImpl @Inject constructor(
             cancelCandidateObservation()
             operationMutex.withLock {
                 runCatching {
-                    restartServiceLocked()
+                    runtimeData.transition { restartServiceLocked() }
                 }.onFailure {
                     handleRuntimeOperationFailure("重启服务", it)
                 }
@@ -1767,70 +1769,72 @@ class RuntimeRepositoryImpl @Inject constructor(
         scope.launch {
             try {
                 operationMutex.withLock {
-                    val candidate = coreRepository.candidateState.value ?: return@withLock
-                    if (!CoreCandidateRecoveryPolicy.matchesAttempt(
-                            candidate = candidate,
-                            variant = attempt.variant,
-                            runMode = attempt.runMode,
-                            installedAtMs = attempt.candidateInstalledAtMs
-                        )
-                    ) {
-                        return@withLock
-                    }
-                    if (!candidate.hasRecoveryPoint) {
-                        coreRepository.confirmCandidateCore(
-                            attempt.variant,
-                            attempt.runMode,
-                            attempt.candidateInstalledAtMs
-                        )
-                        addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
-                        return@withLock
-                    }
-
-                    val transitionId = beginRuntimeTransition(
-                        kind = RuntimeTransitionKind.RecoveringCore,
-                        message = "新核心启动异常，正在恢复上一个可用版本…"
-                    )
-                    try {
-                        addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
-                        val state = _runtimeState.value
-                        if (state.status != ServiceStatus.Stopped) {
-                            updateRuntimeTransition(transitionId, "正在安全停止异常核心…")
-                            stopServiceLocked()
-                            val stopped = waitForRuntimeStopped(
-                                mode = attempt.runMode,
-                                oldPort = state.port,
-                                timeoutMs = NORMAL_STOP_TIMEOUT_MS
+                    runtimeData.transition recovery@ {
+                        val candidate = coreRepository.candidateState.value ?: return@recovery
+                        if (!CoreCandidateRecoveryPolicy.matchesAttempt(
+                                candidate = candidate,
+                                variant = attempt.variant,
+                                runMode = attempt.runMode,
+                                installedAtMs = attempt.candidateInstalledAtMs
                             )
-                            if (!stopped) {
-                                addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
-                                return@withLock
-                            }
+                        ) {
+                            return@recovery
+                        }
+                        if (!candidate.hasRecoveryPoint) {
+                            coreRepository.confirmCandidateCore(
+                                attempt.variant,
+                                attempt.runMode,
+                                attempt.candidateInstalledAtMs
+                            )
+                            addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
+                            return@recovery
                         }
 
-                        updateRuntimeTransition(transitionId, "正在恢复上一个可用核心…")
-                        coreRepository.restoreCandidateCore(
-                            attempt.variant,
-                            attempt.runMode,
-                            attempt.candidateInstalledAtMs
-                        ).fold(
-                            onSuccess = { restored ->
-                                if (!restored) {
-                                    addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
-                                    return@fold
-                                }
-                                markStopped("新核心启动失败，已恢复上一个可用版本")
-                                addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
-                                updateRuntimeTransition(transitionId, "已恢复上一个版本，正在重新启动服务…")
-                                startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
-                            },
-                            onFailure = { error ->
-                                markError("自动恢复失败：${error.message ?: "未知错误"}")
-                                addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
-                            }
+                        val transitionId = beginRuntimeTransition(
+                            kind = RuntimeTransitionKind.RecoveringCore,
+                            message = "新核心启动异常，正在恢复上一个可用版本…"
                         )
-                    } finally {
-                        endRuntimeTransition(transitionId)
+                        try {
+                            addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
+                            val state = _runtimeState.value
+                            if (state.status != ServiceStatus.Stopped) {
+                                updateRuntimeTransition(transitionId, "正在安全停止异常核心…")
+                                stopServiceLocked()
+                                val stopped = waitForRuntimeStopped(
+                                    mode = attempt.runMode,
+                                    oldPort = state.port,
+                                    timeoutMs = NORMAL_STOP_TIMEOUT_MS
+                                )
+                                if (!stopped) {
+                                    addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
+                                    return@recovery
+                                }
+                            }
+
+                            updateRuntimeTransition(transitionId, "正在恢复上一个可用核心…")
+                            coreRepository.restoreCandidateCore(
+                                attempt.variant,
+                                attempt.runMode,
+                                attempt.candidateInstalledAtMs
+                            ).fold(
+                                onSuccess = { restored ->
+                                    if (!restored) {
+                                        addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
+                                        return@fold
+                                    }
+                                    markStopped("新核心启动失败，已恢复上一个可用版本")
+                                    addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
+                                    updateRuntimeTransition(transitionId, "已恢复上一个版本，正在重新启动服务…")
+                                    startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
+                                },
+                                onFailure = { error ->
+                                    markError("自动恢复失败：${error.message ?: "未知错误"}")
+                                    addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
+                                }
+                            )
+                        } finally {
+                            endRuntimeTransition(transitionId)
+                        }
                     }
                 }
             } finally {
@@ -2686,7 +2690,7 @@ class RuntimeRepositoryImpl @Inject constructor(
                 if (snapshot.runMode != RunMode.Normal) {
                     // Root 模式直接基于 Root 工作目录重启，不再用普通目录覆盖 Root 目录。
                 }
-                restartServiceLocked()
+                runtimeData.transition { restartServiceLocked() }
             }
         }
     }

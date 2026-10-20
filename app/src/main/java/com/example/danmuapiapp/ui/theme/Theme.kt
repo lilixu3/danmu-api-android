@@ -2,6 +2,8 @@ package com.example.danmuapiapp.ui.theme
 
 import android.os.SystemClock
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -15,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -25,6 +28,7 @@ import com.example.danmuapiapp.domain.model.AppBackgroundRefreshPolicy
 import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.ui.component.AppDialogHost
+import com.example.danmuapiapp.ui.component.AppToastHost
 
 /** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
 val LocalAppDarkTheme = staticCompositionLocalOf { false }
@@ -142,7 +146,10 @@ fun DanmuApiTheme(
                 bottomBarEnabled = glassBottomBar,
                 darkTheme = darkTheme
             ) {
-                AppDialogHost(content = content)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AppDialogHost(content = content)
+                    AppToastHost()
+                }
             }
         }
     }

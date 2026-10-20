@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -35,7 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,11 +67,10 @@ fun AdminModeScreen(
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.sessionState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
@@ -92,7 +91,6 @@ fun AdminModeScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

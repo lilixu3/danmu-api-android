@@ -22,6 +22,10 @@ import com.example.danmuapiapp.domain.model.DownloadThrottleConfig
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.DanmuDownloadRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
+import com.example.danmuapiapp.ui.screen.apitest.ApiTestInputResolver
+import com.example.danmuapiapp.ui.screen.apitest.UrlDanmuMetadataResolver
+import com.example.danmuapiapp.ui.screen.apitest.buildManualUrlDanmuSelection
+import com.example.danmuapiapp.ui.screen.apitest.buildManualUrlEpisodeCandidate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -106,7 +110,9 @@ class DanmuDownloadViewModel @Inject constructor(
             DanmuDownloadInput(apiBaseUrl = base, animeTitle = state.anime.title, episodeTitle = episode.title,
                 episodeId = episode.episodeId, episodeNo = episode.episodeNumber, source = episode.source,
                 format = settings.value.format(), fileNameTemplate = settings.value.fileNameTemplate,
-                conflictPolicy = settings.value.policy(), animeId = state.anime.animeId)
+                conflictPolicy = settings.value.policy(), animeId = state.anime.animeId,
+                mediaType = com.example.danmuapiapp.domain.model.LocalDanmuType.fromDescription(state.anime.typeDescription)?.wire.orEmpty(),
+                directUrl = episode.directUrl)
         }
         if (inputs.isEmpty()) return
         val added = downloadRepository.enqueueTasks(inputs)
@@ -234,7 +240,7 @@ class DanmuDownloadViewModel @Inject constructor(
             records.collect { snapshot ->
                 val fresh = snapshot.filter { it.id !in seen }
                 seen.addAll(snapshot.map { it.id })
-                if (settings.value.autoImportToLocal) fresh.filter { it.statusEnum() == DownloadRecordStatus.Success && it.episodeId > 0 }.forEach { record ->
+                if (settings.value.autoImportToLocal) fresh.filter { it.canAutoImportToLocal }.forEach { record ->
                     viewModelScope.launch {
                         localUploader.importRecord(record).exceptionOrNull()?.let { failure ->
                             if (failure.message != "已导入，跳过") {
@@ -735,7 +741,9 @@ class DanmuDownloadViewModel @Inject constructor(
                 format = selectedFormat,
                 fileNameTemplate = fileNameTemplate,
                 conflictPolicy = settings.value.policy(),
-                animeId = anime.animeId
+                animeId = anime.animeId,
+                mediaType = com.example.danmuapiapp.domain.model.LocalDanmuType.fromDescription(anime.typeDescription)?.wire.orEmpty(),
+                directUrl = episode.directUrl
             )
         }
         val added = downloadRepository.enqueueTasks(inputs)
@@ -804,7 +812,12 @@ class DanmuDownloadViewModel @Inject constructor(
 
         val q = keyword.trim()
         if (q.isBlank()) {
-            errorMessage = "请输入搜索关键词"
+            errorMessage = "请输入搜索关键词或视频链接"
+            return
+        }
+
+        ApiTestInputResolver.extractHttpUrl(q)?.let { inputUrl ->
+            searchUrlCandidate(apiBase, inputUrl)
             return
         }
 
@@ -842,8 +855,66 @@ class DanmuDownloadViewModel @Inject constructor(
         }
     }
 
+    private fun searchUrlCandidate(apiBase: String, inputUrl: String) {
+        if (isSearching || isLoadingEpisodes) return
+        viewModelScope.launch {
+            isSearching = true
+            errorMessage = null
+            animeCandidates = emptyList()
+            currentAnime = null
+            episodeCandidates = emptyList()
+            selectedEpisodeIds = emptySet()
+            episodeStates = emptyMap()
+            sourceFilter = null
+            val metadata = withContext(Dispatchers.IO) {
+                runCatching { UrlDanmuMetadataResolver(httpClient).resolve(inputUrl, apiBase) }.getOrNull()
+            }
+            val selection = withContext(Dispatchers.Default) {
+                buildManualUrlDanmuSelection(inputUrl = inputUrl, metadata = metadata)
+            }
+            animeCandidates = listOf(selection.anime)
+            hasSearchedAnime = true
+            operationMessage = selection.anime.directMetadataNotice.ifBlank {
+                if (selection.anime.directEpisodes.size > 1) {
+                    "已解析链接，共 ${selection.anime.directEpisodes.size} 个播放条目"
+                } else {
+                    "已解析链接，可直接下载弹幕"
+                }
+            }
+            isSearching = false
+        }
+    }
+
+    private fun openDirectUrlAnimeDetail(anime: DownloadAnimeCandidate) {
+        val episodes = anime.directEpisodes.ifEmpty {
+            listOfNotNull(buildManualUrlEpisodeCandidate(anime))
+        }
+        if (episodes.isEmpty()) {
+            errorMessage = "链接解析结果缺少可用地址"
+            return
+        }
+        currentAnime = anime
+        episodeCandidates = episodes
+        selectedEpisodeIds = episodes.map { it.episodeId }.toSet()
+        sourceFilter = null
+        episodeStates = buildInitialEpisodeStates(
+            animeTitle = anime.title,
+            episodes = episodes,
+            queueTasksSnapshot = queueTasks.value,
+            recordsSnapshot = records.value,
+            animeId = anime.animeId
+        )
+        errorMessage = null
+        operationMessage = anime.directMetadataNotice.ifBlank { "共加载 ${episodes.size} 个播放条目" }
+    }
+
     fun openAnimeDetail(anime: DownloadAnimeCandidate) {
         if (isSearching || isLoadingEpisodes) return
+
+        if (anime.directUrl.isNotBlank()) {
+            openDirectUrlAnimeDetail(anime)
+            return
+        }
 
         val apiBase = resolveApiBaseUrl()
         if (apiBase == null) {
@@ -952,7 +1023,9 @@ class DanmuDownloadViewModel @Inject constructor(
                 format = selectedFormat,
                 fileNameTemplate = fileNameTemplate,
                 conflictPolicy = settings.value.policy(),
-                animeId = anime.animeId
+                animeId = anime.animeId,
+                mediaType = com.example.danmuapiapp.domain.model.LocalDanmuType.fromDescription(anime.typeDescription)?.wire.orEmpty(),
+                directUrl = episode.directUrl
             )
         }
         errorMessage = null
@@ -1808,6 +1881,22 @@ class DanmuDownloadViewModel @Inject constructor(
             val apiBase = resolveApiBaseUrl() ?: task.apiBaseUrl.trim().ifBlank {
                 error("弹幕源地址无效")
             }
+            if (task.directUrl.isNotBlank()) {
+                return@runCatching DanmuDownloadInput(
+                    apiBaseUrl = apiBase,
+                    animeTitle = task.animeTitle,
+                    episodeTitle = task.episodeTitle,
+                    episodeId = task.episodeId,
+                    episodeNo = task.episodeNo,
+                    source = task.source,
+                    format = DanmuDownloadFormat.fromValue(task.format),
+                    fileNameTemplate = task.fileNameTemplate,
+                    conflictPolicy = DownloadConflictPolicy.fromKey(task.conflictPolicy),
+                    animeId = task.animeId,
+                    mediaType = task.mediaType,
+                    directUrl = task.directUrl
+                )
+            }
             val keyword = extractAnimeKeywordForSearch(task.animeTitle)
             if (keyword.isBlank()) {
                 error("剧名为空，无法重建链路")
@@ -1862,7 +1951,8 @@ class DanmuDownloadViewModel @Inject constructor(
                     format = DanmuDownloadFormat.fromValue(task.format),
                     fileNameTemplate = task.fileNameTemplate,
                     conflictPolicy = DownloadConflictPolicy.fromKey(task.conflictPolicy),
-                    animeId = candidate.animeId
+                    animeId = candidate.animeId,
+                    mediaType = com.example.danmuapiapp.domain.model.LocalDanmuType.fromDescription(candidate.typeDescription)?.wire ?: task.mediaType
                 )
             }
             error("未找到匹配剧集：第${task.episodeNo}集（${task.source.ifBlank { "unknown" }}）")

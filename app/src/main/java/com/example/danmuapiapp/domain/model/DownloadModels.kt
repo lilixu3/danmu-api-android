@@ -342,9 +342,13 @@ data class DanmuDownloadRecord(
     val errorMessage: String? = null,
     val animeId: Long = 0L,
     val localImportedAt: Long = 0L,
-    val localResourceKey: String = ""
+    val localResourceKey: String = "",
+    val localImports: Map<String, String> = emptyMap(),
+    val mediaType: String = ""
 ) {
     val importedToLocal: Boolean get() = localImportedAt > 0L
+    val canAutoImportToLocal: Boolean get() = statusEnum() == DownloadRecordStatus.Success && episodeId != 0L
+    fun importedInto(libraryId: String): Boolean = libraryId.isNotBlank() && localImports[libraryId]?.isNotBlank() == true
     fun statusEnum(): DownloadRecordStatus {
         return DownloadRecordStatus.entries.firstOrNull { it.key == status } ?: DownloadRecordStatus.Failed
     }
@@ -374,7 +378,9 @@ data class DanmuDownloadTask(
     val attempts: Int = 0,
     val lastDetail: String = "",
     val retryNotBeforeAt: Long = 0L,
-    val animeId: Long = 0L
+    val animeId: Long = 0L,
+    val directUrl: String = "",
+    val mediaType: String = ""
 ) {
     fun statusEnum(): DownloadQueueStatus = DownloadQueueStatus.fromKey(status)
 
@@ -389,7 +395,9 @@ data class DanmuDownloadTask(
             format = DanmuDownloadFormat.fromValue(format),
             fileNameTemplate = fileNameTemplate,
             conflictPolicy = DownloadConflictPolicy.fromKey(conflictPolicy),
-            animeId = animeId
+            animeId = animeId,
+            directUrl = directUrl,
+            mediaType = mediaType
         )
     }
 }
@@ -404,7 +412,9 @@ data class DanmuDownloadInput(
     val format: DanmuDownloadFormat,
     val fileNameTemplate: String,
     val conflictPolicy: DownloadConflictPolicy,
-    val animeId: Long = 0L
+    val animeId: Long = 0L,
+    val directUrl: String = "",
+    val mediaType: String = ""
 )
 
 data class DanmuDownloadResult(
@@ -493,7 +503,9 @@ fun DanmuDownloadInput.toQueueTask(taskId: Long): DanmuDownloadTask {
         status = DownloadQueueStatus.Pending.key,
         attempts = 0,
         lastDetail = "等待下载",
-        animeId = animeId
+        animeId = animeId,
+        directUrl = directUrl,
+        mediaType = mediaType
     )
 }
 

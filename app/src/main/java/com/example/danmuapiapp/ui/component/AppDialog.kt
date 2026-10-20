@@ -543,6 +543,10 @@ private fun AppDialogFrame(
                         content
                     }
                 )
+                AppToastHost(
+                    bottomPadding = 24.dp,
+                    applyWindowInsets = false
+                )
             }
         }
     }

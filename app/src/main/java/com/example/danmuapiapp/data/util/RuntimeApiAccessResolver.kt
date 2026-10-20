@@ -4,10 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import okhttp3.Request
 
-internal data class RuntimeApiAccess(
+data class RuntimeApiAccess(
     val port: Int,
     val runtimeToken: String,
-    val tokenPaths: List<String>
+    val tokenPaths: List<String>,
+    val expectedSessionId: String = ""
 )
 
 internal object RuntimeApiAccessResolver {
@@ -33,6 +34,7 @@ internal object RuntimeApiAccessResolver {
 }
 
 internal fun Request.Builder.applyRuntimeApiAuth(access: RuntimeApiAccess): Request.Builder {
+    if (access.expectedSessionId.isNotBlank()) header("X-Danmu-App-Session", access.expectedSessionId)
     if (access.runtimeToken.isNotBlank()) {
         header("Authorization", "Bearer ${access.runtimeToken}")
     }

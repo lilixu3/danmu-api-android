@@ -485,7 +485,7 @@ class ApiTestViewModel @Inject constructor(
         val inputUrl = ApiTestInputResolver.extractHttpUrl(query)
         if (inputUrl != null) {
             successfulManualSearchKeyword = ""
-            searchManualUrlCandidate(inputUrl)
+            searchManualUrlCandidate(base, inputUrl)
             return
         }
 
@@ -555,7 +555,7 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
-    private fun searchManualUrlCandidate(inputUrl: String) {
+    private fun searchManualUrlCandidate(base: String, inputUrl: String) {
         if (isSearchingAnime || isLoadingEpisodes) return
 
         viewModelScope.launch {
@@ -570,7 +570,7 @@ class ApiTestViewModel @Inject constructor(
             manualOriginalInput = inputUrl
             lastApiActionStartedAtMs = System.currentTimeMillis()
 
-            val metadata = fetchUrlMetadata(inputUrl)
+            val metadata = fetchUrlMetadata(inputUrl, base)
             val selection = withContext(Dispatchers.Default) {
                 buildManualUrlDanmuSelection(
                     inputUrl = inputUrl,
@@ -597,7 +597,7 @@ class ApiTestViewModel @Inject constructor(
             errorMessage = null
             manualResult = null
             manualCurrentAnime = anime
-            manualEpisodeCandidates = listOf(episode)
+            manualEpisodeCandidates = anime.directEpisodes.ifEmpty { listOf(episode) }
             return
         }
 
@@ -826,8 +826,8 @@ class ApiTestViewModel @Inject constructor(
         }
     }
 
-    private suspend fun fetchUrlMetadata(inputUrl: String): UrlDanmuMetadata? {
-        return UrlDanmuMetadataResolver(httpClient).resolve(inputUrl)
+    private suspend fun fetchUrlMetadata(inputUrl: String, base: String? = null): UrlDanmuMetadata? {
+        return UrlDanmuMetadataResolver(httpClient).resolve(inputUrl, base)
     }
 
     fun loadFavorites(baseUrl: String) {

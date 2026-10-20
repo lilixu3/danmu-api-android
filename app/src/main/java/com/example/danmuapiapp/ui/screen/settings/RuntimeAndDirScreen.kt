@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -40,7 +41,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,7 +60,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.data.service.NodeKeepAlivePrefs
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
 import com.example.danmuapiapp.domain.model.KeepAliveHeartbeatMode
@@ -81,7 +80,6 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 @Composable
 fun RuntimeAndDirScreen(
     onBack: () -> Unit,
-    onOpenHarmonyGuide: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -92,7 +90,6 @@ fun RuntimeAndDirScreen(
     val normalNotificationBehavior by viewModel.normalNotificationBehavior.collectAsStateWithLifecycle()
     val serviceNotificationInfoEnabled by viewModel.serviceNotificationInfoEnabled.collectAsStateWithLifecycle()
     val rootNotificationEnabled by viewModel.rootNotificationEnabled.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isModeSwitching = state.status == ServiceStatus.Starting ||
@@ -125,7 +122,7 @@ fun RuntimeAndDirScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
@@ -152,7 +149,6 @@ fun RuntimeAndDirScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -568,14 +564,6 @@ fun RuntimeAndDirScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("查看厂商后台教程")
-                    }
-                    if (HarmonyCompatDetector.isLikelyHarmonyCompat()) {
-                        AppGlassButton(
-                            onClick = onOpenHarmonyGuide,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("鸿蒙后台权限引导")
-                        }
                     }
                     Text(
                         autoStartHint,

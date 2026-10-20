@@ -32,7 +32,6 @@ import androidx.navigation.navArgument
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
 import com.example.danmuapiapp.ui.component.GlassBottomNavigationBar
-import com.example.danmuapiapp.ui.component.LocalFloatingBottomBarVisible
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.navigation.CoreRoute
 import com.example.danmuapiapp.ui.navigation.Screen
@@ -58,7 +57,6 @@ import com.example.danmuapiapp.ui.screen.settings.BackupRestoreScreen
 import com.example.danmuapiapp.ui.screen.settings.DownloadSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.DownloadUpdateSettingsScreen
 import com.example.danmuapiapp.ui.screen.settings.GithubTokenScreen
-import com.example.danmuapiapp.ui.screen.settings.HarmonyGuideScreen
 import com.example.danmuapiapp.ui.screen.settings.ProxySettingsScreen
 import com.example.danmuapiapp.ui.screen.tools.SourceProbeScreen
 import com.example.danmuapiapp.ui.screen.settings.NetworkSettingsScreen
@@ -173,6 +171,9 @@ private fun DanmuApiMainContent() {
     // 与 Flutter 的 IndexedStack 一样：进入首页时就准备核心页，并在切换页面时保留状态。
     val coreViewModel: CoreViewModel = hiltViewModel()
     val navController = rememberNavController()
+    com.example.danmuapiapp.ui.component.GithubQuotaNoticeHost(coreViewModel.githubApiQuota) {
+        navController.navigate(SettingsRoute.GithubToken) { launchSingleTop = true }
+    }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
     // 底栏单开玻璃时也需要记录页面 backdrop（底栏要折射页面内容）。
@@ -207,8 +208,7 @@ private fun DanmuApiMainContent() {
                 solidBackgroundColor = legacyShellBackground
             ) {
                 CompositionLocalProvider(
-                    LocalContentColor provides MaterialTheme.colorScheme.onBackground,
-                    LocalFloatingBottomBarVisible provides showBottomBar
+                    LocalContentColor provides MaterialTheme.colorScheme.onBackground
                 ) {
                     NavHost(
                     navController = navController,
@@ -303,16 +303,12 @@ private fun DanmuApiMainContent() {
                     onOpenBackupRestore = { navController.navigate(SettingsRoute.BackupRestore) },
                     onOpenGithubToken = { navController.navigate(SettingsRoute.GithubToken) },
                     onOpenAdminMode = { navController.navigate(SettingsRoute.AdminMode) },
-                    onOpenAbout = { navController.navigate(SettingsRoute.About) },
-                    onOpenHarmonyGuide = { navController.navigate(SettingsRoute.HarmonyGuide) }
+                    onOpenAbout = { navController.navigate(SettingsRoute.About) }
                 )
             }
 
             composable(SettingsRoute.RuntimeAndDir) {
-                RuntimeAndDirScreen(
-                    onBack = { navController.popBackStack() },
-                    onOpenHarmonyGuide = { navController.navigate(SettingsRoute.HarmonyGuide) }
-                )
+                RuntimeAndDirScreen(onBack = { navController.popBackStack() })
             }
             composable(SettingsRoute.CompatMode) {
                 CompatModeSettingsScreen(onBack = { navController.popBackStack() })
@@ -352,9 +348,6 @@ private fun DanmuApiMainContent() {
             }
             composable(SettingsRoute.About) {
                 AboutScreen(onBack = { navController.popBackStack() })
-            }
-            composable(SettingsRoute.HarmonyGuide) {
-                HarmonyGuideScreen(onBack = { navController.popBackStack() })
             }
             composable(ToolRoute.Console) {
                 ConsoleScreen()

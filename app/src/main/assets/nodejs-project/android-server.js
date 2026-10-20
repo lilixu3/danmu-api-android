@@ -630,7 +630,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     }
     return {
       handler: _wrapDirectFavoritePersistence(require('./app-series-refresh.js').wrapSeriesRefresh(
-        mod.handleRequest, path.join(__dirname, i.dir))),
+        require('./app-url-metadata.js').wrapUrlMetadata(mod.handleRequest, path.join(__dirname, i.dir)), path.join(__dirname, i.dir))),
       info: i,
       variantKey,
       coreGlobals,
@@ -647,6 +647,8 @@ async function _loadHandleRequestForVariant(options = {}) {
     handleRequest = loaded.handler;
     _directCoreGlobals = loaded.coreGlobals || null;
     _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
+    _loadedRuntimeVariant = loaded.variantKey;
+    runtimeDataContext.markLoaded();
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -666,6 +668,8 @@ async function _loadHandleRequestForVariant(options = {}) {
         handleRequest = loaded.handler;
         _directCoreGlobals = loaded.coreGlobals || null;
         _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
+        _loadedRuntimeVariant = loaded.variantKey;
+        runtimeDataContext.markLoaded();
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;
@@ -681,6 +685,9 @@ async function _loadHandleRequestForVariant(options = {}) {
 
 // Persistent home (config/logs are stored outside the module folder)
 const HOME = process.env.DANMU_API_HOME || __dirname;
+let _loadedRuntimeVariant = '';
+const { createRuntimeContext, guardSession } = require('./app-runtime-context.js');
+const runtimeDataContext = createRuntimeContext(HOME, () => _loadedRuntimeVariant || _getVariant(), _getEnvSnapshot);
 if (!process.env.DANMU_API_HOME || !String(process.env.DANMU_API_HOME).trim()) {
   process.env.DANMU_API_HOME = HOME;
 }
@@ -2335,6 +2342,9 @@ function createMainServer() {
       maybeReloadConfigOnTraffic();
       _maybeReloadCoreOnTraffic();
 
+      const dataContext = runtimeDataContext();
+      if (!guardSession(req, res, dataContext)) return;
+
       if (strippedPathname === '/__source-probe') {
         if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
           res.writeHead(403); res.end('Forbidden'); return;
@@ -2404,7 +2414,7 @@ function createMainServer() {
 
       // Health endpoint (used by the Android app for status/diagnostics)
       if (strippedPathname === '/__health') {
-        const variantKey = _getVariant();
+        const variantKey = _loadedRuntimeVariant || _getVariant();
         const info = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
         const cacheProbeDir = _resolveCacheProbeDir();
         const cacheProbeWritable = _checkCacheProbeWritable(cacheProbeDir);
@@ -2426,6 +2436,7 @@ function createMainServer() {
           variant: variantKey,
           variantLabel: info.label,
           runtimeIdentity: runtimeIdentity || null,
+          ...dataContext,
           requestCount: METRICS.requestCount,
           lastRequestAt: METRICS.lastRequestAt,
           lastRequestPath: METRICS.lastRequestPath,
@@ -2537,6 +2548,7 @@ function createMainServer() {
         const buf = await readRequestBody(req);
         body = buf.length ? buf : undefined;
       }
+      if (!guardSession(req, res, runtimeDataContext())) return;
 
       if (strippedPathname === '/__danmaku/prepare') {
         await _handleDanmakuPrepare(req, res, fullUrl, clientIp, headers);

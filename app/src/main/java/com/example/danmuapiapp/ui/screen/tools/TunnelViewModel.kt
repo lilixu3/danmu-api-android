@@ -22,7 +22,8 @@ import javax.inject.Inject
 @HiltViewModel
 class TunnelViewModel @Inject constructor(
     private val repository: TunnelRepository,
-    private val runtimeRepository: RuntimeRepository
+    private val runtimeRepository: RuntimeRepository,
+    private val githubApiQuota: com.example.danmuapiapp.data.service.GithubApiQuota
 ) : ViewModel() {
 
     val state: StateFlow<TunnelUiState> = repository.state
@@ -152,6 +153,7 @@ class TunnelViewModel @Inject constructor(
     }
 
     fun checkKernelUpdate() = viewModelScope.launch {
+        if (!githubApiQuota.allowManualOperation()) return@launch
         _kernelUpdate.value = KernelUpdateUi(checking = true)
         val current = state.value.kernelVersion
         repository.checkFrpcUpdate().fold(
@@ -169,7 +171,9 @@ class TunnelViewModel @Inject constructor(
                 )
             },
             onFailure = { error ->
-                _kernelUpdate.value = KernelUpdateUi(message = "检查失败：${error.message}")
+                _kernelUpdate.value = KernelUpdateUi(message =
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) ""
+                    else "检查失败：${error.message}")
             }
         )
     }
@@ -177,6 +181,7 @@ class TunnelViewModel @Inject constructor(
     fun applyKernelUpdate() = viewModelScope.launch {
         if (_kernelUpdate.value.applying) return@launch
         val release = _kernelUpdate.value.release ?: return@launch
+        if (!githubApiQuota.allowManualOperation()) return@launch
         _kernelUpdate.value = _kernelUpdate.value.copy(applying = true)
         try {
             val result = repository.applyFrpcUpdate(release)

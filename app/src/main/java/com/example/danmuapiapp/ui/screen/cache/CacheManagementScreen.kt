@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.cache
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -66,16 +67,14 @@ fun CacheManagementScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(viewModel.message) {
         viewModel.message?.let {
-            snackbarHostState.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->

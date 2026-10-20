@@ -56,6 +56,7 @@ class CoreViewModel @Inject constructor(
     val customRepo = settingsRepo.customRepo
     val customRepoBranch = settingsRepo.customRepoBranch
     val githubAccountStatus = githubAccountService.status
+    val githubApiQuota = githubProxyService.apiQuota
     val proxyOptions = githubProxyService.proxyOptions()
     val selectedGithubProxyId = githubProxyService.selectedProxyId
 
@@ -261,6 +262,10 @@ class CoreViewModel @Inject constructor(
 
     fun refreshWorkspace(variant: ApiVariant, force: Boolean = false, afterCoreMutation: Boolean = false) {
         if (isOperating && !afterCoreMutation) return
+        if (githubApiQuota.blocked() != null) {
+            if (force && !afterCoreMutation) githubApiQuota.allowManualOperation()
+            return
+        }
         val repo = resolveCoreVariantRepo(variant, customRepo.value)
         val branch = resolveCoreVariantBranch(
             variant, customRepo.value, customRepoBranch.value, coreBranchSelections.value
@@ -292,7 +297,9 @@ class CoreViewModel @Inject constructor(
         workspaceRefreshKey = key
         isRefreshingWorkspace = true
         isManualWorkspaceRefresh = force && !afterCoreMutation
-        workspaceRefreshJob = viewModelScope.launch {
+        workspaceRefreshJob = viewModelScope.launch(
+            com.example.danmuapiapp.data.service.GithubQuotaRequestContext.element(!force || afterCoreMutation)
+        ) {
             try {
                 // 本地状态由仓库独立读取；远端请求不用排在 Root 文件扫描后面。
                 if (force && !afterCoreMutation) coreRepo.refreshCoreInfo()
@@ -308,7 +315,8 @@ class CoreViewModel @Inject constructor(
                         onFailure = { error ->
                             if (error is CancellationException) throw error
                             if (generation == workspaceGeneration) {
-                                workspaceRefreshError = error.message ?: "分支信息读取失败"
+                                workspaceRefreshError = if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) null
+                                    else error.message ?: "分支信息读取失败"
                             }
                         }
                     )
@@ -460,6 +468,8 @@ class CoreViewModel @Inject constructor(
             try {
                 settingsRepo.setIgnoredUpdateVersion(variant, null)
                 coreRepo.checkAndMarkUpdate(variant)
+                if (coreInfoList.value.find { it.variant == variant }?.updateCheckError != null &&
+                    !githubApiQuota.allowManualOperation()) return@launch
                 openUpdatePrompt(variant)
             } finally {
                 isCheckingUpdate = false
@@ -545,7 +555,9 @@ class CoreViewModel @Inject constructor(
             isCheckingUpdate = true
             try {
                 val request = coreUpdateChoice.prepare(coreRepo, variant).getOrElse {
-                    operationMessage = "无法准备更新：${it.message}"
+                    if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                        operationMessage = "无法准备更新：${it.message}"
+                    }
                     return@launch
                 } ?: return@launch
                 performCoreMutation(
@@ -1224,6 +1236,7 @@ class CoreViewModel @Inject constructor(
         pendingAction: PendingProxyAction,
         applyBlock: suspend () -> Result<Unit>
     ) {
+        if (!githubApiQuota.allowManualOperation()) return
         isOperating = true
         try {
             operationMessage = actionMessage
@@ -1261,7 +1274,9 @@ class CoreViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
-                    if (error is CoreDependencyRepairRequiredException) {
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                        operationMessage = null
+                    } else if (error is CoreDependencyRepairRequiredException) {
                         operationMessage = "${variantLabel(variant)}${error.request.actionLabel}已暂停，等待修复依赖"
                         showDependencyRequiredPrompt = true
                     } else {
@@ -1339,6 +1354,7 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun requireProxyAndRun(action: PendingProxyAction) {
+        if (action != PendingProxyAction.RepairDependenciesOnline && !githubApiQuota.allowManualOperation()) return
         if (githubProxyService.hasUserSelectedProxy()) {
             executePendingProxyAction(action)
             return
@@ -1348,6 +1364,7 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun executePendingProxyAction(action: PendingProxyAction) {
+        if (action != PendingProxyAction.RepairDependenciesOnline && !githubApiQuota.allowManualOperation()) return
         when (action) {
             is PendingProxyAction.Install -> doInstallCore(action.variant)
             is PendingProxyAction.CheckUpdate -> doCheckUpdate(action.variant)
@@ -1362,6 +1379,7 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun promptProxyReselectIfNeeded(retryAction: PendingProxyAction) {
+        if (githubApiQuota.blocked() != null) return
         if (!githubProxyService.isUsingProxy()) return
         pendingProxyAction = retryAction
         openProxyPickerDialog(withTip = "当前加速线路不可用，请重新测速并选择")

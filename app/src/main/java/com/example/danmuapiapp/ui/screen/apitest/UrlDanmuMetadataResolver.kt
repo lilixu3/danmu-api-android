@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import com.example.danmuapiapp.data.network.newOutboundCall
+import com.example.danmuapiapp.data.repository.runCatchingCancellable
+import com.example.danmuapiapp.data.repository.useCancellableResponse
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -8,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
 import java.math.BigInteger
 import java.net.URI
 import java.security.MessageDigest
@@ -23,12 +26,15 @@ internal class UrlDanmuMetadataResolver(
         .callTimeout(6, TimeUnit.SECONDS)
         .build()
 
-    suspend fun resolve(inputUrl: String): UrlDanmuMetadata? {
+    suspend fun resolve(originalUrl: String, apiBase: String? = null): UrlDanmuMetadata? {
+        val inputUrl = expandShortUrl(originalUrl)
+        val appMetadata = apiBase?.let { resolveFromApp(it, inputUrl) }
+        if (appMetadata != null && appMetadata.title.isNotBlank() && appMetadata.posterUrl.isNotBlank()) return appMetadata
         if (!inputUrl.startsWith("http", ignoreCase = true)) {
             return null
         }
         return withContext(Dispatchers.IO) {
-            when (UrlDanmuMetadataPlatform.detect(inputUrl)) {
+            val result = when (UrlDanmuMetadataPlatform.detect(inputUrl)) {
                 UrlDanmuMetadataPlatform.Tencent -> resolveByHtml(
                     inputUrl = inputUrl,
                     platformLabel = "腾讯视频",
@@ -88,10 +94,51 @@ internal class UrlDanmuMetadataResolver(
                     userAgent = MOBILE_UA
                 )
             }
+            if (appMetadata != null) appMetadata.copy(
+                title = appMetadata.title.ifBlank { result?.title.orEmpty() },
+                posterUrl = appMetadata.posterUrl.ifBlank { result?.posterUrl.orEmpty() },
+                year = appMetadata.year.ifBlank { result?.year.orEmpty() }
+            ) else result?.copy(canonicalUrl = result.canonicalUrl.ifBlank { inputUrl })
         }
     }
 
-    private fun resolveIqiyi(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun expandShortUrl(input: String): String = withContext(Dispatchers.IO) {
+        val host = runCatching { URI(input).host?.lowercase(Locale.ROOT) }.getOrNull()
+        if (host !in setOf("b23.tv", "bili2233.cn", "v.douyin.com", "iqiyi.cn")) return@withContext input
+        val client = metadataClient.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        var current = input
+        repeat(5) {
+            val next = runCatchingCancellable {
+                val req = Request.Builder().url(current).header("User-Agent", DESKTOP_UA).build()
+                client.newOutboundCall(req).useCancellableResponse { response ->
+                    response.header("Location")?.takeIf { response.code in 300..399 }
+                        ?.let { response.request.url.resolve(it)?.toString() }
+                }
+            }.getOrNull() ?: return@withContext current
+            if (UrlDanmuMetadataPlatform.detect(next) == UrlDanmuMetadataPlatform.Unknown) return@withContext current
+            current = next
+            if (runCatching { URI(current).host }.getOrNull() != host) return@withContext current
+        }
+        current
+    }
+
+    private suspend fun resolveFromApp(base: String, input: String): UrlDanmuMetadata? = withContext(Dispatchers.IO) {
+        // Remote/older cores simply omit appUrlMetadata; use the native resolver in that case.
+        val url = buildUrl("${base.trimEnd('/')}/api/v2/search/anime",
+            linkedMapOf("keyword" to input, "app_url_metadata" to "1"))
+        try {
+            val client = metadataClient.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
+            client.newOutboundCall(Request.Builder().url(url).build()).useCancellableResponse { response ->
+                if (!response.isSuccessful) return@useCancellableResponse null
+                val body = response.peekBody(2L * 1024L * 1024L).string()
+                parseAppUrlMetadata(body, input)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) { null }
+    }
+
+    private suspend fun resolveIqiyi(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""/v_([A-Za-z0-9]+)\.html""")
             .find(inputUrl)
             ?.groupValues
@@ -123,7 +170,7 @@ internal class UrlDanmuMetadataResolver(
         return UrlDanmuMetadataPlatformParsers.parseIqiyiBaseInfoJson(inputUrl, body)
     }
 
-    private fun resolveYouku(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveYouku(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""id_([^./?#]+)""")
             .find(inputUrl)
             ?.groupValues
@@ -159,7 +206,7 @@ internal class UrlDanmuMetadataResolver(
         return UrlDanmuMetadataPlatformParsers.parseYoukuJson(inputUrl, videoJson, showJson)
     }
 
-    private fun resolveMango(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveMango(inputUrl: String): UrlDanmuMetadata? {
         val match = Regex("""/b/(\d+)/(\d+)\.html""").find(inputUrl) ?: return null
         val cid = match.groupValues[1]
         val vid = match.groupValues[2]
@@ -172,9 +219,10 @@ internal class UrlDanmuMetadataResolver(
         return UrlDanmuMetadataPlatformParsers.parseMangoVideoInfoJson(inputUrl, body)
     }
 
-    private fun resolveBilibili(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveBilibili(inputUrl: String): UrlDanmuMetadata? {
+        val isVideo = Regex("""/video/(?:BV[0-9A-Za-z]+|av\d+)""").containsMatchIn(inputUrl)
         val epId = Regex("""/bangumi/play/ep(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
-            ?: Regex("""[?&]ep_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
+            ?: if (isVideo) null else Regex("""[?&]ep_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
         if (!epId.isNullOrBlank()) {
             val apiUrl = buildUrl("https://api.bilibili.com/pgc/view/web/season", linkedMapOf("ep_id" to epId))
             val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
@@ -183,7 +231,7 @@ internal class UrlDanmuMetadataResolver(
         }
 
         val seasonId = Regex("""/bangumi/play/ss(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
-            ?: Regex("""[?&]season_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
+            ?: if (isVideo) null else Regex("""[?&]season_id=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
         if (!seasonId.isNullOrBlank()) {
             val apiUrl = buildUrl("https://api.bilibili.com/pgc/view/web/season", linkedMapOf("season_id" to seasonId))
             val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
@@ -192,8 +240,10 @@ internal class UrlDanmuMetadataResolver(
         }
 
         val bvid = Regex("""/(BV[0-9A-Za-z]+)""").find(inputUrl)?.groupValues?.getOrNull(1)
-        if (!bvid.isNullOrBlank()) {
-            val apiUrl = buildUrl("https://api.bilibili.com/x/web-interface/view", linkedMapOf("bvid" to bvid))
+        val aid = Regex("""/av(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
+        if (!bvid.isNullOrBlank() || !aid.isNullOrBlank()) {
+            val params = if (!bvid.isNullOrBlank()) linkedMapOf("bvid" to bvid) else linkedMapOf("aid" to aid!!)
+            val apiUrl = buildUrl("https://api.bilibili.com/x/web-interface/view", params)
             val body = fetchText(apiUrl, userAgent = DESKTOP_UA, referer = "https://www.bilibili.com/")
                 ?: return null
             return UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(inputUrl, body)
@@ -201,7 +251,7 @@ internal class UrlDanmuMetadataResolver(
         return null
     }
 
-    private fun resolveMigu(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveMigu(inputUrl: String): UrlDanmuMetadata? {
         val cid = queryParam(inputUrl, "cid")
             ?: Regex("""cid=(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: return null
@@ -211,7 +261,7 @@ internal class UrlDanmuMetadataResolver(
         return UrlDanmuMetadataPlatformParsers.parseMiguContentInfoJson(inputUrl, body)
     }
 
-    private fun resolveSohu(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveSohu(inputUrl: String): UrlDanmuMetadata? {
         val html = fetchText(inputUrl, userAgent = DESKTOP_UA, referer = "https://tv.sohu.com/")
             ?: return null
         val pageMetadata = parseUrlDanmuMetadata(inputUrl, html)
@@ -225,7 +275,7 @@ internal class UrlDanmuMetadataResolver(
         return mergeMetadata(primary = apiMetadata, fallback = pageMetadata, platformLabel = "搜狐视频")
     }
 
-    private fun resolveLeshi(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveLeshi(inputUrl: String): UrlDanmuMetadata? {
         val videoId = Regex("""/vplay/(\d+)\.html""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: return null
         val pageUrl = "https://www.le.com/ptv/vplay/$videoId.html"
@@ -236,7 +286,7 @@ internal class UrlDanmuMetadataResolver(
         return mergeMetadata(primary = leMetadata, fallback = pageMetadata, platformLabel = "乐视视频")
     }
 
-    private fun resolveXigua(inputUrl: String): UrlDanmuMetadata? {
+    private suspend fun resolveXigua(inputUrl: String): UrlDanmuMetadata? {
         if (inputUrl.contains("douyin.com", ignoreCase = true)) return null
         val gid = Regex("""/video/(\d+)""").find(inputUrl)?.groupValues?.getOrNull(1)
             ?: Regex("""/(\d{10,})(?:[/?#]|$)""").find(inputUrl)?.groupValues?.getOrNull(1)
@@ -247,7 +297,7 @@ internal class UrlDanmuMetadataResolver(
         return parseUrlDanmuMetadata(inputUrl, html)?.copy(platformLabel = "西瓜视频")
     }
 
-    private fun resolveByHtml(
+    private suspend fun resolveByHtml(
         inputUrl: String,
         platformLabel: String,
         userAgent: String
@@ -256,7 +306,7 @@ internal class UrlDanmuMetadataResolver(
         return html?.let { parseUrlDanmuMetadata(inputUrl, it)?.copy(platformLabel = platformLabel) }
     }
 
-    private fun withHtmlFallback(
+    private suspend fun withHtmlFallback(
         primary: UrlDanmuMetadata?,
         inputUrl: String,
         platformLabel: String,
@@ -270,13 +320,13 @@ internal class UrlDanmuMetadataResolver(
         )
     }
 
-    private fun fetchText(
+    private suspend fun fetchText(
         url: String,
         userAgent: String,
         referer: String? = null,
         maxBytes: Long = 768L * 1024L
     ): String? {
-        return runCatching {
+        return runCatchingCancellable {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", userAgent)
@@ -286,10 +336,10 @@ internal class UrlDanmuMetadataResolver(
                 }
                 .get()
                 .build()
-            metadataClient.newOutboundCall(request).execute().use { response ->
-                if (response.code !in 200..299) return@use null
+            metadataClient.newOutboundCall(request).useCancellableResponse { response ->
+                if (response.code !in 200..299) return@useCancellableResponse null
                 val contentLength = response.body.contentLength()
-                if (contentLength > maxBytes) return@use null
+                if (contentLength > maxBytes) return@useCancellableResponse null
                 response.peekBody(maxBytes).string()
             }
         }.getOrNull()
@@ -322,7 +372,7 @@ internal class UrlDanmuMetadataResolver(
         if (primary == null && fallback == null) return null
         val p = primary ?: UrlDanmuMetadata()
         val f = fallback ?: UrlDanmuMetadata()
-        return UrlDanmuMetadata(
+        return p.copy(
             title = p.title.ifBlank { f.title },
             episodeTitle = p.episodeTitle.ifBlank { f.episodeTitle },
             posterUrl = p.posterUrl.ifBlank { f.posterUrl },
@@ -353,17 +403,18 @@ internal enum class UrlDanmuMetadataPlatform {
 
     companion object {
         fun detect(inputUrl: String): UrlDanmuMetadataPlatform {
-            val lower = inputUrl.lowercase(Locale.ROOT)
+            val host = runCatching { URI(inputUrl).host?.lowercase(Locale.ROOT) }.getOrNull() ?: return Unknown
+            fun matches(domain: String) = host == domain || host.endsWith(".$domain")
             return when {
-                ".qq.com" in lower -> Tencent
-                ".iqiyi.com" in lower -> Iqiyi
-                ".youku.com" in lower -> Youku
-                ".mgtv.com" in lower -> Mango
-                ".bilibili.com" in lower || "b23.tv" in lower -> Bilibili
-                ".miguvideo.com" in lower -> Migu
-                ".sohu.com" in lower -> Sohu
-                ".le.com" in lower -> Leshi
-                ".ixigua.com" in lower || ".douyin.com" in lower -> Xigua
+                matches("qq.com") -> Tencent
+                matches("iqiyi.com") || matches("iqiyi.cn") -> Iqiyi
+                matches("youku.com") -> Youku
+                matches("mgtv.com") -> Mango
+                matches("bilibili.com") || matches("b23.tv") || matches("bili2233.cn") -> Bilibili
+                matches("miguvideo.com") -> Migu
+                matches("sohu.com") -> Sohu
+                matches("le.com") -> Leshi
+                matches("ixigua.com") || matches("douyin.com") -> Xigua
                 else -> Unknown
             }
         }
@@ -481,46 +532,82 @@ internal object UrlDanmuMetadataPlatformParsers {
     }
 
     fun parseBilibiliSeasonJson(inputUrl: String, json: String, preferredEpId: String?): UrlDanmuMetadata? {
-        val result = runCatching { JSONObject(json).optJSONObject("result") }.getOrNull() ?: return null
+        val root = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        if (root.optInt("code", 0) != 0) return null
+        val result = root.optJSONObject("result") ?: return null
+        val expectedSeason = Regex("""/ss(\d+)""").find(inputUrl)?.groupValues?.get(1)
+        if (expectedSeason != null && result.has("season_id") && expectedSeason != result.stringValue("season_id")) return null
         val title = result.stringValue("season_title").ifBlank { result.stringValue("title") }
-        val episodes = result.optJSONArray("episodes")
-        val selectedEpisode = (0 until (episodes?.length() ?: 0))
-            .asSequence()
-            .mapNotNull { episodes?.optJSONObject(it) }
-            .firstOrNull { ep -> preferredEpId != null && ep.stringValue("id") == preferredEpId }
-            ?: episodes?.optJSONObject(0)
-        val episodeIndex = selectedEpisode?.stringValue("title").orEmpty()
-        val episodeLongTitle = selectedEpisode?.stringValue("long_title").orEmpty()
-        val episodeLabel = episodeIndex.toIntOrNull()?.takeIf { it > 0 }?.let { "第${it}集" }
-            ?: findEpisodeLabel(episodeIndex)
-        val episodeTitle = listOf(title, episodeLabel, episodeLongTitle)
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
-            .ifBlank { title }
-        val publish = result.optJSONObject("publish")
-        val year = extractYear(publish?.stringValue("pub_time").orEmpty())
-            .ifBlank { timestampToYear(selectedEpisode?.optLong("pub_time", 0L) ?: 0L) }
+        val poster = normalizeFirstPoster(inputUrl, result.stringValue("cover"))
+        val episodes = buildList {
+            fun addEpisodes(array: org.json.JSONArray?, group: String) {
+                for (i in 0 until (array?.length() ?: 0)) {
+                    val ep = array?.optJSONObject(i) ?: continue
+                    val id = ep.stringValue("id").ifBlank { ep.stringValue("ep_id") }
+                    if (!id.matches(Regex("\\d+"))) continue
+                    val index = ep.stringValue("title")
+                    val label = if (index.matches(Regex("\\d+(?:\\.\\d+)?"))) "第${index}集" else index
+                    add(UrlDanmuEpisode(id, listOf(title, label, ep.stringValue("long_title"))
+                        .filter { it.isNotBlank() }.joinToString(" "),
+                        "https://www.bilibili.com/bangumi/play/ep$id", index.toIntOrNull() ?: i + 1,
+                        label, group, normalizeFirstPoster(inputUrl, ep.stringValue("cover"))))
+                }
+            }
+            addEpisodes(result.optJSONArray("episodes") ?: result.optJSONObject("main_section")?.optJSONArray("episodes"), "")
+            val sections = result.optJSONArray("section")
+            for (i in 0 until (sections?.length() ?: 0)) {
+                val section = sections?.optJSONObject(i) ?: continue
+                addEpisodes(section.optJSONArray("episodes"), section.stringValue("title"))
+            }
+        }.distinctBy { it.id }
+        val selected = episodes.firstOrNull { it.id == preferredEpId }
+        val missing = preferredEpId != null && selected == null
         return UrlDanmuMetadata(
-            title = title,
-            episodeTitle = episodeTitle,
-            posterUrl = normalizeFirstPoster(inputUrl, result.stringValue("cover"), selectedEpisode?.stringValue("cover").orEmpty()),
-            year = year,
-            episodeLabel = episodeLabel,
-            platformLabel = "哔哩哔哩"
+            title = title, episodeTitle = selected?.title.orEmpty().ifBlank { title },
+            posterUrl = poster.ifBlank { selected?.posterUrl.orEmpty() },
+            year = extractYear(result.optJSONObject("publish")?.stringValue("pub_time").orEmpty()),
+            episodeLabel = selected?.label.orEmpty(), platformLabel = "哔哩哔哩",
+            canonicalUrl = selected?.url ?: inputUrl,
+            episodes = if (missing) emptyList() else episodes,
+            selectedEpisodeId = selected?.id.orEmpty(), episodesComplete = episodes.isNotEmpty() && !missing,
+            notice = if (missing) "未找到链接指定的分集，保留原链接获取弹幕" else ""
         ).takeIf { it.hasUsefulValue() }
     }
 
     fun parseBilibiliViewJson(inputUrl: String, json: String): UrlDanmuMetadata? {
-        val data = runCatching { JSONObject(json).optJSONObject("data") }.getOrNull() ?: return null
+        val root = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        if (root.optInt("code", 0) != 0) return null
+        val data = root.optJSONObject("data") ?: return null
+        val bvid = data.stringValue("bvid")
+        if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) return null
+        val expected = Regex("""/(BV[0-9A-Za-z]+)""").find(inputUrl)?.groupValues?.get(1)
+        val expectedAid = Regex("""/av(\d+)""").find(inputUrl)?.groupValues?.get(1)
+        if (expected == null && expectedAid == null) return null
+        if (expected != null && expected != bvid) return null
+        if (expectedAid != null && expectedAid != data.stringValue("aid")) return null
         val title = data.stringValue("title")
-        val year = timestampToYear(data.optLong("pubdate", 0L))
+        val pageParam = runCatching { inputUrl.toHttpUrl().queryParameter("p") }.getOrNull()
+        val page = if (pageParam == null) 1 else pageParam.toIntOrNull()
+        val pages = data.optJSONArray("pages")
+        val episodes = (0 until (pages?.length() ?: 0)).mapNotNull { i ->
+            val item = pages?.optJSONObject(i) ?: return@mapNotNull null
+            val cid = item.stringValue("cid")
+            val number = item.optInt("page", i + 1)
+            if (cid.isBlank() || number <= 0) return@mapNotNull null
+            UrlDanmuEpisode(cid, item.stringValue("part").ifBlank { title },
+                "https://www.bilibili.com/video/$bvid?p=$number", number,
+                if ((pages?.length() ?: 0) > 1) "P$number" else "正片")
+        }
+        val selected = episodes.firstOrNull { it.number == page }
         return UrlDanmuMetadata(
-            title = title,
-            episodeTitle = title,
+            title = title, episodeTitle = selected?.title ?: title,
             posterUrl = normalizeFirstPoster(inputUrl, data.stringValue("pic")),
-            year = year,
-            episodeLabel = "",
-            platformLabel = "哔哩哔哩"
+            year = timestampToYear(data.optLong("pubdate", 0L)),
+            episodeLabel = selected?.label.orEmpty(), platformLabel = "哔哩哔哩",
+            canonicalUrl = selected?.url ?: inputUrl,
+            episodes = if (selected == null) emptyList() else episodes,
+            selectedEpisodeId = selected?.id.orEmpty(), episodesComplete = selected != null,
+            notice = if (selected == null) "未找到链接指定的分P，保留原链接获取弹幕" else ""
         ).takeIf { it.hasUsefulValue() }
     }
 
@@ -551,8 +638,9 @@ internal object UrlDanmuMetadataPlatformParsers {
     }
 
     fun extractSohuPlaylistId(html: String): String? {
+        val state = extractUrlPageObject(html, "videoData") ?: return null
         return Regex("""\b(?:sid|plid)\s*:\s*["']?(\d+)["']?""", RegexOption.IGNORE_CASE)
-            .find(html)
+            .find(state)
             ?.groupValues
             ?.getOrNull(1)
     }
@@ -560,7 +648,13 @@ internal object UrlDanmuMetadataPlatformParsers {
     fun parseSohuVideoListJson(inputUrl: String, json: String): UrlDanmuMetadata? {
         val root = runCatching { JSONObject(stripJsonp(json)) }.getOrNull() ?: return null
         val title = root.stringValue("albumName")
-        val firstVideo = root.optJSONArray("videos")?.optJSONObject(0)
+        val videos = root.optJSONArray("videos")
+        val firstVideo = (0 until (videos?.length() ?: 0)).asSequence()
+            .mapNotNull { videos?.optJSONObject(it) }
+            .firstOrNull { video -> listOf("url_html5", "pageUrl", "url").any { key ->
+                video.stringValue(key).isNotBlank() && video.stringValue(key).substringBefore('?').replace("http://", "https://") ==
+                    inputUrl.substringBefore('?').replace("http://", "https://")
+            } }
         val year = extractYear(root.stringValue("publishYear"))
             .ifBlank { extractYear(firstVideo?.stringValue("publishTime").orEmpty()) }
         return UrlDanmuMetadata(
@@ -581,16 +675,19 @@ internal object UrlDanmuMetadataPlatformParsers {
     }
 
     fun parseLeshiHtml(inputUrl: String, html: String): UrlDanmuMetadata? {
-        val title = findJsString(html, "pTitle")
+        val videoId = Regex("""/vplay/(\d+)""").find(inputUrl)?.groupValues?.get(1) ?: return null
+        val state = extractUrlPageObject(html, "__INFO__") ?: return null
+        if (!Regex("""\b(?:vid|id)["']?\s*:\s*["']?$videoId\b""").containsMatchIn(state)) return null
+        val title = findJsString(state, "pTitle")
             .ifBlank { findMetaContent(html, "irAlbumName") }
             .ifBlank { cleanEpisodeSuffix(findTitle(html)) }
-        val episodeTitle = findJsString(html, "title").ifBlank { findTitle(html) }.ifBlank { title }
-        val releaseDate = findJsString(html, "releasedate")
+        val episodeTitle = findJsString(state, "title").ifBlank { findTitle(html) }.ifBlank { title }
+        val releaseDate = findJsString(state, "releasedate")
         val poster = normalizeFirstPoster(
             inputUrl,
-            findJsString(html, "pPicShutu"),
-            findJsString(html, "pPic"),
-            findJsString(html, "videoPic")
+            findJsString(state, "pPicShutu"),
+            findJsString(state, "pPic"),
+            findJsString(state, "videoPic")
         )
         return UrlDanmuMetadata(
             title = title,

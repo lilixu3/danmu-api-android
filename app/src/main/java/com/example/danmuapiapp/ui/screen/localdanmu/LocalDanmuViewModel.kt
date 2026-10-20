@@ -144,7 +144,9 @@ class LocalDanmuViewModel @Inject constructor(
     private val sourceStore: LocalDanmuSourceStore,
     private val uploadHistoryStore: LocalDanmuUploadHistoryStore,
     private val runtimeRepository: RuntimeRepository,
-    private val uploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService
+    private val uploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService,
+    private val runtimeData: com.example.danmuapiapp.data.service.RuntimeDataAccess,
+    private val downloads: com.example.danmuapiapp.domain.repository.DanmuDownloadRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocalDanmuUiState())
@@ -156,6 +158,22 @@ class LocalDanmuViewModel @Inject constructor(
     private var previewJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            var observed = runtimeData.changes.value
+            runtimeData.changes.collect { generation ->
+                if (generation != observed) {
+                    observed = generation
+                    detailJob?.cancel()
+                    previewJob?.cancel()
+                    importedIndex = emptyMap()
+                    _uiState.update { it.copy(snapshot = LocalDanmuSnapshot(emptyList(), emptyList()),
+                        detailResource = null, editState = LocalDanmuEditState(), pendingDeleteResources = emptyList(),
+                        previewState = DanmuPreviewDialogState(),
+                        batch = if (it.batch.isRunning) it.batch.copy(cancelRequested = true) else LocalDanmuBatchState()) }
+                    refreshNow()
+                }
+            }
+        }
         viewModelScope.launch {
             repository.writePermission.collect { permission ->
                 _uiState.update { it.copy(writePermission = permission) }
@@ -169,7 +187,6 @@ class LocalDanmuViewModel @Inject constructor(
         refresh()
     }
 
-    /** 自动刷新：命中内存快照或直读核心缓存，通常不发（慢的）列表接口。 */
     fun refresh() = refreshInternal(force = false)
 
     /** 手动刷新（点刷新、导入/删除完成）：强制重新读一次。 */
@@ -178,7 +195,10 @@ class LocalDanmuViewModel @Inject constructor(
     private fun refreshInternal(force: Boolean) {
         // 进入页面时 init 与 ON_START 会各触发一次刷新，这里合并成一次；
         // 连点「重试」也不会堆叠出重复请求。
-        if (refreshJob?.isActive == true) return
+        if (refreshJob?.isActive == true) {
+            if (!force) return
+            refreshJob?.cancel()
+        }
         refreshJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -189,9 +209,10 @@ class LocalDanmuViewModel @Inject constructor(
             }
             repository.refresh(force = force).fold(
                 onSuccess = { snapshot ->
+                    if (!runtimeData.isCurrentSession(snapshot.sessionKey)) return@fold
                     importedIndex = LocalDanmuImportedIndex.build(
                         resources = snapshot.resources,
-                        sources = sourceStore.all()
+                        sources = sourceStore.all(snapshot.libraryId)
                     )
                     _uiState.update {
                         it.copy(
@@ -426,6 +447,12 @@ class LocalDanmuViewModel @Inject constructor(
         prepare: suspend (String) -> Result<LocalDanmuImportManager.PreparedFile>
     ) {
         viewModelScope.launch {
+            val snapshot = repository.refresh(force = true).getOrElse { error ->
+                showError(userMessage(error))
+                return@launch
+            }
+            if (!runtimeData.isCurrentSession(snapshot.sessionKey)) return@launch
+            _uiState.update { it.copy(snapshot = snapshot) }
             _uiState.update {
                 it.copy(
                     batch = it.batch.copy(visible = true, isRunning = true, cancelRequested = false),
@@ -436,7 +463,7 @@ class LocalDanmuViewModel @Inject constructor(
             val failures = mutableListOf<String>()
             sources.forEach { source ->
                 prepare(source).fold(
-                    onSuccess = { prepared -> items += batchItemOf(prepared) },
+                    onSuccess = { prepared -> items += batchItemOf(prepared, snapshot.sessionKey) },
                     onFailure = { error ->
                         failures += "${source.substringAfterLast('/')}：${
                             error.message?.takeIf { it.isNotBlank() } ?: "无法读取文件"
@@ -445,6 +472,7 @@ class LocalDanmuViewModel @Inject constructor(
                 )
             }
             val prepared = markBatchDuplicates(items)
+            if (!runtimeData.isCurrentSession(snapshot.sessionKey)) return@launch
             _uiState.update { state ->
                 state.copy(
                     batch = state.batch.copy(
@@ -458,10 +486,12 @@ class LocalDanmuViewModel @Inject constructor(
         }
     }
 
-    private fun batchItemOf(prepared: LocalDanmuImportManager.PreparedFile): LocalDanmuBatchItem {
-        val parsed = LocalDanmuMetadataResolver.resolve(
+    private fun batchItemOf(prepared: LocalDanmuImportManager.PreparedFile, sessionKey: String): LocalDanmuBatchItem {
+        val record = downloads.records.value.firstOrNull { it.fileUri == prepared.sourceUri && it.bytes == prepared.sizeBytes }
+        val parsed = record?.let(com.example.danmuapiapp.data.repository.DownloadLocalImportPlanner::metadata)
+            ?: LocalDanmuMetadataResolver.resolve(
             fileName = prepared.displayName,
-            relativePath = prepared.displayName
+            relativePath = prepared.relativePath
         )
         val imported = LocalDanmuImportedIndex.lookup(importedIndex,
             LocalDanmuImportedIndex.pathFromUri(prepared.sourceUri).orEmpty(), prepared.displayName, prepared.sizeBytes ?: 0L)
@@ -473,11 +503,12 @@ class LocalDanmuViewModel @Inject constructor(
             sizeBytes = prepared.sizeBytes,
             formatHint = prepared.formatHint,
             mimeType = prepared.mimeType,
+            expectedSessionKey = sessionKey,
             title = parsed.title,
-            year = parsed.year ?: Calendar.getInstance().get(Calendar.YEAR),
-            type = LocalDanmuType.fromWire(parsed.type) ?: LocalDanmuType.Tv,
+            year = parsed.year,
+            type = LocalDanmuType.fromWire(parsed.type) ?: LocalDanmuType.Unknown,
             season = parsed.season ?: 1,
-            episode = parsed.episode ?: 1,
+            episode = parsed.episode,
             confidence = parsed.confidence,
             importedLabel = LocalDanmuImportedIndex.lookup(
                 index = importedIndex,
@@ -492,6 +523,11 @@ class LocalDanmuViewModel @Inject constructor(
         updateBatchItem(id) {
             if (it.status == LocalDanmuBatchStatus.Uploading) it else it.copy(selected = !it.selected)
         }
+    }
+
+    fun setBatchType(type: LocalDanmuType?) {
+        if (_uiState.value.batch.isRunning) return
+        _uiState.update { it.copy(batch = it.batch.copy(items = applyImportType(it.batch.items, type))) }
     }
 
     fun updateBatchItemMetadata(
@@ -585,6 +621,7 @@ class LocalDanmuViewModel @Inject constructor(
                     formatHint = item.formatHint,
                     sizeBytes = item.sizeBytes,
                     mimeType = item.mimeType,
+                    expectedSessionKey = item.expectedSessionKey,
                     onProgress = { progress ->
                         updateBatchItem(item.id) { current ->
                             if (progress >= 1f || progress - current.progress >= 0.05f) {
@@ -597,6 +634,7 @@ class LocalDanmuViewModel @Inject constructor(
                 ).fold(
                     onSuccess = { resource ->
                         success++
+                        if (!runtimeData.isCurrentSession(resource.sessionKey)) return@fold
                         updateBatchItem(item.id) {
                             it.copy(
                                 status = LocalDanmuBatchStatus.Success,
@@ -620,14 +658,15 @@ class LocalDanmuViewModel @Inject constructor(
             }
             val canceled = _uiState.value.batch.cancelRequested
             refreshNow()
+            refreshJob?.join()
             _uiState.update {
                 it.copy(
                     batch = it.batch.copy(isRunning = false, cancelRequested = false),
-                    message = when {
+                    message = (when {
                         canceled -> "已取消批量导入：成功 $success 个，失败 $failed 个"
                         failed == 0 -> "批量导入完成：成功 $success 个"
                         else -> "批量导入完成：成功 $success 个，失败 $failed 个"
-                    }
+                    }) + if (success > 0 && it.errorMessage != null) "；列表刷新失败，请重试刷新（无需重复上传）" else ""
                 )
             }
         }
@@ -685,7 +724,7 @@ class LocalDanmuViewModel @Inject constructor(
         val cached = _uiState.value.snapshot.resources.firstOrNull { it.resourceKey == resourceKey }
         if (cached != null) _uiState.update { it.copy(detailResource = cached, previewState = DanmuPreviewDialogState()) }
         detailJob = viewModelScope.launch {
-            repository.loadDetail(resourceKey).fold(
+            repository.loadDetail(resourceKey, _uiState.value.snapshot.sessionKey).fold(
                 onSuccess = { resource -> _uiState.update { if (it.detailResource?.resourceKey == resourceKey) it.copy(detailResource = resource) else it } },
                 onFailure = { error ->
                     if (cached == null) {
@@ -804,7 +843,8 @@ class LocalDanmuViewModel @Inject constructor(
             type = edit.type.takeIf { scoped },
             season = edit.season.takeIf { scoped },
             episode = edit.episode.takeIf { !scoped },
-            filename = edit.filename.trim().takeIf { !scoped }
+            filename = edit.filename.trim().takeIf { !scoped },
+            expectedSessionKey = target.sessionKey
         )
         val affected = when (edit.scope) {
             LocalDanmuEditScope.Resource -> listOf(target)
@@ -813,10 +853,20 @@ class LocalDanmuViewModel @Inject constructor(
         }
         viewModelScope.launch {
             updateEdit { it.copy(isSaving = true, errorMessage = null) }
-            repository.updateMetadata(target.resourceKey, patch).fold(
+            com.example.danmuapiapp.data.repository.runLocalDanmuRequest {
+                runtimeData.withRuntime(target.sessionKey) {
+                    repository.updateMetadata(target.resourceKey, patch).getOrThrow().also { result ->
+                        val mappings = matchMigratedResourceKeys(affected, result.resources)
+                        sourceStore.migrate(target.libraryId, mappings)
+                        val associations = downloads.records.value.mapNotNull { record ->
+                            mappings[record.localImports[target.libraryId]]?.let { record.id to it }
+                        }.toMap()
+                        downloads.markRecordsImported(target.libraryId, associations, mediaType = edit.type.wire)
+                    }
+                }
+            }.fold(
                 onSuccess = { result ->
-                    // 编辑会重算 resourceKey，来源记录必须跟着迁移，否则预览失效。
-                    sourceStore.migrate(matchMigratedResourceKeys(affected, result.resources))
+                    if (!runtimeData.isCurrentSession(target.sessionKey)) return@fold
                     _uiState.update {
                         it.copy(
                             editState = LocalDanmuEditState(),
@@ -861,7 +911,7 @@ class LocalDanmuViewModel @Inject constructor(
             it.copy(previewState = DanmuPreviewDialogState(loadingRecordId = -1L))
         }
         previewJob = viewModelScope.launch {
-            repository.loadPreview(resourceKey).fold(
+            repository.loadPreview(resourceKey, _uiState.value.snapshot.sessionKey).fold(
                 onSuccess = { preview ->
                     _uiState.update {
                         it.copy(previewState = DanmuPreviewDialogState(preview = preview))
@@ -909,7 +959,7 @@ class LocalDanmuViewModel @Inject constructor(
         if (resources.isEmpty()) return
         _uiState.update { it.copy(pendingDeleteResources = emptyList(), deleteInProgress = true) }
         viewModelScope.launch {
-            repository.deleteMany(resources.map { it.resourceKey }) { done, total ->
+            repository.deleteMany(resources.map { it.resourceKey }, resources.firstOrNull()?.sessionKey.orEmpty()) { done, total ->
                 _uiState.update { it.copy(deleteProgress = "$done/$total") }
             }.fold(
                 onSuccess = { count ->
@@ -996,10 +1046,12 @@ class LocalDanmuViewModel @Inject constructor(
         formatHint: String,
         sizeBytes: Long?,
         mimeType: String,
+        expectedSessionKey: String,
         onProgress: (Float) -> Unit
     ): Result<LocalDanmuResource> {
         return uploader.upload(LocalDanmuBatchItem(id = 0, sourceUri = sourceUri,
             displayName = displayName, sizeBytes = sizeBytes, formatHint = formatHint, mimeType = mimeType,
-            title = title, year = year, type = type, season = season, episode = episode), onProgress)
+            title = title, year = year, type = type, season = season, episode = episode,
+            expectedSessionKey = expectedSessionKey), onProgress)
     }
 }

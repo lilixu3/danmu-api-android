@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.deviceaccess
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -50,7 +51,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -84,11 +84,10 @@ fun DeviceAccessScreen(
 ) {
     val snapshot = viewModel.snapshot.collectAsStateWithLifecycle().value
     val adminState = viewModel.adminSessionState.collectAsStateWithLifecycle().value
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
-            snackbarHostState.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
@@ -98,7 +97,6 @@ fun DeviceAccessScreen(
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        snackbarHost = { AppSnackbarHost(hostState = snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

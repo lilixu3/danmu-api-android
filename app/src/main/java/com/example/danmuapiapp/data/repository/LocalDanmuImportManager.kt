@@ -30,7 +30,8 @@ class LocalDanmuImportManager @Inject constructor(
         val displayName: String,
         val sizeBytes: Long?,
         val mimeType: String,
-        val formatHint: String
+        val formatHint: String,
+        val relativePath: String = ""
     )
 
     /**
@@ -55,7 +56,8 @@ class LocalDanmuImportManager @Inject constructor(
                 displayName = displayName,
                 sizeBytes = sizeBytes,
                 mimeType = mimeTypeForExtension(extension),
-                formatHint = formatHint
+                formatHint = formatHint,
+                relativePath = file.absolutePath.removePrefix("/storage/emulated/0/").removePrefix("/sdcard/")
             )
         }
     }

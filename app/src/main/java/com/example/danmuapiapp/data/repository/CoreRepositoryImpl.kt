@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.data.repository
 
 import com.example.danmuapiapp.data.network.newOutboundCall
+import com.example.danmuapiapp.data.service.GithubQuotaExhaustedException
+import com.example.danmuapiapp.data.service.GithubQuotaRequestContext
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -1009,6 +1011,8 @@ class CoreRepositoryImpl @Inject constructor(
                     coverage.inclusion
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (exhausted: GithubQuotaExhaustedException) {
+                    throw exhausted
                 } catch (error: Exception) {
                     logRecoverableWarning("确认 PR #$number 是否已包含失败", error)
                     notes[number] = "查询失败，尚未确认是否包含；可以取消后重试"
@@ -1073,6 +1077,7 @@ class CoreRepositoryImpl @Inject constructor(
             try {
                 val info = _coreInfoList.value.find { it.variant == variant } ?: return@withContext
                 if (!info.isInstalled) return@withContext
+                githubProxyService.apiQuota.requireAvailable()
                 val remoteSource = resolveRemoteSource(variant)
                     ?: throw IOException("无法读取远程核心信息")
                 val remoteVersion = remoteSource.metadata?.versionLabel
@@ -1191,7 +1196,8 @@ class CoreRepositoryImpl @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                logRecoverableWarning("checkAndMarkUpdate(${variant.key}) 失败", e)
+                if (e is GithubQuotaExhaustedException && GithubQuotaRequestContext.isAutomatic()) return@withContext
+                if (e !is GithubQuotaExhaustedException) logRecoverableWarning("checkAndMarkUpdate(${variant.key}) 失败", e)
                 _coreInfoList.value = _coreInfoList.value.map { info ->
                     if (info.variant == variant) {
                         info.copy(
@@ -1210,6 +1216,7 @@ class CoreRepositoryImpl @Inject constructor(
     override suspend fun checkAllUpdates() {
         withContext(Dispatchers.IO) {
             ApiVariant.entries.forEach { variant ->
+                if (githubProxyService.apiQuota.blocked() != null) return@withContext
                 try {
                     checkAndMarkUpdate(variant)
                 } catch (cancelled: CancellationException) {
@@ -1231,6 +1238,7 @@ class CoreRepositoryImpl @Inject constructor(
             if (info.sourceMismatch) throw IOException("当前核心来源与设置不一致")
 
             if (info.remoteCommit == null) {
+                githubProxyService.apiQuota.requireAvailable()
                 checkAndMarkUpdate(variant)
                 info = _coreInfoList.value.firstOrNull { it.variant == variant }
                     ?: throw IOException("未找到核心状态")
@@ -1320,7 +1328,9 @@ class CoreRepositoryImpl @Inject constructor(
                 )
                 refreshCoreInfo()
                 refreshAllJob?.join()
-                checkAndMarkUpdate(variant)
+                GithubQuotaRequestContext.automatically {
+                    if (githubProxyService.apiQuota.blocked() == null) checkAndMarkUpdate(variant)
+                }
             }
         }
 
@@ -1349,7 +1359,9 @@ class CoreRepositoryImpl @Inject constructor(
             )
             refreshCoreInfo()
             refreshAllJob?.join()
-            checkAndMarkUpdate(variant)
+            GithubQuotaRequestContext.automatically {
+                if (githubProxyService.apiQuota.blocked() == null) checkAndMarkUpdate(variant)
+            }
         }
     }
 
@@ -2857,6 +2869,8 @@ class CoreRepositoryImpl @Inject constructor(
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
+                    } catch (exhausted: GithubQuotaExhaustedException) {
+                        throw exhausted
                     } catch (e: Exception) {
                         lastFailureMessage = e.message ?: "下载失败：网络异常"
                     }

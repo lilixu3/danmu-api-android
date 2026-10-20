@@ -3,7 +3,6 @@ package com.example.danmuapiapp.ui.screen.tools
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.danmuapiapp.data.tunnel.*
 import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import kotlinx.coroutines.delay
 
@@ -49,7 +49,7 @@ fun TunnelScreen(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: Tunn
             }
         }
     }
-    fun notify(message: String) = Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    fun notify(message: String) = AppToast.show(message)
     fun runAction(action: String) {
         busy = true
         val callback: (TunnelActionResult, Boolean) -> Unit = { result, converged ->

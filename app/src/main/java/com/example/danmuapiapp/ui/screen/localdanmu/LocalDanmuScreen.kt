@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import android.content.Intent
 import android.os.Build
@@ -29,7 +31,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
 import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
 import com.example.danmuapiapp.ui.screen.download.DanmuPreviewDialog
 import com.example.danmuapiapp.ui.screen.download.buildDownloadRecordAnimeGroups
@@ -43,7 +44,6 @@ fun LocalDanmuScreen(
     viewModel: LocalDanmuViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showAdminPrompt by remember { mutableStateOf(false) }
@@ -105,7 +105,7 @@ fun LocalDanmuScreen(
 
     LaunchedEffect(state.message) {
         state.message?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
@@ -130,6 +130,9 @@ fun LocalDanmuScreen(
     LaunchedEffect(importer.completedVersion) {
         if (importer.completedVersion > 0) viewModel.refreshNow()
     }
+    LaunchedEffect(chooseDownloads, state.snapshot) {
+        if (chooseDownloads) importer.refreshMatches()
+    }
     DownloadImportDialog(importer)
     if (chooseDownloads) {
         val groups = buildDownloadRecordAnimeGroups(downloads.filter { it.statusEnum() == DownloadRecordStatus.Success })
@@ -138,7 +141,7 @@ fun LocalDanmuScreen(
                 if (groups.isEmpty()) ToolHint("还没有成功的下载记录，先在弹幕下载里下载或同步下载目录。")
                 else LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(groups, key = { it.key }) { group ->
-                        ToolListRow("${group.records.size} 集", "已导入 ${group.records.count { it.importedToLocal }}",
+                        ToolListRow("${group.records.size} 集", "当前库已导入 ${group.records.count { it.id in importer.importedKeys }}",
                             group.title, "点此选择并订正导入信息", { chooseDownloads = false; importer.open(group.records, "导入《${com.example.danmuapiapp.ui.screen.download.extractAnimeKeywordForSearch(group.title)}》") },
                             actions = { Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp)) })
                     }
@@ -165,10 +168,10 @@ fun LocalDanmuScreen(
     if (state.batch.visible) {
         LocalDanmuBatchPanel(state.batch, state.errorMessage, viewModel::closeBatch, viewModel::toggleBatchSelected,
             viewModel::removeBatchItem, viewModel::updateBatchItemMetadata, viewModel::runBatchImport,
-            viewModel::cancelBatchImport, viewModel::retryFailedBatch, viewModel::dismissError)
+            viewModel::cancelBatchImport, viewModel::retryFailedBatch, viewModel::dismissError, viewModel::setBatchType)
         return
     }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { AppSnackbarHost(snackbarHostState) },
+    Scaffold(containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             ToolHeader("本地弹幕", onBack,

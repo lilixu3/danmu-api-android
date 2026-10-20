@@ -13,7 +13,8 @@ import javax.inject.Singleton
 class UpdateChecker @Inject constructor(
     @ApplicationContext context: Context,
     private val coreRepo: CoreRepository,
-    private val settingsRepo: SettingsRepository
+    private val settingsRepo: SettingsRepository,
+    private val apiQuota: GithubApiQuota
 ) {
     companion object {
         private const val PREFS_NAME = "core_update_checker"
@@ -27,6 +28,7 @@ class UpdateChecker @Inject constructor(
 
     /** Called on app resume. Checks only when the user-selected cooldown has elapsed. */
     fun onAppResume() {
+        if (apiQuota.blocked() != null) return
         val now = System.currentTimeMillis()
         val lastCheck = runCatching { prefs.getLong(KEY_LAST_AUTO_CHECK_TIME, 0L) }
             .getOrDefault(0L)
@@ -42,7 +44,8 @@ class UpdateChecker @Inject constructor(
         scope.launch {
             try {
                 coreRepo.refreshCoreInfoAndAwait()
-                coreRepo.checkAllUpdates()
+                GithubQuotaRequestContext.automatically { coreRepo.checkAllUpdates() }
+                if (apiQuota.blocked() != null) prefs.edit().putLong(KEY_LAST_AUTO_CHECK_TIME, 0L).apply()
             } finally {
                 isAutoChecking.set(false)
             }
@@ -51,6 +54,7 @@ class UpdateChecker @Inject constructor(
 
     /** Manual check for a specific variant. Returns true if update available. */
     suspend fun manualCheck(variant: com.example.danmuapiapp.domain.model.ApiVariant): Boolean {
+        if (!apiQuota.allowManualOperation()) return false
         if (!isManualChecking.compareAndSet(false, true)) return false
         return try {
             coreRepo.checkAndMarkUpdate(variant)

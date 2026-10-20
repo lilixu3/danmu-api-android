@@ -4,6 +4,9 @@ import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import android.app.Activity
 import android.content.Context
 import android.os.Build
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -156,6 +159,32 @@ class CompatModeViewModel(
         }
     }
     val proxyOptions: List<GithubProxyOption> = graph.githubProxyService.proxyOptions()
+    val githubApiQuota = graph.githubProxyService.apiQuota
+    val githubAccountStatus = graph.githubAccountService.status
+    var showGithubTokenDialog by mutableStateOf(false)
+        private set
+
+    fun openGithubTokenDialog() { showGithubTokenDialog = true }
+    fun dismissGithubTokenDialog() { showGithubTokenDialog = false }
+
+    fun validateAndSaveGithubToken(input: String) {
+        if (githubAccountStatus.value.isLoading) return
+        viewModelScope.launch {
+            val token = input.trim()
+            val status = graph.githubAccountService.refresh(token)
+            if (token.isNotBlank() && status.tokenValid != true) {
+                emitEvent(status.error ?: "暂时无法验证 Token，未保存")
+                return@launch
+            }
+            runCatching { graph.settingsRepository.setGithubToken(token) }.fold(
+                onSuccess = {
+                    showGithubTokenDialog = false
+                    emitEvent(if (token.isBlank()) "已清空 GitHub Token" else "GitHub Token 已验证并保存")
+                },
+                onFailure = { emitEvent(it.message ?: "GitHub Token 安全保存失败") }
+            )
+        }
+    }
 
     private val proxyPickerController = ProxyPickerController(
         githubProxyService = graph.githubProxyService,
@@ -398,6 +427,7 @@ class CompatModeViewModel(
     }
 
     fun openBranchDialog(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (_uiState.value.isOperating) return
         if (_uiState.value.coreInfos.firstOrNull { it.variant == variant }?.isInstalled != true) {
             emitEvent("请先安装 ${resolveVariantLabel(variant)}")
@@ -477,6 +507,7 @@ class CompatModeViewModel(
     }
 
     private fun doSwitchCoreBranch(variant: ApiVariant, branch: String) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在切换 ${resolveVariantLabel(variant)} 分支") {
             graph.coreRepository.switchCoreBranch(variant, branch).fold(
                 onSuccess = {
@@ -490,6 +521,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}切换已暂停，等待修复依赖")
                     } else {
@@ -505,6 +537,7 @@ class CompatModeViewModel(
     }
 
     fun installCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Install(variant)
@@ -516,6 +549,7 @@ class CompatModeViewModel(
     }
 
     private fun doInstallCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在下载 ${resolveVariantLabel(variant)}") {
             graph.coreRepository.installCore(variant).fold(
                 onSuccess = {
@@ -529,6 +563,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}安装已暂停，等待修复依赖")
                     } else {
@@ -544,6 +579,7 @@ class CompatModeViewModel(
     }
 
     fun updateCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Update(variant)
@@ -557,9 +593,12 @@ class CompatModeViewModel(
     val coreUpdateChoice = CoreUpdateChoiceController()
 
     private fun doUpdateCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在更新 ${resolveVariantLabel(variant)}") {
             val request = coreUpdateChoice.prepare(graph.coreRepository, variant).getOrElse {
-                emitEvent("无法准备更新：${it.message}")
+                if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                    emitEvent("无法准备更新：${it.message}")
+                }
                 return@performCoreOperation
             } ?: return@performCoreOperation
             graph.coreRepository.updateCore(request).fold(
@@ -574,6 +613,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}更新已暂停，等待修复依赖")
                     } else {
@@ -589,6 +629,7 @@ class CompatModeViewModel(
     }
 
     fun checkCoreUpdate(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.CheckUpdate(variant)
@@ -600,10 +641,12 @@ class CompatModeViewModel(
     }
 
     private fun doCheckCoreUpdate(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在检查 ${resolveVariantLabel(variant)} 更新") {
             runCatching {
                 graph.coreRepository.checkAndMarkUpdate(variant)
                 val refreshed = graph.coreRepository.coreInfoList.value.find { it.variant == variant }
+                if (refreshed?.updateCheckError != null && !githubApiQuota.allowManualOperation()) return@runCatching
                 when {
                     refreshed?.updateCheckError != null -> {
                         emitEvent("${resolveVariantLabel(variant)} 检查更新失败：${refreshed.updateCheckError}")
@@ -757,6 +800,9 @@ class CompatModeViewModel(
 
     fun checkAppUpdate(showFreshToast: Boolean = true) {
         if (_uiState.value.appUpdate.isChecking) return
+        if (showFreshToast) {
+            if (!githubApiQuota.allowManualOperation()) return
+        } else if (githubApiQuota.blocked() != null) return
         _uiState.update {
             it.copy(
                 appUpdate = it.appUpdate.copy(
@@ -765,7 +811,7 @@ class CompatModeViewModel(
                 )
             )
         }
-        viewModelScope.launch {
+        viewModelScope.launch(com.example.danmuapiapp.data.service.GithubQuotaRequestContext.element(!showFreshToast)) {
             val result = withContext(Dispatchers.IO) {
                 graph.appUpdateService.checkLatestRelease()
             }
@@ -790,11 +836,12 @@ class CompatModeViewModel(
                         it.copy(
                             appUpdate = it.appUpdate.copy(
                                 isChecking = false,
-                                checkError = error.message ?: "检查失败"
+                                checkError = if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) ""
+                                    else error.message ?: "检查失败"
                             )
                         )
                     }
-                    if (showFreshToast) {
+                    if (showFreshToast && error !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
                         emitEvent("检查 App 更新失败：${error.message ?: "未知错误"}")
                     }
                 }

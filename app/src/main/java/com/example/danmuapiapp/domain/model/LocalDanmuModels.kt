@@ -5,9 +5,19 @@ import java.util.Locale
 
 enum class LocalDanmuType(val wire: String, val label: String) {
     Tv("tv", "电视剧"),
-    Movie("movie", "电影");
+    Movie("movie", "电影"),
+    Unknown("", "待确认");
 
     companion object {
+        fun fromDescription(raw: String?): LocalDanmuType? {
+            val value = raw?.trim()?.lowercase(Locale.ROOT).orEmpty()
+            return when {
+                value in setOf("movie", "film") || listOf("电影", "電影", "剧场版", "劇場版").any(value::contains) -> Movie
+                value in setOf("tv", "series", "tv series") || listOf("电视剧", "電視劇", "番剧", "番劇").any(value::contains) -> Tv
+                else -> null
+            }
+        }
+
         fun fromWire(raw: String?): LocalDanmuType? {
             val value = raw?.trim()?.lowercase(Locale.ROOT).orEmpty()
             return entries.firstOrNull { it.wire == value }
@@ -29,7 +39,9 @@ data class LocalDanmuResource(
     val status: String = "ready",
     val count: Int = 0,
     val updatedAt: String = "",
-    val matchKeys: List<String> = emptyList()
+    val matchKeys: List<String> = emptyList(),
+    val libraryId: String = "",
+    val sessionKey: String = ""
 ) {
     val typeLabel: String
         get() = LocalDanmuType.fromWire(type)?.label ?: type.ifBlank { "未知类型" }
@@ -57,7 +69,9 @@ data class LocalDanmuGroup(
 
 data class LocalDanmuSnapshot(
     val resources: List<LocalDanmuResource>,
-    val groups: List<LocalDanmuGroup>
+    val groups: List<LocalDanmuGroup>,
+    val libraryId: String = "",
+    val sessionKey: String = ""
 )
 
 enum class LocalDanmuWritePermission {
@@ -84,7 +98,8 @@ data class LocalDanmuMetadataPatch(
     val type: LocalDanmuType? = null,
     val season: Int? = null,
     val episode: Int? = null,
-    val filename: String? = null
+    val filename: String? = null,
+    val expectedSessionKey: String = ""
 )
 
 /** 核心 PATCH 的响应：更新后的资源（分组范围会返回整组）。 */
@@ -103,7 +118,8 @@ data class LocalDanmuUploadRequest(
     val stagedFile: File? = null,
     val sourceUri: String = "",
     val contentLength: Long? = null,
-    val mimeType: String = ""
+    val mimeType: String = "",
+    val expectedSessionKey: String = ""
 )
 
 enum class LocalDanmuParseConfidence {
@@ -137,5 +153,6 @@ data class LocalDanmuSourceRef(
     val displayName: String = "",
     val format: String = "",
     val sizeBytes: Long = 0L,
-    val updatedAt: Long = 0L
+    val updatedAt: Long = 0L,
+    val libraryId: String = ""
 )

@@ -116,6 +116,13 @@ for (const worker of [false, true]) test(`fresh searches use the loaded core and
       return Response.json({success:true,animes:[{animeId:42,animeTitle:'Show from tencent',source:'tencent'}]});
     }`);
     fs.writeFileSync(path.join(core, 'apis', 'dandan-api.js'), api);
+    fs.mkdirSync(path.join(core, 'utils'));
+    fs.mkdirSync(path.join(core, 'sources'));
+    fs.writeFileSync(path.join(core, 'sources', 'bilibili.js'), 'export default class Bilibili {}');
+    fs.writeFileSync(path.join(core, 'utils', 'http-util.js'), `export async function httpGet() {
+      return {data:{code:0,data:{bvid:'BVfixture',title:'Current video',pic:'https://i0.hdslb.com/current.jpg',
+        pages:[{cid:1,page:1,part:'First'},{cid:2,page:2,part:'Second'}]}}};
+    }`);
     const port = await freePort();
     child = spawn(process.execPath, [path.join(directory, 'main.js')], {
       cwd:directory, env:{...process.env, DANMU_API_HOME:directory, DANMU_API_PORT:String(port),
@@ -138,6 +145,11 @@ for (const worker of [false, true]) test(`fresh searches use the loaded core and
     assert.equal(body.appBangumis[0].detail.bangumi.episodes.length, 18);
     const denied = await fetch(base+'/invalid'+suffix);
     assert.equal(denied.status, 401);
+    const metadataPath = '/api/v2/search/anime?app_url_metadata=1&keyword=' + encodeURIComponent('https://www.bilibili.com/video/BVfixture?p=2');
+    const metadata = await (await fetch(base + '/user' + metadataPath)).json();
+    assert.equal(metadata.appUrlMetadata?.selectedEpisodeId, '2', JSON.stringify(metadata) + output);
+    assert.equal(metadata.appUrlMetadata?.episodes.length, 2);
+    assert.equal((await fetch(base + '/invalid' + metadataPath)).status, 401);
     assert.equal((await denied.json()).appRefreshFresh, undefined);
   } finally {
     if (child && child.exitCode === null) {

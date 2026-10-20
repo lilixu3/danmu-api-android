@@ -18,6 +18,7 @@ class DownloadRecordRecoveryTest {
         assertEquals(123L, record.createdAt)
         assertEquals(456L, record.bytes)
         assertNull(record.danmuCount)
+        assertFalse(record.canAutoImportToLocal)
         assertEquals(record.id, DownloadRecordRecovery.record(input, 1000).id)
     }
     @Test fun `flat files recover titles and sources without generic existing danmaku group`() {

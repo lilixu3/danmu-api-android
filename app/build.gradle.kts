@@ -1740,5 +1740,5 @@ tasks.matching {
 // Enhanced outbound uses Node TLS/QUIC and Android DoH; no executable helper.
 val testAppOutboundTask = tasks.register<Exec>("testAppOutboundBridge") {
     workingDir(project.rootDir)
-    commandLine("node", "--test", "node-tests/app-proxy-routing.test.cjs", "node-tests/app-proxy-host.test.cjs", "node-tests/app-source-probe.test.cjs", "node-tests/app-outbound-native.test.cjs", "node-tests/app-outbound-dns.test.cjs", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs", "node-tests/security-discovery-host.test.cjs", "node-tests/app-series-refresh.test.cjs")
+    commandLine("node", "--test", "node-tests/app-proxy-routing.test.cjs", "node-tests/app-proxy-host.test.cjs", "node-tests/app-source-probe.test.cjs", "node-tests/app-outbound-native.test.cjs", "node-tests/app-outbound-dns.test.cjs", "node-tests/app-outbound-bridge.test.cjs", "node-tests/app-outbound-runtime.test.cjs", "node-tests/app-outbound-host.test.cjs", "node-tests/app-management.test.cjs", "node-tests/app-management-host.test.cjs", "node-tests/security-discovery-host.test.cjs", "node-tests/app-series-refresh.test.cjs", "node-tests/app-url-metadata.test.cjs", "node-tests/runtime-data-context.test.cjs")
 }

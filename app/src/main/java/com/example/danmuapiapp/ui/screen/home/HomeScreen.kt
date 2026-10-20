@@ -1,7 +1,8 @@
 package com.example.danmuapiapp.ui.screen.home
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.CorePullRequestUpdateChoiceHost
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -116,7 +117,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -255,7 +255,6 @@ fun HomeScreen(
             ?: emptyQueueState
         )
     val listState = rememberLazyListState()
-    val snackbarHostState = remember { SnackbarHostState() }
     var activeOverlay by remember { mutableStateOf<HomeOverlay?>(null) }
     var pendingRunModeTarget by remember { mutableStateOf<RunMode?>(null) }
     var quickPortText by remember { mutableStateOf("") }
@@ -449,14 +448,14 @@ fun HomeScreen(
 
     LaunchedEffect(viewModel.appUpdateMessage) {
         viewModel.appUpdateMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissAppUpdateMessage()
         }
     }
     LaunchedEffect(downloadViewModel?.operationMessage) {
         val message = downloadViewModel?.operationMessage
         if (!message.isNullOrBlank()) {
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             downloadViewModel.dismissMessage()
         }
     }
@@ -561,7 +560,6 @@ fun HomeScreen(
     }
 
     Scaffold(
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color.Transparent
     ) { padding ->

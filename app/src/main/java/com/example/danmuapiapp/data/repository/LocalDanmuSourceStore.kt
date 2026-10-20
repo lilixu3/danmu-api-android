@@ -27,10 +27,11 @@ class LocalDanmuSourceStore @Inject constructor(
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun save(ref: LocalDanmuSourceRef) {
+    @Synchronized fun save(libraryId: String, ref: LocalDanmuSourceRef) {
+        require(libraryId.isNotBlank())
         if (ref.resourceKey.isBlank() || ref.uri.isBlank()) return
         val current = readAll().toMutableMap()
-        current[ref.resourceKey] = ref.copy(updatedAt = System.currentTimeMillis())
+        current[scopedKey(libraryId, ref.resourceKey)] = ref.copy(libraryId = libraryId, updatedAt = System.currentTimeMillis())
         val trimmed = current.entries
             .sortedByDescending { it.value.updatedAt }
             .take(MAX_ENTRIES)
@@ -38,19 +39,22 @@ class LocalDanmuSourceStore @Inject constructor(
         writeAll(trimmed)
     }
 
-    fun get(resourceKey: String): LocalDanmuSourceRef? {
+    @Synchronized fun get(libraryId: String, resourceKey: String): LocalDanmuSourceRef? {
+        if (libraryId.isBlank()) return null
         if (resourceKey.isBlank()) return null
-        return readAll()[resourceKey]
+        return readAll()[scopedKey(libraryId, resourceKey)]
     }
 
-    fun all(): List<LocalDanmuSourceRef> = readAll().values.toList()
+    @Synchronized fun all(libraryId: String): List<LocalDanmuSourceRef> =
+        readAll().values.filter { libraryId.isNotBlank() && it.libraryId == libraryId }
 
-    fun remove(resourceKeys: Collection<String>) {
+    @Synchronized fun remove(libraryId: String, resourceKeys: Collection<String>) {
+        require(libraryId.isNotBlank())
         if (resourceKeys.isEmpty()) return
         val current = readAll().toMutableMap()
         var changed = false
         resourceKeys.forEach { key ->
-            if (current.remove(key) != null) changed = true
+            if (current.remove(scopedKey(libraryId, key)) != null) changed = true
         }
         if (changed) writeAll(current)
     }
@@ -59,15 +63,16 @@ class LocalDanmuSourceStore @Inject constructor(
      * 编辑元数据会重算 resourceKey（核心会删掉旧 key 文件），这里把来源记录迁到新 key，
      * 否则改完标题/集数后详情页预览会因为找不到 uri 而失效。
      */
-    fun migrate(mappings: Map<String, String>) {
+    @Synchronized fun migrate(libraryId: String, mappings: Map<String, String>) {
+        require(libraryId.isNotBlank())
         if (mappings.isEmpty()) return
         val current = readAll().toMutableMap()
         var changed = false
         val now = System.currentTimeMillis()
         mappings.forEach { (oldKey, newKey) ->
             if (oldKey.isBlank() || newKey.isBlank() || oldKey == newKey) return@forEach
-            val ref = current.remove(oldKey) ?: return@forEach
-            current[newKey] = ref.copy(resourceKey = newKey, updatedAt = now)
+            val ref = current.remove(scopedKey(libraryId, oldKey)) ?: return@forEach
+            current[scopedKey(libraryId, newKey)] = ref.copy(resourceKey = newKey, updatedAt = now)
             changed = true
         }
         if (changed) writeAll(current)
@@ -84,7 +89,7 @@ class LocalDanmuSourceStore @Inject constructor(
                     val key = obj.optString("resourceKey").trim()
                     if (key.isBlank()) continue
                     put(
-                        key,
+                        scopedKey(obj.optString("libraryId"), key),
                         LocalDanmuSourceRef(
                             resourceKey = key,
                             kind = runCatching {
@@ -95,7 +100,8 @@ class LocalDanmuSourceStore @Inject constructor(
                             displayName = obj.optString("displayName"),
                             format = obj.optString("format"),
                             sizeBytes = obj.optLong("sizeBytes", 0L),
-                            updatedAt = obj.optLong("updatedAt", 0L)
+                            updatedAt = obj.optLong("updatedAt", 0L),
+                            libraryId = obj.optString("libraryId")
                         )
                     )
                 }
@@ -109,6 +115,7 @@ class LocalDanmuSourceStore @Inject constructor(
             array.put(
                 JSONObject()
                     .put("resourceKey", ref.resourceKey)
+                    .put("libraryId", ref.libraryId)
                     .put("kind", ref.kind.name)
                     .put("uri", ref.uri)
                     .put("entryName", ref.entryName)
@@ -120,4 +127,6 @@ class LocalDanmuSourceStore @Inject constructor(
         }
         prefs.edit { putString(KEY_SOURCES, array.toString()) }
     }
+
+    private fun scopedKey(libraryId: String, resourceKey: String): String = scopedLocalResourceKey(libraryId, resourceKey)
 }

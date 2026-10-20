@@ -28,7 +28,8 @@ import javax.inject.Singleton
 @Singleton
 class GithubProxyService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    val apiQuota: GithubApiQuota
 ) {
     companion object {
         private const val KEY_GITHUB_PROXY = "github_proxy"

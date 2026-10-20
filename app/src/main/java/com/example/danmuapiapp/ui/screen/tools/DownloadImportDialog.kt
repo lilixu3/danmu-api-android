@@ -31,6 +31,7 @@ import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuBatchStatus
                     else "共 ${batch.items.size} 个文件 · 待导入 ${batch.pendingCount} · 已导入默认跳过，点条目可订正年份 / 季 / 集数")
                 if (batch.total > 0) LinearProgressIndicator(progress = { batch.progress }, modifier = Modifier.fillMaxWidth())
                 vm.error?.let { ToolError(it) }
+                if (!batch.isRunning) ImportTypeActions(vm::setBatchType)
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp)) {
                     items(vm.blocked) { ToolError(it) }
                     items(batch.items, key = { it.id }) { item ->
@@ -68,6 +69,14 @@ import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuBatchStatus
     editing?.let { item -> ImportMetadataDialog(item, { editing = null }) { title, year, type, season, episode ->
         vm.edit(item.id, title, year, type, season, episode); editing = null
     } }
+}
+@Composable internal fun ImportTypeActions(onSetType: (LocalDanmuType?) -> Unit) {
+    ToolHint("类型应用到选中项")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ToolChip("自动识别", false, { onSetType(null) })
+        ToolChip("电影", false, { onSetType(LocalDanmuType.Movie) })
+        ToolChip("电视剧", false, { onSetType(LocalDanmuType.Tv) })
+    }
 }
 @Composable internal fun ImportMetadataDialog(item: LocalDanmuBatchItem, onDismiss: () -> Unit,
     onSave: (String, Int?, LocalDanmuType, Int?, Int?) -> Unit) {

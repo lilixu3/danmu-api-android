@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -86,7 +86,6 @@ private data class VideoShellInjectionState(
 @Composable
 fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
     val appContext = LocalContext.current.applicationContext
-    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(VideoShellInjectionState()) }
     var saving by remember { mutableStateOf(false) }
@@ -114,7 +113,6 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -219,11 +217,11 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                     checked = injectionChecked,
                     enabled = canControlInjection,
                     disabledOnClick = {
-                        scope.launch { snackbarHostState.showSnackbar(missingEnvironment) }
+                        scope.launch { AppToast.show(missingEnvironment) }
                     },
                     onCheckedChange = { checked ->
                         if (!state.environmentReady) {
-                            scope.launch { snackbarHostState.showSnackbar(missingEnvironment) }
+                            scope.launch { AppToast.show(missingEnvironment) }
                             return@SettingsSwitchItem
                         }
                         saving = true
@@ -239,9 +237,9 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                             saving = false
                             if (result.ok) {
                                 state = state.copy(injectionEnabled = checked, autoPushEnabled = nextAutoPush)
-                                snackbarHostState.showSnackbar(if (checked) "已开启播放页注入" else "已关闭播放页注入")
+                                AppToast.show(if (checked) "已开启播放页注入" else "已关闭播放页注入")
                             } else {
-                                snackbarHostState.showSnackbar(result.message)
+                                AppToast.show(result.message)
                                 refresh()
                             }
                         }
@@ -261,7 +259,7 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                     enabled = canControlInjection && injectionChecked,
                     disabledOnClick = {
                         scope.launch {
-                            snackbarHostState.showSnackbar(
+                            AppToast.show(
                                 if (!state.environmentReady) missingEnvironment else "请先开启播放页注入"
                             )
                         }
@@ -269,7 +267,7 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { checked ->
                         if (!state.environmentReady || !state.injectionEnabled) {
                             scope.launch {
-                                snackbarHostState.showSnackbar(
+                                AppToast.show(
                                     if (!state.environmentReady) missingEnvironment else "请先开启播放页注入"
                                 )
                             }
@@ -287,9 +285,9 @@ fun VideoShellInjectionSettingsScreen(onBack: () -> Unit) {
                             saving = false
                             if (result.ok) {
                                 state = state.copy(autoPushEnabled = checked)
-                                snackbarHostState.showSnackbar(if (checked) "已开启自动推送" else "已关闭自动推送")
+                                AppToast.show(if (checked) "已开启自动推送" else "已关闭自动推送")
                             } else {
-                                snackbarHostState.showSnackbar(result.message)
+                                AppToast.show(result.message)
                                 refresh()
                             }
                         }

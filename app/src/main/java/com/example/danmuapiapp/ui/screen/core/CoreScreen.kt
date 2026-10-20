@@ -1,7 +1,8 @@
 package com.example.danmuapiapp.ui.screen.core
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.CorePullRequestUpdateChoiceHost
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +33,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -88,7 +88,6 @@ fun CoreScreen(
     val customBranch by viewModel.customRepoBranch.collectAsStateWithLifecycle()
     val githubStatus by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
     val selectedProxyId by viewModel.selectedGithubProxyId.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     var viewedVariantKey by rememberSaveable { mutableStateOf<String?>(null) }
     val viewedVariant = ApiVariant.entries.firstOrNull { it.key == viewedVariantKey }
         ?: runtimeState.variant
@@ -106,13 +105,12 @@ fun CoreScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
-            snackbar.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
-        snackbarHost = { AppSnackbarHost(snackbar) },
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
@@ -318,7 +316,7 @@ private fun UpdateResultDialog(vm: CoreViewModel, names: CoreVariantDisplayNames
 }
 
 @Composable
-private fun GithubTokenDialog(
+internal fun GithubTokenDialog(
     tokenConfigured: Boolean,
     status: GithubAccountStatus,
     onValidate: (String) -> Unit,

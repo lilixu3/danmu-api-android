@@ -31,6 +31,7 @@ import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.DanmuApiApp
 import com.example.danmuapiapp.ui.compat.CompatModeActivity
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.theme.DanmuApiTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -134,6 +135,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        AppToast.dismiss()
         runtimeRepository.setAppForeground(false)
         super.onStop()
     }

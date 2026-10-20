@@ -3,7 +3,6 @@ package com.example.danmuapiapp.ui.screen.tools
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.danmuapiapp.ui.component.AppToast
 
 @Composable
 internal fun TunnelLogs(log: String, expanded: Boolean, onExpand: () -> Unit, onRefresh: () -> Unit, onClear: () -> Unit) {
@@ -46,7 +46,7 @@ internal fun TunnelLogs(log: String, expanded: Boolean, onExpand: () -> Unit, on
                 IconButton(onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                     clipboard?.setPrimaryClip(ClipData.newPlainText("frpc 日志", entries.joinToString("\n") { it.raw }))
-                    if (clipboard != null) Toast.makeText(context, "已复制整理后的日志", Toast.LENGTH_SHORT).show()
+                    if (clipboard != null) AppToast.success("已复制整理后的日志")
                 }, enabled = entries.isNotEmpty()) {
                     Icon(Icons.Rounded.ContentCopy, "复制日志", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

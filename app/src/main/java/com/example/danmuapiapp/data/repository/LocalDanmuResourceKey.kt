@@ -85,7 +85,7 @@ internal object LocalDanmuResourceKey {
         if (title.trim().isEmpty()) return "标题为必填项"
         if (year == null) return "年份为必填项"
         if (year < 1900 || year > currentYear) return "年份必须在 1900–$currentYear 年之间"
-        if (type == null) return "类型为必填项"
+        if (type == null || type == LocalDanmuType.Unknown) return "未确定类型，请选择电影或电视剧"
         if (type == LocalDanmuType.Tv) {
             if (season == null || season <= 0) return "电视剧的季数必须是大于 0 的整数"
             if (episode == null || episode <= 0) return "电视剧的集数必须是大于 0 的整数"

@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.startup
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
@@ -11,7 +12,6 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -38,7 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,7 +48,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -133,14 +131,14 @@ object StartupPermissionGatePrefs {
     }
 
     internal fun showSkipNotice(context: Context, item: StartupPermissionItem, detail: String) {
-        runCatching { Toast.makeText(context, "${item.label}：$detail，已跳过启动检查。", Toast.LENGTH_LONG).show() }
+        AppToast.warning("${item.label}：$detail，已跳过启动检查。")
         prefs(context).edit { putBoolean("skip_notice_${item.key}", true) }
     }
 
     internal fun showUnsupportedNoticeOnce(context: Context, items: List<StartupPermissionItem>) {
         val unseen = items.filter { !prefs(context).getBoolean("skip_notice_${it.key}", false) }
         if (unseen.isEmpty()) return
-        runCatching { Toast.makeText(context, "未发现可用的${unseen.joinToString("、") { it.label }}设置入口，已跳过，可继续使用。", Toast.LENGTH_LONG).show() }
+        AppToast.warning("未发现可用的${unseen.joinToString("、") { it.label }}设置入口，已跳过，可继续使用。")
         prefs(context).edit { unseen.forEach { putBoolean("skip_notice_${it.key}", true) } }
     }
 
@@ -381,8 +379,6 @@ private fun StartupPermissionGateScreen(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     val notificationAction = remember(permissionState, activity) {
         resolveNotificationAction(activity = activity, permissionState = permissionState)
     }
@@ -436,7 +432,7 @@ private fun StartupPermissionGateScreen(
     LaunchedEffect(viewModel.operationMessage) {
         val message = viewModel.operationMessage
         if (message.isNullOrBlank()) return@LaunchedEffect
-        snackbarHostState.showSnackbar(message)
+        AppToast.show(message)
         viewModel.dismissMessage()
     }
 
@@ -514,12 +510,6 @@ private fun StartupPermissionGateScreen(
     ) {
         Scaffold(
             containerColor = Color.Transparent,
-            snackbarHost = {
-                AppSnackbarHost(
-                    hostState = snackbarHostState,
-                    aboveBottomBar = false
-                )
-            },
             contentWindowInsets = WindowInsets(0, 0, 0, 0)
         ) { padding ->
             BoxWithConstraints(

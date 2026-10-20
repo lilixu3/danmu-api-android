@@ -28,19 +28,19 @@ object FavoriteCacheStore {
         return write(context, RuntimePaths.currentRunMode(context), raw)
     }
 
-    fun read(context: Context, mode: RunMode): Result<Snapshot> = runCatching {
+    fun read(context: Context, mode: RunMode, projectDir: File = RuntimePaths.projectDir(context, mode)): Result<Snapshot> = runCatching {
         val raw = when (mode) {
-            RunMode.Normal -> readNormal(RuntimePaths.normalProjectDir(context))
-            RunMode.Root -> readRoot(context, RuntimePaths.rootProjectDir(context))
+            RunMode.Normal -> readNormal(projectDir)
+            RunMode.Root -> readRoot(context, projectDir)
         }
         snapshotOf(raw)
     }
 
-    fun write(context: Context, mode: RunMode, raw: String): Result<Snapshot> = runCatching {
+    fun write(context: Context, mode: RunMode, raw: String, projectDir: File = RuntimePaths.projectDir(context, mode)): Result<Snapshot> = runCatching {
         val snapshot = snapshotOf(raw)
         when (mode) {
-            RunMode.Normal -> writeNormal(RuntimePaths.normalProjectDir(context), snapshot.content)
-            RunMode.Root -> writeRoot(context, RuntimePaths.rootProjectDir(context), snapshot.content)
+            RunMode.Normal -> writeNormal(projectDir, snapshot.content)
+            RunMode.Root -> writeRoot(context, projectDir, snapshot.content)
         }
         snapshot
     }

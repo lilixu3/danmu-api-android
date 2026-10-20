@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.data.remote.github
 
 import com.example.danmuapiapp.data.network.newOutboundCall
+import com.example.danmuapiapp.data.service.GithubQuotaExhaustedException
 
 import android.util.Log
 import com.example.danmuapiapp.data.repository.executeCancellable
@@ -60,6 +61,7 @@ class GithubRemoteService @Inject constructor(
         .build()
 
     fun apiUrlCandidates(path: String): List<String> {
+        githubProxyService.apiQuota.requireAvailable(if (path.trimStart('/').startsWith("search/")) "search" else "core")
         val original = "https://api.github.com/$path"
         val candidates = withProxyCandidates(original)
         // Authenticated metadata must use the official API first so the token is
@@ -108,6 +110,8 @@ class GithubRemoteService @Inject constructor(
                         )
                     }
                     break
+                } catch (exhausted: GithubQuotaExhaustedException) {
+                    throw exhausted
                 } catch (error: Exception) {
                     Log.w(TAG, "GitHub 请求失败：$url", error)
                     attempt += 1
@@ -139,6 +143,8 @@ class GithubRemoteService @Inject constructor(
                         if (mapped != null) return mapped
                     }
                     break
+                } catch (exhausted: GithubQuotaExhaustedException) {
+                    throw exhausted
                 } catch (error: Exception) {
                     Log.w(TAG, "GitHub 请求失败：$url", error)
                     attempt += 1
@@ -183,6 +189,8 @@ class GithubRemoteService @Inject constructor(
                     break
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (exhausted: GithubQuotaExhaustedException) {
+                    throw exhausted
                 } catch (error: Exception) {
                     Log.w(TAG, "GitHub 请求失败：$url", error)
                     attempt += 1
@@ -215,6 +223,8 @@ class GithubRemoteService @Inject constructor(
                     break
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (exhausted: GithubQuotaExhaustedException) {
+                    throw exhausted
                 } catch (error: Exception) {
                     Log.w(TAG, "GitHub 请求失败：$url", error)
                     attempt += 1

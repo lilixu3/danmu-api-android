@@ -110,7 +110,8 @@ object RuntimePaths {
         }
     }
 
-    fun projectDir(context: Context): File = File(normalBaseDir(context), "nodejs-project")
+    @Deprecated("必须显式选择运行模式或 normalProjectDir", level = DeprecationLevel.ERROR)
+    fun projectDir(context: Context): File = normalProjectDir(context)
 
     fun projectDir(context: Context, mode: RunMode): File {
         val base = if (mode != RunMode.Normal) rootBaseDir(context) else normalBaseDir(context)

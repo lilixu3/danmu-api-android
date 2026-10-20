@@ -19,6 +19,22 @@ class DownloadImportPersistenceTest {
         assertTrue(restored.importedToLocal)
         assertEquals(record.localResourceKey, restored.localResourceKey)
     }
+    @Test fun `successful API downloads can auto import positive and negative episode IDs`() {
+        val record = DanmuDownloadRecord(animeTitle = "测试剧", episodeTitle = "第1集", episodeId = 88,
+            episodeNo = 1, source = "tencent", format = "xml", status = "success")
+        assertTrue(record.canAutoImportToLocal)
+        assertTrue(record.copy(episodeId = -88).canAutoImportToLocal)
+        assertFalse(record.copy(episodeId = 0, source = "目录同步").canAutoImportToLocal)
+    }
+    @Test fun `unsuccessful downloads never auto import regardless of episode ID sign`() {
+        val record = DanmuDownloadRecord(animeTitle = "测试剧", episodeTitle = "第1集", episodeId = 88,
+            episodeNo = 1, source = "tencent", format = "xml", status = "success")
+        for (episodeId in listOf(88L, -88L, 0L)) {
+            for (status in listOf("failed", "skipped", "unknown")) {
+                assertFalse(record.copy(episodeId = episodeId, status = status).canAutoImportToLocal)
+            }
+        }
+    }
     @Test fun `old settings keep safe defaults and new options persist`() {
         val defaults = json.decodeFromString<DanmuDownloadSettings>("{}")
         assertFalse(defaults.autoImportToLocal)

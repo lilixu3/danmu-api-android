@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.core
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 
@@ -61,7 +62,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -112,13 +112,12 @@ fun PullRequestLabScreen(
     val coreInfos by viewModel.coreInfoList.collectAsStateWithLifecycle()
     val displayNames by viewModel.coreDisplayNames.collectAsStateWithLifecycle()
     val progress by viewModel.downloadProgress.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     val installedPrs = coreInfos.firstOrNull { it.variant == viewModel.variant && it.isReady }
         ?.pullRequestNumbers.orEmpty()
 
     LaunchedEffect(viewModel.statusMessage) {
         viewModel.statusMessage?.let { message ->
-            snackbar.showSnackbar(message)
+            AppToast.show(message)
             viewModel.consumeStatusMessage()
         }
     }
@@ -127,7 +126,6 @@ fun PullRequestLabScreen(
     }
 
     Scaffold(
-        snackbarHost = { AppSnackbarHost(snackbar) },
         bottomBar = {
             PullRequestBuildBar(
                 selectedPullRequests = viewModel.selectedPullRequests,

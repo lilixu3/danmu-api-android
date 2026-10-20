@@ -582,6 +582,7 @@ class HomeViewModel @Inject constructor(
 
     fun installAndStart(variant: ApiVariant) {
         if (isSwitchingCore || isUpdatingCore || isRepairingDependencies) return
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         showNoCoreDialog = false
         if (!githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Install(variant)
@@ -592,6 +593,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun doInstallAndStart(variant: ApiVariant) {
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         isInstallingCore = true
         viewModelScope.launch {
             runtimeRepo.addLog(LogLevel.Info, "正在下载 ${variantLabel(variant)}...")
@@ -602,8 +604,9 @@ class HomeViewModel @Inject constructor(
                     completeInstallAndStart(variant)
                 },
                 onFailure = { error ->
-                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${error.message}")
                     isInstallingCore = false
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
+                    runtimeRepo.addLog(LogLevel.Error, "安装失败: ${error.message}")
                     if (error is CoreDependencyRepairRequiredException) {
                         pendingRepairContinuation = PendingRepairContinuation.InstallAndStart(variant)
                         appUpdateMessage = "${variantLabel(variant)}安装已暂停，等待修复依赖"
@@ -624,6 +627,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun quickCheckCurrentCoreUpdate() {
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         if (isSwitchingCore || isInstallingCore || isUpdatingCore ||
             isCheckingCoreUpdate || isRepairingDependencies
         ) return
@@ -647,6 +651,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun doQuickCheckCurrentCoreUpdate(variant: ApiVariant) {
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         isCheckingCoreUpdate = true
         coreUpdateCheckDialogMessage = null
         coreUpdateCheckDialogIsError = false
@@ -665,6 +670,10 @@ class HomeViewModel @Inject constructor(
             }
 
             val latestInfo = coreInfoList.value.find { it.variant == variant }
+            if (latestInfo?.updateCheckError != null && !githubProxyService.apiQuota.allowManualOperation()) {
+                isCheckingCoreUpdate = false
+                return@launch
+            }
             if (latestInfo?.updateCheckError != null) {
                 coreUpdateCheckDialogMessage =
                     "检查更新失败：${latestInfo.updateCheckError}"
@@ -807,6 +816,7 @@ class HomeViewModel @Inject constructor(
 
     private fun updateCurrentVariant(variant: ApiVariant) {
         if (isSwitchingCore || isInstallingCore || isUpdatingCore || isRepairingDependencies) return
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         if (!githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Update(variant)
             openProxyPickerDialog()
@@ -818,11 +828,14 @@ class HomeViewModel @Inject constructor(
     val coreUpdateChoice = CoreUpdateChoiceController()
 
     private fun doUpdateCurrentVariant(variant: ApiVariant) {
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         isUpdatingCore = true
         viewModelScope.launch {
             try {
                 val request = coreUpdateChoice.prepare(coreRepo, variant).getOrElse {
-                    appUpdateMessage = "无法准备更新：${it.message}"
+                    if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                        appUpdateMessage = "无法准备更新：${it.message}"
+                    }
                     return@launch
                 } ?: return@launch
                 runtimeRepo.addLog(LogLevel.Info, "正在更新 ${variantLabel(variant)}...")
@@ -833,8 +846,9 @@ class HomeViewModel @Inject constructor(
                         isUpdatingCore = false
                     },
                     onFailure = { error ->
-                        runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
                         isUpdatingCore = false
+                        if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
+                        runtimeRepo.addLog(LogLevel.Error, "更新失败: ${error.message}")
                         if (error is CoreDependencyRepairRequiredException) {
                             pendingRepairContinuation = PendingRepairContinuation.Update(variant)
                             appUpdateMessage = "${variantLabel(variant)}更新已暂停，等待修复依赖"
@@ -1016,6 +1030,7 @@ class HomeViewModel @Inject constructor(
 
     fun refreshForegroundAppUpdatePrompt() {
         if (isRefreshingAppUpdatePrompt || isDownloadingAppUpdate) return
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         val expectedVersion = appUpdatePromptLatestVersion ?: return
         isRefreshingAppUpdatePrompt = true
         viewModelScope.launch {
@@ -1032,7 +1047,11 @@ class HomeViewModel @Inject constructor(
                             if (info.downloadUrls.isEmpty()) appUpdateMessage = "暂未获取到兼容的安装包，可重试检查或使用浏览器下载"
                         }
                     },
-                    onFailure = { appUpdateMessage = "获取安装包失败：${it.message ?: "请稍后重试"}" }
+                    onFailure = {
+                        if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                            appUpdateMessage = "获取安装包失败：${it.message ?: "请稍后重试"}"
+                        }
+                    }
                 )
             } finally {
                 isRefreshingAppUpdatePrompt = false

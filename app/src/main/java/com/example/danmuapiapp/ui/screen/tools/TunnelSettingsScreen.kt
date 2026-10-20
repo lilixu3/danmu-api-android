@@ -2,7 +2,6 @@ package com.example.danmuapiapp.ui.screen.tools
 
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
@@ -29,6 +28,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.data.tunnel.*
 import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 
 @Composable
@@ -50,7 +50,7 @@ fun TunnelSettingsScreen(onBack: () -> Unit, viewModel: TunnelViewModel = hiltVi
     fun save() {
         focus.clearFocus()
         viewModel.saveDraft { result ->
-            Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+            AppToast.show(result.message)
             if (result.ok) attempted = false
         }
     }
@@ -219,7 +219,7 @@ private fun TunnelImportSection(value: TunnelDraft, port: Int, attempted: Boolea
             val clip = manager?.primaryClip
             val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(context).toString() else ""
             if (text.isNotBlank()) edit(value.copy(pasteText = text))
-            else Toast.makeText(context, "剪贴板中没有文本", Toast.LENGTH_SHORT).show()
+            else AppToast.warning("剪贴板中没有文本")
         }, modifier = Modifier.heightIn(min = 44.dp), shape = RoundedCornerShape(12.dp)) {
             Icon(Icons.Rounded.ContentPaste, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("从剪贴板粘贴")
         }

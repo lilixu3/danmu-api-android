@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -48,7 +49,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -80,7 +80,6 @@ fun WorkDirScreen(
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
     val pendingDependencyRepair by viewModel.pendingDependencyRepair.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val workDirInfo = viewModel.workDirInfo
 
@@ -132,7 +131,7 @@ fun WorkDirScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
@@ -143,7 +142,6 @@ fun WorkDirScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

@@ -118,12 +118,12 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             deleteSourceAfterImport = deleteSource, matchMode = matchMode))
     }
 
-    override fun markRecordsImported(resourceKeys: Map<Long, String>) {
-        if (resourceKeys.isEmpty()) return
+    override fun markRecordsImported(libraryId: String, resourceKeys: Map<Long, String>, reconcile: Boolean, mediaType: String) {
+        require(libraryId.isNotBlank())
+        if (resourceKeys.isEmpty() && !reconcile) return
         synchronized(recordsLock) {
             persistRecordsLocked(_records.value.map { record ->
-                resourceKeys[record.id]?.let { key -> record.copy(
-                    localImportedAt = System.currentTimeMillis(), localResourceKey = key) } ?: record
+                reconcileLocalLibraryRecord(record, libraryId, resourceKeys[record.id], reconcile, mediaType, System.currentTimeMillis())
             })
         }
     }
@@ -230,14 +230,14 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 status == DownloadQueueStatus.Pending || status == DownloadQueueStatus.Running
             }
             .map { task ->
-                "${task.episodeId}|${task.source}|${task.format}"
+                "${task.episodeId}|${task.source}|${task.format}|${task.directUrl}"
             }
             .toMutableSet()
 
         var baseId = System.currentTimeMillis() * 1000
         var added = 0
         inputs.forEach { input ->
-            val key = "${input.episodeId}|${input.source}|${input.format.value}"
+            val key = "${input.episodeId}|${input.source}|${input.format.value}|${input.directUrl}"
             if (!activeKeys.add(key)) return@forEach
             baseId += 1
             existing += input.toQueueTask(baseId)
@@ -294,6 +294,8 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
                 fileNameTemplate = input.fileNameTemplate,
                 conflictPolicy = input.conflictPolicy.key,
                 animeId = input.animeId,
+                directUrl = input.directUrl,
+                mediaType = input.mediaType,
                 lastDetail = detail.ifBlank { task.lastDetail }
             )
         }
@@ -509,7 +511,8 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             danmuCount = result.danmuCount,
             httpCode = result.httpCode,
             errorMessage = result.errorMessage,
-            animeId = input.animeId
+            animeId = input.animeId,
+            mediaType = input.mediaType
         )
     }
 
@@ -900,9 +903,12 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
     }
 
     private fun buildCommentUrl(input: DanmuDownloadInput): String {
-        val base = input.apiBaseUrl.trim().trimEnd('/')
-        val encodedFormat = URLEncoder.encode(input.format.value, Charsets.UTF_8.name())
-        return "$base/api/v2/comment/${input.episodeId}?format=$encodedFormat"
+        return buildDanmuCommentUrl(
+            apiBaseUrl = input.apiBaseUrl,
+            format = input.format,
+            episodeId = input.episodeId,
+            directUrl = input.directUrl
+        )
     }
 
     private fun writePayload(fileUri: Uri, payload: ByteArray) {
@@ -1112,4 +1118,24 @@ class DanmuDownloadRepositoryImpl @Inject constructor(
             json.decodeFromString(ListSerializer(DanmuDownloadTask.serializer()), raw)
         }.getOrDefault(emptyList())
     }
+}
+
+/**
+ * 链接解析得到的剧集没有真实 bangumi 集号，直接带 original URL 调用弹幕接口。
+ * 普通剧集仍走 /api/v2/comment/{episodeId}。
+ */
+internal fun buildDanmuCommentUrl(
+    apiBaseUrl: String,
+    format: DanmuDownloadFormat,
+    episodeId: Long,
+    directUrl: String
+): String {
+    val base = apiBaseUrl.trim().trimEnd('/')
+    val encodedFormat = URLEncoder.encode(format.value, Charsets.UTF_8.name())
+    val link = directUrl.trim()
+    if (link.isNotBlank()) {
+        val encodedUrl = URLEncoder.encode(link, Charsets.UTF_8.name())
+        return "$base/api/v2/comment?url=$encodedUrl&format=$encodedFormat"
+    }
+    return "$base/api/v2/comment/$episodeId?format=$encodedFormat"
 }

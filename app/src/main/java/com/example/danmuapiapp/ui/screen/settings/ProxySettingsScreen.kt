@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
@@ -57,8 +59,7 @@ fun ProxySettingsScreen(onBack: () -> Unit) {
         val byId = nodes.associateBy { it.id }
         nodeChecks.start(nodes.map { it.id }) { id -> AppProxyNetwork.probeNode(byId.getValue(id)) }
     }
-    val snack = remember { SnackbarHostState() }
-    fun notify(message: String) { scope.launch { snack.showSnackbar(message) } }
+    fun notify(message: String) { AppToast.show(message) }
     fun save(next: AppProxySettings) {
         if (busy) return
         busy = true
@@ -88,7 +89,6 @@ fun ProxySettingsScreen(onBack: () -> Unit) {
         (AppProxySourceCatalog.label(it).contains(search, true) || it.contains(search, true)) }
         .sortedBy { if (it in catalog.enabled) 0 else 1 }
     Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { AppSnackbarHost(snack) },
         floatingActionButton = {
             if (tab == 1) FloatingActionButton(onClick = { editing = AppProxyNode() }) { Icon(Icons.Rounded.Add, "添加节点") }
         }

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import android.content.Context
 import android.content.ContextWrapper
@@ -25,7 +27,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.screen.tools.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,12 +41,11 @@ import java.util.Locale
     val records by vm.records.collectAsStateWithLifecycle()
     val tasks by vm.queueTasks.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val snackbar = remember { SnackbarHostState() }
     BackHandler(tab == 0 && vm.currentAnime != null) { vm.backToAnimeList() }
-    LaunchedEffect(vm.operationMessage) { vm.operationMessage?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
+    LaunchedEffect(vm.operationMessage) { vm.operationMessage?.let { AppToast.show(it); vm.dismissMessage() } }
     LaunchedEffect(tab, vm.isSyncingRecords) { if (tab == 2 && !vm.isSyncingRecords) importer.refreshMatches() }
     Scaffold(containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { AppSnackbarHost(snackbar) }) { padding ->
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             ToolHeader("弹幕下载", onBack) {
                 ToolIcon(Icons.Outlined.Tune, "下载设置", onOpenDownloadSettings, size = 40)
@@ -105,7 +105,7 @@ import java.util.Locale
         item {
             ToolCard {
                 ToolTitle("搜索动漫")
-                ToolInput(vm.keyword, vm::updateKeyword, "例如：凡人修仙传", icon = Icons.Outlined.Search, onSubmit = vm::searchAnime)
+                ToolInput(vm.keyword, vm::updateKeyword, "例如：凡人修仙传，或粘贴视频链接", icon = Icons.Outlined.Search, onSubmit = vm::searchAnime)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolChip("本机 127.0.0.1", vm.sourceBase.contains("127.0.0.1"), vm::useLocalBase)
                     ToolChip("局域网", !vm.sourceBase.contains("127.0.0.1"), vm::useLanBase)
@@ -256,7 +256,7 @@ import java.util.Locale
         }
         items(groups, key = { it.key }) { group ->
             val good = group.records.filter { it.statusEnum() == DownloadRecordStatus.Success }
-            val imported = good.isNotEmpty() && good.all { it.importedToLocal || it.id in importer.importedKeys }
+            val imported = good.isNotEmpty() && good.all { it.id in importer.importedKeys }
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ToolIcon(if (group.key in expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, "展开记录", {
@@ -271,7 +271,7 @@ import java.util.Locale
                 }
                 ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${downloadBytes(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
                 if (group.key in expanded) group.records.forEach { record ->
-                    val isImported = record.importedToLocal || record.id in importer.importedKeys
+                    val isImported = record.id in importer.importedKeys
                     ToolListRow("第${record.episodeNo}集", record.danmuCount?.let { "$it 条" } ?: record.statusEnum().label,
                         record.fileName.ifBlank { record.episodeTitle },
                         "${downloadTime(record.createdAt)} · ${downloadBytes(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",

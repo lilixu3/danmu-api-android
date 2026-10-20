@@ -236,7 +236,7 @@ interface DanmuDownloadRepository {
     fun setSaveTreeUri(uri: String, displayName: String)
     fun setSaveDirPath(path: String)
     fun setImportOptions(autoImport: Boolean, deleteSource: Boolean, matchMode: String)
-    fun markRecordsImported(resourceKeys: Map<Long, String>)
+    fun markRecordsImported(libraryId: String, resourceKeys: Map<Long, String>, reconcile: Boolean = false, mediaType: String = "")
     fun noteRecord(recordId: Long, message: String)
     suspend fun deleteDownloadedFiles(recordIds: Set<Long>): Result<Int>
     fun removeQueueTasks(taskIds: Set<Long>)
@@ -307,15 +307,16 @@ interface LocalDanmuRepository {
 
     /** @param force 为 true 时忽略内存快照与新鲜度窗口（手动刷新、导入/删除后用）。 */
     suspend fun refresh(force: Boolean = false): Result<LocalDanmuSnapshot>
-    suspend fun loadDetail(resourceKey: String): Result<LocalDanmuResource>
-    suspend fun loadPreview(resourceKey: String): Result<DanmuFilePreview>
+    suspend fun loadDetail(resourceKey: String, expectedSessionKey: String = ""): Result<LocalDanmuResource>
+    suspend fun loadPreview(resourceKey: String, expectedSessionKey: String = ""): Result<DanmuFilePreview>
     suspend fun upload(
         request: LocalDanmuUploadRequest,
         onProgress: (Float) -> Unit = {}
     ): Result<LocalDanmuResource>
-    suspend fun delete(resourceKey: String): Result<Unit>
+    suspend fun delete(resourceKey: String, expectedSessionKey: String = ""): Result<Unit>
     suspend fun deleteMany(
         resourceKeys: Collection<String>,
+        expectedSessionKey: String = "",
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): Result<Int>
     /** 编辑元数据（核心 PATCH）：resource 只改集数/文件名，group 改同剧同季的标题/年份/类型/季数。 */

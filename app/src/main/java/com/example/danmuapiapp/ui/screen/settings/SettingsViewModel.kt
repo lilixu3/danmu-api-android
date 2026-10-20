@@ -773,6 +773,7 @@ class SettingsViewModel @Inject constructor(
 
     fun checkAppUpdate() {
         if (isCheckingAppUpdate) return
+        if (!githubProxyService.apiQuota.allowManualOperation()) return
         viewModelScope.launch {
             isCheckingAppUpdate = true
             appUpdateCurrentVersion = appUpdateService.currentVersionName()
@@ -801,7 +802,9 @@ class SettingsViewModel @Inject constructor(
                 onFailure = {
                     showAppUpdateAvailableDialog = false
                     appUpdateInstaller.dismissMethodDialog()
-                    operationMessage = "检查更新失败：${it.message ?: "请稍后重试"}"
+                    if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                        operationMessage = "检查更新失败：${it.message ?: "请稍后重试"}"
+                    }
                 }
             )
             isCheckingAppUpdate = false
@@ -1096,10 +1099,7 @@ class SettingsViewModel @Inject constructor(
         isFullBackupOperating = true
         return try {
             withContext(Dispatchers.IO) {
-                envConfigRepo.readCurrentRawContent().fold(
-                    onSuccess = { appBackupService.createBackup(sections, it) },
-                    onFailure = { Result.failure(it) }
-                )
+                appBackupService.createBackup(sections)
             }
         } finally {
             isFullBackupOperating = false
@@ -1114,19 +1114,15 @@ class SettingsViewModel @Inject constructor(
             isFullBackupOperating = true
             try {
                 val wasRunning = runtimeState.value.status == ServiceStatus.Running
-                val currentEnv = withContext(Dispatchers.IO) {
-                    envConfigRepo.readCurrentRawContent().getOrThrow()
-                }
                 val result = withContext(Dispatchers.IO) {
                     appBackupService.restore(
                         raw = content,
-                        selectedSections = sections,
-                        currentEnvContent = currentEnv,
-                        environmentWriter = envConfigRepo::saveRawContent
+                        selectedSections = sections
                     )
                 }
                 result.fold(
                     onSuccess = { restored ->
+                        envConfigRepo.reload()
                         restored.mergedEnvironment?.let(::applyRuntimeFromEnv)
                         settingsRepo.reloadFromStorage()
                         SystemHeartbeatScheduler.refresh(context)
@@ -1241,12 +1237,7 @@ class SettingsViewModel @Inject constructor(
             webDavOperatingText = "正在上传安全完整备份到 WebDAV..."
             try {
                 val fullBundle = withContext(Dispatchers.IO) {
-                    envConfigRepo.readCurrentRawContent().fold(
-                        onSuccess = { content ->
-                            appBackupService.createBackup(AppBackupSection.entries.toSet(), content)
-                        },
-                        onFailure = { Result.failure(it) }
-                    )
+                    appBackupService.createBackup(AppBackupSection.entries.toSet())
                 }
                 if (fullBundle.isFailure) {
                     operationMessage = "WebDAV 备份失败：${fullBundle.exceptionOrNull()?.message}"

@@ -19,13 +19,15 @@ import com.example.danmuapiapp.ui.screen.tools.*
 @Composable internal fun LocalDanmuBatchPanel(state: LocalDanmuBatchState, errorMessage: String?,
     onBack: () -> Unit, onToggleSelected: (Long) -> Unit, onRemove: (Long) -> Unit,
     onUpdateMetadata: (Long, String, Int?, LocalDanmuType, Int?, Int?) -> Unit,
-    onRun: () -> Unit, onCancel: () -> Unit, onRetryFailed: () -> Unit, onDismissError: () -> Unit) {
+    onRun: () -> Unit, onCancel: () -> Unit, onRetryFailed: () -> Unit, onDismissError: () -> Unit,
+    onSetType: (LocalDanmuType?) -> Unit) {
     var editing by remember { mutableStateOf<LocalDanmuBatchItem?>(null) }
     BackHandler { if (state.isRunning) onCancel() else onBack() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         ToolHeader("导入本地弹幕", { if (state.isRunning) onCancel() else onBack() }, "共 ${state.items.size} 个文件 · 待导入 ${state.pendingCount}")
         Column(Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ToolHint("已导入过的默认跳过；点条目可订正标题、年份、类型、季与集数。")
+            if (!state.isRunning) ImportTypeActions(onSetType)
             if (state.total > 0 || state.isRunning) {
                 LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
                 ToolHint("${state.completed}/${state.total} · 成功 ${state.successCount} · 失败 ${state.failedCount}")
@@ -39,7 +41,7 @@ import com.example.danmuapiapp.ui.screen.tools.*
                         Checkbox(item.selected, { onToggleSelected(item.id) }, Modifier.size(34.dp), enabled = !state.isRunning && item.status != LocalDanmuBatchStatus.Success)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             ToolTitle(item.displayName, size = 12, maxLines = 1)
-                            ToolHint("${item.title} · ${item.year ?: "年份待订正"} · ${item.episodeLabel}")
+                            ToolHint("${item.title} · ${item.year ?: "年份待订正"} · ${item.type.label} · ${item.episodeLabel}")
                             val note = item.validationError ?: item.message.ifBlank { item.importedLabel.orEmpty() }
                             if (note.isNotBlank()) Text(note, fontSize = 10.5.sp,
                                 color = if (item.validationError != null || item.status == LocalDanmuBatchStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)

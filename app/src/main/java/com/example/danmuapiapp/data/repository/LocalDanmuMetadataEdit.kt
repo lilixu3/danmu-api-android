@@ -45,6 +45,7 @@ internal fun validateLocalDanmuEdit(
     filename: String,
     currentYear: Int
 ): String? {
+    if (type == LocalDanmuType.Unknown) return "未确定类型，请选择电影或电视剧"
     return when (scope) {
         LocalDanmuEditScope.Resource -> {
             if (type == LocalDanmuType.Tv && (episode == null || episode <= 0)) {

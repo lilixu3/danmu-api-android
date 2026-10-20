@@ -166,22 +166,25 @@ object NodeProjectManager {
     private val projectDirLocks = ConcurrentHashMap<String, Any>()
     private val coreLayoutLocks = ConcurrentHashMap<String, Any>()
 
-    fun projectDir(context: Context): File = RuntimePaths.projectDir(context)
+    @Deprecated("必须显式选择运行模式或 normalProjectDir", level = DeprecationLevel.ERROR)
+    fun projectDir(context: Context): File = normalProjectDir(context)
+
+    fun normalProjectDir(context: Context): File = RuntimePaths.normalProjectDir(context)
 
     fun projectDir(context: Context, mode: RunMode): File = RuntimePaths.projectDir(context, mode)
 
     fun coreDir(context: Context, variantKey: String): File {
-        return File(projectDir(context), "danmu_api_$variantKey")
+        return File(normalProjectDir(context), "danmu_api_$variantKey")
     }
 
-    fun hasSelectedCoreInstalled(context: Context, targetProjectDir: File = projectDir(context)): Boolean {
+    fun hasSelectedCoreInstalled(context: Context, targetProjectDir: File = normalProjectDir(context)): Boolean {
         val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
         val variantKey = prefs.getString("variant", "stable").orEmpty().ifBlank { "stable" }
         val coreDir = File(targetProjectDir, "danmu_api_$variantKey")
         return hasValidCore(coreDir)
     }
 
-    fun ensureProjectExtracted(context: Context, targetDir: File = projectDir(context)): File {
+    fun ensureProjectExtracted(context: Context, targetDir: File = normalProjectDir(context)): File {
         val lock = lockForDir(projectDirLocks, targetDir)
         synchronized(lock) {
             val versionFile = File(targetDir, APP_VERSION_FILE)
@@ -237,7 +240,7 @@ object NodeProjectManager {
 
     fun syncRuntimeEnvIfProjectReady(
         context: Context,
-        targetProjectDir: File = projectDir(context),
+        targetProjectDir: File = normalProjectDir(context),
         preferredVariantKey: String? = null
     ): Boolean {
         if (!hasProjectEntry(targetProjectDir)) return false
@@ -252,7 +255,7 @@ object NodeProjectManager {
 
     fun writeRuntimeEnv(
         context: Context,
-        targetProjectDir: File = projectDir(context),
+        targetProjectDir: File = normalProjectDir(context),
         preferredVariantKey: String? = null
     ) {
         val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
@@ -857,7 +860,7 @@ object NodeProjectManager {
 
     fun ensureOptionalRuntimeDependencies(
         context: Context,
-        targetProjectDir: File = projectDir(context)
+        targetProjectDir: File = normalProjectDir(context)
     ) {
         ensureBundledRuntimeDependencies(context, targetProjectDir)
         ensureOptionalRedisDependency(context, targetProjectDir)

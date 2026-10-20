@@ -33,7 +33,8 @@ import javax.inject.Singleton
 @Singleton
 class GithubAccountService @Inject constructor(
     @ApplicationContext context: Context,
-    httpClient: OkHttpClient
+    httpClient: OkHttpClient,
+    private val apiQuota: GithubApiQuota
 ) {
     companion object {
         private const val USER_URL = "https://api.github.com/user"
@@ -94,6 +95,7 @@ class GithubAccountService @Inject constructor(
         _status.value = previous.copy(isLoading = true, error = null)
         try {
             val refreshed = withContext(Dispatchers.IO) { loadStatus(token) }
+            apiQuota.observeAccount(token, refreshed)
             val result = retainGithubAccountSnapshot(previous, refreshed)
             _status.value = result
             if (refreshed.error == null && refreshed.coreRemaining != null && refreshed.coreLimit != null) {

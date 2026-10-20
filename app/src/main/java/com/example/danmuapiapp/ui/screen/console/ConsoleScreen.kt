@@ -2,7 +2,6 @@ package com.example.danmuapiapp.ui.screen.console
 
 import android.content.Intent
 import android.content.Context
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -46,6 +45,7 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
@@ -83,9 +83,9 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     output.write(pendingExportText.toByteArray(Charsets.UTF_8))
                 } ?: error("无法打开导出文件")
             }.onSuccess {
-                Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
+                AppToast.success("日志已导出")
             }.onFailure { throwable ->
-                Toast.makeText(context, throwable.message ?: "导出日志失败", Toast.LENGTH_SHORT).show()
+                AppToast.error(throwable.message ?: "导出日志失败")
             }
         }
     }
@@ -644,7 +644,7 @@ internal fun shareLogsAsTextFile(
         }
         context.startActivity(Intent.createChooser(sendIntent, "分享日志文件"))
     }.onFailure { throwable ->
-        Toast.makeText(context, throwable.message ?: "分享日志失败", Toast.LENGTH_SHORT).show()
+        AppToast.error(throwable.message ?: "分享日志失败")
     }
 }
 

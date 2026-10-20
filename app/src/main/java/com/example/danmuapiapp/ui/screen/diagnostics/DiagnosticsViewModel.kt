@@ -53,7 +53,9 @@ class DiagnosticsViewModel @Inject constructor(
     private val runtimeRepository: RuntimeRepository,
     private val coreRepository: CoreRepository,
     private val cacheRepository: CacheRepository,
-    private val githubAccountService: GithubAccountService
+    private val githubAccountService: GithubAccountService,
+    private val runtimeData: com.example.danmuapiapp.data.service.RuntimeDataAccess,
+    private val storage: com.example.danmuapiapp.data.service.RuntimeStorageGateway
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DiagnosticsUiState())
     val uiState: StateFlow<DiagnosticsUiState> = _uiState.asStateFlow()
@@ -107,7 +109,7 @@ class DiagnosticsViewModel @Inject constructor(
         }
     }
 
-    private fun buildSnapshot(incompleteRefreshes: List<String>): DiagnosticsUiState {
+    private suspend fun buildSnapshot(incompleteRefreshes: List<String>): DiagnosticsUiState = runtimeData.withOffline { target ->
         val now = System.currentTimeMillis()
         val runtime = runtimeRepository.runtimeState.value
         val selectedCore = coreRepository.coreInfoList.value.firstOrNull { it.variant == runtime.variant }
@@ -115,8 +117,9 @@ class DiagnosticsViewModel @Inject constructor(
         val cache = cacheRepository.cacheStats.value
         val cacheCapability = cacheRepository.clearCapability.value
         val github = githubAccountService.status.value
-        val projectDir = RuntimePaths.normalProjectDir(context)
-        val freeMb = projectDir.parentFile?.usableSpace?.div(1024L * 1024L) ?: 0L
+        val directoryResult = runCatching { storage.directoryStatus(target) }
+        val directory = directoryResult.getOrNull()
+        val freeMb = directory?.freeMb ?: 0L
         val portReachable = runCatching {
             Socket().use { socket ->
                 socket.connect(InetSocketAddress("127.0.0.1", runtime.port), 900)
@@ -183,9 +186,11 @@ class DiagnosticsViewModel @Inject constructor(
             add(
                 DiagnosticCheck(
                     title = "工作目录",
-                    detail = "目录${if (projectDir.isDirectory) "可读取" else "尚未创建"}，可用空间 ${freeMb} MB",
+                    detail = "${target.mode.label} · ${target.projectDir.absolutePath}\n" +
+                        (directoryResult.exceptionOrNull()?.message ?: "目录${if (directory?.exists == true) "已创建" else "尚未创建"}，可用空间 ${freeMb} MB"),
                     level = when {
-                        projectDir.isDirectory && projectDir.canRead() && projectDir.canWrite() && freeMb >= 100 -> DiagnosticLevel.Good
+                        directory == null -> DiagnosticLevel.Warning
+                        directory.exists && directory.readable && directory.writable && freeMb >= 100 -> DiagnosticLevel.Good
                         freeMb < 100 -> DiagnosticLevel.Warning
                         else -> DiagnosticLevel.Info
                     }
@@ -242,7 +247,7 @@ class DiagnosticsViewModel @Inject constructor(
             )
         }
 
-        return DiagnosticsUiState(
+        DiagnosticsUiState(
             generatedAtMs = now,
             checks = checks,
             report = buildReport(now, checks)
