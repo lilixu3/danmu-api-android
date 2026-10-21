@@ -166,6 +166,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:common"))
     implementation(project(":ui:designsystem"))
+    implementation(project(":feature:records"))
 
     // Compose BOM
     val composeBom = platform(libs.compose.bom)
