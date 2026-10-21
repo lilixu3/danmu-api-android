@@ -24,7 +24,6 @@ import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.AppUpdateInstallerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.ProxyPickerController
-import com.example.danmuapiapp.ui.screen.home.support.formatHomeUptime
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -32,6 +31,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -498,4 +498,13 @@ class HomeViewModel @Inject constructor(
         proxyPickerController.dismiss()
         super.onCleared()
     }
+}
+
+/** 运行时长展示格式化：超过一小时显示 h:mm:ss，否则 mm:ss。 */
+internal fun formatHomeUptime(seconds: Long): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s)
+    else String.format(Locale.getDefault(), "%02d:%02d", m, s)
 }

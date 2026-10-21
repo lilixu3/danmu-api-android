@@ -10,7 +10,6 @@ import com.example.danmuapiapp.domain.model.RuntimeState
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
-import com.example.danmuapiapp.ui.screen.home.support.shouldHandleHomeCacheFileChange
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -226,4 +225,15 @@ internal class HomeCacheRefreshController(
             }
         }
     }
+}
+
+/** 缓存目录文件事件过滤：只有请求记录相关文件的变化才触发刷新。 */
+internal fun shouldHandleHomeCacheFileChange(path: String?): Boolean {
+    val name = path
+        ?.substringAfterLast('/')
+        ?.trim()
+        ?.lowercase()
+        .orEmpty()
+    if (name.isBlank()) return false
+    return name == "reqrecords" || name == "todayreqnum"
 }

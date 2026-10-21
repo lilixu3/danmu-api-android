@@ -1,4 +1,6 @@
-package com.example.danmuapiapp.ui.screen.home.support
+package com.example.danmuapiapp.ui.screen.home
+
+import com.example.danmuapiapp.ui.screen.home.shouldHandleHomeCacheFileChange
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

@@ -1,4 +1,6 @@
-package com.example.danmuapiapp.ui.screen.home.support
+package com.example.danmuapiapp.ui.screen.home
+
+import com.example.danmuapiapp.ui.screen.home.formatHomeUptime
 
 import java.util.Locale
 import org.junit.Assert.assertEquals
