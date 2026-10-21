@@ -17,7 +17,9 @@ import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.PortProbe
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import com.example.danmuapiapp.data.util.TokenDefaults
+import com.example.danmuapiapp.data.service.AppRuntimeAssets
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
 import com.example.danmuapiapp.data.service.NormalNotificationBehaviorPrefs
@@ -98,11 +100,6 @@ class RuntimeRepositoryImpl @Inject constructor(
         private const val HOT_RELOAD_DEBOUNCE_MS = 800L
         private const val HOT_RELOAD_MIN_INTERVAL_MS = 2500L
         private const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
-        private val NORMAL_RESTART_CRITICAL_FILES = setOf(
-            "main.js",
-            "android-server.js",
-            "worker-proxy.js"
-        )
         private val NORMAL_RESTART_SKIP_PREFIXES = listOf(
             "config/",
             "danmu_api_stable/",
@@ -128,6 +125,9 @@ class RuntimeRepositoryImpl @Inject constructor(
     private val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val operationMutex = Mutex()
+    private val normalRestartCriticalFiles by lazy {
+        AppRuntimeAssets.relativePaths(context).mapTo(hashSetOf()) { it.lowercase() }
+    }
     private val connectivityManager by lazy {
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     }
@@ -2596,7 +2596,7 @@ class RuntimeRepositoryImpl @Inject constructor(
         if (path.isBlank()) return false
         val normalized = path.lowercase()
 
-        if (normalized in NORMAL_RESTART_CRITICAL_FILES) {
+        if (normalized in normalRestartCriticalFiles) {
             return true
         }
         if (NORMAL_RESTART_SKIP_PREFIXES.any { prefix ->
@@ -2822,10 +2822,6 @@ class RuntimeRepositoryImpl @Inject constructor(
                 rel.startsWith("node_modules/") ||
                 rel == "node_modules"
         }
-    }
-
-    private fun shellQuote(s: String): String {
-        return "'" + s.replace("'", "'\"'\"'") + "'"
     }
 
     private fun ensureRuntimeStartedAt(mode: RunMode, forceNew: Boolean): Long {

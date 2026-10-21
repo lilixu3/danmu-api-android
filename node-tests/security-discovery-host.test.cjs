@@ -7,19 +7,18 @@ const os = require('node:os');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { copyRuntimeAssets } = require('./runtime-fixture.cjs');
 const runtimeRoot = path.resolve('app/src/main/assets/nodejs-project');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function freePort() {
   const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-for (const worker of [false, true]) test(`security.txt discovery skips core token validation (${worker ? 'Worker' : 'direct'})`, { timeout: 20000 }, async () => {
+for (const worker of [false, true]) test(`security.txt discovery skips core token validation (${worker ? 'Worker' : 'direct'})`, { timeout: 20000, concurrency: false }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'danmu-security-host-'));
   let child, output = '';
   try {
-    for (const name of fs.readdirSync(runtimeRoot)) if (name.endsWith('.js') || name === 'package.json' || name === 'app-runtime-assets.json') {
-      fs.copyFileSync(path.join(runtimeRoot, name), path.join(directory, name));
-    }
+    copyRuntimeAssets(runtimeRoot, directory);
     fs.symlinkSync(path.join(runtimeRoot, 'node_modules'), path.join(directory, 'node_modules'));
     fs.mkdirSync(path.join(directory, 'config'));
     fs.writeFileSync(path.join(directory, 'config', '.env'), `TOKEN=fixture-token\nDANMU_API_WORKER=${worker}\nDANMU_API_HOT_RELOAD=false\n`);
@@ -32,8 +31,9 @@ for (const worker of [false, true]) test(`security.txt discovery skips core toke
       return Response.json({ok:true});
     }`);
     const port = await freePort();
+    const proxyPort = await freePort();
     child = spawn(process.execPath, [path.join(directory, 'main.js')], {
-      cwd: directory, env: { ...process.env, DANMU_API_HOME: directory, DANMU_API_PORT: String(port), DANMU_API_HOST: '127.0.0.1', DANMU_API_PROXY_PORT: String(await freePort()), OUTBOUND_MODE: 'off', DANMU_APP_OUTBOUND_CONFIG: '', PROXY_URL: '' },
+      cwd: directory, env: { ...process.env, DANMU_API_HOME: directory, DANMU_API_PORT: String(port), DANMU_API_HOST: '127.0.0.1', DANMU_API_PROXY_PORT: String(proxyPort), OUTBOUND_MODE: 'off', DANMU_APP_OUTBOUND_CONFIG: '', PROXY_URL: '' },
       stdio: ['ignore', 'pipe', 'pipe']
     });
     child.stdout.on('data', data => output += data); child.stderr.on('data', data => output += data);

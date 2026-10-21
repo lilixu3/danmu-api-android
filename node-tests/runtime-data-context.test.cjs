@@ -7,6 +7,7 @@ const os = require('node:os');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { copyRuntimeAssets } = require('./runtime-fixture.cjs');
 const runtimeRoot = path.resolve('app/src/main/assets/nodejs-project');
 const { createRuntimeContext, libraryIdentity, detectCacheClearSupport } = require(path.join(runtimeRoot, 'app-runtime-context.js'));
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -116,11 +117,7 @@ for (const worker of [false, true]) for (const malformedRedis of [false, true]) 
   let child;
   let output = '';
   try {
-    for (const name of fs.readdirSync(runtimeRoot)) {
-      if (name.endsWith('.js') || name === 'package.json' || name === 'app-runtime-assets.json') {
-        fs.copyFileSync(path.join(runtimeRoot, name), path.join(directory, name));
-      }
-    }
+    copyRuntimeAssets(runtimeRoot, directory);
     fs.symlinkSync(path.join(runtimeRoot, 'node_modules'), path.join(directory, 'node_modules'));
     fs.mkdirSync(path.join(directory, 'config'));
     fs.writeFileSync(path.join(directory, 'config/.env'), `TOKEN=fixture-token\nDANMU_API_WORKER=${worker}\nDANMU_API_HOT_RELOAD=false\n` +

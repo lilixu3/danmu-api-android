@@ -7,6 +7,7 @@ const os = require('node:os');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { copyRuntimeAssets } = require('./runtime-fixture.cjs');
 const runtimeRoot = path.resolve('app/src/main/assets/nodejs-project');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function freePort() {
@@ -17,9 +18,7 @@ for (const worker of [false, true]) test(`shared configuration API hot updates a
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'danmu-management-host-'));
   let child, output = '';
   try {
-    for (const name of fs.readdirSync(runtimeRoot)) if (name.endsWith('.js') || name === 'package.json' || name === 'app-runtime-assets.json') {
-      fs.copyFileSync(path.join(runtimeRoot, name), path.join(directory, name));
-    }
+    copyRuntimeAssets(runtimeRoot, directory);
     fs.symlinkSync(path.join(runtimeRoot, 'node_modules'), path.join(directory, 'node_modules'));
     fs.mkdirSync(path.join(directory, 'config'));
     const envFile = path.join(directory, 'config', '.env');

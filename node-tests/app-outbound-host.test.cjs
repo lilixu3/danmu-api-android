@@ -7,6 +7,7 @@ const path=require('node:path');
 const net=require('node:net');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
+const {copyRuntimeAssets}=require('./runtime-fixture.cjs');
 const runtimeRoot=path.resolve('app/src/main/assets/nodejs-project');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(fn, timeout=15000) {
@@ -20,7 +21,7 @@ for(const workerEnabled of [true,false]) {
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'app-outbound-host-'));
   let child,logs='';
   try {
-   for(const file of fs.readdirSync(runtimeRoot))if(file.endsWith('.js') || file==='package.json' || file==='app-runtime-assets.json')fs.copyFileSync(path.join(runtimeRoot,file),path.join(directory,file));
+   copyRuntimeAssets(runtimeRoot,directory);
    fs.symlinkSync(path.join(runtimeRoot,'node_modules'),path.join(directory,'node_modules'));
    fs.mkdirSync(path.join(directory,'config'));
    fs.mkdirSync(path.join(directory,'outbound'));

@@ -8,6 +8,7 @@ const { wrapSeriesRefresh } = require('../app/src/main/assets/nodejs-project/app
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { copyRuntimeAssets } = require('./runtime-fixture.cjs');
 
 function fixture(t, source) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'danmu-fresh-series-'));
@@ -102,9 +103,7 @@ for (const worker of [false, true]) test(`fresh searches use the loaded core and
   let child, output = '';
   try {
     const runtime = path.resolve('app/src/main/assets/nodejs-project');
-    for (const name of fs.readdirSync(runtime)) if (name.endsWith('.js') || name === 'package.json' || name === 'app-runtime-assets.json') {
-      fs.copyFileSync(path.join(runtime, name), path.join(directory, name));
-    }
+    copyRuntimeAssets(runtime, directory);
     fs.symlinkSync(path.join(runtime, 'node_modules'), path.join(directory, 'node_modules'));
     fs.mkdirSync(path.join(directory, 'config'));
     fs.writeFileSync(path.join(directory, 'config', '.env'), `TOKEN=user\nADMIN_TOKEN=administrator\nDANMU_API_WORKER=${worker}\nDANMU_API_HOT_RELOAD=false\n`);

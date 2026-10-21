@@ -975,26 +975,39 @@ object RootRuntimeController {
         )
     }
 
-    internal fun buildRootProjectIncrementalSyncShell(srcProjectPath: String, dstProjectPath: String): String {
+    internal fun buildRootProjectIncrementalSyncShell(
+        srcProjectPath: String,
+        dstProjectPath: String,
+        managedPaths: List<String> = listOf("main.js")
+    ): String {
+        val normalizedPaths = managedPaths.map(::normalizeRuntimeAssetPath).distinct()
+        require("main.js" in normalizedPaths) { "managedPaths 必须包含 main.js" }
+        val managedPathList = normalizedPaths.joinToString(" ") { shellQuote(it) }
         return """
             SRC=${shellQuote(srcProjectPath)}
             DST=${shellQuote(dstProjectPath)}
             mkdir -p "${'$'}DST" "${'$'}DST/config" "${'$'}DST/logs" || exit 2
 
-            # 热启动只需要同步 App 托管的顶层包装文件；不要递归复制 node_modules/core/cache。
-            # 使用普通 glob 兼容 Android toybox/mksh，避免依赖 find/rsync。
-            for FILE in "${'$'}SRC"/* "${'$'}SRC"/.[!.]* "${'$'}SRC"/..?*; do
-              [ -f "${'$'}FILE" ] || continue
-              NAME="${'$'}{FILE##*/}"
-              TMP="${'$'}DST/.wrapper-${'$'}$-${'$'}NAME"
+            # app-runtime-assets.json 是唯一文件清单。只同步清单内文件，保留 Root 的
+            # config、core、node_modules 与 .cache，并支持 server/ 等嵌套目录。
+            for REL in $managedPathList; do
+              FILE="${'$'}SRC/${'$'}REL"
+              [ -f "${'$'}FILE" ] || exit 2
+              REL_DIR="${'$'}{REL%/*}"
+              if [ "${'$'}REL_DIR" != "${'$'}REL" ]; then mkdir -p "${'$'}DST/${'$'}REL_DIR" || exit 2; fi
+              TMP="${'$'}DST/${'$'}REL.tmp-${'$'}$"
               rm -f "${'$'}TMP" 2>/dev/null || true
               if ! cp -f "${'$'}FILE" "${'$'}TMP" 2>/dev/null; then
                 cat "${'$'}FILE" > "${'$'}TMP" || exit 3
               fi
               cmp -s "${'$'}FILE" "${'$'}TMP" || exit 4
-              mv -f "${'$'}TMP" "${'$'}DST/${'$'}NAME" || exit 5
+              mv -f "${'$'}TMP" "${'$'}DST/${'$'}REL" || exit 5
             done
 
+            if [ -f "${'$'}SRC/.app_version" ]; then
+              cp -f "${'$'}SRC/.app_version" "${'$'}DST/.app_version" 2>/dev/null || \
+                cat "${'$'}SRC/.app_version" > "${'$'}DST/.app_version" || exit 5
+            fi
             test -f "${'$'}DST/main.js" || exit 6
         """.trimIndent()
     }
@@ -1017,7 +1030,11 @@ object RootRuntimeController {
         } else {
             // 增量同步：只同步 App 托管的顶层包装文件，保留 Root 工作目录中的
             // config、danmu_api_*、node_modules 与 .cache。避免每次启动都复制整个 core/node_modules 到临时目录。
-            buildRootProjectIncrementalSyncShell(srcProjectPath = src, dstProjectPath = dst)
+            buildRootProjectIncrementalSyncShell(
+                srcProjectPath = src,
+                dstProjectPath = dst,
+                managedPaths = AppRuntimeAssets.relativePaths(context)
+            )
         }
 
         val result = RootShell.exec(script, timeoutMs = if (bootstrap) ROOT_SYNC_TIMEOUT_MS else 25_000L)
@@ -1051,8 +1068,10 @@ object RootRuntimeController {
 
     internal fun buildRootProjectPermissionNormalizeShell(
         rootProjectPath: String,
-        fullScan: Boolean
+        fullScan: Boolean,
+        managedPaths: List<String> = listOf("main.js")
     ): String {
+        val normalizedPaths = managedPaths.map(::normalizeRuntimeAssetPath).distinct()
         val commonTail = """
             [ -d "${'$'}DST/config" ] && chmod 0755 "${'$'}DST/config" 2>/dev/null || true
             [ -f "${'$'}DST/config/.env" ] && chmod 0640 "${'$'}DST/config/.env" 2>/dev/null || true
@@ -1072,15 +1091,17 @@ object RootRuntimeController {
                 $commonTail
             """.trimIndent()
         } else {
+            val managedPathList = normalizedPaths.joinToString(" ") { shellQuote(it) }
             """
                 DST=${shellQuote(rootProjectPath)}
                 [ -d "${'$'}DST" ] || exit 0
                 mkdir -p "${'$'}DST/config" "${'$'}DST/logs" 2>/dev/null || true
 
-                # 热启动只修正启动必需的浅层文件和配置/日志目录。
-                for NAME in main.js android-server.js app-management.js worker-proxy.js app-outbound-runtime.js app-outbound-bridge.js app-outbound-diagnostics.js startup-failure.js package.json package-lock.json .app_version; do
-                  [ -f "${'$'}DST/${'$'}NAME" ] && chmod 0644 "${'$'}DST/${'$'}NAME" 2>/dev/null || true
+                # 热启动只修正 manifest 管理的文件和配置/日志目录。
+                for REL in $managedPathList; do
+                  [ -f "${'$'}DST/${'$'}REL" ] && chmod 0644 "${'$'}DST/${'$'}REL" 2>/dev/null || true
                 done
+                [ -f "${'$'}DST/.app_version" ] && chmod 0644 "${'$'}DST/.app_version" 2>/dev/null || true
 
                 $commonTail
             """.trimIndent()
@@ -1090,7 +1111,8 @@ object RootRuntimeController {
     private fun normalizeRootProjectPermissions(context: Context, fullScan: Boolean): OpResult {
         val script = buildRootProjectPermissionNormalizeShell(
             rootProjectPath = rootProjectDir(context),
-            fullScan = fullScan
+            fullScan = fullScan,
+            managedPaths = AppRuntimeAssets.relativePaths(context)
         )
         val result = RootShell.exec(script, timeoutMs = if (fullScan) 15_000L else 5_000L)
         if (!result.ok) {

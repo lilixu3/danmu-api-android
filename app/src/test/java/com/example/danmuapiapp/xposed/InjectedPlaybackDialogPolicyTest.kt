@@ -223,7 +223,8 @@ class InjectedPlaybackDialogPolicyTest {
     @Test
     fun `推送应先预取同一份弹幕且不再异步二次统计`() {
         val coordinator = readPushCoordinatorSource()
-        val server = readSource("app/src/main/assets/nodejs-project/android-server.js")
+        val server = readSource("app/src/main/assets/nodejs-project/android-server.js") +
+            readSource("app/src/main/assets/nodejs-project/app-http-routes.js")
 
         assertTrue(coordinator.contains("prepareDanmaku(settings.corePort, sourceDanmakuUrl)"))
         assertTrue(coordinator.contains("buildShellPushUrl(effectivePort, pushDanmakuUrl)"))

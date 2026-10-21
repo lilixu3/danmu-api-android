@@ -72,9 +72,13 @@ test('old extended nodes do not disable enhanced settings and a removed binding 
 const crypto=require('node:crypto');
 test('runtime fingerprint covers every shipped host script and changes for DNS native and refresh updates',()=>{
  const directory=path.resolve('app/src/main/assets/nodejs-project');
- const scripts=JSON.parse(fs.readFileSync(path.join(directory,'app-runtime-assets.json'),'utf8'));
- assert.deepEqual(scripts,fs.readdirSync(directory).filter(x=>x.endsWith('.js')).sort());
- const names=['app-runtime-assets.json',...scripts];
+ const manifestName='app-runtime-assets.json';
+ const runtimeAssets=JSON.parse(fs.readFileSync(path.join(directory,manifestName),'utf8'));
+ const shippedAssets=fs.readdirSync(directory,{withFileTypes:true})
+  .filter(entry=>entry.isFile()&&entry.name!==manifestName)
+  .map(entry=>entry.name).sort();
+ assert.deepEqual(runtimeAssets,shippedAssets);
+ const names=[manifestName,...runtimeAssets];
  const fingerprint=changed=>{const hash=crypto.createHash('sha256');for(const name of names){hash.update(name+'\0');hash.update(fs.readFileSync(path.join(directory,name)));if(name===changed)hash.update('changed');}return hash.digest('hex');};
  assert.equal(fingerprint(),require('../app/src/main/assets/nodejs-project/app-outbound-runtime.js').networkRuntimeFingerprint);
  for(const name of ['android-server.js','worker-proxy.js','app-outbound-dns.js','app-outbound-native.js','app-series-refresh.js','app-url-metadata.js'])assert.notEqual(fingerprint(name),fingerprint());

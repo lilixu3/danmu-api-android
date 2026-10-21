@@ -1,18 +1,9 @@
-const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
-const root = path.resolve(__dirname, '..');
-const serverPath = path.join(root, 'app/src/main/assets/nodejs-project/android-server.js');
-const source = fs.readFileSync(serverPath, 'utf8');
-const start = source.indexOf('function parseDotEnv');
-const end = source.indexOf('\nfunction flattenObject', start);
-
-if (start < 0 || end < 0) {
-  throw new Error('parseDotEnv snippet not found');
-}
-
-const parseDotEnv = vm.runInNewContext(`${source.slice(start, end)}\nparseDotEnv;`);
+const { parseDotEnv } = require(path.join(
+  __dirname,
+  '../app/src/main/assets/nodejs-project/app-config-runtime.js'
+));
 
 const cases = [
   {
