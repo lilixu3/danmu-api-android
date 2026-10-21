@@ -103,6 +103,48 @@ class ArchitectureTests(unittest.TestCase):
             violations = check_tree(repo)
             self.assertEqual(2, len(violations))
 
+    def test_module_rules_reject_platform_imports_in_core(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            source = repo / "core/model/src/main/java/com/example/danmuapiapp/core/model"
+            source.mkdir(parents=True)
+            (source / "Bad.kt").write_text(
+                "import androidx.compose.runtime.Composable\n",
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
+    def test_module_rules_reject_disallowed_project_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            build_file = repo / "core/model/build.gradle.kts"
+            build_file.parent.mkdir(parents=True)
+            build_file.write_text(
+                'dependencies {\n    api(project(":ui:designsystem"))\n}\n',
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
+    def test_module_rules_accept_declared_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            build_file = repo / "core/common/build.gradle.kts"
+            build_file.parent.mkdir(parents=True)
+            build_file.write_text(
+                'dependencies {\n    api(project(":core:model"))\n}\n',
+                encoding="utf-8",
+            )
+            source = repo / "ui/designsystem/src/main/java/com/example/danmuapiapp/ui/designsystem"
+            source.mkdir(parents=True)
+            (source / "Ok.kt").write_text(
+                "import androidx.compose.runtime.Composable\n"
+                "import com.example.danmuapiapp.core.model.CoreVariant\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], check_tree(repo))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,8 @@
 local.properties
 /app/build
 /build-logic/build
+/core/*/build
+/ui/*/build
 /dist
 *.jks
 

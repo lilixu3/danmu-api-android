@@ -16,12 +16,16 @@ SCAN_ROOTS = (
     Path("app/build.gradle.kts"),
     # WS7 起 Node 资产与打包校验逻辑迁到 build-logic 预编译脚本插件，审计必须跟随。
     Path("build-logic/src/main/kotlin"),
+    # WS8 起代码开始迁入 Gradle 模块，审计范围必须覆盖新模块源码。
+    Path("core"),
+    Path("ui"),
     Path("scripts"),
 )
 IGNORED_PREFIXES = (
     Path("scripts/refactoring"),
 )
 CLUSTER_THRESHOLD = 3
+IGNORED_PATH_PARTS = ("build",)
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,9 @@ def _iter_files(repo_root: Path) -> list[Path]:
                 continue
             relative = path.relative_to(repo_root)
             if any(relative.is_relative_to(prefix) for prefix in IGNORED_PREFIXES):
+                continue
+            # 跳过各模块的构建产物目录，只审计源码。
+            if any(part in IGNORED_PATH_PARTS for part in relative.parts[:-1]):
                 continue
             if path.suffix not in {".kt", ".kts", ".py", ".sh", ".cjs", ".js"}:
                 continue

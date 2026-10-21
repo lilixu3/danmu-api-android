@@ -162,6 +162,11 @@ kotlin {
 }
 
 dependencies {
+    // WS8 模块骨架：先固定模块依赖方向，代码迁移按模块逐步进行。
+    implementation(project(":core:model"))
+    implementation(project(":core:common"))
+    implementation(project(":ui:designsystem"))
+
     // Compose BOM
     val composeBom = platform(libs.compose.bom)
     implementation(composeBom)

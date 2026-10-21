@@ -9,7 +9,7 @@
 - 重构前 checkpoint：`bade371`（`checkpoint: 保存 test 分支重构前本地改动`）
 - checkpoint 已推送到：`origin/test`
 - 起始日期：2026-10-20
-- 当前阶段：`WS8 Gradle 模块化`（WS6、WS7 已完成，WS8 待启动）
+- 当前阶段：`WS8 Gradle 模块化`（WS6、WS7 已完成；WS8 模块骨架已落地，代码迁移待启动）
 - Kotlin 主代码：约 104,071 行
 - Kotlin 测试：约 16,228 行、197 个测试文件
 - 手写 Node 入口代码：约 5,975 行
@@ -49,7 +49,7 @@
 | WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 已完成 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
 | WS6 | 大型 ViewModel 与 Compose 文件拆分 | 已完成 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
 | WS7 | Gradle `build-logic` 拆分 | 已完成 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
-| WS8 | Gradle 模块化 | 未开始 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
+| WS8 | Gradle 模块化 | 进行中 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
 | WS9 | 文档、测试与持续校验收口 | 未开始 | 架构文档与代码一致；边界和资产测试进入常规检查 |
 
 ## 防丢文件与防硬编码规则
@@ -210,9 +210,12 @@ WS6 起点（`0bcdc40` 之后）：
 
 ### WS8 Gradle 模块
 
-- [ ] `:core:model`
-- [ ] `:core:common`
-- [ ] `:ui:designsystem`
+- [x] 建立 `:core:model` / `:core:common` / `:ui:designsystem` 模块骨架并接入 `settings.gradle.kts`
+- [x] 固定模块依赖方向（`:core:model` 无项目依赖、`:core:common` 只依赖 `:core:model`、
+      `:ui:designsystem` 只依赖 `:core:*`），并把方向写进 `check_architecture.py`
+- [ ] `:core:model` 迁入纯模型与纯逻辑
+- [ ] `:core:common` 迁入跨功能共享工具
+- [ ] `:ui:designsystem` 迁入主题、颜色、排版与共用组件
 - [ ] 功能模块边界评审
 - [ ] 首批功能模块提取
 
@@ -393,6 +396,12 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS7 收口 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin --rerun :app:testDebugUnitTest --rerun` | 通过 | 234 suite、1,168 项、0 失败；编译为 `--rerun` 强制重跑 |
 | 2026-10-21 | WS7 收口 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`audit_runtime_hardcoding.py`、`git diff --check` | 通过 | 216 项 0 失败；架构边界无违规；硬编码审计扫描根已含 `build-logic` |
 | 2026-10-21 | WS7 环境阻塞 | `:app:prepareNativeRuntime` | 阻塞 | 宿主 `cmake` 因用户 19:30 的 Termux 包升级损坏；任务体逐行未改动，直接执行 `scripts/build-native-deps.py` 同样失败 |
+| 2026-10-21 | WS8 模块骨架 | `./gradlew :core:model:assembleDebug :core:common:assembleDebug :ui:designsystem:assembleDebug --dry-run` | 通过 | 三个新模块配置阶段解析成功（AGP `com.android.library` 9.3.1） |
+| 2026-10-21 | WS8 模块骨架 | `./gradlew :core:model:assembleDebug :core:common:assembleDebug :ui:designsystem:assembleDebug :app:compileDebugKotlin` | 通过 | BUILD SUCCESSFUL，7m32s；空模块可产出 AAR，`app` 已接通三个模块依赖 |
+| 2026-10-21 | WS8 模块骨架 | `./gradlew :app:checkRefactorGuardrails` | 通过 | 架构边界（含 3 条新模块规则）、资产清单 27 项/28 文件、硬编码审计、护栏自测 9 项 |
+| 2026-10-21 | WS8 模块骨架 | `python3 scripts/refactoring/check_architecture.py`、`PYTHONPATH=scripts/refactoring python3 -m unittest discover -s scripts/refactoring -p 'test_*.py'` | 通过 | 边界无违规；护栏自测 9 项（新增 3 项模块规则用例） |
+| 2026-10-21 | WS8 模块骨架 | `./gradlew :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败（接通模块依赖后重跑，无回归） |
+| 2026-10-21 | WS8 模块骨架 | `git diff --check` | 通过 | 无空白错误 |
 
 ## 进度日志
 
@@ -628,6 +637,26 @@ WS6 起点（`0bcdc40` 之后）：
   且不经 Gradle 直接执行 `scripts/build-native-deps.py` 同样失败，可确认是宿主工具链问题。
   宿主 cmake 修复后需补跑完整 `:app:assembleDebug` / `:app:releaseCheck`。
 
+### 2026-10-21 WS8 Gradle 模块骨架
+
+- 新增三个 Android library 模块骨架，`settings.gradle.kts` 接入 `:core:model`、`:core:common`、`:ui:designsystem`，
+  `app` 显式依赖三者（本轮模块内尚无代码，依赖接通只为固定方向并让后续迁移有编译反馈）：
+  `core/model/build.gradle.kts`（`namespace com.example.danmuapiapp.core.model`，Kotlin serialization）、
+  `core/common/build.gradle.kts`（`...core.common`，只依赖 `:core:model`）、
+  `ui/designsystem/build.gradle.kts`（`...ui.designsystem`，Compose BOM + material3/foundation/animation + kyant shapes/backdrop）。
+- 三个模块统一 `compileSdk 37` / `minSdk 24` / Java 17，与 `app` 对齐；沿用 AGP 9 内置 Kotlin（不额外应用 `kotlin-android`），
+  与 `app/build.gradle.kts` 现有插件组合保持一致。
+- 模块依赖方向写入 `scripts/refactoring/check_architecture.py` 的 `MODULE_RULES`：
+  `:core:model` 不允许任何 `project(...)` 依赖、`:core:common` 只允许 `:core:model`、`:ui:designsystem` 只允许 `:core:*`；
+  同时校验源码导入（core 模块禁止 `android.*`/`androidx.*`，三个模块禁止跨模块导入 `app` 侧包）。
+  护栏自测新增 3 项用例（平台导入、越权模块依赖、合法依赖），共 9 项。
+- `audit_runtime_hardcoding.py` 扫描根加入 `core`、`ui`，并跳过路径中的 `build` 目录，
+  避免代码迁入模块后资产清单审计出现盲区（与 WS7 把 `build-logic` 纳入扫描同一处理方式）。
+- `.gitignore` 补 `/core/*/build`、`/ui/*/build`，避免新模块构建产物被误提交（WS7 审计已登记的同类风险）。
+- 本轮不迁移任何 Kotlin 代码：迁移按模块单独提交，先动 `:core:model`（`domain/model` 为纯 Kotlin，最易先落地）。
+- 验证：三个模块 `assembleDebug` 与 `:app:compileDebugKotlin` 通过（BUILD SUCCESSFUL，7m32s）；
+  `:app:checkRefactorGuardrails` 通过（含 9 项护栏自测）；`git diff --check` 无空白错误。
+
 ## 决策记录
 
 ### 2026-10-21 落盘方式
@@ -669,6 +698,7 @@ WS6 起点（`0bcdc40` 之后）：
 | 决策 | 原因 |
 |---|---|
 | 先拆职责和边界，再做 Gradle 模块 | 直接改全项目包名会产生不可审查的巨型 diff |
+| 先落模块骨架再迁代码 | 模块接线（AGP 9 内置 Kotlin、依赖方向、护栏）本身有失败风险，先独立验证；迁移提交随后只含文件移动 |
 | 先改资产清单，再移动 Node 文件 | Kotlin Root 同步和测试存在扁平文件名硬编码，直接移动会导致运行时缺文件 |
 | Repository 保留门面 | UI 和跨功能调用接口保持稳定，降低重构回归面 |
 | 完整 APK 构建在用户确认后执行 | 用户明确要求 checkpoint 阶段不构建；重构中优先使用静态检查、单测和针对性 smoke |
