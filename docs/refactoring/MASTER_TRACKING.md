@@ -9,7 +9,7 @@
 - 重构前 checkpoint：`bade371`（`checkpoint: 保存 test 分支重构前本地改动`）
 - checkpoint 已推送到：`origin/test`
 - 起始日期：2026-10-20
-- 当前阶段：`WS8 Gradle 模块化`（WS6、WS7 已完成；WS8 模块骨架已落地，代码迁移待启动）
+- 当前阶段：`WS9 文档与验证收口`（WS8 已完成；WS9 仅剩完整构建待用户确认）
 - Kotlin 主代码：约 104,071 行
 - Kotlin 测试：约 16,228 行、197 个测试文件
 - 手写 Node 入口代码：约 5,975 行
@@ -50,7 +50,7 @@
 | WS6 | 大型 ViewModel 与 Compose 文件拆分 | 已完成 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
 | WS7 | Gradle `build-logic` 拆分 | 已完成 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
 | WS8 | Gradle 模块化 | 已完成 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
-| WS9 | 文档、测试与持续校验收口 | 未开始 | 架构文档与代码一致；边界和资产测试进入常规检查 |
+| WS9 | 文档、测试与持续校验收口 | 进行中 | 架构文档与代码一致；边界和资产测试进入常规检查 |
 
 ## 防丢文件与防硬编码规则
 
@@ -255,10 +255,13 @@ WS6 起点（`0bcdc40` 之后）：
 - 剩余超大文件登记（WS8/WS9 评估）：`ApiTestViewModel` 1,511、`CoreViewModel` 1,419、`CompatModeViewModel` 1,278、
   `DanmuDownloadRepositoryImpl` 1,141、`GithubPullRequestService` 1,126、`NodeService` 1,064、`LocalDanmuViewModel` 1,059。
 - [x] 处理上述粒度、重复实现与死代码项（清理 lane，见下「2026-10-22 WS9 清理收口」）
-- [ ] 重写 `docs/architecture.md`
-- [ ] 更新 README 开发说明
-- [x] 常规验证任务一次执行
-- [ ] 完整构建由用户确认后执行
+- [x] 重写 `docs/architecture.md`（按 WS8 后的模块结构重写，含依赖图、护栏强制方式、构建与运行时结构）
+- [x] 更新 README 开发说明（模块结构、`verifyAll` 聚合验证、两条 Termux 环境坑、四条迁移与新增约定）
+- [x] 常规验证任务一次执行（新增 `:app:verifyAll`，实跑通过）
+- [ ] 完整构建由用户确认后执行（`assembleRelease`/`releaseCheck` 涉及签名与版本参数）
+- [ ] 剩余超大文件（`ApiTestViewModel` 1,511、`CoreViewModel` 1,419、`CompatModeViewModel` 1,278、
+      `DanmuDownloadRepositoryImpl` 1,141、`GithubPullRequestService` 1,126、`NodeService` 1,064、
+      `LocalDanmuViewModel` 1,059）按需继续拆分
 
 ### 2026-10-22 WS9 清理收口
 
