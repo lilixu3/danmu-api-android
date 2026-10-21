@@ -297,6 +297,9 @@
 | 2026-10-21 | WS4 更新计划控制器 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
 | 2026-10-21 | WS4 更新计划控制器 | `python3 scripts/refactoring/check_architecture.py` | 通过 | 架构边界无违规 |
 | 2026-10-21 | WS4 更新计划控制器 | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-21 | WS0-WS4 落盘 | `git add`/`git commit` 分 5 个语义提交 | 通过 | `555085b` 护栏与文档、`4e1952d` domain 抽取、`2219eb2` Core 拆分、`17e5b99` Node 拆分与资产清单、`7ebaeb5` 安装续跑与弹窗 toast |
+| 2026-10-21 | 推送 | `gh_git_push.sh 1 origin test` | 通过 | `bade371..7ebaeb5`，工作树干净 |
+| 2026-10-21 | 提交后复核 | `./gradlew :app:checkRefactorGuardrails` | 通过 | 架构边界、资产清单、护栏自测全通过 |
 
 ## 进度日志
 
@@ -411,6 +414,17 @@
 - 全量 Kotlin 单测（排除环境 frpc 用例）229 suite、1,149 项、0 失败；Node 216 项通过；架构边界与护栏检查通过。
 
 ## 决策记录
+
+### 2026-10-21 落盘方式
+
+- WS0-WS4 的改动按职责拆成 5 个语义提交后推送 `origin/test`：
+  `555085b` 护栏与追踪文档、`4e1952d` domain 抽取与工具统一、
+  `2219eb2` CoreRepository 拆分、`17e5b99` Node 模块化与资产清单驱动、
+  `7ebaeb5` 安装续跑结果上报与弹窗内 toast。
+- 提交前在最终工作树上执行了完整验证（护栏、Kotlin 编译、全量单测、Node 测试、
+  架构边界检查、`git diff --check`），提交后复核护栏任务仍通过。
+- `app/build.gradle.kts` 跨两个关注点：护栏任务部分随 `555085b`，
+  Node 测试清单部分随 `17e5b99`。
 
 | 决策 | 原因 |
 |---|---|
