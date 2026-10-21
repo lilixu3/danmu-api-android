@@ -35,7 +35,7 @@ private const val SOURCE_ROWS = 48
 private const val VIEWPORT_COLUMNS = 18
 private const val VIEWPORT_ROWS = 36
 
-internal class GlassImageLuminanceSource(
+class GlassImageLuminanceSource(
     val sourceWidth: Int,
     val sourceHeight: Int,
     private val pixels: IntArray
@@ -71,7 +71,7 @@ internal class GlassImageLuminanceSource(
 }
 
 @Stable
-internal class GlassLuminanceGrid private constructor(
+class GlassLuminanceGrid private constructor(
     val viewportSize: IntSize,
     private val values: FloatArray
 ) {
@@ -149,7 +149,7 @@ private fun Color.perceivedLuminance(): Float {
 }
 
 @Stable
-internal class GlassAdaptiveLuminanceState {
+class GlassAdaptiveLuminanceState {
     var grid by mutableStateOf(GlassLuminanceGrid.neutral())
         private set
 
@@ -158,7 +158,7 @@ internal class GlassAdaptiveLuminanceState {
     }
 }
 
-internal val LocalGlassAdaptiveLuminance = staticCompositionLocalOf {
+val LocalGlassAdaptiveLuminance = staticCompositionLocalOf {
     GlassAdaptiveLuminanceState()
 }
 

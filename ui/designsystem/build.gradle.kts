@@ -47,4 +47,7 @@ dependencies {
     implementation(libs.markdown.renderer.m3)
     implementation(libs.markdown.renderer.coil2)
     implementation(libs.markdown.renderer.code)
+
+    // 主题与共用组件的单测随模块迁移，模块自带测试依赖。
+    testImplementation("junit:junit:4.13.2")
 }

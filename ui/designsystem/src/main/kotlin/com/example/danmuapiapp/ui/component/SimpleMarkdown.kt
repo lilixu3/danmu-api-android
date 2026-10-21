@@ -219,7 +219,7 @@ fun SimpleMarkdownText(
 }
 
 @Composable
-internal fun rememberSimpleMarkdownState(markdown: String): MarkdownState {
+fun rememberSimpleMarkdownState(markdown: String): MarkdownState {
     val normalizedMarkdown = remember(markdown) {
         normalizeMarkdownLineEndings(markdown)
     }

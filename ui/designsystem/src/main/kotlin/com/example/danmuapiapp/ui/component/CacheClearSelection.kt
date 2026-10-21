@@ -96,7 +96,7 @@ internal fun cacheClearItemPresentation(item: CacheClearItem): CacheClearItemPre
 }
 
 @Composable
-internal fun CacheClearSelectionToolbar(
+fun CacheClearSelectionToolbar(
     selectedCount: Int,
     selectionEnabled: Boolean,
     onSelectAll: () -> Unit,
@@ -131,7 +131,7 @@ internal fun CacheClearSelectionToolbar(
 }
 
 @Composable
-internal fun CacheClearSelectionPanel(
+fun CacheClearSelectionPanel(
     selectedItems: Set<CacheClearItem>,
     selectionEnabled: Boolean,
     onToggle: (CacheClearItem) -> Unit,
@@ -181,7 +181,7 @@ internal fun CacheClearSelectionPanel(
 }
 
 @Composable
-internal fun CacheClearSelectionList(
+fun CacheClearSelectionList(
     selectedItems: Set<CacheClearItem>,
     selectionEnabled: Boolean,
     onToggle: (CacheClearItem) -> Unit,
@@ -319,7 +319,7 @@ internal fun CacheClearSelectionList(
 }
 
 @Composable
-internal fun CacheClearCapabilityNotice(
+fun CacheClearCapabilityNotice(
     capability: CacheClearCapability,
     modifier: Modifier = Modifier
 ) {

@@ -41,6 +41,9 @@ import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
+/** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
+val LocalAppDarkTheme = staticCompositionLocalOf { false }
+
 @Immutable
 data class GlassEffectStyle(
     val blurRadius: Dp,
@@ -296,11 +299,11 @@ val LocalAppBackgroundForegroundKey = staticCompositionLocalOf { 0L }
 /** True while content is rendered inside the shared dialog surface. */
 val LocalAppDialogContext = staticCompositionLocalOf { false }
 
-internal fun isLiquidGlassSupported(sdkInt: Int = Build.VERSION.SDK_INT): Boolean {
+fun isLiquidGlassSupported(sdkInt: Int = Build.VERSION.SDK_INT): Boolean {
     return sdkInt >= Build.VERSION_CODES.TIRAMISU
 }
 
-internal fun resolveGlassMaterialSpec(
+fun resolveGlassMaterialSpec(
     preference: GlassMaterialPreference,
     darkTheme: Boolean,
     tuning: GlassMaterialTuningState = GlassMaterialTuningState(),
@@ -651,7 +654,7 @@ private fun buildBackgroundImageRequest(
         .build()
 }
 
-internal fun resolveEffectiveBackgroundImageData(
+fun resolveEffectiveBackgroundImageData(
     background: AppBackgroundPreference,
     foregroundKey: Long,
     glassEnabled: Boolean

@@ -56,7 +56,7 @@ import kotlinx.coroutines.delay
 private val ToastShape = RoundedCornerShape(16.dp)
 private val DefaultToastClearance = 88.dp
 
-internal object AppToastWindowRegistry {
+object AppToastWindowRegistry {
     var platformDialogCount by mutableIntStateOf(0)
         private set
 

@@ -28,7 +28,7 @@ import kotlinx.coroutines.isActive
  * 这样不会触发逐帧重组合。
  */
 @Composable
-internal fun rememberAmbientLoopState(
+fun rememberAmbientLoopState(
     durationMillis: Int,
     maxFps: Int = 30,
     active: Boolean = true

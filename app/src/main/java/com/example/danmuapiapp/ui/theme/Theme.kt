@@ -16,7 +16,6 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.Lifecycle
@@ -29,9 +28,6 @@ import com.example.danmuapiapp.domain.model.GlassMaterialPreference
 import com.example.danmuapiapp.domain.model.GlassTuningPreference
 import com.example.danmuapiapp.ui.component.AppDialogHost
 import com.example.danmuapiapp.ui.component.AppToastHost
-
-/** Explicit app theme state; unlike isSystemInDarkTheme this also reflects the in-app override. */
-val LocalAppDarkTheme = staticCompositionLocalOf { false }
 
 /** Palette introduced with the liquid-glass redesign. */
 private val GlassDarkColorScheme = darkColorScheme(

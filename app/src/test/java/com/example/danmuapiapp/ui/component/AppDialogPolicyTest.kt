@@ -46,14 +46,16 @@ class AppDialogPolicyTest {
 
     @Test
     fun `主代码不应残留旧弹窗实现与展示偏好`() {
-        val mainDir = resolveRepoRoot().resolve("app/src/main/java")
-        val source = Files.walk(mainDir).use { paths ->
-            paths
-                .filter { Files.isRegularFile(it) && (it.toString().endsWith(".kt") || it.toString().endsWith(".java")) }
-                .map { it.toFile().readText() }
-                .toList()
-                .joinToString("\n")
-        }
+        val mainDirs = listOf("app/src/main/java", "ui/designsystem/src/main")
+        val source = mainDirs.flatMap { relative ->
+            val mainDir = resolveRepoRoot().resolve(relative)
+            Files.walk(mainDir).use { paths ->
+                paths
+                    .filter { Files.isRegularFile(it) && (it.toString().endsWith(".kt") || it.toString().endsWith(".java")) }
+                    .map { it.toFile().readText() }
+                    .toList()
+            }
+        }.joinToString("\n")
 
         assertFalse(source.contains("AppBottomSheetDialog"))
         assertFalse(source.contains("AppPanelDialog"))
