@@ -11,7 +11,7 @@ import org.junit.Test
 class AppDialogPolicyTest {
     @Test
     fun `共享弹窗应只有一个滚动正文和可换行操作区`() {
-        val source = readSource("app/src/main/java/com/example/danmuapiapp/ui/component/AppDialog.kt")
+        val source = readSource("ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/component/AppDialog.kt")
 
         assertTrue(source.contains("fun AppDialog("))
         assertTrue(source.contains("usePlatformDefaultWidth = false"))
@@ -26,8 +26,8 @@ class AppDialogPolicyTest {
 
     @Test
     fun `共享弹窗配色应服从应用主题并使用统一语义色`() {
-        val source = readSource("app/src/main/java/com/example/danmuapiapp/ui/component/AppDialog.kt")
-        val themeSource = readSource("app/src/main/java/com/example/danmuapiapp/ui/theme/Theme.kt")
+        val source = readSource("ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/component/AppDialog.kt")
+        val themeSource = readSource("ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/theme/Theme.kt")
 
         assertTrue(themeSource.contains("LocalAppDarkTheme provides darkTheme"))
         assertTrue(source.contains("DialogColorTokens"))
@@ -38,7 +38,7 @@ class AppDialogPolicyTest {
 
     @Test
     fun `液态玻璃模式下嵌套弹窗应绕过宿主 portal`() {
-        val source = readSource("app/src/main/java/com/example/danmuapiapp/ui/component/AppDialog.kt")
+        val source = readSource("ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/component/AppDialog.kt")
 
         assertTrue(source.contains("val nestedDialog = LocalAppDialogContext.current"))
         assertTrue(source.contains("host != null && !nestedDialog"))

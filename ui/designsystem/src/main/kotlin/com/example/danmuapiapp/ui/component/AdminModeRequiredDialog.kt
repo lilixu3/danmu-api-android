@@ -8,20 +8,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 
-internal sealed interface AdminModeRequiredTarget {
+sealed interface AdminModeRequiredTarget {
     data class ConfigItem(val key: String) : AdminModeRequiredTarget
     data object RawConfig : AdminModeRequiredTarget
     data object ClearCache : AdminModeRequiredTarget
     data object LocalDanmu : AdminModeRequiredTarget
 }
 
-internal data class AdminModeRequiredPrompt(
+data class AdminModeRequiredPrompt(
     val title: String,
     val message: String,
     val confirmText: String
 )
 
-internal fun adminModeRequiredPrompt(
+fun adminModeRequiredPrompt(
     target: AdminModeRequiredTarget,
     hasAdminTokenConfigured: Boolean
 ): AdminModeRequiredPrompt {
@@ -56,7 +56,7 @@ internal fun adminModeRequiredPrompt(
 }
 
 @Composable
-internal fun AdminModeRequiredDialog(
+fun AdminModeRequiredDialog(
     prompt: AdminModeRequiredPrompt,
     onOpenAdminMode: () -> Unit,
     onDismiss: () -> Unit

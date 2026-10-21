@@ -151,7 +151,7 @@ fun DanmuApiTheme(
     }
 }
 
-internal fun usesLiquidGlassPalette(
+fun usesLiquidGlassPalette(
     preference: GlassMaterialPreference,
     sdkInt: Int = android.os.Build.VERSION.SDK_INT
 ): Boolean {
@@ -215,7 +215,7 @@ private fun rememberBackgroundRefreshKey(
     return refreshKey
 }
 
-internal fun shouldRefreshRandomBackground(
+fun shouldRefreshRandomBackground(
     nowElapsedMillis: Long,
     lastRefreshElapsedMillis: Long,
     refreshEnabled: Boolean,

@@ -25,6 +25,8 @@ android {
 
 dependencies {
     implementation(project(":core:model"))
+    // `AppDialog` 通过 `data.util.DeviceCompatMode` 判断兼容界面设备。
+    implementation(project(":core:common"))
 
     val composeBom = platform(libs.compose.bom)
     implementation(composeBom)

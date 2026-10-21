@@ -33,7 +33,7 @@ import com.example.danmuapiapp.domain.model.formatCoreVersionValue
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 
-internal fun shouldOfferCoreUpdateActions(
+fun shouldOfferCoreUpdateActions(
     hasVersionUpdate: Boolean,
     hasCheckError: Boolean,
     sourceMismatch: Boolean,
@@ -46,7 +46,7 @@ internal fun shouldOfferCoreUpdateActions(
 }
 
 @Composable
-internal fun CoreUpdateAvailableDialog(
+fun CoreUpdateAvailableDialog(
     variantLabel: String,
     currentVersion: String?,
     latestVersion: String?,
