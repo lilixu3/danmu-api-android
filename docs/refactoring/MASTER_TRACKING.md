@@ -213,11 +213,20 @@ WS6 起点（`0bcdc40` 之后）：
 - [x] 建立 `:core:model` / `:core:common` / `:ui:designsystem` 模块骨架并接入 `settings.gradle.kts`
 - [x] 固定模块依赖方向（`:core:model` 无项目依赖、`:core:common` 只依赖 `:core:model`、
       `:ui:designsystem` 只依赖 `:core:*`），并把方向写进 `check_architecture.py`
-- [ ] `:core:model` 迁入纯模型与纯逻辑
-- [ ] `:core:common` 迁入跨功能共享工具
-- [ ] `:ui:designsystem` 迁入主题、颜色、排版与共用组件
-- [ ] 功能模块边界评审
-- [ ] 首批功能模块提取
+- [x] `:core:model` 迁入纯模型与纯逻辑（36 个模型 + 18 个测试，包名不变）
+- [x] `:core:common` 迁入跨功能共享工具（`data/util` 中 11 个无 app 依赖文件）
+- [x] `:ui:designsystem` 迁入主题、颜色、排版与共用组件（27 个文件，含 liquid 子包）
+- [x] 功能模块边界评审（模块依赖白名单 + 源码导入规则写入护栏；`AppDialog` 阻塞点已定位）
+- [ ] 首批功能模块提取（建议先做 `:feature:download` 或 `:feature:localdanmu`，需单独评估）
+
+模块化结果与遗留：
+
+- `:core:model`：纯 Kotlin/JVM，0 个 android/androidx import；app 侧 903 行 import 零改动，仅 3 个跨模块符号放宽为 `public`。
+- `:core:common`：11 个纯工具迁入（`DotEnvCodec`、`PortProbe`、`ShellUtils` 等）；6 个依赖 Android 或 app 包的工具（`AppAppearancePrefs`、`SecureStringStore`、`TokenDefaults`、`DeviceCompatMode`、`SharedPrefsSafe`、`RuntimeApiAccessResolver`）留在原地。
+- `:ui:designsystem`：`ui/theme` 与 `ui/component`（含 `liquid/`）共 27 个文件迁入；依赖 app 内部实现的 11 个文件（`AppDialog`、`Theme`、5 个对话框等）留在原地。
+- 已知阻塞：`AppDialog` 依赖 `data/util/DeviceCompatMode`（`data/service/NodeService` 也在用），而 `Theme.kt` 依赖 `AppDialogHost`，因此 `AppDialog`/`Theme`/5 个对话框暂时无法进设计系统模块。要收口需先把 `DeviceCompatMode` 以保留包名迁入 `:core:common` 并放宽该模块的 Android 导入限制，属独立决策项。
+- 模块边界护栏修正：`check_architecture.py` 的模块源码根此前写成 `src/main/java`，实际源码在 `src/main/kotlin`，规则空转；已修正为 kotlin 根并按真实包名重写白名单，护栏自测 9 项恢复通过。
+- 验证：`:core:model` 18 suite / 82 项、`:ui:designsystem` 5 suite / 15 项、`:app` 211 suite / 1,071 项，合计 **234 suite / 1,168 项 / 0 失败**（与迁移前一致）；`:app:assembleDebug` 与三个模块 `assembleDebug` 全部通过；Node 216 项、护栏 9 项、架构边界与 `git diff --check` 通过。
 
 ### WS9 收口
 
