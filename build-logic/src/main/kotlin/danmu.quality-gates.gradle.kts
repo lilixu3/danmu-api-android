@@ -60,6 +60,20 @@ tasks.register("checkRefactorGuardrails") {
     )
 }
 
+// WS9：常规验证一次执行——护栏、各模块单测、Node 回归与应用单测。
+tasks.register("verifyAll") {
+    dependsOn(
+        "checkRefactorGuardrails",
+        "checkNodeRuntimeScripts",
+        "testAppOutboundBridge",
+        ":core:model:testDebugUnitTest",
+        ":core:common:assembleDebug",
+        ":ui:designsystem:testDebugUnitTest",
+        ":feature:records:testDebugUnitTest",
+        "testDebugUnitTest"
+    )
+}
+
 // 发布防呆：release/bundle 任务未显式传 -PversionName/-PversionCode 时给出醒目告警，
 // 避免工作流漏传参数后静默产出旧版本号的产物。
 gradle.projectsEvaluated {
