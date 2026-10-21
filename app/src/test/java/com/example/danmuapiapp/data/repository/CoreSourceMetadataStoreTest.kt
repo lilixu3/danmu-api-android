@@ -63,4 +63,23 @@ class CoreSourceMetadataStoreTest {
         assertEquals("2026-10-01T08:00:00Z", actual.commitPublishedAt)
         assertEquals(1791763200000L, actual.installedAtEpochMillis)
     }
+
+    @Test fun `writing metadata stamps installation time and removes empty records`() {
+        val coreDir = folder.newFolder("core")
+        CoreSourceMetadataStore.write(coreDir, installed, now = 1791763200123L)
+        val written = CoreSourceMetadataStore.read(RunMode.Normal, CoreSourceMetadataStore.fileIn(coreDir), "unused") { null }!!
+        assertEquals(installed.repo, written.repo)
+        assertEquals(1791763200123L, written.installedAtEpochMillis)
+
+        CoreSourceMetadataStore.write(coreDir, CoreSourceMetadata(), now = 1L)
+        assertFalse(CoreSourceMetadataStore.fileIn(coreDir).exists())
+    }
+
+    @Test fun `root metadata path uses the shared file name contract`() {
+        assertEquals(".danmuapiapp-core-source.json", CoreSourceMetadataStore.FILE_NAME)
+        assertEquals(
+            "/root/core/.danmuapiapp-core-source.json",
+            "/root/core/${CoreSourceMetadataStore.FILE_NAME}"
+        )
+    }
 }

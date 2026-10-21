@@ -186,4 +186,63 @@ class CoreDirectoryOpsTest {
             root.deleteRecursively()
         }
     }
+    @Test
+    fun `stale cleanup removes expired artifacts but keeps the active recovery point`() {
+        val root = Files.createTempDirectory("core-stale-cleanup").toFile()
+        val expired = root.resolve("danmu_api_stable.staging-1").apply { mkdirs() }
+        CoreArtifactPolicy.markerFile(expired).writeText("1\n1\n")
+        val active = root.resolve("danmu_api_stable.backup-2").apply { mkdirs() }
+        CoreArtifactPolicy.markerFile(active).writeText("2\n1\n")
+        val ordinary = root.resolve("ordinary-dir").apply { mkdirs() }
+
+        try {
+            cleanupStaleCoreDirectories(
+                projectDir = root,
+                activeBackupPath = active.canonicalPath,
+                now = CoreArtifactPolicy.MARKED_STAGING_RETENTION_MS + 10L
+            )
+
+            assertFalse(expired.exists())
+            assertTrue(active.exists())
+            assertTrue(ordinary.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `replacement failure restores the previous core directory`() {
+        val root = Files.createTempDirectory("core-replace-rollback").toFile()
+        val target = root.resolve("danmu_api_stable").apply { mkdirs() }
+        target.resolve("worker.js").writeText("old\n")
+        val missingStaging = root.resolve("missing-staging")
+
+        try {
+            val error = runCatching { replaceCoreDirectory(target, missingStaging) }.exceptionOrNull()
+            assertTrue(error is IOException)
+            assertEquals("临时核心目录不存在", error?.message)
+            assertEquals("old\n", target.resolve("worker.js").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `successful replacement moves staging into place and returns backup`() {
+        val root = Files.createTempDirectory("core-replace-success").toFile()
+        val target = root.resolve("danmu_api_stable").apply { mkdirs() }
+        target.resolve("worker.js").writeText("old\n")
+        val staging = root.resolve("danmu_api_stable.staging-1").apply { mkdirs() }
+        staging.resolve("worker.js").writeText("new\n")
+
+        try {
+            val backup = replaceCoreDirectory(target, staging)
+            assertTrue(backup != null && backup.isDirectory)
+            assertEquals("new\n", target.resolve("worker.js").readText())
+            assertFalse(staging.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
 }
