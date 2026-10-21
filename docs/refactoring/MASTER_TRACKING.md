@@ -382,6 +382,9 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS7 收口复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest -x prepareNativeRuntime -x verifyNativeRuntimeInputs` | 通过（排除环境阻塞） | 234 suite、1,168 项、0 失败；`prepareNativeRuntime` 因宿主 `cmake` 动态链接失败无法运行，非本次改动 |
 | 2026-10-21 | WS7 收口复核 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`git diff --check` | 通过 | 216 项 0 失败、边界无违规、无空白错误 |
 | 2026-10-21 | WS7 收口复核 | 任务图 `--dry-run` 迁移前后比对 + 7 项行为 smoke | 通过 | 132 项任务逐行一致；发布防呆、缺依赖开关、ABI/混淆校验行为不变 |
+| 2026-10-21 | 原生运行时重建 | `env -u LD_LIBRARY_PATH ./gradlew :app:prepareNativeRuntime :app:verifyNativeRuntimeInputs` | 通过 | 三个 ABI 的 libc++/libc++abi/libunwind 与 JNI 桥重建完成，耗时 5m20s |
+| 2026-10-21 | 原生重建后复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest`（无排除项） | 通过 | 234 suite、1,168 项、0 失败；护栏通过 |
+| 2026-10-21 | 原生重建后复核 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
 | 2026-10-21 | WS7 迁移保真 | 三个预编译脚本插件逐行多重集比对 | 通过 | 1,319 行迁移内容与原 `app/build.gradle.kts` 完全一致（缺失 0、多余 0） |
 | 2026-10-21 | WS7 任务图 | `./gradlew :app:preBuild :app:assembleDebug :app:releaseCheck :app:checkRefactorGuardrails --dry-run` | 通过 | 迁移前后任务集合逐行一致（132 项，含 finalizer 与 `mustRunAfter`） |
 | 2026-10-21 | WS7 行为校验 | 7 项开关/门禁 smoke（发布防呆告警与静默、缺依赖测试开关 Debug/Release、ABI 校验、混淆开关校验、ABI split） | 通过 | 与迁移前语义一致 |
@@ -626,6 +629,20 @@ WS6 起点（`0bcdc40` 之后）：
 ## 决策记录
 
 ### 2026-10-21 落盘方式
+
+### 2026-10-21 构建环境注意（cmake 链接失败与 Gradle 输出快照）
+
+- 现象一：从 Codex 的 Termux 包装器里执行构建时，`cmake` 报
+  `cannot locate symbol "_ZNSt6__ndk113__hash_memoryEPKvm"`。根因不是系统升级未完成，而是包装器把
+  `LD_LIBRARY_PATH` 指向了 `node_modules/@mmmbuto/codex-cli-termux/bin`，该目录里有一份旧版
+  `libc++_shared.so`，被 `cmake` 优先加载。验证与构建命令统一用 `env -u LD_LIBRARY_PATH ./gradlew ...` 即可；
+  直接执行 `cmake --version` 也会复现，清空该变量后返回 4.4.4。
+- 现象二：原生任务失败后再次执行，Gradle 报
+  `Cannot access output property '$1' ... Could not read directory path '.../prepared-native-runtime/libnode/bin/x86_64'`。
+  这是失败运行留下的半成品输出目录与任务快照不一致导致的；把 `app/build/prepared-native-runtime` 移开后
+  重新执行即可完整重建（三个 ABI）。
+- 结论：这两条都不是重构引入的问题；后续所有 Gradle 验证建议带上 `env -u LD_LIBRARY_PATH`，
+  并且原生任务失败后不要直接重跑，先清理输出目录。
 
 ### 2026-10-21 拆分粒度约束（WS6 起生效）
 
