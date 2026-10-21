@@ -15,10 +15,15 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // 与 app 一致：`data/util` 里的时间解析用到 java.time，需要脱糖。
+        isCoreLibraryDesugaringEnabled = true
     }
 }
 
 dependencies {
     api(project(":core:model"))
     implementation(libs.coroutines.android)
+
+    // Java 8+ API（如 java.time）向低版本兼容
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 }

@@ -7,7 +7,7 @@ package com.example.danmuapiapp.data.util
  * `http://127.0.0.1:<port><tokenPath>/<path>` 的字符串，这里统一到一处，
  * 并统一 token / path 的前导斜杠写法。
  */
-internal object RuntimeApiUrls {
+object RuntimeApiUrls {
 
     const val HOST = "127.0.0.1"
 

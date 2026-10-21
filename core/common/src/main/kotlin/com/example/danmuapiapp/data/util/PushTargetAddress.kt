@@ -4,7 +4,7 @@ import java.net.URI
 import java.util.Locale
 
 /** Accept a device host or a complete HTTP endpoint without losing its scheme or query. */
-internal fun resolvePushTargetAddress(raw: String): String? {
+fun resolvePushTargetAddress(raw: String): String? {
     val value = raw.trim()
     if (value.isBlank() || value.any { it.isWhitespace() || it.isISOControl() }) return null
     val hasScheme = value.contains("://")
@@ -23,7 +23,7 @@ internal fun resolvePushTargetAddress(raw: String): String? {
 }
 
 /** Only the scheme and hostname are case insensitive; paths and escaped query values are not. */
-internal fun pushTargetAddressKey(raw: String): String {
+fun pushTargetAddressKey(raw: String): String {
     val resolved = resolvePushTargetAddress(raw) ?: return raw.trim()
     val uri = URI(resolved)
     val scheme = uri.scheme.lowercase(Locale.ROOT)

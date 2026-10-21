@@ -1,7 +1,7 @@
 package com.example.danmuapiapp.data.util
 
 /** Registration and permanent shutdown share one lock; callbacks cannot resurrect a stopped watcher. */
-internal class WatcherRegistry<T>(private val dispose: (T) -> Unit) {
+class WatcherRegistry<T>(private val dispose: (T) -> Unit) {
     private val lock = Any()
     private val entries = LinkedHashMap<String, T>()
     private var stopped = false

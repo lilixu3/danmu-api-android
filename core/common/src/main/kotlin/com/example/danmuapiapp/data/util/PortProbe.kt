@@ -12,7 +12,7 @@ import kotlinx.coroutines.delay
  * - [isOpen] 单次探测，供后台线程（服务、心跳）使用；
  * - [probe] 带重试与错误详情，供协程（运行时仓库）使用。
  */
-internal object PortProbe {
+object PortProbe {
 
     const val LOOPBACK = "127.0.0.1"
     const val DEFAULT_TIMEOUT_MS = 220

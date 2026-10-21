@@ -7,7 +7,7 @@ package com.example.danmuapiapp.data.util
  * reveal privileged fields (for example real clientIp in /api/reqrecords) return the richest data.
  * A bare-path fallback is kept last for users who explicitly run the core without a TOKEN.
  */
-internal object RuntimeManagementPaths {
+object RuntimeManagementPaths {
     fun tokenPaths(
         runtimeTokenPaths: List<String>,
         adminMode: Boolean,
