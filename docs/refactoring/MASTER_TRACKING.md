@@ -9,7 +9,7 @@
 - 重构前 checkpoint：`bade371`（`checkpoint: 保存 test 分支重构前本地改动`）
 - checkpoint 已推送到：`origin/test`
 - 起始日期：2026-10-20
-- 当前阶段：`WS5 Runtime Repository 与 Root`（WS4 已完成，WS5 待启动）
+- 当前阶段：`WS6 大型 ViewModel 与 Compose 文件拆分`（WS5 已完成，WS6 待启动）
 - Kotlin 主代码：约 104,071 行
 - Kotlin 测试：约 16,228 行、197 个测试文件
 - 手写 Node 入口代码：约 5,975 行
@@ -46,7 +46,7 @@
 | WS2 | Node 运行时资产清单与递归复制 | 已完成 | `app-runtime-assets.json` 是唯一资产清单；Gradle、Root、测试均消费该清单 |
 | WS3 | `android-server.js` 模块化 | 已完成 | 入口只负责组合；Worker、配置、日志、安全、路由、弹幕缓存、代理分文件 |
 | WS4 | `CoreRepositoryImpl` 拆分 | 已完成 | Repository 仅编排；远端、安装、依赖修复、恢复、监听各自独立 |
-| WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 未开始 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
+| WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 已完成 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
 | WS6 | 大型 ViewModel 与 Compose 文件拆分 | 未开始 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
 | WS7 | Gradle `build-logic` 拆分 | 未开始 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
 | WS8 | Gradle 模块化 | 未开始 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
@@ -155,16 +155,28 @@
 
 ### WS5 Runtime Repository 与 Root
 
-- [ ] 状态存储
-- [ ] 生命周期控制
-- [ ] 状态协调
-- [ ] 日志读取与解析
-- [ ] 热重载
-- [ ] 网络监听
-- [ ] Root 脚本构建
-- [ ] Root 进程控制
-- [ ] Root 项目同步
-- [ ] Root 健康检查
+WS5 起点（`08c2df8` 之后）：
+
+- `RuntimeRepositoryImpl.kt`：3,047 行
+- `RootRuntimeController.kt`：1,428 行
+- `RuntimePaths.kt`：770 行
+- `NodeService.kt`：1,064 行、`NodeProjectManager.kt`：956 行
+
+拆分顺序：先按文件归属并行拆分 `RuntimeRepositoryImpl`（日志/热重载/网络）、
+`RootRuntimeController`（脚本构建/进程探测/项目同步）与 `RuntimePaths`（偏好存储/
+工作目录迁移），再由统一验证收口。
+
+- [x] 状态存储（`RuntimeStateStore`）
+- [x] 生命周期控制（`RuntimeLifecycleController`）
+- [x] 状态协调（`RuntimeStateReconciler`）
+- [x] 日志读取与解析（`RuntimeLogController`）
+- [x] 热重载（`RuntimeHotReloadController`）
+- [x] 网络监听（`RuntimeNetworkMonitorController`）
+- [x] Root 脚本构建（`RootRuntimeScripts`）
+- [x] Root 进程控制（`RootRuntimeProcessControl`）
+- [x] Root 项目同步（`RootRuntimeSync`）
+- [x] Root 健康检查（`RootRuntimeHealth`）
+- [x] 工作目录偏好存储与迁移（`RuntimeWorkDirPreferences`/`RuntimeWorkDirMigration`）
 
 ### WS6 UI
 
@@ -300,6 +312,21 @@
 | 2026-10-21 | WS0-WS4 落盘 | `git add`/`git commit` 分 5 个语义提交 | 通过 | `555085b` 护栏与文档、`4e1952d` domain 抽取、`2219eb2` Core 拆分、`17e5b99` Node 拆分与资产清单、`7ebaeb5` 安装续跑与弹窗 toast |
 | 2026-10-21 | 推送 | `gh_git_push.sh 1 origin test` | 通过 | `bade371..7ebaeb5`，工作树干净 |
 | 2026-10-21 | 提交后复核 | `./gradlew :app:checkRefactorGuardrails` | 通过 | 架构边界、资产清单、护栏自测全通过 |
+| 2026-10-21 | WS5 Runtime Repository | `./gradlew :app:compileDebugKotlin` | 通过 | 仅存量告警；拆分后新增 9 个文件全部编译通过 |
+| 2026-10-21 | WS5 Runtime Repository | `./gradlew :app:checkRefactorGuardrails :app:checkNodeRuntimeScripts` | 通过 | 架构边界无违规；资产清单 27 项/28 文件；护栏自测 6 项；JS 语法 24 项 |
+| 2026-10-21 | WS5 Runtime Repository | `./gradlew :app:testAppOutboundBridge` | 通过 | Node 216 项、0 失败 |
+| 2026-10-21 | WS5 Runtime Repository | `./gradlew :app:testDebugUnitTest` | 通过 | 231 suite、1,158 项、0 失败 |
+| 2026-10-21 | WS5 Runtime Repository | `node --test node-tests/*.test.cjs` | 通过 | 216 项、0 失败 |
+| 2026-10-21 | WS5 Runtime Repository | `python3 scripts/refactoring/check_architecture.py` | 通过 | 架构边界无违规 |
+| 2026-10-21 | WS5 Runtime Repository | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-21 | WS5 Root 控制 | `./gradlew :app:compileDebugKotlin` | 通过 | 0 error |
+| 2026-10-21 | WS5 Root 控制 | `./gradlew :app:testDebugUnitTest --tests RootRuntimeControllerNodeModulesTest --tests RootRuntimeControllerMarkerTest --tests RootRuntimeStartDecisionTest` | 通过 | 12 + 1 + 2 项 |
+| 2026-10-21 | WS5 RuntimePaths | `./gradlew :app:testDebugUnitTest --tests RuntimePathsMigrationTest --tests RuntimePathResolverTest --tests RuntimeVariantKeyResolverTest` | 通过 | 8 + 4 + 2 项 |
+| 2026-10-21 | WS5 统一收口复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 231 suite、1,158 项、0 失败；护栏通过 |
+| 2026-10-21 | WS5 统一收口复核 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
+| 2026-10-21 | WS5 统一收口复核 | `python3 scripts/refactoring/check_architecture.py`、`test_guardrails.py` | 通过 | 架构边界无违规、护栏自测 6 项 |
+| 2026-10-21 | WS5 统一收口复核 | 脚本字面量与 API 面独立比对 | 通过 | Root 三引号脚本块归一化后逐块一致；Runtime 11 个脚本块零差异；`RuntimePaths`/`RootRuntimeController` 仅私有函数改名 |
+| 2026-10-21 | WS5 统一收口复核 | `git diff --check` | 通过 | 无空白错误 |
 
 ## 进度日志
 
@@ -412,6 +439,52 @@
 - 保持原有语义：候选校验要求变体/运行模式/安装时间戳完全匹配、备份目录为空或缺失时丢弃候选返回 false、回滚后仅在 Normal 模式之外同步 Root、`mutationMutex` 内完成确认与恢复、恢复完成后触发核心信息刷新。
 - `CoreRepositoryImpl.kt` 从 904 行降至 839 行；当前文件内容以字段装配、来源解析、目录位置、`isCoreInstalled`/`isCoreReady`、`prepareCoreUpdate`、`deleteCore` 与纯转发为主。
 - 全量 Kotlin 单测（排除环境 frpc 用例）229 suite、1,149 项、0 失败；Node 216 项通过；架构边界与护栏检查通过。
+
+### 2026-10-21 WS5 Runtime Repository（`RuntimeRepositoryImpl.kt`）
+
+- 提取 `RuntimeStateStore.kt`：`runtime` 偏好键、初始状态装载（端口/Token/变体/监听模式）、
+  运行时长锚点选择与健康接口补锚、本地/局域网/IPv6 访问地址拼装、配置与接管写回。
+- 提取 `RuntimeProcessProbe.kt`：端口探活与等待、带重试的端口探测、Node 进程与前台服务判定、
+  健康接口读取与归属校验、退出/回收等待。
+- 提取 `RuntimeStatusController.kt`：`mark*` 状态迁移、状态文案与 Root 通知同步、运行时长计数、
+  运行态转换（transition）序列、候选核心观察/确认/失败回调与已运行 Root 进程接管。
+- 提取 `RuntimeLifecycleController.kt`：启动/停止/重启、服务配置应用与重启、陈旧普通进程回收、
+  启动前依赖预检、运行模式切换。
+- 提取 `RuntimeStateReconciler.kt`：初始接管（含数据丢失后的 Root 被动恢复）、周期状态纠正、
+  前后台切换、离开应用时的前台通知补发。
+- 提取 `RuntimeLogController.kt`：核心日志抓取与清空、App 日志聚合、多格式日志块解析与噪声过滤。
+- 提取 `RuntimeHotReloadController.kt`：普通模式递归文件监听、Root 目录指纹比对、去抖与抑制窗口。
+- 提取 `RuntimeNetworkMonitorController.kt`：系统网络事件订阅与访问地址刷新。
+- 提取 `NormalRuntimeStartState.kt`：普通模式启动/重启标记（`pendingRestart`/`startIssuedAtMs`/`pendingExplicitStart`）
+  由状态广播、生命周期与状态协调共享。
+- 保持原有语义：状态广播仍只处理普通模式、陈旧广播过滤不变、启动/停止/重启的等待与超时阈值不变、
+  配置应用仍先停后启、候选核心启动失败仍按"停止 → 还原 → 重启"恢复、热重载仍走同一把操作锁。
+
+### 2026-10-21 WS5 Root 控制与 RuntimePaths（并行拆分）
+
+- 三条拆分并行执行（`RuntimeRepositoryImpl`、`RootRuntimeController`、`RuntimePaths`），
+  每个文件单一归属，避免同文件并发编辑；收口时统一跑一次全量验证。
+- `RootRuntimeController.kt` 从 1,428 行降至 228 行门面，拆出 `RootRuntimeScripts`（420 行，
+  原子同步/增量同步/权限归一/依赖探测/node_modules 校验脚本）、`RootRuntimeSync`（491 行，
+  工作目录、环境变量、核心与依赖同步）、`RootRuntimeProcessControl`（288 行，启动/停止/重启与控制标记）、
+  `RootRuntimeHealth`（229 行，健康端点、归属判定、进程发现、端口等待）、`RootRuntimeLocation`（37 行，
+  进程名与 pid/started-at 路径单一来源）。对外 API 与既有测试零改动。
+- `RuntimePaths.kt` 从 770 行降至 270 行，拆出 `RuntimePathResolver`（路径规范化、tree URI、
+  写入探针、目录重叠）、`RuntimeWorkDirPreferences`（工作目录偏好）、`RuntimeWorkDirMigration`（迁移事务与回滚）、
+  `RuntimeVariantKeyResolver`（核心变体解析）；新增 `RuntimePathResolverTest`、`RuntimeVariantKeyResolverTest`。
+- 复核证据：Root 侧三引号脚本块在归一化 `RootRuntimeLocation` 常量引用后逐块一致；Runtime 侧
+  11 个脚本块零差异；`RuntimePaths` 与 `RootRuntimeController` 的公开/内部函数集合不变
+  （仅三个原 `private` 变体解析函数随迁移改名）。
+- 统一收口：231 suite、1,158 项、0 失败；Node 216 项通过；架构边界与护栏自测通过；
+  `git diff --check` 无空白错误。
+- 清理迁移后失效的死代码：未使用的 `NORMAL_START_TIMEOUT_PRIMARY_MS`/`EXTEND_MS`/`STALE_TIMEOUT_MS`
+  常量与 `ConcurrentHashMap` 导入。
+- `RuntimeRepositoryImpl.kt` 从 3,047 行降至 503 行，剩余内容为字段装配、串行用户操作入口、
+  NodeService 状态广播桥接、候选核心恢复编排与公开 API 转发。
+- 验证：`./gradlew :app:compileDebugKotlin`、`:app:checkRefactorGuardrails`、
+  `:app:checkNodeRuntimeScripts`、`:app:testAppOutboundBridge`、`:app:testDebugUnitTest`
+  （231 suite、1,158 项、0 失败）、`node --test node-tests/*.test.cjs`（216 项）、
+  `python3 scripts/refactoring/check_architecture.py`、`git diff --check` 全部通过。
 
 ## 决策记录
 
