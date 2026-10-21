@@ -180,9 +180,21 @@ WS5 起点（`08c2df8` 之后）：
 
 ### WS6 UI
 
-- [ ] Download ViewModel
-- [ ] Home ViewModel
-- [ ] Settings ViewModel
+WS6 起点（`0bcdc40` 之后）：
+
+- `DanmuDownloadViewModel.kt`：1,982 行
+- `HomeViewModel.kt`：1,578 行、`HomeScreen.kt`：1,937 行、`HomeScreenSections.kt`：1,537 行
+- `SettingsViewModel.kt`：1,608 行
+- `ConfigDialogEditors.kt`：1,707 行、`ConfigVisualEditors.kt`：1,697 行
+- `StartupPermissionGate.kt`：1,626 行
+- `PullRequestLabScreen.kt`：1,549 行、`PullRequestLabViewModel.kt`：740 行
+
+拆分顺序：第一轮并行拆三个大型 ViewModel（Download / Home / Settings），
+第二轮拆 Compose 侧（Home Screen、Config Editors、Startup Permission Gate、Pull Request Lab）。
+
+- [x] Download ViewModel
+- [x] Home ViewModel
+- [x] Settings ViewModel
 - [ ] Home Screen
 - [ ] Config Editors
 - [ ] Startup Permission Gate
@@ -327,6 +339,19 @@ WS5 起点（`08c2df8` 之后）：
 | 2026-10-21 | WS5 统一收口复核 | `python3 scripts/refactoring/check_architecture.py`、`test_guardrails.py` | 通过 | 架构边界无违规、护栏自测 6 项 |
 | 2026-10-21 | WS5 统一收口复核 | 脚本字面量与 API 面独立比对 | 通过 | Root 三引号脚本块归一化后逐块一致；Runtime 11 个脚本块零差异；`RuntimePaths`/`RootRuntimeController` 仅私有函数改名 |
 | 2026-10-21 | WS5 统一收口复核 | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-21 | WS6 Download VM | `./gradlew :app:compileDebugKotlin` | 通过 | 0 error |
+| 2026-10-21 | WS6 Download VM | `./gradlew :app:testDebugUnitTest :app:checkRefactorGuardrails :app:checkNodeRuntimeScripts` | 通过 | 234 suite、1,168 项、0 失败；护栏自测 6 项、JS 语法 24 项 |
+| 2026-10-21 | WS6 Download VM | `python3 scripts/refactoring/check_architecture.py`、`test_guardrails.py` | 通过 | 架构边界无违规、护栏自测 6 项 |
+| 2026-10-21 | WS6 Download VM | 搬移代码归一化逐行比对 | 通过 | `processPendingQueue` 561 行与其余搬移方法逐块一致，仅状态归属与回调注入差异 |
+| 2026-10-21 | WS6 Download VM | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-21 | WS6 Home VM | `flock .gradle-team.lock ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 1,168 项、0 失败 |
+| 2026-10-21 | WS6 Home VM | 函数名/属性名/字符串字面量双向比对 | 通过 | 89 条字面量零差异；仅 3 个私有函数改名；期间发现并修回一处误改文案 |
+| 2026-10-21 | WS6 Settings VM | 独立 worktree `:app:compileDebugKotlin --offline` | 通过 | 隔离其他并行改动后编译成功 |
+| 2026-10-21 | WS6 Settings VM | 对外 API 逐名比对 + 字面量多重集比对 | 通过 | API 名单零差异；213 条字面量零差异；13 个界面调用点零改动 |
+| 2026-10-21 | WS6 统一收口复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败；护栏通过 |
+| 2026-10-21 | WS6 统一收口复核 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
+| 2026-10-21 | WS6 统一收口复核 | 三个 ViewModel 字面量多重集独立比对 | 通过 | download 204=204、home 89=89、settings 213=213；差异仅为状态归属前缀 |
+| 2026-10-21 | WS6 统一收口复核 | `git diff --check`、`check_architecture.py`、`test_guardrails.py` | 通过 | 无空白错误、边界无违规、护栏自测 6 项 |
 
 ## 进度日志
 
@@ -485,6 +510,34 @@ WS5 起点（`08c2df8` 之后）：
   `:app:checkNodeRuntimeScripts`、`:app:testAppOutboundBridge`、`:app:testDebugUnitTest`
   （231 suite、1,158 项、0 失败）、`node --test node-tests/*.test.cjs`（216 项）、
   `python3 scripts/refactoring/check_architecture.py`、`git diff --check` 全部通过。
+
+- WS6 起：`DanmuDownloadViewModel.kt` 从 1,982 行降至 303 行，只保留装配、初始装载与公开 API 转发；
+  页面状态改由 5 个 Compose 状态容器持有，业务规则分到 6 个控制器与 2 个支撑类。
+- 新增 `DownloadSearchController`（搜索、链接解析、剧集加载与来源/格式设置）、
+  `DownloadEpisodeSelectionController`（来源筛选、批量选中与“下载选中集”）、
+  `DownloadQueueController`（队列统计、分组、排序、清空、重试、暂停与取消）、
+  `DownloadQueueRunner`（串行执行、自动重试、链路重建、退避流控）、
+  `DownloadRecordsController`（记录预览、删除、目录同步与整季补集）、`DownloadUiState`（状态容器）。
+- 支撑类：`DownloadRateLimitBypass`（下载期 `RATE_LIMIT_MAX_REQUESTS` 旁路与恢复）、
+  `DownloadTaskInputRebuilder`（旧链路失效后的重新搜索与剧集匹配）、
+  `support/DownloadNetworkSupport.kt`（弹幕源基础地址解析、带出站统计的 GET）。
+- 行为逐字保留：`processPendingQueue`（561 行）与其余搬移方法经归一化逐行比对与原文一致，
+  仅替换状态归属（`x = y` → `state.x = y`）与回调注入（`processPendingQueue()` → `startQueueProcessing()`）；
+  对外属性与函数签名全部保留，`DanmuDownloadScreen`、Home 页与记录页调用点零改动。
+- 新增 `DownloadNetworkSupportTest`（5 项）：补协议、去尾斜杠、token 追加与去重、空值与空 token。
+- 验证：`./gradlew :app:compileDebugKotlin`、`:app:checkRefactorGuardrails`、`:app:checkNodeRuntimeScripts`、
+  `:app:testDebugUnitTest`（234 suite、1,168 项、0 失败，含新增 5 项）、
+  `python3 scripts/refactoring/check_architecture.py`、`test_guardrails.py`、`git diff --check` 全部通过。
+- `HomeViewModel.kt` 从 1,578 行降至 501 行，拆出 `HomeCoreInstallController`（456）、
+  `HomeCacheRefreshController`（229）、`HomeAppUpdateController`（229）、`HomeCoreUpdateCheckController`（209）、
+  `HomeCoreUpdatePromptController`（198）、`HomeRuntimeQuickActionsController`（148）、`HomeCacheClearController`（109）、
+  `HomePendingProxyAction`（16）与两个纯函数支撑（`HomeCacheFileEventPolicy`、`HomeDisplayFormatters`）；
+  新增对应 JVM 单测 5 项。原有 106 个函数、174 个属性名保留，89 条字面量双向零差异。
+- `SettingsViewModel.kt` 从 1,608 行降至 602 行，按域拆出 9 个控制器（服务控制、工作目录、备份/恢复、
+  外观、应用更新、GitHub 账号、Root 自启、控制中心磁贴、电视同步），对外 API 名单零差异、
+  213 条字面量零差异、13 个界面调用点零改动。
+- 统一收口：234 suite、1,168 项、0 失败；Node 216 项通过；架构边界与护栏自测通过；
+  三个 ViewModel 的字面量多重集独立比对通过（差异仅为状态归属前缀与私有符号改名）。
 
 ## 决策记录
 
