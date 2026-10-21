@@ -3,6 +3,8 @@ package com.example.danmuapiapp.ui.screen.download
 import com.example.danmuapiapp.domain.model.DanmuDownloadTask
 import com.example.danmuapiapp.domain.model.DownloadQueueStatus
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
+import com.example.danmuapiapp.domain.model.canonicalSourceKey
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
 import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
@@ -212,34 +214,6 @@ internal fun normalizeEpisodeTitleForMatch(raw: String): String {
         .replace(Regex("[\\s\\p{Punct}　【】（）()\\[\\]「」]"), "")
         .lowercase()
         .trim()
-}
-
-internal fun extractSourceFromAnimeTitle(raw: String): String {
-    val matched = Regex("from\\s+(.+?)\\s*$", RegexOption.IGNORE_CASE).find(raw)
-    return matched?.groupValues?.getOrNull(1)
-        ?.trim()
-        ?.trim('【', '】', '[', ']')
-        .orEmpty()
-}
-
-internal fun canonicalSourceKey(raw: String): String {
-    val key = raw.trim()
-        .replace(Regex("^from\\s+", RegexOption.IGNORE_CASE), "")
-        .trim()
-        .lowercase()
-    if (key.isBlank()) return "unknown"
-    return when (key) {
-        "qq", "tencent" -> "tencent"
-        "bilibili", "bilibili1", "bili", "b23" -> "bilibili"
-        "iqiyi", "qiyi" -> "iqiyi"
-        "imgo", "mango", "mgtv", "hunantv" -> "imgo"
-        "douyin", "xigua" -> "xigua"
-        "dandanplay", "ddplay", "dandan" -> "dandan"
-        "baha", "bahamut" -> "bahamut"
-        "360kan", "360" -> "360"
-        "ani", "animeko" -> "animeko"
-        else -> key
-    }
 }
 
 internal fun extractAnimeKeywordForSearch(rawAnimeTitle: String): String {

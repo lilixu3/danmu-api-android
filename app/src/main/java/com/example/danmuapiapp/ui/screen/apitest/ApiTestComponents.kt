@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.danmuapiapp.ui.common.formatByteSize
 import java.util.Locale
 
 // Geometry follows the Flutter tool pages; colors follow the Android app theme.
@@ -124,10 +125,4 @@ internal fun apiTime(seconds: Double): String {
     val value = seconds.toLong().coerceAtLeast(0)
     return if (value >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
     else String.format(Locale.ROOT, "%02d:%02d", value / 60, value % 60)
-}
-
-internal fun apiBytes(bytes: Int): String = when {
-    bytes >= 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
-    bytes >= 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-    else -> "$bytes B"
 }

@@ -239,7 +239,6 @@ internal fun UpdatePromptDialog(
         }
     )
 }
-
 @Composable
 internal fun NoCoreDialog(
     currentVariant: ApiVariant,
@@ -581,7 +580,6 @@ internal fun coreOperationStatus(
         else -> null
     }
 }
-
 internal fun statusShortLabel(status: ServiceStatus): String {
     return when (status) {
         ServiceStatus.Running -> "运行"
@@ -644,18 +642,5 @@ internal tailrec fun Context.findActivity(): Activity? {
         is Activity -> this
         is ContextWrapper -> baseContext.findActivity()
         else -> null
-    }
-}
-
-internal fun formatBytes(v: Long): String {
-    if (v <= 0) return "未知"
-    val kb = 1024.0
-    val mb = kb * 1024
-    val gb = mb * 1024
-    return when {
-        v >= gb -> String.format(Locale.getDefault(), "%.2fGB", v / gb)
-        v >= mb -> String.format(Locale.getDefault(), "%.2fMB", v / mb)
-        v >= kb -> String.format(Locale.getDefault(), "%.1fKB", v / kb)
-        else -> "${v}B"
     }
 }

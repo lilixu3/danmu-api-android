@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
 import com.example.danmuapiapp.domain.model.LocalDanmuParseConfidence
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchItem
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchStatus
 import com.example.danmuapiapp.domain.model.LocalDanmuType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

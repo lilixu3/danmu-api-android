@@ -170,6 +170,7 @@ import com.example.danmuapiapp.ui.component.GradientButton
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.component.StatusIndicator
 import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.ui.screen.download.DanmuDownloadViewModel
@@ -1301,7 +1302,7 @@ fun HomeScreen(
                     Text("文件：${apk.displayName}")
                     Text("位置：${apk.displayPath}", style = MaterialTheme.typography.bodySmall)
                     Text(
-                        "大小：${formatBytes(apk.sizeBytes)}",
+                        "大小：${if (apk.sizeBytes > 0L) formatByteSize(apk.sizeBytes) else "未知"}",
                         style = MaterialTheme.typography.bodySmall
                     )
                     AppGlassButton(onClick = {

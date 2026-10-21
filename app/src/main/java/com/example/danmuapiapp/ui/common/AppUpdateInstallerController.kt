@@ -69,12 +69,12 @@ internal class AppUpdateInstallerController(
                     uiState = if (total <= 0L) {
                         uiState.copy(
                             downloadPercent = -1,
-                            downloadDetail = "已下载 ${formatBytesText(soFar)}"
+                            downloadDetail = "已下载 ${formatByteSize(soFar)}"
                         )
                     } else {
                         uiState.copy(
                             downloadPercent = ((soFar * 100f) / total).toInt().coerceIn(0, 100),
-                            downloadDetail = "${formatBytesText(soFar)} / ${formatBytesText(total)}"
+                            downloadDetail = "${formatByteSize(soFar)} / ${formatByteSize(total)}"
                         )
                     }
                 }

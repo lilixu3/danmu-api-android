@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.danmuapiapp.ui.common.formatByteSize
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,7 +102,7 @@ internal fun ApiDebugPane(viewModel: ApiTestViewModel, base: String, onCopy: (St
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     ApiTag("HTTP ${response.responseCode}", if (response.responseCode in 200..299) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    ApiHint("${response.responseDurationMs}ms · ${apiBytes(response.bodySizeBytes)}")
+                    ApiHint("${response.responseDurationMs}ms · ${formatByteSize(response.bodySizeBytes)}")
                 }
                 SelectionContainer {
                     Text(if (showFull) response.fullText.take(100_000) else response.previewText,

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
+
 data class AnimeSearchResultPresentation(
     val title: String,
     val source: String,

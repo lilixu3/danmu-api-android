@@ -26,7 +26,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.tools.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -269,12 +271,12 @@ import java.util.Locale
                     ToolIcon(Icons.Outlined.Refresh, "刷新未下载剧集", { vm.refreshSeries(group) }, busy = vm.refreshingSeriesKey == group.key)
                     ToolIcon(Icons.Outlined.DeleteOutline, "删除整部记录", { deleting = group.records }, enabled = !vm.isDownloading, danger = true)
                 }
-                ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${downloadBytes(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
+                ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${formatByteSize(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
                 if (group.key in expanded) group.records.forEach { record ->
                     val isImported = record.id in importer.importedKeys
                     ToolListRow("第${record.episodeNo}集", record.danmuCount?.let { "$it 条" } ?: record.statusEnum().label,
                         record.fileName.ifBlank { record.episodeTitle },
-                        "${downloadTime(record.createdAt)} · ${downloadBytes(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",
+                        "${downloadTime(record.createdAt)} · ${formatByteSize(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",
                         actions = {
                             ToolIcon(Icons.Outlined.Visibility, "预览", { vm.openRecordPreview(record) })
                             ToolIcon(if (isImported) Icons.Outlined.TaskAlt else Icons.Outlined.DownloadForOffline, "导入本地弹幕",
@@ -300,5 +302,4 @@ private fun Context.downloadActivity(): ComponentActivity? = when (this) {
     is ContextWrapper -> baseContext.downloadActivity()
     else -> null
 }
-internal fun downloadBytes(bytes: Long): String = if (bytes >= 1024 * 1024) String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0) else "${bytes / 1024} KB"
 internal fun downloadTime(time: Long): String = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))

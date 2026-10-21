@@ -1,6 +1,5 @@
-package com.example.danmuapiapp.data.repository
+package com.example.danmuapiapp.domain.model
 
-import com.example.danmuapiapp.domain.model.LocalDanmuType
 import java.text.Normalizer
 import java.util.Locale
 

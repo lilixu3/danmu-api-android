@@ -5,6 +5,8 @@ import com.example.danmuapiapp.data.repository.DownloadLocalImportPlanner
 import com.example.danmuapiapp.data.repository.LocalDanmuMetadataResolver
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
+import com.example.danmuapiapp.domain.model.canonicalSourceKey
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*

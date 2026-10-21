@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.File
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RootAutoStartModule
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 
 /**
  * Root 模式下的 frpc 进程：su + setsid 拉起，PID 文件判活。
@@ -162,7 +163,4 @@ object RootTunnel {
 
     private fun readPid(context: Context): Long =
         TunnelStore.readText(TunnelStore.rootPidFile(context), 64).trim().toLongOrNull() ?: 0L
-
-    private fun shellQuote(value: String): String =
-        "'" + value.replace("'", "'\\''") + "'"
 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.tools.*
 import java.util.Locale
 
@@ -40,7 +41,7 @@ import java.util.Locale
                     val counts = remember(preview, search) { preview.items.filter { search.isBlank() || it.text.contains(search, ignoreCase = true) }
                         .groupingBy { it.previewFilter() }.eachCount() }
                     Column(Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ToolHint("${preview.count} 条弹幕 · ${preview.displayFormatLabel} · ${downloadBytes(preview.bytes)}")
+                        ToolHint("${preview.count} 条弹幕 · ${preview.displayFormatLabel} · ${formatByteSize(preview.bytes)}")
                         if (preview.truncated) ToolHint("文件较大，展示前 ${preview.items.size} 条；总数 ${preview.count} 条")
                         preview.parseError?.let { ToolError(it) }
                         ToolInput(search, { search = it }, "搜索弹幕内容", icon = Icons.Outlined.Search)

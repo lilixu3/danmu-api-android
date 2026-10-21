@@ -535,17 +535,6 @@ fun buildPublicApiUrl(base: String, token: String): String {
     return if (normalizedToken.isEmpty()) value else "$value/$normalizedToken"
 }
 
-/** 版本比较：a > b 返回正数，相等 0。 */
-fun compareVersions(a: String, b: String): Int {
-    val left = a.trim().removePrefix("v").split('.').map { it.toIntOrNull() ?: 0 }
-    val right = b.trim().removePrefix("v").split('.').map { it.toIntOrNull() ?: 0 }
-    for (index in 0 until maxOf(left.size, right.size)) {
-        val diff = left.getOrElse(index) { 0 } - right.getOrElse(index) { 0 }
-        if (diff != 0) return diff
-    }
-    return 0
-}
-
 /** 从 frpc 日志尾部判断链路状态（后出现的日志优先）。 */
 fun parseFrpcLogLinkState(logTail: String): TunnelLinkState {
     var state = TunnelLinkState.Unknown

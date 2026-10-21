@@ -18,7 +18,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.remoteFocusHighlight
-import java.util.Locale
+import com.example.danmuapiapp.ui.common.formatByteSize
 
 @Composable
 internal fun CompatSectionHeading(title: String, subtitle: String, action: String, onAction: () -> Unit) {
@@ -275,11 +275,7 @@ internal fun compatCoreVersion(info: CoreInfo?, loading: Boolean): String = when
 }
 
 private fun compatByteProgress(progress: CoreDownloadProgress): String {
-    fun bytes(value: Long): String = when {
-        value >= 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", value / (1024.0 * 1024))
-        value >= 1024 -> String.format(Locale.ROOT, "%.1f KB", value / 1024.0)
-        else -> "${value.coerceAtLeast(0)} B"
-    }
     if (progress.downloadedBytes <= 0 && progress.totalBytes <= 0) return ""
-    return bytes(progress.downloadedBytes) + if (progress.totalBytes > 0) " / ${bytes(progress.totalBytes)}" else ""
+    return formatByteSize(progress.downloadedBytes) +
+        if (progress.totalBytes > 0) " / ${formatByteSize(progress.totalBytes)}" else ""
 }

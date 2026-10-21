@@ -16,6 +16,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.tools.*
 
 @Composable internal fun LocalDanmuDirectoryBrowserPanel(state: LocalDanmuBrowserState, onBack: () -> Unit,
@@ -74,7 +75,7 @@ import com.example.danmuapiapp.ui.screen.tools.*
                         if (row.entry.isDirectory) onOpenDirectory(row.entry.path) else onToggleSelection(row.entry.path)
                     }.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(row.entry.name, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        if (!row.entry.isDirectory) ToolHint("${formatLocalDanmuSize(row.entry.sizeBytes)}${row.importedLabel?.let { " · 已导入 $it" }.orEmpty()}", maxLines = 1)
+                        if (!row.entry.isDirectory) ToolHint("${formatByteSize(row.entry.sizeBytes)}${row.importedLabel?.let { " · 已导入 $it" }.orEmpty()}", maxLines = 1)
                     }
                     if (row.entry.isDirectory) ToolIcon(Icons.Outlined.ChevronRight, "打开目录", { onOpenDirectory(row.entry.path) })
                 }

@@ -32,6 +32,7 @@ import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
 import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
 import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.download.DanmuPreviewDialog
 import com.example.danmuapiapp.ui.screen.download.buildDownloadRecordAnimeGroups
 import com.example.danmuapiapp.ui.screen.tools.*
@@ -175,7 +176,7 @@ fun LocalDanmuScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             ToolHeader("本地弹幕", onBack,
-                "${state.totalEpisodeFiles} 个文件 · ${state.totalDanmuCount} 条弹幕 · ${formatLocalDanmuSize(state.totalSizeBytes)}") {
+                "${state.totalEpisodeFiles} 个文件 · ${state.totalDanmuCount} 条弹幕 · ${formatByteSize(state.totalSizeBytes)}") {
                 ToolIcon(Icons.Outlined.DownloadForOffline, "从下载记录导入", { requireWrite { chooseDownloads = true } }, size = 36)
                 ToolIcon(Icons.Outlined.UploadFile, "上传弹幕文件", { requireWrite(openImportFlow) }, size = 36)
                 ToolIcon(Icons.Outlined.Refresh, "刷新", viewModel::refreshNow, busy = state.isLoading, size = 36)
@@ -233,7 +234,7 @@ fun LocalDanmuScreen(
                         if (expanded) group.episodes.forEach { episode ->
                             ToolListRow(if (episode.type == "movie") "剧场版" else "第${episode.episode ?: "-"}集", "${episode.count} 条",
                                 episode.filename.ifBlank { episode.resourceKey },
-                                "${episode.format.uppercase()} · ${formatLocalDanmuSize(episode.sizeBytes)} · ${if (episode.status == "ready") "可用" else episode.status}",
+                                "${episode.format.uppercase()} · ${formatByteSize(episode.sizeBytes)} · ${if (episode.status == "ready") "可用" else episode.status}",
                                 { viewModel.loadDetail(episode.resourceKey) }, actions = {
                                     ToolIcon(Icons.Outlined.Visibility, "预览", { viewModel.loadDetail(episode.resourceKey) })
                                     ToolIcon(Icons.Outlined.Edit, "编辑这一集", { requireWrite { viewModel.startEdit(episode) } })
@@ -260,7 +261,7 @@ private fun LocalDanmuDialogHost(state: LocalDanmuUiState, showAdminPrompt: Bool
                     listOf(resource.title, resource.typeLabel, resource.year.toString(), "第${resource.season}季", resource.episodeLabel)
                         .forEach { label -> ToolChip(label, onClick = {}) }
                 }
-                ToolHint("弹幕 ${resource.count} 条 · 格式 ${resource.format.ifBlank { "未知" }} · ${formatLocalDanmuSize(resource.sizeBytes)}")
+                ToolHint("弹幕 ${resource.count} 条 · 格式 ${resource.format.ifBlank { "未知" }} · ${formatByteSize(resource.sizeBytes)}")
                 if (state.previewState.loadingRecordId != null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 state.previewState.error?.let { ToolError(it) }
                 state.previewState.preview?.let { preview ->

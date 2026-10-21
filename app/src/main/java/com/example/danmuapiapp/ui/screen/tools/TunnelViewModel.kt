@@ -8,7 +8,7 @@ import com.example.danmuapiapp.data.tunnel.TunnelRepository
 import com.example.danmuapiapp.data.tunnel.TunnelSettings
 import com.example.danmuapiapp.data.tunnel.TunnelUiState
 import com.example.danmuapiapp.data.tunnel.FrpcRelease
-import com.example.danmuapiapp.data.tunnel.compareVersions
+import com.example.danmuapiapp.domain.model.compareVersions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

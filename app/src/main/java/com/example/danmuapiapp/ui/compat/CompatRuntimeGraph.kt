@@ -56,8 +56,8 @@ object CompatRuntimeGraph {
         val coreRepository = CoreRepositoryImpl(
             context = context,
             httpClient = httpClient,
-            githubRemoteService = githubRemoteService,
             githubProxyService = githubProxyService,
+            githubRemoteService = githubRemoteService,
             settingsRepository = settingsRepository,
             runtimeDependencyPackManager = runtimeDependencyPackManager,
             githubPullRequestService = githubPullRequestService,
