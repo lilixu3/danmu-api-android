@@ -385,6 +385,8 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | 原生运行时重建 | `env -u LD_LIBRARY_PATH ./gradlew :app:prepareNativeRuntime :app:verifyNativeRuntimeInputs` | 通过 | 三个 ABI 的 libc++/libc++abi/libunwind 与 JNI 桥重建完成，耗时 5m20s |
 | 2026-10-21 | 原生重建后复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest`（无排除项） | 通过 | 234 suite、1,168 项、0 失败；护栏通过 |
 | 2026-10-21 | 原生重建后复核 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
+| 2026-10-21 | WS7 打包实跑 | `env -u LD_LIBRARY_PATH ./gradlew :app:assembleDebug` | 通过 | 产出 arm64-v8a / armeabi-v7a / x86_64 三个 debug APK（约 70MB）；`verifyBundledNodeModules`、`verifyNativeRuntimeInputs`、`verifyFrpcDebugKernels`、`verifyPackagedNodeModulesDebug` 全部执行通过 |
+| 2026-10-21 | WS7 打包实跑 | 首次 `packageDebug` 失败后重跑 | 通过 | 首跑 `IncrementalSplitterRunnable` 失败为原生运行时重建后的增量状态残留，单独重跑即恢复，非代码问题 |
 | 2026-10-21 | WS7 迁移保真 | 三个预编译脚本插件逐行多重集比对 | 通过 | 1,319 行迁移内容与原 `app/build.gradle.kts` 完全一致（缺失 0、多余 0） |
 | 2026-10-21 | WS7 任务图 | `./gradlew :app:preBuild :app:assembleDebug :app:releaseCheck :app:checkRefactorGuardrails --dry-run` | 通过 | 迁移前后任务集合逐行一致（132 项，含 finalizer 与 `mustRunAfter`） |
 | 2026-10-21 | WS7 行为校验 | 7 项开关/门禁 smoke（发布防呆告警与静默、缺依赖测试开关 Debug/Release、ABI 校验、混淆开关校验、ABI split） | 通过 | 与迁移前语义一致 |
