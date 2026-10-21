@@ -49,7 +49,7 @@
 | WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 已完成 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
 | WS6 | 大型 ViewModel 与 Compose 文件拆分 | 已完成 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
 | WS7 | Gradle `build-logic` 拆分 | 已完成 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
-| WS8 | Gradle 模块化 | 进行中 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
+| WS8 | Gradle 模块化 | 已完成 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
 | WS9 | 文档、测试与持续校验收口 | 未开始 | 架构文档与代码一致；边界和资产测试进入常规检查 |
 
 ## 防丢文件与防硬编码规则
@@ -217,7 +217,17 @@ WS6 起点（`0bcdc40` 之后）：
 - [x] `:core:common` 迁入跨功能共享工具（`data/util` 中 11 个无 app 依赖文件）
 - [x] `:ui:designsystem` 迁入主题、颜色、排版与共用组件（27 个文件，含 liquid 子包）
 - [x] 功能模块边界评审（模块依赖白名单 + 源码导入规则写入护栏；`AppDialog` 阻塞点已定位）
-- [ ] 首批功能模块提取（建议先做 `:feature:download` 或 `:feature:localdanmu`，需单独评估）
+- [x] 首批功能模块提取（试点 `:feature:records`：3 个文件 + 测试迁入，Hilt 聚合跨模块生效）
+- [x] 设计系统收口：`AppDialog`、`Theme` 与 5 个对话框迁入（依赖 `DeviceCompatMode` 上移 `:core:common`）
+- [ ] 后续功能模块（`:feature:download`、`:feature:localdanmu` 等）按需提取
+
+第二轮补充（设计系统收口 + 功能模块试点）：
+
+- `DeviceCompatMode` 按用户决策以保留包名迁入 `:core:common`，`:core:common` 规则放宽为允许平台导入（仍禁 app 包、仍只依赖 `:core:model`），护栏自测 9 → 10 项。
+- `domain.repository` 两个纯接口（353 行、零 Android 依赖）以保留包名迁入 `:core:model`，为功能模块提供领域抽象；模块补 `api(coroutines-core)`。
+- `:ui:designsystem` 第二批迁入 `AppDialog`、`Theme` 与 5 个对话框共 7 个文件（1,723 行）；`Theme → AppDialogHost → AppDialog` 链路打通。仍留原地 4 个：`ConnectivityStatus`（依赖 `data.service`）、`GithubQuotaNoticeHost`（`data.service`）、`CorePullRequestUpdateChoiceDialog`（`ui.common`）、`GlassBottomNavigationBar`（`ui.navigation`）。
+- 新增 `:feature:records` 试点模块：3 个文件 + 1 个测试（778 行）迁入，包名不变、app 侧 import 零改动、无可见性放宽；Hilt 聚合任务已从模块 AAR 取到 ViewModel 模块。护栏新增该模块规则。
+- 已知观察：records 模块的包仍位于 `com.example.danmuapiapp.ui.screen.records`（刻意保持包名以换取 app 零改动），模块「拥有」的包边界目前靠护栏约定而非结构；`aapt2` 在资源合并时打印过 `No package ID 7f found` 提示，构建成功，留待 WS9 复核。
 
 模块化结果与遗留：
 
