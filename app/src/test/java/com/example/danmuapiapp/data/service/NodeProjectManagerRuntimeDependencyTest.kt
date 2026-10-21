@@ -147,7 +147,8 @@ class NodeProjectManagerRuntimeDependencyTest {
 
     @Test
     fun `构建排除清单不能出现在内置依赖期望清单中`() {
-        val buildScript = resolveProjectFile("app/build.gradle.kts")
+        // WS7 起该排除清单由 build-logic 的 danmu.runtime-assets 插件持有，仍是唯一来源。
+        val buildScript = resolveProjectFile("build-logic/src/main/kotlin/danmu.runtime-assets.gradle.kts")
         val text = buildScript.readText(Charsets.UTF_8)
         val excluded = Regex(
             """androidRuntimeExcludedNodeModules\s*=\s*setOf\(([\s\S]*?)\)"""
@@ -160,7 +161,7 @@ class NodeProjectManagerRuntimeDependencyTest {
             .orEmpty()
         assertTrue("未从 ${buildScript.path} 解析到 androidRuntimeExcludedNodeModules", excluded.isNotEmpty())
         assertEquals(
-            "NodeProjectManager 的 Android 排除清单与 build.gradle.kts 不一致",
+            "NodeProjectManager 的 Android 排除清单与 danmu.runtime-assets 插件不一致",
             excluded,
             NodeProjectManager.bundledRuntimeDependencyExclusions()
         )

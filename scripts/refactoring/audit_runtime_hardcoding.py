@@ -14,6 +14,8 @@ from runtime_assets import RuntimeAssetError, validate_manifest
 SCAN_ROOTS = (
     Path("app/src/main/java"),
     Path("app/build.gradle.kts"),
+    # WS7 起 Node 资产与打包校验逻辑迁到 build-logic 预编译脚本插件，审计必须跟随。
+    Path("build-logic/src/main/kotlin"),
     Path("scripts"),
 )
 IGNORED_PREFIXES = (
