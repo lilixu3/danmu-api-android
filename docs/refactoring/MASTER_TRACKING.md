@@ -9,7 +9,7 @@
 - 重构前 checkpoint：`bade371`（`checkpoint: 保存 test 分支重构前本地改动`）
 - checkpoint 已推送到：`origin/test`
 - 起始日期：2026-10-20
-- 当前阶段：`WS6 大型 ViewModel 与 Compose 文件拆分`（WS5 已完成，WS6 待启动）
+- 当前阶段：`WS7 Gradle build-logic 拆分`（WS6 已完成，WS7 待启动）
 - Kotlin 主代码：约 104,071 行
 - Kotlin 测试：约 16,228 行、197 个测试文件
 - 手写 Node 入口代码：约 5,975 行
@@ -47,7 +47,7 @@
 | WS3 | `android-server.js` 模块化 | 已完成 | 入口只负责组合；Worker、配置、日志、安全、路由、弹幕缓存、代理分文件 |
 | WS4 | `CoreRepositoryImpl` 拆分 | 已完成 | Repository 仅编排；远端、安装、依赖修复、恢复、监听各自独立 |
 | WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 已完成 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
-| WS6 | 大型 ViewModel 与 Compose 文件拆分 | 未开始 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
+| WS6 | 大型 ViewModel 与 Compose 文件拆分 | 已完成 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
 | WS7 | Gradle `build-logic` 拆分 | 未开始 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
 | WS8 | Gradle 模块化 | 未开始 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
 | WS9 | 文档、测试与持续校验收口 | 未开始 | 架构文档与代码一致；边界和资产测试进入常规检查 |
@@ -197,8 +197,8 @@ WS6 起点（`0bcdc40` 之后）：
 - [x] Settings ViewModel
 - [x] Home Screen
 - [x] Config Editors
-- [ ] Startup Permission Gate
-- [ ] Pull Request Lab
+- [x] Startup Permission Gate
+- [x] Pull Request Lab
 
 ### WS7 Gradle
 
@@ -358,6 +358,11 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS6 第二轮收口 | 三个 Compose lane 字面量多重集独立比对 | 通过 | Home Screen 188=188、ConfigDialogEditors 150=150、ConfigVisualEditors 375=375 |
 | 2026-10-21 | WS6 拆分粒度收敛 | 合并单次调用的 16 行辅助文件回宿主文件 | 通过 | `HomeCacheFileEventPolicy`→`HomeCacheRefreshController`、`HomeDisplayFormatters`→`HomeViewModel`，测试改为指向宿主文件内的同文件函数 |
 | 2026-10-21 | WS6 第二轮收口 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
+| 2026-10-21 | WS6 Startup Gate | 隔离 worktree 编译 + 单测 + 护栏 | 通过 | 1,168 项 0 失败；字面量 125=125；仅 17 处 private→internal |
+| 2026-10-21 | WS6 PR Lab | 隔离 worktree + 共享工作树编译/单测 | 通过 | 234 suite、1,168 项 0 失败；字面量 185=185 |
+| 2026-10-21 | WS6 第三轮收口 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败；护栏通过 |
+| 2026-10-21 | WS6 第三轮收口 | 两个 lane 字面量多重集独立比对 | 通过 | Startup Gate 125=125、PR Lab 185=185，双向零差异 |
+| 2026-10-21 | WS6 第三轮收口 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`git diff --check` | 通过 | 216 项 0 失败、边界无违规、无空白错误 |
 
 ## 进度日志
 
@@ -554,6 +559,16 @@ WS6 起点（`0bcdc40` 之后）：
   （`HomeCacheFileEventPolicy` 并入 `HomeCacheRefreshController`、`HomeDisplayFormatters` 并入 `HomeViewModel`），
   测试改为直接引用宿主文件内的同文件函数，保持可测性。
 - 第二轮收口：234 suite、1,168 项、0 失败；Node 216 项通过；护栏、架构边界与 `git diff --check` 全部通过。
+
+- `StartupPermissionGate.kt` 从 1,626 行降至 593 行，拆出 `StartupPermissionState`（122，权限状态与动作判定）、
+  `StartupGateCards`（384，六个共用卡片）、`StartupGateStepSections`（561，四步内容）；正文逐字节一致、
+  字面量 125=125，仅 17 处跨文件声明 `private` → `internal`。
+- `PullRequestLabScreen.kt` 从 1,549 行降至 267 行，拆出队列、详情、卡片、构建、状态、头部与共享文案等 8 个文件
+  （62–340 行）；`PullRequestLabViewModel.kt` 从 740 行降至 487 行，抽出 `PullRequestLabBuildController`（339，
+  组合构建、原子应用与启动恢复流水线）。页面字面量 147=147、ViewModel 38=38，对外 API 与调用点零改动。
+- 按粒度约束执行：`SectionTitle`、`SelectedPullRequestRow`、`StatusBadge`、`coreBadgeText`、`normalizeStartupVariant`
+  等单调用点小件保留在宿主文件内，未新建文件、未引入抽象层。
+- 第三轮收口：234 suite、1,168 项、0 失败；Node 216 项通过；护栏、架构边界与 `git diff --check` 通过。
 
 ## 决策记录
 
