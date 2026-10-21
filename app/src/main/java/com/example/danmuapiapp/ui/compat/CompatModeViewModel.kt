@@ -41,8 +41,8 @@ import com.example.danmuapiapp.domain.model.normalizeGithubBranch
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -287,7 +287,13 @@ class CompatModeViewModel(
         updateLogsRefresh()
         if (currentCompatPage == CompatPage.Config) managementController.refresh()
         graph.runtimeRepository.setAppForeground(true)
-        graph.appUpdateService.tryResumePendingInstall(activity)
+        when (val result = graph.appUpdateService.tryResumePendingInstall(activity)) {
+            AppUpdateService.ResumeInstallResult.Launched,
+            AppUpdateService.ResumeInstallResult.NoPendingInstall -> Unit
+            AppUpdateService.ResumeInstallResult.NeedUnknownSourcePermission ->
+                _events.tryEmit("请先允许安装未知应用，授权后返回将自动继续安装")
+            is AppUpdateService.ResumeInstallResult.Failed -> _events.tryEmit(result.message)
+        }
         refreshKeepAliveUi()
         graph.updateChecker.onAppResume()
     }
@@ -878,9 +884,9 @@ class CompatModeViewModel(
                 ) { soFar, total ->
                     _uiState.update { state ->
                         val detail = if (total > 0) {
-                            "${formatBytes(soFar)} / ${formatBytes(total)}"
+                            "${formatByteSize(soFar)} / ${formatByteSize(total)}"
                         } else {
-                            "已下载 ${formatBytes(soFar)}"
+                            "已下载 ${formatByteSize(soFar)}"
                         }
                         state.copy(
                             appUpdate = state.appUpdate.copy(
@@ -1254,19 +1260,6 @@ class CompatModeViewModel(
 
     private fun resolveSyncHost(state: RuntimeState): String {
         return PushLanScanner.resolveSelfLanIpv4(state.lanUrl).orEmpty()
-    }
-
-    private fun formatBytes(bytes: Long): String {
-        if (bytes <= 0L) return "0 B"
-        val kb = 1024.0
-        val mb = kb * 1024.0
-        val gb = mb * 1024.0
-        return when {
-            bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
-            bytes >= mb -> String.format(Locale.getDefault(), "%.2f MB", bytes / mb)
-            bytes >= kb -> String.format(Locale.getDefault(), "%.2f KB", bytes / kb)
-            else -> "$bytes B"
-        }
     }
 
     private fun emitEvent(message: String) {

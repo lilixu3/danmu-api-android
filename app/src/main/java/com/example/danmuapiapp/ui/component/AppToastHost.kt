@@ -31,7 +31,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +56,19 @@ import kotlinx.coroutines.delay
 private val ToastShape = RoundedCornerShape(16.dp)
 private val DefaultToastClearance = 88.dp
 
+internal object AppToastWindowRegistry {
+    var platformDialogCount by mutableIntStateOf(0)
+        private set
+
+    fun attachPlatformDialog() {
+        platformDialogCount += 1
+    }
+
+    fun detachPlatformDialog() {
+        platformDialogCount = (platformDialogCount - 1).coerceAtLeast(0)
+    }
+}
+
 /**
  * Render-only host. Message ownership lives in [AppToastController], so every window can host the
  * same toast without creating another queue.
@@ -61,8 +78,12 @@ fun AppToastHost(
     modifier: Modifier = Modifier,
     controller: AppToastController = AppToast.controller,
     bottomPadding: Dp = DefaultToastClearance,
-    applyWindowInsets: Boolean = true
+    applyWindowInsets: Boolean = true,
+    renderInPlatformDialogWindow: Boolean = false
 ) {
+    if (!renderInPlatformDialogWindow && AppToastWindowRegistry.platformDialogCount > 0) {
+        return
+    }
     val message = controller.currentMessage
     val accessibilityManager = LocalAccessibilityManager.current
     val timeoutMillis = message?.let { current ->

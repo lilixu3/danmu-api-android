@@ -131,7 +131,13 @@ class MainActivity : ComponentActivity() {
         updateChecker.onAppResume()
         appForegroundUpdateChecker.onAppResume()
         appForegroundAnnouncementChecker.onAppResume()
-        appUpdateService.tryResumePendingInstall(this)
+        when (val result = appUpdateService.tryResumePendingInstall(this)) {
+            AppUpdateService.ResumeInstallResult.Launched,
+            AppUpdateService.ResumeInstallResult.NoPendingInstall -> Unit
+            AppUpdateService.ResumeInstallResult.NeedUnknownSourcePermission ->
+                AppToast.warning("请先允许安装未知应用，授权后返回将自动继续安装")
+            is AppUpdateService.ResumeInstallResult.Failed -> AppToast.error(result.message)
+        }
     }
 
     override fun onStop() {

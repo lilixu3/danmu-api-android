@@ -487,6 +487,11 @@ private fun AppDialogFrame(
     val parentShapes = MaterialTheme.shapes
     val dialogColors = dialogColorScheme(parentColors, LocalAppDarkTheme.current)
 
+    DisposableEffect(Unit) {
+        AppToastWindowRegistry.attachPlatformDialog()
+        onDispose { AppToastWindowRegistry.detachPlatformDialog() }
+    }
+
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
@@ -545,7 +550,8 @@ private fun AppDialogFrame(
                 )
                 AppToastHost(
                     bottomPadding = 24.dp,
-                    applyWindowInsets = false
+                    applyWindowInsets = false,
+                    renderInPlatformDialogWindow = true
                 )
             }
         }
