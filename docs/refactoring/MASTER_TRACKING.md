@@ -9,7 +9,7 @@
 - 重构前 checkpoint：`bade371`（`checkpoint: 保存 test 分支重构前本地改动`）
 - checkpoint 已推送到：`origin/test`
 - 起始日期：2026-10-20
-- 当前阶段：`WS7 Gradle build-logic 拆分`（WS6 已完成，WS7 待启动）
+- 当前阶段：`WS8 Gradle 模块化`（WS6、WS7 已完成，WS8 待启动）
 - Kotlin 主代码：约 104,071 行
 - Kotlin 测试：约 16,228 行、197 个测试文件
 - 手写 Node 入口代码：约 5,975 行
@@ -48,7 +48,7 @@
 | WS4 | `CoreRepositoryImpl` 拆分 | 已完成 | Repository 仅编排；远端、安装、依赖修复、恢复、监听各自独立 |
 | WS5 | `RuntimeRepositoryImpl` 与 Root 控制拆分 | 已完成 | 生命周期、协调、日志、热重载、网络、Root 脚本/进程/同步分离 |
 | WS6 | 大型 ViewModel 与 Compose 文件拆分 | 已完成 | ViewModel 只组合控制器；页面入口只编排；无新增超大文件 |
-| WS7 | Gradle `build-logic` 拆分 | 未开始 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
+| WS7 | Gradle `build-logic` 拆分 | 已完成 | `app/build.gradle.kts` 只保留 Android 配置、依赖和插件接入 |
 | WS8 | Gradle 模块化 | 未开始 | 纯模型、设计系统和已验证的功能边界成为独立模块 |
 | WS9 | 文档、测试与持续校验收口 | 未开始 | 架构文档与代码一致；边界和资产测试进入常规检查 |
 
@@ -202,11 +202,11 @@ WS6 起点（`0bcdc40` 之后）：
 
 ### WS7 Gradle
 
-- [ ] 签名与版本配置
-- [ ] Node 依赖资产任务
-- [ ] 原生运行时任务
-- [ ] frp 校验任务
-- [ ] 打包与发布校验任务
+- [x] 签名与版本配置（解析集中到 `build-logic/src/main/kotlin/danmu/DanmuBuildProperties.kt`，`android {}` 只读取结果）
+- [x] Node 依赖资产任务（`danmu.runtime-assets` 预编译脚本插件）
+- [x] 原生运行时任务（`danmu.native-runtime` 预编译脚本插件）
+- [x] frp 校验任务（同上）
+- [x] 打包与发布校验任务（`danmu.runtime-assets` 的 APK 运行时校验 + `danmu.quality-gates` 的 `releaseCheck`）
 
 ### WS8 Gradle 模块
 
@@ -218,6 +218,21 @@ WS6 起点（`0bcdc40` 之后）：
 
 ### WS9 收口
 
+独立审计（`00e431a`）登记的收口项：
+
+- 粒度复核：仍有 8 个「<100 行 + 单一宿主」文件待逐项判定是否并回宿主
+  （`SettingsTvSyncController` 53、`SettingsQuickSettingsTileController` 58、`SettingsGithubAccountController` 90、
+  `SettingsRootAutoStartController` 90、`HomeAnnouncementOverlays` 74、`CoreRootProbe` 67、
+  `RuntimeWorkDirPreferences` 60、`CoreDirWatcher` 96）。
+- 重复实现：`CoreDirWatcher` 与 `RuntimeHotReloadController` 各有一份 `FileObserver` 包装（mask 不同）；
+  Home/Settings 的应用更新控制器各有 3 个完全相同的转发方法。均为重构前既有，登记待合并。
+- 既有死代码：`ui/screen/config/editor/` 下 8 个 composable 无任何调用
+  （`KeywordListEditor`、`IpBlacklistEditor`、`CompactMergeSourcePairsEditor`、`CompactMatchPlatformRulesEditor`、
+  `SourceConcurrencyBySourceEditor`、`CompactTitleMappingTableEditor`、`MergeSourcePairsEditor`、`OrderedTokenEditor`）；
+  `RootRuntimeController.waitForPort` 同样未被调用。
+- 剩余超大文件登记（WS8/WS9 评估）：`ApiTestViewModel` 1,511、`CoreViewModel` 1,419、`CompatModeViewModel` 1,278、
+  `DanmuDownloadRepositoryImpl` 1,141、`GithubPullRequestService` 1,126、`NodeService` 1,064、`LocalDanmuViewModel` 1,059。
+- [ ] 处理上述粒度、重复实现与死代码项
 - [ ] 重写 `docs/architecture.md`
 - [ ] 更新 README 开发说明
 - [ ] 常规验证任务一次执行
@@ -363,6 +378,16 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS6 第三轮收口 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败；护栏通过 |
 | 2026-10-21 | WS6 第三轮收口 | 两个 lane 字面量多重集独立比对 | 通过 | Startup Gate 125=125、PR Lab 185=185，双向零差异 |
 | 2026-10-21 | WS6 第三轮收口 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`git diff --check` | 通过 | 216 项 0 失败、边界无违规、无空白错误 |
+| 2026-10-21 | 独立审计 | 护栏脚本 + Node 216 项 + `--offline` 编译 + 字面量/死代码/重复实现扫描 | 通过（含发现） | 发现 1 处文档行数漂移、8 个待判定小文件、2 处既有重复实现、8 个既有死 composable、7 个剩余大文件 |
+| 2026-10-21 | WS7 收口复核 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest -x prepareNativeRuntime -x verifyNativeRuntimeInputs` | 通过（排除环境阻塞） | 234 suite、1,168 项、0 失败；`prepareNativeRuntime` 因宿主 `cmake` 动态链接失败无法运行，非本次改动 |
+| 2026-10-21 | WS7 收口复核 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`git diff --check` | 通过 | 216 项 0 失败、边界无违规、无空白错误 |
+| 2026-10-21 | WS7 收口复核 | 任务图 `--dry-run` 迁移前后比对 + 7 项行为 smoke | 通过 | 132 项任务逐行一致；发布防呆、缺依赖开关、ABI/混淆校验行为不变 |
+| 2026-10-21 | WS7 迁移保真 | 三个预编译脚本插件逐行多重集比对 | 通过 | 1,319 行迁移内容与原 `app/build.gradle.kts` 完全一致（缺失 0、多余 0） |
+| 2026-10-21 | WS7 任务图 | `./gradlew :app:preBuild :app:assembleDebug :app:releaseCheck :app:checkRefactorGuardrails --dry-run` | 通过 | 迁移前后任务集合逐行一致（132 项，含 finalizer 与 `mustRunAfter`） |
+| 2026-10-21 | WS7 行为校验 | 7 项开关/门禁 smoke（发布防呆告警与静默、缺依赖测试开关 Debug/Release、ABI 校验、混淆开关校验、ABI split） | 通过 | 与迁移前语义一致 |
+| 2026-10-21 | WS7 收口 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin --rerun :app:testDebugUnitTest --rerun` | 通过 | 234 suite、1,168 项、0 失败；编译为 `--rerun` 强制重跑 |
+| 2026-10-21 | WS7 收口 | `node --test node-tests/*.test.cjs`、`check_architecture.py`、`audit_runtime_hardcoding.py`、`git diff --check` | 通过 | 216 项 0 失败；架构边界无违规；硬编码审计扫描根已含 `build-logic` |
+| 2026-10-21 | WS7 环境阻塞 | `:app:prepareNativeRuntime` | 阻塞 | 宿主 `cmake` 因用户 19:30 的 Termux 包升级损坏；任务体逐行未改动，直接执行 `scripts/build-native-deps.py` 同样失败 |
 
 ## 进度日志
 
@@ -539,7 +564,7 @@ WS6 起点（`0bcdc40` 之后）：
 - 验证：`./gradlew :app:compileDebugKotlin`、`:app:checkRefactorGuardrails`、`:app:checkNodeRuntimeScripts`、
   `:app:testDebugUnitTest`（234 suite、1,168 项、0 失败，含新增 5 项）、
   `python3 scripts/refactoring/check_architecture.py`、`test_guardrails.py`、`git diff --check` 全部通过。
-- `HomeViewModel.kt` 从 1,578 行降至 501 行，拆出 `HomeCoreInstallController`（456）、
+- `HomeViewModel.kt` 从 1,578 行降至 510 行，拆出 `HomeCoreInstallController`（456）、
   `HomeCacheRefreshController`（229）、`HomeAppUpdateController`（229）、`HomeCoreUpdateCheckController`（209）、
   `HomeCoreUpdatePromptController`（198）、`HomeRuntimeQuickActionsController`（148）、`HomeCacheClearController`（109）、
   `HomePendingProxyAction`（16）与两个纯函数支撑（`HomeCacheFileEventPolicy`、`HomeDisplayFormatters`）；
@@ -569,6 +594,34 @@ WS6 起点（`0bcdc40` 之后）：
 - 按粒度约束执行：`SectionTitle`、`SelectedPullRequestRow`、`StatusBadge`、`coreBadgeText`、`normalizeStartupVariant`
   等单调用点小件保留在宿主文件内，未新建文件、未引入抽象层。
 - 第三轮收口：234 suite、1,168 项、0 失败；Node 216 项通过；护栏、架构边界与 `git diff --check` 通过。
+
+### 2026-10-21 WS7 Gradle build-logic 拆分
+
+- 新增 `build-logic` 独立构建（`kotlin-dsl`，不依赖 AGP 或第三方库，因此 build-logic 类路径保持纯净），
+  根 `settings.gradle.kts` 用 `includeBuild("build-logic")` 接入。
+- `app/build.gradle.kts` 从 1,789 行降到 240 行，只保留插件接入、`android {}`、`kotlin {}` 与 `dependencies {}`；
+  其余按域剪切到 3 个预编译脚本插件：
+  `danmu.runtime-assets`（671 行：Node 依赖闭包读取/裁剪/刷新/校验、缺依赖测试开关、Node smoke 与 APK 运行时校验）、
+  `danmu.native-runtime`（747 行：原生运行时来源解析、下载与 SHA-256 校验、JNI 桥现编、ELF 16KB 页对齐门禁、frp 内核校验）、
+  `danmu.quality-gates`（96 行：重构护栏任务、发布防呆告警、`releaseCheck` 入口与 `preBuild` 门禁）。
+- 跨域共享的配置解析（版本、ABI、混淆开关、签名、`local.properties`、运行时目录与开关）集中到
+  `build-logic/src/main/kotlin/danmu/DanmuBuildProperties.kt`（184 行）；模块脚本与三个插件都只调用这里，
+  避免同一份清单在模块脚本和插件里各维护一份。
+- 迁移方式：按行区间原样剪切，只在装配点改写（`testMissingRuntimePackage`/`missingRuntimeTestAssetsDir` 收敛为单一来源、
+  签名改用 `DanmuSigning` 结果、`preBuild`/`preReleaseBuild` 门禁按域拆给各插件）。
+  逐行多重集比对：三个插件合计 1,319 行迁移内容与原文件完全一致（缺失 0、多余 0）。
+- 连带修正两处跨文件硬编码（迁移必然触及，不改会削弱护栏）：
+  `NodeProjectManagerRuntimeDependencyTest` 改为从 `danmu.runtime-assets` 插件读取 `androidRuntimeExcludedNodeModules`；
+  `scripts/refactoring/audit_runtime_hardcoding.py` 的扫描根加入 `build-logic/src/main/kotlin`。
+- 验证：任务图 `--dry-run` 与迁移前逐行一致（`preBuild`/`assembleDebug`/`releaseCheck`/`checkRefactorGuardrails` 共 132 项）；
+  `:app:compileDebugKotlin --rerun`、`:app:checkRefactorGuardrails`、`:app:testDebugUnitTest --rerun`（234 suite、1,168 项、0 失败）、
+  `:app:testAppOutboundBridge`、`node --test node-tests/*.test.cjs`（216 项）、`git diff --check` 全部通过。
+- 环境阻塞（与本工作流无关，需用户处理）：用户 Termux 在 2026-10-21 19:30–19:34 升级了
+  `libc++ 29→30` 与 `cmake 4.4.3→4.4.4`，升级后宿主 `cmake` 无法启动
+  （`CANNOT LINK EXECUTABLE "cmake": cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm`）。
+  因此本轮 `:app:prepareNativeRuntime` 与 `:app:verifyNativeRuntimeInputs` 以 `-x` 排除：这两个任务的正文逐行未改动，
+  且不经 Gradle 直接执行 `scripts/build-native-deps.py` 同样失败，可确认是宿主工具链问题。
+  宿主 cmake 修复后需补跑完整 `:app:assembleDebug` / `:app:releaseCheck`。
 
 ## 决策记录
 
