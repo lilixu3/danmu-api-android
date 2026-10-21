@@ -33,7 +33,11 @@ MODULE_RULES = (
         source_root=Path("core/model/src/main/kotlin"),
         build_file=Path("core/model/build.gradle.kts"),
         allowed_project_dependencies=(),
-        allowed_app_package_prefixes=("com.example.danmuapiapp.domain.model",),
+        # 模块拥有 domain.model 与 domain.repository 两个包（领域模型 + 领域抽象）。
+        allowed_app_package_prefixes=(
+            "com.example.danmuapiapp.domain.model",
+            "com.example.danmuapiapp.domain.repository",
+        ),
         allow_android_imports=False,
     ),
     ModuleRule(
@@ -45,7 +49,24 @@ MODULE_RULES = (
             "com.example.danmuapiapp.data.util",
             "com.example.danmuapiapp.domain.model",
         ),
-        allow_android_imports=False,
+        # 该模块承载跨功能共享工具，其中 `DeviceCompatMode` 需要 Context/PackageManager/Configuration，
+        # 因此允许 Android API；但仍禁止导入 app 侧包，且仍只允许依赖 `:core:model`。
+        allow_android_imports=True,
+    ),
+    ModuleRule(
+        name=":feature:records",
+        source_root=Path("feature/records/src/main/kotlin"),
+        build_file=Path("feature/records/build.gradle.kts"),
+        allowed_project_dependencies=(":core:model", ":core:common", ":ui:designsystem"),
+        # 功能模块拥有 ui.screen.records 包，可依赖核心模块与设计系统提供的包。
+        allowed_app_package_prefixes=(
+            "com.example.danmuapiapp.ui.screen.records",
+            "com.example.danmuapiapp.ui.component",
+            "com.example.danmuapiapp.domain.model",
+            "com.example.danmuapiapp.domain.repository",
+            "com.example.danmuapiapp.data.util",
+        ),
+        allow_android_imports=True,
     ),
     ModuleRule(
         name=":ui:designsystem",

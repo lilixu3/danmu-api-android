@@ -115,6 +115,25 @@ class ArchitectureTests(unittest.TestCase):
             violations = check_tree(repo)
             self.assertEqual(1, len(violations))
 
+    def test_core_common_allows_platform_imports_but_not_app_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            allowed = repo / "core/common/src/main/kotlin/com/example/danmuapiapp/data/util"
+            allowed.mkdir(parents=True)
+            (allowed / "Ok.kt").write_text(
+                "import android.content.Context\n"
+                "import androidx.core.content.edit\n",
+                encoding="utf-8",
+            )
+            forbidden = repo / "core/common/src/main/kotlin/com/example/danmuapiapp/data/service"
+            forbidden.mkdir(parents=True)
+            (forbidden / "Bad.kt").write_text(
+                "import com.example.danmuapiapp.data.service.NodeService\n",
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
     def test_module_rules_reject_disallowed_project_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
