@@ -758,7 +758,51 @@ tasks.register("verifyBundledNodeModules") {
 }
 
 tasks.register<Exec>("checkNodeRuntimeScripts") {
-    commandLine("node", "--check", "src/main/assets/nodejs-project/android-server.js")
+    workingDir = rootProject.projectDir
+    commandLine("python3", "scripts/refactoring/check_runtime_js_syntax.py")
+}
+
+tasks.register<Exec>("checkRefactorArchitecture") {
+    workingDir = rootProject.projectDir
+    commandLine("python3", "scripts/refactoring/check_architecture.py")
+}
+
+tasks.register<Exec>("checkRuntimeAssetManifest") {
+    workingDir = rootProject.projectDir
+    commandLine("python3", "scripts/refactoring/runtime_assets.py")
+}
+
+tasks.register<Exec>("auditRuntimeHardcoding") {
+    workingDir = rootProject.projectDir
+    commandLine(
+        "python3",
+        "scripts/refactoring/audit_runtime_hardcoding.py",
+        "--fail-on-findings"
+    )
+}
+
+tasks.register<Exec>("testRefactorGuardrails") {
+    workingDir = rootProject.projectDir
+    environment("PYTHONPATH", "scripts/refactoring")
+    commandLine(
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/refactoring",
+        "-p",
+        "test_*.py"
+    )
+}
+
+tasks.register("checkRefactorGuardrails") {
+    dependsOn(
+        "checkRefactorArchitecture",
+        "checkRuntimeAssetManifest",
+        "auditRuntimeHardcoding",
+        "testRefactorGuardrails"
+    )
 }
 
 tasks.register<Exec>("testNodeRuntimeParsing") {
