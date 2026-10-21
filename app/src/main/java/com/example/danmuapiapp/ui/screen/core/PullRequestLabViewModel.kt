@@ -7,36 +7,30 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.domain.model.ApiVariant
-import com.example.danmuapiapp.domain.model.CoreDependencyRepairRequest
 import com.example.danmuapiapp.domain.model.CorePullRequest
 import com.example.danmuapiapp.domain.model.CorePullRequestFilter
 import com.example.danmuapiapp.domain.model.CorePullRequestFilePage
 import com.example.danmuapiapp.domain.model.CorePullRequestInclusion
 import com.example.danmuapiapp.domain.model.CorePullRequestPage
-import com.example.danmuapiapp.domain.model.PullRequestMergeConflictException
-import com.example.danmuapiapp.domain.model.RuntimeState
-import com.example.danmuapiapp.domain.model.RuntimeTransitionKind
-import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.canApplyToCurrentCore
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.cancelTrackedJobs
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
+/**
+ * PR 实验室门面 ViewModel：只做依赖装配、状态转发与跨控制器编排。
+ *
+ * 组合构建、原子应用与启动恢复流水线在 [PullRequestLabBuildController]；本类保留
+ * 列表分页与富化缓存、搜索筛选、选择队列与详情面板状态。
+ */
 @HiltViewModel
 class PullRequestLabViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -77,26 +71,13 @@ class PullRequestLabViewModel @Inject constructor(
         private set
     var listContentGeneration by mutableStateOf(0L)
         private set
-    var isBuilding by mutableStateOf(false)
-        private set
-    var isActivating by mutableStateOf(false)
-        private set
     var errorMessage by mutableStateOf<String?>(null)
-        private set
-    var statusMessage by mutableStateOf<String?>(null)
-        private set
-    var conflictFiles by mutableStateOf<List<String>>(emptyList())
-        private set
-    var conflictPullRequestNumber by mutableStateOf<Int?>(null)
-        private set
-    var showBuildConfirmation by mutableStateOf(false)
         private set
     var activateAfterInstall by mutableStateOf(true)
         private set
 
     private var pageLoadJob: Job? = null
     private var detailsJob: Job? = null
-    private var buildJob: Job? = null
     private var pageGeneration = 0L
     private var detailsGeneration = 0L
     private var knownLocallyMergedPullRequests = locallyMergedPullRequestNumbers()
@@ -107,6 +88,20 @@ class PullRequestLabViewModel @Inject constructor(
     private val firstContributionLookupAuthors = linkedSetOf<String>()
     private var inclusionLookupCount = 0
     private val pageEnrichmentSemaphore = Semaphore(PAGE_ENRICHMENT_CONCURRENCY)
+
+    private val buildController = PullRequestLabBuildController(
+        scope = viewModelScope,
+        coreRepository = coreRepository,
+        runtimeRepository = runtimeRepository,
+        variant = variant,
+        runtimeState = runtimeState,
+        selectedPullRequests = { selectedPullRequests },
+        clearSelection = { selectedPullRequests = emptyList() },
+        activateAfterInstall = { activateAfterInstall },
+        isPrivateRepository = { pageData?.isPrivateRepository == true },
+        onBuildSettled = ::refreshAfterLocalMergeChangeIfIdle,
+        postError = { errorMessage = it }
+    )
 
     init {
         loadPage(1)
@@ -323,8 +318,7 @@ class PullRequestLabViewModel @Inject constructor(
         } else {
             selectedPullRequests + pullRequest
         }
-        conflictFiles = emptyList()
-        conflictPullRequestNumber = null
+        buildController.clearConflict()
     }
 
     fun syncLocallyMergedPullRequests(numbers: Collection<Int>) {
@@ -424,151 +418,35 @@ class PullRequestLabViewModel @Inject constructor(
         isLoadingPullRequestDetails = false
     }
 
-    fun requestBuild() {
-        if (selectedPullRequests.isEmpty() || isBuilding || isActivating) return
-        if (pageData?.isPrivateRepository == true) {
-            errorMessage = "为保证 Token 只发往 GitHub 官方 API，PR 实验室暂不克隆私有仓库"
-            return
-        }
-        showBuildConfirmation = true
-    }
+    val isBuilding: Boolean
+        get() = buildController.isBuilding
+    val isActivating: Boolean
+        get() = buildController.isActivating
+    val statusMessage: String?
+        get() = buildController.statusMessage
+    val conflictFiles: List<String>
+        get() = buildController.conflictFiles
+    val conflictPullRequestNumber: Int?
+        get() = buildController.conflictPullRequestNumber
+    val showBuildConfirmation: Boolean
+        get() = buildController.showBuildConfirmation
 
-    fun dismissBuildConfirmation() {
-        showBuildConfirmation = false
-    }
+    fun requestBuild() = buildController.requestBuild()
+
+    fun dismissBuildConfirmation() = buildController.dismissBuildConfirmation()
+
+    fun confirmBuild() = buildController.confirmBuild()
+
+    fun cancelBuild() = buildController.cancelBuild()
+
+    fun consumeStatusMessage() = buildController.consumeStatusMessage()
 
     fun updateActivateAfterInstall(enabled: Boolean) {
         activateAfterInstall = enabled
     }
 
-    fun confirmBuild() {
-        if (isBuilding || isActivating || selectedPullRequests.isEmpty()) return
-        showBuildConfirmation = false
-        errorMessage = null
-        statusMessage = null
-        conflictFiles = emptyList()
-        conflictPullRequestNumber = null
-        val shouldActivate = activateAfterInstall
-        buildJob = viewModelScope.launch {
-            isBuilding = true
-            try {
-                coreRepository.preparePullRequestStack(
-                    variant = variant,
-                    pullRequestNumbers = selectedPullRequests.map { it.number }
-                ).fold(
-                    onSuccess = { request ->
-                        applyPreparedPullRequest(request, shouldActivate)
-                    },
-                    onFailure = { error ->
-                        when (error) {
-                            is PullRequestMergeConflictException -> {
-                                conflictPullRequestNumber = error.pullRequestNumber
-                                conflictFiles = error.conflictFiles
-                                errorMessage = error.message
-                            }
-                            else -> errorMessage = error.message ?: "PR 组合构建失败"
-                        }
-                    }
-                )
-            } finally {
-                isBuilding = false
-                refreshAfterLocalMergeChangeIfIdle()
-            }
-        }
-    }
-
-    fun cancelBuild() {
-        if (isActivating) return
-        buildJob?.cancel()
-        buildJob = null
-        statusMessage = "已取消 PR 组合构建，当前核心未变更"
-    }
-
-    fun consumeStatusMessage() {
-        statusMessage = null
-    }
-
     fun dismissError() {
         errorMessage = null
-    }
-
-    private suspend fun applyPreparedPullRequest(
-        request: CoreDependencyRepairRequest,
-        shouldActivate: Boolean
-    ) = withContext(NonCancellable) {
-        isActivating = true
-        val previous = runtimeState.value
-        val wasActive = previous.status == ServiceStatus.Running ||
-            previous.status == ServiceStatus.Starting
-        var stoppedForApply = false
-        var runtimeTransitionId: Long? = null
-        try {
-            val applyPlan = decidePullRequestApplyPlan(previous, variant, shouldActivate)
-            if (applyPlan.shouldStartTargetAfterApply) {
-                runtimeTransitionId = runtimeRepository.beginRuntimeTransition(
-                    kind = RuntimeTransitionKind.ApplyingPullRequests,
-                    message = "正在安全应用 PR 组合并重启服务…"
-                )
-            }
-            stoppedForApply = if (applyPlan.shouldAwaitStopped) {
-                statusMessage = "PR 组合已准备完成，正在安全停止服务"
-                runtimeTransitionId?.let { transitionId ->
-                    runtimeRepository.updateRuntimeTransition(
-                        transitionId,
-                        "PR 组合已准备完成，正在安全停止旧服务…"
-                    )
-                }
-                stoppedForApply = applyPlan.shouldStartTargetAfterApply
-                if (applyPlan.shouldRequestStop) runtimeRepository.stopService()
-                val stopped = withTimeoutOrNull(25_000L) {
-                    runtimeState.first {
-                        it.status == ServiceStatus.Stopped || it.status == ServiceStatus.Error
-                    }
-                } != null
-                if (!stopped) {
-                    coreRepository.discardPendingCoreMutation(request.operationId)
-                    restoreInterruptedService(previous, stoppedForApply, wasActive)
-                    errorMessage = "停止服务超时，未替换当前核心，请稍后重试"
-                    return@withContext
-                }
-                applyPlan.shouldStartTargetAfterApply
-            } else {
-                false
-            }
-
-            statusMessage = "正在原子应用 PR 组合"
-            runtimeTransitionId?.let { transitionId ->
-                runtimeRepository.updateRuntimeTransition(
-                    transitionId,
-                    "旧服务已停止，正在原子应用 PR 组合…"
-                )
-            }
-            val applyResult = coreRepository.applyPendingCoreMutation(request.operationId)
-            val applyError = applyResult.exceptionOrNull()
-            if (applyError != null) {
-                errorMessage = applyError.message ?: "应用 PR 组合失败"
-                restoreInterruptedService(previous, stoppedForApply, wasActive)
-                return@withContext
-            }
-            runtimeTransitionId?.let { transitionId ->
-                runtimeRepository.updateRuntimeTransition(
-                    transitionId,
-                    "PR 组合已应用，正在启动服务…"
-                )
-            }
-            finishInstallation(
-                shouldActivate = shouldActivate,
-                previous = previous,
-                stoppedForApply = stoppedForApply
-            )
-        } catch (error: Exception) {
-            errorMessage = error.message ?: "应用 PR 组合时发生异常"
-            restoreInterruptedService(previous, stoppedForApply, wasActive)
-        } finally {
-            runtimeTransitionId?.let(runtimeRepository::endRuntimeTransition)
-            isActivating = false
-            refreshAfterLocalMergeChangeIfIdle()
-        }
     }
 
     private fun locallyMergedPullRequestNumbers(): Set<Int> = coreInfoList.value
@@ -582,137 +460,6 @@ class PullRequestLabViewModel @Inject constructor(
         refreshAfterLocalMergeChange = false
         invalidatePageCache()
         loadPage(1, forceRefresh = true)
-    }
-
-    private suspend fun restoreInterruptedService(
-        previous: RuntimeState,
-        stoppedForApply: Boolean,
-        wasActive: Boolean
-    ) {
-        if (stoppedForApply && wasActive) {
-            runtimeRepository.updateVariant(previous.variant)
-            runtimeRepository.startService()
-            statusMessage = "PR 组合未应用，正在恢复原服务"
-            withTimeoutOrNull(8_000L) {
-                runtimeState.first { state ->
-                    state.status == ServiceStatus.Starting ||
-                        state.status == ServiceStatus.Running ||
-                        state.status == ServiceStatus.Error
-                }
-            }
-        }
-    }
-
-    private suspend fun finishInstallation(
-        shouldActivate: Boolean,
-        previous: RuntimeState,
-        stoppedForApply: Boolean
-    ) {
-        coreRepository.refreshCoreInfo()
-        selectedPullRequests = emptyList()
-        val shouldRunAppliedCore = stoppedForApply &&
-            (shouldActivate || previous.variant == variant)
-        if (shouldActivate) {
-            runtimeRepository.updateVariant(variant)
-        }
-        if (!shouldRunAppliedCore) {
-            statusMessage = "PR 组合核心已安装"
-            return
-        }
-
-        val wasActive = previous.status == ServiceStatus.Running ||
-            previous.status == ServiceStatus.Starting
-        val expectsSameVariantRecovery = coreRepository.candidateState.value?.let { candidate ->
-            candidate.variant == variant && candidate.hasRecoveryPoint
-        } == true
-
-        runtimeRepository.startService()
-
-        var sawTransition = false
-        val terminal = withTimeoutOrNull(45_000L) {
-            runtimeState.first { state ->
-                when (state.status) {
-                    ServiceStatus.Starting, ServiceStatus.Stopping -> {
-                        sawTransition = true
-                        false
-                    }
-                    ServiceStatus.Running -> sawTransition && state.variant == variant
-                    ServiceStatus.Error, ServiceStatus.Stopped -> sawTransition
-                }
-            }
-        }
-        if (terminal?.status == ServiceStatus.Running) {
-            statusMessage = "PR 组合已安装并启动，正在后台确认稳定性"
-            if (!expectsSameVariantRecovery && previous.variant != variant) {
-                monitorFreshVariantCandidate(previous.variant, wasActive)
-            }
-            return
-        }
-
-        delay(500L)
-        val candidateStillPending = coreRepository.candidateState.value?.variant == variant
-        if (terminal?.status == ServiceStatus.Stopped && candidateStillPending) {
-            statusMessage = "PR 组合已安装并切换，服务已停止，未执行自动回退"
-            return
-        }
-        if (expectsSameVariantRecovery) {
-            val recovered = withTimeoutOrNull(40_000L) {
-                runtimeState.first { it.variant == variant && it.status == ServiceStatus.Running }
-            } != null
-            if (recovered) {
-                statusMessage = "PR 组合启动失败，已恢复该核心的上一个可用版本"
-                return
-            }
-        }
-        restorePreviousVariant(previous.variant, wasActive)
-    }
-
-    private fun monitorFreshVariantCandidate(previousVariant: ApiVariant, wasActive: Boolean) {
-        viewModelScope.launch {
-            val outcome = withTimeoutOrNull(35_000L) {
-                combine(coreRepository.candidateState, runtimeState) { candidate, runtime ->
-                    candidate to runtime
-                }.first { (candidate, _) -> candidate?.variant != variant }
-            } ?: return@launch
-            val runtime = outcome.second
-            if (runtime.variant == variant &&
-                (runtime.status == ServiceStatus.Error || runtime.status == ServiceStatus.Stopped)
-            ) {
-                restorePreviousVariant(previousVariant, wasActive)
-            } else if (runtime.variant == variant && runtime.status == ServiceStatus.Running) {
-                statusMessage = "PR 组合已稳定运行"
-            }
-        }
-    }
-
-    private suspend fun restorePreviousVariant(previousVariant: ApiVariant, shouldRestart: Boolean) {
-        if (previousVariant == variant || runtimeState.value.variant != variant) {
-            statusMessage = "PR 组合启动失败，请查看运行日志"
-            return
-        }
-        val previousReady = withContext(Dispatchers.IO) {
-            coreRepository.isCoreReady(previousVariant)
-        }
-        runtimeRepository.updateVariant(previousVariant)
-        if (!previousReady) {
-            statusMessage = "PR 组合启动失败，已恢复原核心选择；原核心需要重新安装"
-            return
-        }
-        if (!shouldRestart) {
-            statusMessage = "PR 组合启动失败，已恢复原核心选择"
-            return
-        }
-        runtimeRepository.restartService()
-        val restored = withTimeoutOrNull(45_000L) {
-            runtimeState.first {
-                it.variant == previousVariant && it.status == ServiceStatus.Running
-            }
-        } != null
-        statusMessage = if (restored) {
-            "PR 组合启动失败，已恢复并启动原核心"
-        } else {
-            "PR 组合启动失败，已恢复原核心选择，请查看运行日志"
-        }
     }
 
     companion object {
