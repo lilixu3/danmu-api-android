@@ -13,6 +13,7 @@ local.properties
 /build-logic/build
 /core/*/build
 /ui/*/build
+/feature/*/build
 /dist
 *.jks
 
