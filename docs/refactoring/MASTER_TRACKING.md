@@ -254,11 +254,49 @@ WS6 起点（`0bcdc40` 之后）：
   `RootRuntimeController.waitForPort` 同样未被调用。
 - 剩余超大文件登记（WS8/WS9 评估）：`ApiTestViewModel` 1,511、`CoreViewModel` 1,419、`CompatModeViewModel` 1,278、
   `DanmuDownloadRepositoryImpl` 1,141、`GithubPullRequestService` 1,126、`NodeService` 1,064、`LocalDanmuViewModel` 1,059。
-- [ ] 处理上述粒度、重复实现与死代码项
+- [x] 处理上述粒度、重复实现与死代码项（清理 lane，见下「2026-10-22 WS9 清理收口」）
 - [ ] 重写 `docs/architecture.md`
 - [ ] 更新 README 开发说明
-- [ ] 常规验证任务一次执行
+- [x] 常规验证任务一次执行
 - [ ] 完整构建由用户确认后执行
+
+### 2026-10-22 WS9 清理收口
+
+清理 lane 按「可达性分析 + 逐符号 grep + 编译器」三重证据执行，改动全部落在 `app/src/main/java`。
+
+- 粒度复核：登记里 8 个「<100 行 + 单一宿主」文件全部并回宿主，均为同包纯移动、零行为改动。
+  `SettingsTvSyncController` 53 / `SettingsQuickSettingsTileController` 58 / `SettingsGithubAccountController` 90 /
+  `SettingsRootAutoStartController` 90 → `SettingsViewModel.kt`；`HomeAnnouncementOverlays` 74 → `HomeScreen.kt`；
+  `CoreRootProbe` 67 → `CoreRepositoryImpl.kt`；`RuntimeWorkDirPreferences` 60 → `RuntimePaths.kt`。
+  `CoreDirWatcher` 96 按下一条改造成共享监听器，不再单独存在。
+- 重复实现合并：新增 `data/repository/DirTreeWatcher.kt`（递归 `FileObserver`，mask 与忽略策略由调用方注入），
+  替换 `CoreDirWatcher` 与 `RuntimeHotReloadController.WorkDirHotReloadWatcher` 两份逐行相同的实现。
+  两者差异原样保留：热重载多监听 `ATTRIB`，忽略策略额外忽略 `config`。相对路径归一与核心忽略策略仍是
+  `CoreDirWatchPolicy` 单一来源（`CoreDirWatchPolicyTest` 未改动）。
+  Home/Settings 应用更新控制器里 3 个完全相同的纯转发方法（`installDownloadedAppUpdate`、
+  `dismissInstallAppUpdateDialog`、`openDownloadsApp`，另有 Home 的 `dismissForegroundAppUpdateMethodDialog`
+  与 Settings 的 `dismissAppUpdateMethodDialog`）删除，改由 ViewModel 直接调用各自已有的 `appUpdateInstaller`；
+  两个 ViewModel 的对外方法与页面调用点零改动。
+- 死代码清理（均确认在 `bade371` 同样无调用，不是本次重构引入）：
+  - `ui/screen/config/editor/` 整包收敛：删除 7 个整文件（`AutoMatchMappingEditor`、`ConfigMappingTableEditors`、
+    `ConfigMergeSourcePairsEditor`、`ConfigOrderedTokenEditor`、`ConfigSimpleListEditors`、`ConfigTitleMappingEditor`、
+    `ConfigTitleOffsetEditor`），以及 `ConfigSpecialEditors` 内 3 个非 Compact 编辑器与 `EntityEditorCard`、
+    `ConfigMergeRuleEditors.entityText`/`buildCustomMergeRule`、`AutoMatchMappingModels.validateAutoMatchDraft`、
+    `ConfigEditorPrimitives.looseTokens`、`ConfigDanmuColorEditors.replaceWithDefaultColorPool` 与 `DefaultDanmuColorPool`。
+    根因：`EnvVarEditDialog` 只对 `COLOR_POOL` 等少数 key 做专用界面，其余一律按 `EnvType` 走通用控件，
+    按 key 特判的旧编辑器（含其 `Compact*` 变体）全部悬空；登记只覆盖其中 8 个，本次按可达性补全。
+  - `ConfigScreenUtils.kt` 569 → 211 行：删除仅为上述编辑器服务的解析/序列化对（标题映射、标题偏移、
+    自定义合并规则、时间轴偏移、匹配平台规则）、对应 row 数据类与私有辅助，以及 `canonicalizePlatformSelection`、
+    `togglePlatformSelection`、`formatPlatformSummary`、`List.move`；顺带清掉该文件 39 行失效 import。
+  - 其他：`LocalDanmuFormatters.kt`（唯一函数无调用，整文件删除）、`CompatModeSettingsScreen.CompatModeSettingsDialog`、
+    `DeviceAccessScreen.primaryActionButtonColors`、`RootRuntimeHealth.waitForPort`（私有且无调用）、
+    `RuntimeDependencyPackManager.Companion.readLimited`。
+  - 登记未处理：`VideoShellAutoPushState`（`data/service/VideoShellAutoPushLogic.kt`）在 `app/src` 内无引用，
+    但形态上是公开数据类，交由功能负责人判定是否保留。
+- 验证：`:app:compileDebugKotlin` 通过；`:app:testDebugUnitTest` 210 suite / 1,068 项 / 0 失败（与 WS8 收口一致）；
+  `:app:checkRefactorGuardrails` 通过（架构边界、资产清单 27 项 / 28 文件、护栏自测 10 项）；
+  `node --test node-tests/*.test.cjs` 216 项通过；`git diff --check` 干净。
+- 规模：`app/` 侧 35 文件、+512 / −3,602 行（含并回宿主带来的「删文件 + 追加」记账），净减约 3,000 行。
 
 ## 验证记录
 
@@ -421,6 +459,10 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS8 模块骨架 | `python3 scripts/refactoring/check_architecture.py`、`PYTHONPATH=scripts/refactoring python3 -m unittest discover -s scripts/refactoring -p 'test_*.py'` | 通过 | 边界无违规；护栏自测 9 项（新增 3 项模块规则用例） |
 | 2026-10-21 | WS8 模块骨架 | `./gradlew :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败（接通模块依赖后重跑，无回归） |
 | 2026-10-21 | WS8 模块骨架 | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-22 | WS9 清理 | `./gradlew :app:compileDebugKotlin` | 通过 | 死代码清理与并回宿主后编译通过（分三次迭代，逐次修掉删除带出的引用） |
+| 2026-10-22 | WS9 清理 | `./gradlew :app:testDebugUnitTest :app:checkRefactorGuardrails` | 通过 | 210 suite、1,068 项、0 失败；架构边界、资产清单 27 项/28 文件、护栏自测 10 项 |
+| 2026-10-22 | WS9 清理 | `node --test node-tests/*.test.cjs` | 通过 | 216 项通过 |
+| 2026-10-22 | WS9 清理 | `git diff --check` | 通过 | 无空白错误 |
 
 ## 进度日志
 
