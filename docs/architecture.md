@@ -1,56 +1,163 @@
 # 项目架构说明
 
-## 分层约定
+> 本文档描述 WS0–WS9 工程化重构后的实际结构，与
+> [`docs/refactoring/MASTER_TRACKING.md`](refactoring/MASTER_TRACKING.md) 配套：
+> 追踪文档记录进度与验证证据，本文档记录结构与边界约定。
+> 结构变更时必须同步更新本文件；边界由 `scripts/refactoring/check_architecture.py` 自动校验。
 
-- `domain/`：领域模型与仓库接口，只放稳定抽象。
-- `data/repository/`：业务数据编排，负责把服务能力组织成上层可用的仓库实现。
-- `data/remote/github/`：GitHub 相关远程访问能力，统一处理代理、鉴权、Release 拉取与元数据请求。
-- `data/service/`：运行时、文件、系统交互、更新、辅助工具等基础设施能力。
-- `ui/screen/<feature>/`：按功能拆分页面代码，避免单文件堆叠所有职责。
+## 1. Gradle 模块地图
 
-## 页面目录约定
+`settings.gradle.kts` 包含 `:app`、`:core:model`、`:core:common`、`:ui:designsystem`、
+`:feature:records` 与 `includeBuild("build-logic")`。
 
-### `ui/screen/home/`
-- `HomeScreen.kt`：首页状态汇总与页面编排。
-- `dialog/`：首页弹窗与表单类 UI。
-- `section/`：首页卡片、队列、面板等可复用区块。
-- `support/`：首页辅助弹窗、枚举映射、展示格式化函数。
+| 模块 | 职责 | 项目依赖 |
+|---|---|---|
+| `:app` | Android 应用：UI、业务编排、系统集成、原生与 Node 运行时打包 | 全部模块 |
+| `:core:model` | 纯领域模型、纯逻辑与领域仓储接口（`domain.model`、`domain.repository`） | 无 |
+| `:core:common` | 跨功能共享工具（格式化、比较、路径/字符串、设备兼容判定） | `:core:model` |
+| `:ui:designsystem` | 主题、颜色、排版与共用 Compose 组件（`ui.theme`、`ui.component`、`ui.component.liquid`） | `:core:model`、`:core:common` |
+| `:feature:records` | 请求记录功能（列表、筛选、统计洞察、详情与复制） | `:core:model`、`:core:common`、`:ui:designsystem` |
 
-### `ui/screen/config/`
-- `ConfigScreen.kt`：配置页入口与模式切换。
-- `section/`：视觉模式、原始模式等页面区块。
-- `editor/`：复杂编辑器、专用编辑器、凭证编辑器。
-- `util/`：配置页专用解析与序列化工具。
+依赖方向单向收敛，禁止反向或跨层依赖：
 
-### `ui/screen/download/`
-- `DanmuDownloadScreen.kt`：下载页入口与顶层导航。
-- `model/`：下载页 UI 模型。
-- `section/`：搜索页、队列页、记录页等独立内容区域。
+```
+:app ──► :feature:records ──► :ui:designsystem ──► :core:common ──► :core:model
+  └───────────────────────────────────────────────────────────────────────┘
+```
 
-## 本次重构重点
+模块迁移刻意**保留原包名**（如 `com.example.danmuapiapp.ui.screen.records`），
+以便 app 侧 import 零改动；模块「拥有」哪些包由 `check_architecture.py` 的
+`MODULE_RULES` 白名单约定，而不是靠目录结构推断。新增模块必须同时补模块规则。
 
-- 抽出 `GithubRemoteService`，统一 GitHub Release 与元数据请求逻辑。
-- 抽出 `GithubProxySpeedTester`，消除多个 ViewModel 中重复的代理测速实现。
-- 抽出 `CoreVersionParser`，统一核心版本解析逻辑。
-- 将首页、配置页、下载页中的超长文件拆为按职责划分的子文件。
-- 保持原有功能入口与调用关系不变，优先保证行为兼容。
+## 2. `:app` 内部包分层
 
-## 后续新增代码建议
+### `domain/`
 
-- 新功能优先按功能目录归类，不要继续把大型组件堆回入口文件。
-- 远程接口或 GitHub 请求优先放到 `data/remote/`，不要直接散落在多个仓库或服务里。
-- 页面私有模型优先放到对应功能的 `model/` 目录。
-- 复杂表单、弹窗、列表区块优先拆到 `section/`、`dialog/`、`editor/` 子目录。
+已整体迁入 `:core:model`，`:app` 内不再有 `domain` 源码目录，包名不变：
 
-## 第二轮深度重构补充
+- `domain/model/`：数据模型、枚举与纯逻辑（版本比较、日志噪音过滤、下载命名等）。
+- `domain/repository/`：仓储接口等稳定领域抽象。
 
-- `ui/common/AppUpdateInstallerController.kt`：统一处理 App 安装包下载、浏览器跳转、安装器拉起与安装状态弹窗。
-- `ui/common/ProxyPickerController.kt`：统一处理 GitHub 线路选择弹窗、测速状态与确认逻辑。
-- `ui/common/ViewModelUiFormatters.kt`：统一处理 Root 权限错误文案、字节格式化、`.env` 文本解析。
-- `ui/screen/download/support/DanmuDownloadParsing.kt`：统一处理下载页的搜索结果解析、剧集匹配、标题归一化与状态预构建。
+领域层不得依赖 Android、UI 或具体 data 实现，也不得反向依赖 app 内部包。
 
-## 当前重构结果
+### `data/`
 
-- UI 入口文件主要保留编排职责，重逻辑迁移到控制器、支持文件或子区块文件。
-- 重复实现集中收口，避免 Home/Settings/Download 各自维护同一套逻辑。
-- 与现有页面调用保持兼容，优先不破坏已有界面层代码。
+- `repository/`：仓储实现及其拆分出的控制器与策略。
+  - 核心侧：`CoreRepositoryImpl` 仅保留装配、来源解析、目录位置与转发；
+    安装事务、依赖修复、远端数据源、更新检查、PR 组合、回退历史、
+    Revision 版本缓存、目录监听、操作/候选状态机等各自独立成文件。
+  - 运行时侧：`RuntimeRepositoryImpl` 编排生命周期、状态协调、日志、热重载与网络监听。
+  - 其他：`DanmuDownloadRepositoryImpl`、`LocalDanmuRepositoryImpl`、
+    `SettingsRepositoryImpl`、`AccessControlRepositoryImpl` 等按功能归属。
+- `service/`：系统与运行时基础设施。`NodeService`/`NodeProjectManager` 管理 Node 进程，
+  `RootRuntime*` 负责 Root 脚本构建、进程控制、项目同步与健康检查，
+  `RuntimePaths`/`RuntimePathResolver` 负责工作目录与偏好，
+  其余为更新检查、通知、保活、QuickSettings、配置同步等服务。
+- `remote/github/`：`GithubRemoteService`，统一 GitHub Release 与元数据请求。
+- `remote/announcement/`：公告中心远程访问。
+- `network/`：OkHttp 客户端、代理、DoH DNS、连接池与配额拦截。
+- `parser/`：`.env` / JS-lite 配置解析。
+- `tunnel/`：frpc 内核安装、隧道监督、命令队列与诊断。
+- `util/`：仅保留仍依赖 Android 或 app 内部实现的少量工具；其余共享工具在 `:core:common`。
+
+### `ui/`
+
+- `screen/<feature>/`：按功能一目录，入口文件只做编排；重逻辑放到
+  `section/`（区块）、`dialog/`（弹窗）、`support/`（辅助与格式化）、`model/`（页面私有模型）。
+  现有功能目录：`home`、`config`、`download`、`core`、`settings`、`localdanmu`、
+  `records`、`console`、`diagnostics`、`deviceaccess`、`apitest`、`cache`、`push`、`tools`。
+- `compat/`：兼容界面（Activity、Compose 页面、ViewModel、面板与对话框）。
+- `startup/`：启动权限门禁，拆为 Gate 骨架、状态判定、卡片、步骤与 ViewModel。
+- `common/`：跨页面控制器（更新安装、代理选择、依赖修复续跑、UI 格式化等）。
+- `component/`、`theme/`：主体已迁入 `:ui:designsystem`；app 内仅保留少量仍依赖
+  `data` 层的组件（如 `ConnectivityStatus`、`GithubQuotaNoticeHost`）。
+- `navigation/`：`Screen` 路由定义。
+
+### 其他
+
+- `xposed/`：LSPosed 模块（Java），与 Compose UI 解耦。
+- `di/`：Hilt 聚合模块。
+- 顶层：`DanmuApiApplication`、`MainActivity`、`CompatEntryActivity`、`NodeBridge`。
+
+## 3. 边界规则（自动校验）
+
+`scripts/refactoring/check_architecture.py` 校验两类规则，`./gradlew :app:checkRefactorGuardrails` 会执行：
+
+1. app 源码分层：`domain` 不得导入 `data`/`ui`/`android`/`androidx`；`data` 不得导入 `ui`。
+2. 模块规则（`MODULE_RULES`）：逐模块校验允许的 `project(...)` 依赖与允许导入的包前缀，
+   例如 `:core:model` 禁止任何 Android 导入与项目依赖，`:core:common` 允许 Android API
+   但只依赖 `:core:model` 且不得导入 app 侧包。
+
+新增模块、放宽导入或新增项目依赖时，必须同步更新该脚本与 `scripts/refactoring/test_guardrails.py` 的自测。
+
+## 4. 运行时资产与 Node 服务
+
+`app/src/main/assets/nodejs-project/` 是内嵌 Node 服务的根目录，手写资产清单
+`app-runtime-assets.json` 是**唯一事实来源**（当前 27 项、含清单共 28 个文件）。
+
+- 校验与复制逻辑集中在 `scripts/refactoring/runtime_assets.py`：只接受相对 POSIX 路径，
+  拒绝绝对路径、`.`/`..` 越界与重复项，支持递归子目录，但排除 `node_modules` 与 `config`。
+- Kotlin 侧统一经 `data/service/RuntimeAssetManifest.kt` 的 `AppRuntimeAssets` 读取同一清单，
+  Root 同步（`RootRuntimeSync`/`RootRuntimeScripts`）、热重载指纹（`RuntimeHotReloadController`）
+  与运行时状态校验（`NodeProjectManager`、`NetworkRuntimeStatus`）都据此推导文件集合。
+- Node 测试经 `node-tests/runtime-fixture.cjs` 消费同一清单，测试夹具与打包内容一致。
+
+Node 服务按职责拆分，入口只负责组合装配：
+
+- 入口与运行时：`android-server.js`（组合装配）、`main.js`、`server-worker-runtime.js`、
+  `worker-proxy.js`、`runtime-polyfills.js`、`startup-failure.js`。
+- 配置与日志：`app-config-runtime.js`、`app-runtime-context.js`、`app-server-logging.js`。
+- 访问控制与路由：`app-access-control.js`、`app-http-routes.js`、`app-management.js`。
+- 弹幕与代理：`app-danmaku-cache.js`、`app-proxy-helper.js`、`app-proxy-routing.js`、
+  `app-series-refresh.js`、`app-url-metadata.js`、`app-source-probe.js`、
+  `favorite-scheduler-host.js`。
+- 出站桥接：`app-outbound-runtime.js`、`app-outbound-bridge.js`、`app-outbound-native.js`、
+  `app-outbound-dns.js`、`app-outbound-diagnostics.js`。
+
+Node 回归测试位于 `node-tests/`（`node --test node-tests/*.test.cjs`），
+`preBuild` 依赖 `testAppOutboundBridge`，出站桥接测试不通过则无法构建。
+
+## 5. 构建体系
+
+`build-logic` 是独立 included build，`app/build.gradle.kts` 只保留 Android 配置、依赖与插件接入。
+
+- `danmu/DanmuBuildProperties.kt`：版本号、版本码、ABI、混淆/资源压缩、签名、
+  Termux 主机判定与原生运行时目录等构建配置的**唯一解析来源**。
+- `danmu.runtime-assets`：Node 依赖资产准备与 APK 运行时校验。
+- `danmu.native-runtime`：原生运行时准备与输入校验。
+- `danmu.quality-gates`：重构护栏任务（`checkRefactorGuardrails`、`checkNodeRuntimeScripts`）、
+  发布防呆告警、`releaseCheck` 与出站桥接前置门禁。
+
+常用任务：
+
+```bash
+./gradlew :app:checkRefactorGuardrails   # 架构边界、资产清单、硬编码审计、护栏自测
+./gradlew :app:checkNodeRuntimeScripts   # Node 资产逐个 node --check
+./gradlew :app:compileDebugKotlin :app:testDebugUnitTest
+node --test node-tests/*.test.cjs
+git diff --check
+```
+
+## 6. 拆分粒度约定
+
+- 禁止过度封装：单次调用的逻辑不单独拆文件，简单逻辑不硬套抽象类/接口/DTO。
+- 迁移优先 `git mv` 剪切，不复制后再删除，避免 diff 虚高。
+- 不生成重复样板（重复 try/catch、日志）。
+- 只有具备复用价值、职责明确的逻辑才抽成独立模块。
+
+## 7. 新增代码放置指引
+
+- 领域模型与接口 → `:core:model`；跨功能纯工具 → `:core:common`。
+- 主题与共用组件 → `:ui:designsystem`；完整功能 → 新建 `:feature:<name>` 并补模块规则。
+- app 内业务编排放 `data/repository/` 或 `ui/screen/<feature>/`，远程访问放
+  `data/remote/` 或 `data/network/`，页面私有模型放对应功能目录。
+- 新增 Node 手写资产必须先加入 `app-runtime-assets.json`，再跑护栏与 Node 测试。
+- 不建立万能 `utils` 包；共享逻辑放入语义明确的领域或工具模块。
+
+## 8. 当前边界与遗留
+
+结构层面的已知缺口（进度与验证以 `MASTER_TRACKING.md` 的 WS9 收口项为准）：
+
+- 功能模块目前只有 `:feature:records` 试点，其余功能仍在 `:app` 内按目录分层。
+- `:app` 内仍保留少量依赖 `data` 层的 `ui/component` 组件，尚未迁入设计系统。
+- 若干超大文件仍待按需拆分（如 `ApiTestViewModel`、`CoreViewModel`、`NodeService` 等）。
