@@ -7,7 +7,6 @@ import com.example.danmuapiapp.data.service.AppRuntimeAssets
 import com.example.danmuapiapp.data.service.RootShell
 import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
-import com.example.danmuapiapp.data.util.WatcherRegistry
 import com.example.danmuapiapp.domain.model.LogLevel
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.model.RuntimeState
@@ -44,6 +43,16 @@ internal class RuntimeHotReloadController(
         const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
         const val ROOT_FINGERPRINT_TIMEOUT_MS = 4500L
 
+        val HOT_RELOAD_WATCH_MASK = FileObserver.CLOSE_WRITE or
+            FileObserver.MODIFY or
+            FileObserver.ATTRIB or
+            FileObserver.CREATE or
+            FileObserver.MOVED_TO or
+            FileObserver.MOVED_FROM or
+            FileObserver.DELETE or
+            FileObserver.DELETE_SELF or
+            FileObserver.MOVE_SELF
+
         val NORMAL_RESTART_SKIP_PREFIXES = listOf(
             "config/",
             "danmu_api_stable/",
@@ -55,7 +64,7 @@ internal class RuntimeHotReloadController(
     private val normalRestartCriticalFiles by lazy {
         AppRuntimeAssets.relativePaths(context).mapTo(hashSetOf()) { it.lowercase() }
     }
-    private var hotReloadWatcher: WorkDirHotReloadWatcher? = null
+    private var hotReloadWatcher: DirTreeWatcher? = null
     private var hotReloadJob: Job? = null
     private var rootFingerprintCheckJob: Job? = null
     private var pendingHotReloadReason: String? = null
@@ -133,15 +142,39 @@ internal class RuntimeHotReloadController(
             return
         }
 
-        val watcher = WorkDirHotReloadWatcher(projectDir) { changedPath ->
+        val watcher = DirTreeWatcher(
+            rootDir = projectDir,
+            mask = HOT_RELOAD_WATCH_MASK,
+            shouldIgnore = { shouldIgnoreHotReloadPath(projectDir, it) }
+        ) { changedPath ->
             val normalized = normalizeHotReloadPath(changedPath)
             if (!shouldRestartOnNormalPathChange(normalized)) {
-                return@WorkDirHotReloadWatcher
+                return@DirTreeWatcher
             }
             scheduleHotReload("检测到工作目录关键变更：$normalized")
         }
         watcher.start()
         hotReloadWatcher = watcher
+    }
+
+    private fun shouldIgnoreHotReloadPath(rootDir: File, target: File): Boolean {
+        val rel = CoreDirWatchPolicy.relativePath(rootDir, target)
+        if (rel == "." || rel.isBlank()) return false
+        return rel == ".app_version" ||
+            rel.startsWith("config/") ||
+            rel == "config" ||
+            rel.startsWith("danmu_api_stable/") ||
+            rel == "danmu_api_stable" ||
+            rel.startsWith("danmu_api_dev/") ||
+            rel == "danmu_api_dev" ||
+            rel.startsWith("danmu_api_custom/") ||
+            rel == "danmu_api_custom" ||
+            rel.startsWith("logs/") ||
+            rel == "logs" ||
+            rel.startsWith(".cache/") ||
+            rel == ".cache" ||
+            rel.startsWith("node_modules/") ||
+            rel == "node_modules"
     }
 
     private fun normalizeHotReloadPath(path: String): String {
@@ -256,114 +289,5 @@ internal class RuntimeHotReloadController(
         val result = RootShell.exec(script, timeoutMs = ROOT_FINGERPRINT_TIMEOUT_MS)
         if (!result.ok) return null
         return result.stdout.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }
-    }
-
-    private inner class WorkDirHotReloadWatcher(
-        rootDir: File,
-        private val onChanged: (String) -> Unit
-    ) {
-        val rootPath: String = rootDir.absolutePath
-        private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
-        private val observers = WatcherRegistry<FileObserver> { it.stopWatching() }
-        private val mask = FileObserver.CLOSE_WRITE or
-            FileObserver.MODIFY or
-            FileObserver.ATTRIB or
-            FileObserver.CREATE or
-            FileObserver.MOVED_TO or
-            FileObserver.MOVED_FROM or
-            FileObserver.DELETE or
-            FileObserver.DELETE_SELF or
-            FileObserver.MOVE_SELF
-
-        fun start() {
-            watchRecursively(rootCanonical)
-        }
-
-        fun stop() {
-            observers.stop()
-        }
-
-        private fun createFileObserver(path: String, onEvent: (Int, String?) -> Unit): FileObserver {
-            val watchFile = File(path)
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                object : FileObserver(watchFile, mask) {
-                    override fun onEvent(event: Int, relativePath: String?) {
-                        onEvent.invoke(event, relativePath)
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                object : FileObserver(path, mask) {
-                    override fun onEvent(event: Int, relativePath: String?) {
-                        onEvent.invoke(event, relativePath)
-                    }
-                }
-            }
-        }
-
-        private fun watchRecursively(dir: File) {
-            if (observers.isStopped || !dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
-            val key = runCatching { dir.canonicalPath }.getOrElse { dir.absolutePath }
-            val registered = observers.register(key) {
-                val observer = createFileObserver(key) { event, path ->
-                    if (observers.isStopped) return@createFileObserver
-                    val target = if (path.isNullOrBlank()) {
-                        File(key)
-                    } else {
-                        File(key, path)
-                    }
-                    if (shouldIgnore(target)) return@createFileObserver
-
-                    if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
-                        watchRecursively(target)
-                    }
-
-                    val rel = toRelative(target).ifBlank { target.name }
-                    onChanged(rel)
-
-                    if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
-                        observers.remove(key)
-                    }
-                }
-
-                try { observer.startWatching() } catch (error: Exception) {
-                    runCatching { observer.stopWatching() }
-                    throw error
-                }
-                observer
-            }
-            if (!registered) return
-            dir.listFiles()?.filter { it.isDirectory }?.forEach { child ->
-                watchRecursively(child)
-            }
-        }
-
-        private fun toRelative(target: File): String {
-            return runCatching {
-                target.canonicalFile.relativeTo(rootCanonical).path.replace('\\', '/')
-            }.getOrElse {
-                target.name
-            }
-        }
-
-        private fun shouldIgnore(target: File): Boolean {
-            val rel = toRelative(target)
-            if (rel == "." || rel.isBlank()) return false
-            return rel == ".app_version" ||
-                rel.startsWith("config/") ||
-                rel == "config" ||
-                rel.startsWith("danmu_api_stable/") ||
-                rel == "danmu_api_stable" ||
-                rel.startsWith("danmu_api_dev/") ||
-                rel == "danmu_api_dev" ||
-                rel.startsWith("danmu_api_custom/") ||
-                rel == "danmu_api_custom" ||
-                rel.startsWith("logs/") ||
-                rel == "logs" ||
-                rel.startsWith(".cache/") ||
-                rel == ".cache" ||
-                rel.startsWith("node_modules/") ||
-                rel == "node_modules"
-        }
     }
 }

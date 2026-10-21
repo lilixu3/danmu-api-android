@@ -51,13 +51,6 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import java.util.Locale
 import kotlin.random.Random
 
-private val DefaultDanmuColorPool = listOf(
-    16777215, 16777215, 16777215, 16777215,
-    16777215, 16777215, 16777215, 16777215,
-    16744319, 16752762, 16774799, 9498256,
-    8388564, 8900346, 14204888, 16758465
-)
-
 private val QuickColorPalette = listOf(
     0xFFFFFF, 0xFF6699, 0xFFCC00, 0x66CC66,
     0x00AEEF, 0x8A2BE2, 0xFF5733, 0x2ECC71,
@@ -106,8 +99,6 @@ private fun appendColorsToRaw(current: String, colors: List<Int>): String {
     }
     return (baseColors + cleanColors).joinToString(",")
 }
-
-private fun replaceWithDefaultColorPool(): String = DefaultDanmuColorPool.joinToString(",")
 
 @Composable
 private fun ColorDot(color: Int, modifier: Modifier = Modifier.size(16.dp)) {

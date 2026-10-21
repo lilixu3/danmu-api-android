@@ -175,17 +175,6 @@ internal fun previewAutoMatchMapping(
     )
 }
 
-internal fun validateAutoMatchDraft(
-    draft: AutoMatchMappingDraft,
-    allowedPlatforms: List<String> = emptyList()
-): AutoMatchMappingValidation {
-    if (draft.isEmpty) return AutoMatchMappingValidation(valid = true)
-    return validateAutoMatchMappingTable(
-        serializeAutoMatchMappingDrafts(listOf(draft)),
-        allowedPlatforms
-    )
-}
-
 private fun parseAutoMatchSide(raw: String, allowPlatform: Boolean): ParsedAutoMatchSide? {
     var text = raw.trim()
     var platform = ""

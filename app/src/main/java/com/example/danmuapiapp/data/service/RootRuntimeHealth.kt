@@ -186,15 +186,6 @@ internal object RootRuntimeHealth {
         return PortProbe.isOpen(port = port, host = host, timeoutMs = timeoutMs)
     }
 
-    private fun waitForPort(host: String, port: Int, wantOpen: Boolean, timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val open = isPortOpen(host, port, 220)
-            if (open == wantOpen) return true
-            runCatching { Thread.sleep(180) }
-        }
-        return false
-    }
 
     internal data class StartupWaitResult(
         val ready: Boolean,

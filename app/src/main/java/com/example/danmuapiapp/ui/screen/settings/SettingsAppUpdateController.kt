@@ -114,17 +114,9 @@ internal class SettingsAppUpdateController(
         appUpdateInstaller.openMethodDialog()
     }
 
-    fun dismissAppUpdateMethodDialog() {
-        appUpdateInstaller.dismissMethodDialog()
-    }
-
     fun startInAppUpdateDownload() {
         appUpdateInstaller.dismissMethodDialog()
         downloadLatestAppUpdate()
-    }
-
-    fun installDownloadedAppUpdate(activity: Activity) {
-        appUpdateInstaller.installDownloaded(activity)
     }
 
     fun openBrowserDownload(activity: Activity) {
@@ -137,16 +129,9 @@ internal class SettingsAppUpdateController(
         )
     }
 
-    fun dismissInstallAppUpdateDialog() {
-        appUpdateInstaller.dismissInstallDialog()
-    }
-
     fun openAppUpdateReleasePage(activity: Activity) {
         val url = appUpdateReleasePage.ifBlank { "https://github.com/lilixu3/danmu-api-android/releases/latest" }
         appUpdateService.openUrl(activity, url)
     }
 
-    fun openDownloadsApp(activity: Activity) {
-        appUpdateInstaller.openDownloadsApp(activity)
-    }
 }

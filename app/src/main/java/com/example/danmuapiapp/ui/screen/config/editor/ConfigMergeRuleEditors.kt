@@ -31,40 +31,6 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 
-private fun entityText(title: String, season: String, source: String): String {
-    val cleanTitle = title.trim()
-    val cleanSource = normalizeSource(source)
-    if (cleanTitle.isBlank() || cleanSource.isBlank()) return ""
-    val seasonPart = formatIndexedSegment("S", season)
-    return buildString {
-        append(cleanTitle)
-        if (seasonPart.isNotBlank()) append('/').append(seasonPart)
-        append('@').append(cleanSource)
-    }
-}
-
-private fun buildCustomMergeRule(
-    action: String,
-    secondaryTitle: String,
-    secondarySeason: String,
-    secondarySource: String,
-    primaryTitle: String,
-    primarySeason: String,
-    primarySource: String,
-    routesRaw: String,
-): String {
-    val secondary = entityText(secondaryTitle, secondarySeason, secondarySource)
-    val primary = entityText(primaryTitle, primarySeason, primarySource)
-    if (secondary.isBlank() || primary.isBlank()) return ""
-    val connector = if (action == "block") " × " else " -> "
-    val routes = routesRaw.trim()
-    return if (action == "merge" && routes.isNotBlank()) {
-        "$secondary$connector$primary | $routes"
-    } else {
-        "$secondary$connector$primary"
-    }
-}
-
 private fun normalizeMergeEntity(raw: String): String {
     return raw.trim()
         .replace('，', ',')

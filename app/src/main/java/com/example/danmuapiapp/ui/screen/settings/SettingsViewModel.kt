@@ -51,6 +51,20 @@ import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import com.example.danmuapiapp.data.service.TvConfigSyncCodec
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import android.app.StatusBarManager
+import android.content.ComponentName
+import android.graphics.drawable.Icon
+import android.os.Build
+import com.example.danmuapiapp.R
+import com.example.danmuapiapp.data.service.DanmuQuickSettingsTileService
+import kotlinx.coroutines.Job
+import com.example.danmuapiapp.data.service.RootAutoStartModule
+import com.example.danmuapiapp.data.service.RootAutoStartPrefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 设置页门面 ViewModel：只做依赖装配、状态转发与跨控制器编排。
@@ -378,21 +392,21 @@ class SettingsViewModel @Inject constructor(
 
     fun openAppUpdateMethodDialog() = appUpdateController.openAppUpdateMethodDialog()
 
-    fun dismissAppUpdateMethodDialog() = appUpdateController.dismissAppUpdateMethodDialog()
+    fun dismissAppUpdateMethodDialog() = appUpdateInstaller.dismissMethodDialog()
 
     fun startInAppUpdateDownload() = appUpdateController.startInAppUpdateDownload()
 
     fun installDownloadedAppUpdate(activity: Activity) =
-        appUpdateController.installDownloadedAppUpdate(activity)
+        appUpdateInstaller.installDownloaded(activity)
 
     fun openBrowserDownload(activity: Activity) = appUpdateController.openBrowserDownload(activity)
 
-    fun dismissInstallAppUpdateDialog() = appUpdateController.dismissInstallAppUpdateDialog()
+    fun dismissInstallAppUpdateDialog() = appUpdateInstaller.dismissInstallDialog()
 
     fun openAppUpdateReleasePage(activity: Activity) =
         appUpdateController.openAppUpdateReleasePage(activity)
 
-    fun openDownloadsApp(activity: Activity) = appUpdateController.openDownloadsApp(activity)
+    fun openDownloadsApp(activity: Activity) = appUpdateInstaller.openDownloadsApp(activity)
 
     // ---- GitHub 代理、账号与依赖修复 ----
 
@@ -598,5 +612,255 @@ class SettingsViewModel @Inject constructor(
 
     fun postMessage(message: String) {
         operationMessage = message
+    }
+}
+
+/**
+ * 设置页「同步到电视」子控制器：解析同步码并推送当前配置。
+ */
+internal class SettingsTvSyncController(
+    private val scope: CoroutineScope,
+    private val tvConfigSyncClient: TvConfigSyncClient,
+    private val runtimeRepo: RuntimeRepository,
+    private val postMessage: (String) -> Unit
+) {
+    var isTvSyncOperating by mutableStateOf(false)
+        private set
+    var tvSyncOperatingText by mutableStateOf("")
+        private set
+
+    fun syncConfigToTv(inviteText: String) {
+        if (isTvSyncOperating) return
+        scope.launch {
+            val target = TvConfigSyncCodec.parseTarget(inviteText).getOrElse {
+                postMessage(it.message ?: "未识别到电视同步码")
+                return@launch
+            }
+            isTvSyncOperating = true
+            tvSyncOperatingText = if (target.deviceName.isBlank()) {
+                "正在向电视发送当前配置..."
+            } else {
+                "正在同步到 ${target.deviceName}..."
+            }
+            tvConfigSyncClient.syncToTarget(target).fold(
+                onSuccess = {
+                    postMessage(it)
+                    runtimeRepo.addLog(LogLevel.Info, "已通过扫码同步配置到电视端")
+                },
+                onFailure = {
+                    postMessage("同步失败：${it.message ?: "请检查局域网与同步码"}")
+                }
+            )
+            isTvSyncOperating = false
+            tvSyncOperatingText = ""
+        }
+    }
+}
+
+/**
+ * 设置页「控制中心快捷按钮」子控制器：请求系统添加磁贴并回报结果。
+ */
+internal class SettingsQuickSettingsTileController(
+    private val postMessage: (String) -> Unit
+) {
+    fun requestAddQuickSettingsTile(activity: Activity?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            postMessage("当前系统版本不支持控制中心快捷按钮")
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            postMessage("请在控制中心编辑页手动添加“弹幕API服务”")
+            return
+        }
+        if (activity == null) {
+            postMessage("当前界面无法发起添加，请稍后重试")
+            return
+        }
+
+        val manager = activity.getSystemService(StatusBarManager::class.java)
+        if (manager == null) {
+            postMessage("系统控制中心服务不可用，请手动添加")
+            return
+        }
+
+        val component = ComponentName(activity, DanmuQuickSettingsTileService::class.java)
+        val label = activity.getString(R.string.qs_tile_label)
+        val icon = Icon.createWithResource(activity, R.drawable.ic_qs_danmu_service)
+        manager.requestAddTileService(
+            component,
+            label,
+            icon,
+            activity.mainExecutor
+        ) { result ->
+            postMessage(
+                when (result) {
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "已添加控制中心按钮"
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "控制中心按钮已存在"
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> "未添加控制中心按钮"
+                    StatusBarManager.TILE_ADD_REQUEST_ERROR_REQUEST_IN_PROGRESS -> "系统正在处理上一次添加请求"
+                    StatusBarManager.TILE_ADD_REQUEST_ERROR_APP_NOT_IN_FOREGROUND -> "请保持应用在前台后重试"
+                    else -> "添加控制中心按钮失败：$result"
+                }
+            )
+        }
+    }
+}
+
+/**
+ * 设置页「GitHub 账号」子控制器：Token 校验保存、清空与额度刷新。
+ *
+ * 通过递增 generation 取消过期的异步刷新，行为与拆分前一致。
+ */
+internal class SettingsGithubAccountController(
+    private val scope: CoroutineScope,
+    private val settingsRepo: SettingsRepository,
+    private val githubAccountService: GithubAccountService,
+    private val postMessage: (String) -> Unit
+) {
+    private var githubAccountJob: Job? = null
+    private var githubAccountGeneration = 0L
+
+    fun saveGithubToken(token: String) {
+        val normalized = token.trim()
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = scope.launch {
+            if (normalized.isBlank()) {
+                settingsRepo.setGithubToken("")
+                githubAccountService.refresh("")
+                if (generation != githubAccountGeneration) return@launch
+                postMessage("已切换为匿名 GitHub 额度")
+                githubAccountJob = null
+                return@launch
+            }
+            val result = githubAccountService.refresh(normalized)
+            if (generation != githubAccountGeneration) return@launch
+            when (result.tokenValid) {
+                true -> {
+                    val saveError = runCatching { settingsRepo.setGithubToken(normalized) }.exceptionOrNull()
+                    if (saveError != null) {
+                        githubAccountService.refresh()
+                        if (generation != githubAccountGeneration) return@launch
+                        postMessage(saveError.message ?: "GitHub Token 安全保存失败")
+                        githubAccountJob = null
+                        return@launch
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    postMessage("GitHub Token 验证成功${result.login?.let { "：$it" }.orEmpty()}")
+                }
+                false, null -> {
+                    val errorMessage = if (result.tokenValid == false) {
+                        result.error ?: "GitHub Token 无效，未保存"
+                    } else {
+                        result.error ?: "暂时无法验证 Token，未保存"
+                    }
+                    githubAccountService.refresh()
+                    if (generation != githubAccountGeneration) return@launch
+                    postMessage(errorMessage)
+                }
+            }
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+    }
+
+    fun clearGithubToken() {
+        val generation = beginGithubAccountOperation()
+        settingsRepo.setGithubToken("")
+        githubAccountJob = scope.launch {
+            githubAccountService.refresh("")
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+        postMessage("已清空 GitHub Token，当前使用匿名额度")
+    }
+
+    fun refreshGithubAccount() {
+        val generation = beginGithubAccountOperation()
+        githubAccountJob = scope.launch {
+            githubAccountService.refresh()
+            if (generation == githubAccountGeneration) githubAccountJob = null
+        }
+    }
+
+    private fun beginGithubAccountOperation(): Long {
+        githubAccountGeneration += 1
+        githubAccountJob?.cancel()
+        githubAccountJob = null
+        return githubAccountGeneration
+    }
+}
+
+/**
+ * 设置页「Root 开机自启」子控制器：安装/卸载自启模块与开关状态。
+ *
+ * 行为与拆分前一致，仅把状态与协程从 ViewModel 中搬出。
+ */
+internal class SettingsRootAutoStartController(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val runtimeRepo: RuntimeRepository,
+    private val postMessage: (String) -> Unit
+) {
+    var rootBootAutoStartEnabled by mutableStateOf(
+        RootAutoStartPrefs.isBootAutoStartEnabled(context)
+    )
+        private set
+    var isRootAutoStartOperating by mutableStateOf(false)
+        private set
+
+    fun enableRootBootAutoStart() {
+        if (isRootAutoStartOperating) return
+        if (runtimeRepo.runtimeState.value.runMode != RunMode.Root) {
+            postMessage("请先切换到 Root 模式")
+            return
+        }
+        scope.launch {
+            isRootAutoStartOperating = true
+            val result = withContext(Dispatchers.IO) {
+                RootAutoStartModule.installAndEnable(context)
+            }
+            if (result.ok) {
+                RootAutoStartPrefs.setBootAutoStartEnabled(context, true)
+                rootBootAutoStartEnabled = true
+                postMessage("已安装模块并开启开机自启，建议重启设备验证")
+            } else {
+                postMessage("开启失败：${result.message}")
+            }
+            isRootAutoStartOperating = false
+        }
+    }
+
+    fun disableRootBootAutoStart(uninstallModule: Boolean) {
+        if (isRootAutoStartOperating) return
+        scope.launch {
+            isRootAutoStartOperating = true
+            val result = withContext(Dispatchers.IO) {
+                if (uninstallModule) RootAutoStartModule.uninstall()
+                else RootAutoStartModule.disableOnly()
+            }
+            if (result.ok) {
+                RootAutoStartPrefs.setBootAutoStartEnabled(context, false)
+                rootBootAutoStartEnabled = false
+                postMessage(
+                    if (uninstallModule) {
+                        "已卸载模块并关闭开机自启"
+                    } else {
+                        "已关闭开机自启（模块保留）"
+                    }
+                )
+            } else {
+                postMessage(
+                    if (uninstallModule) {
+                        "卸载失败：${result.message}"
+                    } else {
+                        "关闭失败：${result.message}"
+                    }
+                )
+            }
+            isRootAutoStartOperating = false
+        }
+    }
+
+    fun refreshBootState() {
+        rootBootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
     }
 }

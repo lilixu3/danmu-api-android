@@ -93,19 +93,3 @@ internal fun CompatModeOptions(selected: InterfaceMode, onSelect: (InterfaceMode
         )
     }
 }
-
-@Composable
-internal fun CompatModeSettingsDialog(onDismiss: () -> Unit, onSelect: (InterfaceMode) -> Unit) {
-    val context = LocalContext.current
-    AppDialog(
-        onDismissRequest = onDismiss,
-        style = AppDialogStyle.Selection,
-        tone = AppDialogTone.Info,
-        title = { Text("兼容模式") },
-        text = {
-            Text("仅切换界面，正在运行的服务保持原样。")
-            CompatModeOptions(selected = DeviceCompatMode.getInterfaceMode(context), onSelect = onSelect)
-        },
-        confirmButton = { AppGlassButton(onClick = onDismiss) { Text("返回") } }
-    )
-}

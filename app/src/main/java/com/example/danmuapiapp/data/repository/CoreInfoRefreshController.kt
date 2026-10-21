@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.data.repository
 
+import android.os.FileObserver
 import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreInfo
@@ -47,6 +48,14 @@ internal class CoreInfoRefreshController(
 ) {
     private companion object {
         const val CORE_REFRESH_DEBOUNCE_MS = 800L
+        val CORE_DIR_WATCH_MASK = FileObserver.CLOSE_WRITE or
+            FileObserver.MODIFY or
+            FileObserver.CREATE or
+            FileObserver.MOVED_TO or
+            FileObserver.MOVED_FROM or
+            FileObserver.DELETE or
+            FileObserver.DELETE_SELF or
+            FileObserver.MOVE_SELF
     }
 
     private val _isLoading = MutableStateFlow(true)
@@ -57,7 +66,7 @@ internal class CoreInfoRefreshController(
     private var debounceJob: Job? = null
     private var pendingRefreshReason: String? = null
     private var hasLoadedOnce = false
-    private var watcher: CoreDirWatcher? = null
+    private var watcher: DirTreeWatcher? = null
 
     fun refresh() {
         // 先让旧读取失效，再取消它，避免旧任务的 finally 提前结束首次加载状态。
@@ -233,7 +242,11 @@ internal class CoreInfoRefreshController(
         watcher = null
 
         if (!projectDir.exists() || !projectDir.isDirectory) return
-        val created = CoreDirWatcher(projectDir) { changedPath ->
+        val created = DirTreeWatcher(
+            rootDir = projectDir,
+            mask = CORE_DIR_WATCH_MASK,
+            shouldIgnore = { CoreDirWatchPolicy.shouldIgnore(projectDir, it) }
+        ) { changedPath ->
             scheduleRefresh("检测到核心目录变更：$changedPath")
         }
         created.start()

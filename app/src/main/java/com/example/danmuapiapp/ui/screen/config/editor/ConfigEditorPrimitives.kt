@@ -215,13 +215,6 @@ internal fun appendToken(current: String, token: String, separator: String = ","
     return parts.joinToString(separator)
 }
 
-internal fun looseTokens(raw: String): List<String> {
-    return raw.split(Regex("[,&，、\\s]+"))
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinctBy { it.lowercase(Locale.getDefault()) }
-}
-
 internal fun normalizeSource(raw: String): String {
     return raw.trim().lowercase(Locale.getDefault())
 }

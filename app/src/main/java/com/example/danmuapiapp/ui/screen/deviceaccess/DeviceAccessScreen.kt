@@ -40,24 +40,16 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,7 +61,6 @@ import com.example.danmuapiapp.domain.model.DeviceAccessDevice
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.model.DeviceAccessSource
-import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -649,9 +640,6 @@ private fun AdminActionsCard(
         }
     }
 }
-
-@Composable
-private fun primaryActionButtonColors() = appPrimaryButtonColors()
 
 private fun sourceText(source: DeviceAccessSource): String {
     return when (source) {

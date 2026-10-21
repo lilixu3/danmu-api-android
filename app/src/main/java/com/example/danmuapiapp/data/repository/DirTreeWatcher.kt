@@ -5,21 +5,20 @@ import android.os.FileObserver
 import com.example.danmuapiapp.data.util.WatcherRegistry
 import java.io.File
 
-internal class CoreDirWatcher(
+/**
+ * 递归目录监听：对根目录及其子目录挂 [FileObserver]，事件按相对路径回调。
+ *
+ * 监听掩码与忽略策略由调用方给出：核心目录与工作目录热重载对「哪些事件算变更」的要求不同。
+ */
+internal class DirTreeWatcher(
     rootDir: File,
+    private val mask: Int,
+    private val shouldIgnore: (File) -> Boolean,
     private val onChanged: (String) -> Unit
 ) {
     val rootPath: String = rootDir.absolutePath
     private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
     private val observers = WatcherRegistry<FileObserver> { it.stopWatching() }
-    private val mask = FileObserver.CLOSE_WRITE or
-        FileObserver.MODIFY or
-        FileObserver.CREATE or
-        FileObserver.MOVED_TO or
-        FileObserver.MOVED_FROM or
-        FileObserver.DELETE or
-        FileObserver.DELETE_SELF or
-        FileObserver.MOVE_SELF
 
     fun start() {
         watchRecursively(rootCanonical)
@@ -84,13 +83,5 @@ internal class CoreDirWatcher(
         }
     }
 
-    private fun toRelative(target: File): String {
-        return CoreDirWatchPolicy.relativePath(rootCanonical, target)
-    }
-
-    private fun shouldIgnore(target: File): Boolean {
-        // 核心目录允许用户手工替换；这里不能在覆盖过程中递归介入，
-        // 否则 refreshCoreInfo() -> normalizeCoreLayout() 会对半写入目录做结构整理。
-        return CoreDirWatchPolicy.shouldIgnore(rootCanonical, target)
-    }
+    private fun toRelative(target: File): String = CoreDirWatchPolicy.relativePath(rootCanonical, target)
 }

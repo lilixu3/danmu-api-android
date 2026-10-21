@@ -397,7 +397,7 @@ class HomeViewModel @Inject constructor(
 
     fun dismissForegroundAppUpdatePrompt() = appUpdateController.dismissForegroundAppUpdatePrompt()
 
-    fun dismissForegroundAppUpdateMethodDialog() = appUpdateController.dismissForegroundAppUpdateMethodDialog()
+    fun dismissForegroundAppUpdateMethodDialog() = appUpdateInstaller.dismissMethodDialog()
 
     fun acknowledgeForegroundAnnouncementPrompt() = appUpdateController.acknowledgeForegroundAnnouncementPrompt()
 
@@ -420,11 +420,11 @@ class HomeViewModel @Inject constructor(
 
     fun openBrowserDownload(activity: Activity) = appUpdateController.openBrowserDownload(activity)
 
-    fun installDownloadedAppUpdate(activity: Activity) = appUpdateController.installDownloadedAppUpdate(activity)
+    fun installDownloadedAppUpdate(activity: Activity) = appUpdateInstaller.installDownloaded(activity)
 
-    fun dismissInstallAppUpdateDialog() = appUpdateController.dismissInstallAppUpdateDialog()
+    fun dismissInstallAppUpdateDialog() = appUpdateInstaller.dismissInstallDialog()
 
-    fun openDownloadsApp(activity: Activity) = appUpdateController.openDownloadsApp(activity)
+    fun openDownloadsApp(activity: Activity) = appUpdateInstaller.openDownloadsApp(activity)
 
     fun resetCoreUpdateCheckDialogState() = coreUpdateCheckController.resetCoreUpdateCheckDialogState()
 

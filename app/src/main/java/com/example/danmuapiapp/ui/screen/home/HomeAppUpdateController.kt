@@ -141,10 +141,6 @@ internal class HomeAppUpdateController(
         postMessage("已设置今日不提醒，24 小时内不再弹出更新提示")
     }
 
-    fun dismissForegroundAppUpdateMethodDialog() {
-        appUpdateInstaller.dismissMethodDialog()
-    }
-
     fun acknowledgeForegroundAnnouncementPrompt() {
         val announcement = foregroundAnnouncementPrompt ?: return
         showForegroundAnnouncementDialog = false
@@ -206,18 +202,6 @@ internal class HomeAppUpdateController(
             releasePage = appUpdatePromptReleasePage,
             fallbackReleasePage = "https://github.com/lilixu3/danmu-api-android/releases/latest"
         )
-    }
-
-    fun installDownloadedAppUpdate(activity: Activity) {
-        appUpdateInstaller.installDownloaded(activity)
-    }
-
-    fun dismissInstallAppUpdateDialog() {
-        appUpdateInstaller.dismissInstallDialog()
-    }
-
-    fun openDownloadsApp(activity: Activity) {
-        appUpdateInstaller.openDownloadsApp(activity)
     }
 
     private val showAppUpdateMethodDialog: Boolean
