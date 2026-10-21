@@ -6,7 +6,7 @@ package com.example.danmuapiapp.domain.model
  * This is shared by UI presentation and downloaded-record recovery, so it must remain
  * independent from Compose and data-layer implementations.
  */
-internal fun extractSourceFromAnimeTitle(raw: String): String {
+fun extractSourceFromAnimeTitle(raw: String): String {
     val matched = Regex("from\\s+(.+?)\\s*$", RegexOption.IGNORE_CASE).find(raw)
     return matched?.groupValues?.getOrNull(1)
         ?.trim()
@@ -17,7 +17,7 @@ internal fun extractSourceFromAnimeTitle(raw: String): String {
 /**
  * Produces the stable provider key used for matching records and episode candidates.
  */
-internal fun canonicalSourceKey(raw: String): String {
+fun canonicalSourceKey(raw: String): String {
     val key = raw.trim()
         .replace(Regex("^from\\s+", RegexOption.IGNORE_CASE), "")
         .trim()

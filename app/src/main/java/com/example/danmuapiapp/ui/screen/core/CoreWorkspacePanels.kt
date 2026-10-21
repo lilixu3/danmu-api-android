@@ -424,9 +424,10 @@ internal fun GithubQuotaStrip(status: GithubAccountStatus, onRefresh: () -> Unit
                     else TextButton(onClick = onRefresh, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("重试", fontSize = 12.5.sp) }
                 }
             }
-            if (known && status.error != null) {
+            val error = status.error
+            if (known && error != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(status.error, Modifier.weight(1f), fontSize = 11.sp, color = colors.error, maxLines = 2,
+                    Text(error, Modifier.weight(1f), fontSize = 11.sp, color = colors.error, maxLines = 2,
                         overflow = TextOverflow.Ellipsis)
                     TextButton(onClick = onRefresh, enabled = !status.isLoading) { Text("重试", fontSize = 12.sp) }
                 }

@@ -7,7 +7,7 @@ import java.util.Locale
  * Mirrors the core's local-danmu resource-key normalization closely enough to preview
  * conflicts before an upload. The core remains the source of truth after a request.
  */
-internal object LocalDanmuResourceKey {
+object LocalDanmuResourceKey {
 
     private val trailingExtensionRegex = Regex("\\.[^.\\n]+$")
     private val invalidKeyCharsRegex = Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]+")

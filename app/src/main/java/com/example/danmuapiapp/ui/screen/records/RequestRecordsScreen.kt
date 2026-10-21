@@ -515,16 +515,18 @@ private fun RecordCard(
             // Expanded details
             if (expanded) {
                 // Error message
-                if (!record.errorMessage.isNullOrBlank()) {
+                val errorMessage = record.errorMessage
+                if (!errorMessage.isNullOrBlank()) {
                     Text(
-                        record.errorMessage,
+                        errorMessage,
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isSystemInDarkTheme()) Color(0xFFF87171) else Color(0xFFE53935)
                     )
                 }
 
                 // Response snippet
-                if (!record.responseSnippet.isNullOrBlank()) {
+                val responseSnippet = record.responseSnippet
+                if (!responseSnippet.isNullOrBlank()) {
                     AppGlassSurface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp),
@@ -532,7 +534,7 @@ private fun RecordCard(
                         tonalElevation = 0.dp
                     ) {
                         Text(
-                            record.responseSnippet.take(500),
+                            responseSnippet.take(500),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontFamily = FontFamily.Monospace, fontSize = 10.sp
                             ),

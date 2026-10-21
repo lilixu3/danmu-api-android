@@ -130,7 +130,7 @@ internal class HomeCoreUpdatePromptController(
             return
         }
 
-        val latest = info.availableVersion.trim()
+        val latest = info.availableVersion.orEmpty().trim()
         val ignored = ignoredUpdateVersionMap[currentVariant]?.trim().orEmpty()
         if (ignored.isNotBlank() && ignored != latest) {
             settingsRepo.setIgnoredUpdateVersion(currentVariant, null)

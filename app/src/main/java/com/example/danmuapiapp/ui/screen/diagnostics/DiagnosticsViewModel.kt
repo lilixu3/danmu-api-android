@@ -213,6 +213,7 @@ class DiagnosticsViewModel @Inject constructor(
                     }
                 )
             )
+            val coreRemaining = github.coreRemaining
             add(
                 DiagnosticCheck(
                     title = "GitHub API",
@@ -231,8 +232,8 @@ class DiagnosticsViewModel @Inject constructor(
                     },
                     level = when {
                         github.tokenValid == false -> DiagnosticLevel.Error
-                        github.coreRemaining != null && github.coreRemaining <= 5 -> DiagnosticLevel.Warning
-                        github.error != null && github.coreRemaining == null -> DiagnosticLevel.Warning
+                        coreRemaining != null && coreRemaining <= 5 -> DiagnosticLevel.Warning
+                        github.error != null && coreRemaining == null -> DiagnosticLevel.Warning
                         else -> DiagnosticLevel.Good
                     }
                 )

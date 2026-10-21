@@ -69,10 +69,12 @@ internal fun validateCompatConfigValue(def: EnvVarDef, value: String): String? {
         EnvType.BOOLEAN -> if (value !in listOf("true", "false")) "请选择开启或关闭" else null
         EnvType.NUMBER -> {
             val number = value.toDoubleOrNull()
+            val min = def.min
+            val max = def.max
             when {
                 number == null || !number.isFinite() -> "请输入有效数字"
-                def.min != null && number < def.min -> "不能小于 ${def.min}"
-                def.max != null && number > def.max -> "不能大于 ${def.max}"
+                min != null && number < min -> "不能小于 ${min}"
+                max != null && number > max -> "不能大于 ${max}"
                 else -> null
             }
         }

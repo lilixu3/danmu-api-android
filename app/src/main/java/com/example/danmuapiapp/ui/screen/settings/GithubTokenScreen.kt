@@ -187,8 +187,10 @@ fun GithubTokenScreen(
 
 @Composable
 private fun GithubStatusPanel(status: GithubAccountStatus, onRefresh: () -> Unit) {
-    val ratio = if (status.coreLimit != null && status.coreLimit > 0 && status.coreRemaining != null) {
-        status.coreRemaining.toFloat() / status.coreLimit
+    val coreLimit = status.coreLimit
+    val coreRemaining = status.coreRemaining
+    val ratio = if (coreLimit != null && coreLimit > 0 && coreRemaining != null) {
+        coreRemaining.toFloat() / coreLimit
     } else null
     val color = when {
         status.tokenValid == true -> Color(0xFF1F7A4D)
