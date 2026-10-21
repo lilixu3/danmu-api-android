@@ -30,31 +30,35 @@ class ModuleRule:
 MODULE_RULES = (
     ModuleRule(
         name=":core:model",
-        source_root=Path("core/model/src/main/java"),
+        source_root=Path("core/model/src/main/kotlin"),
         build_file=Path("core/model/build.gradle.kts"),
         allowed_project_dependencies=(),
-        allowed_app_package_prefixes=("com.example.danmuapiapp.core.model",),
+        allowed_app_package_prefixes=("com.example.danmuapiapp.domain.model",),
         allow_android_imports=False,
     ),
     ModuleRule(
         name=":core:common",
-        source_root=Path("core/common/src/main/java"),
+        source_root=Path("core/common/src/main/kotlin"),
         build_file=Path("core/common/build.gradle.kts"),
         allowed_project_dependencies=(":core:model",),
         allowed_app_package_prefixes=(
-            "com.example.danmuapiapp.core.common",
-            "com.example.danmuapiapp.core.model",
+            "com.example.danmuapiapp.data.util",
+            "com.example.danmuapiapp.domain.model",
         ),
         allow_android_imports=False,
     ),
     ModuleRule(
         name=":ui:designsystem",
-        source_root=Path("ui/designsystem/src/main/java"),
+        source_root=Path("ui/designsystem/src/main/kotlin"),
         build_file=Path("ui/designsystem/build.gradle.kts"),
         allowed_project_dependencies=(":core:model", ":core:common"),
+        # 设计系统模块同时拥有 ui.theme / ui.component / ui.component.liquid 三个包，
+        # 并允许依赖 :core:model 与 :core:common 的包。
         allowed_app_package_prefixes=(
-            "com.example.danmuapiapp.ui.designsystem",
-            "com.example.danmuapiapp.core.",
+            "com.example.danmuapiapp.ui.theme",
+            "com.example.danmuapiapp.ui.component",
+            "com.example.danmuapiapp.domain.model",
+            "com.example.danmuapiapp.data.util",
         ),
         allow_android_imports=True,
     ),

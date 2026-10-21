@@ -106,7 +106,7 @@ class ArchitectureTests(unittest.TestCase):
     def test_module_rules_reject_platform_imports_in_core(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
-            source = repo / "core/model/src/main/java/com/example/danmuapiapp/core/model"
+            source = repo / "core/model/src/main/kotlin/com/example/danmuapiapp/domain/model"
             source.mkdir(parents=True)
             (source / "Bad.kt").write_text(
                 "import androidx.compose.runtime.Composable\n",
@@ -136,11 +136,11 @@ class ArchitectureTests(unittest.TestCase):
                 'dependencies {\n    api(project(":core:model"))\n}\n',
                 encoding="utf-8",
             )
-            source = repo / "ui/designsystem/src/main/java/com/example/danmuapiapp/ui/designsystem"
+            source = repo / "ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/theme"
             source.mkdir(parents=True)
             (source / "Ok.kt").write_text(
                 "import androidx.compose.runtime.Composable\n"
-                "import com.example.danmuapiapp.core.model.CoreVariant\n",
+                "import com.example.danmuapiapp.domain.model.CoreVariant\n",
                 encoding="utf-8",
             )
             self.assertEqual([], check_tree(repo))
