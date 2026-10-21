@@ -195,8 +195,8 @@ WS6 起点（`0bcdc40` 之后）：
 - [x] Download ViewModel
 - [x] Home ViewModel
 - [x] Settings ViewModel
-- [ ] Home Screen
-- [ ] Config Editors
+- [x] Home Screen
+- [x] Config Editors
 - [ ] Startup Permission Gate
 - [ ] Pull Request Lab
 
@@ -352,6 +352,12 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-21 | WS6 统一收口复核 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
 | 2026-10-21 | WS6 统一收口复核 | 三个 ViewModel 字面量多重集独立比对 | 通过 | download 204=204、home 89=89、settings 213=213；差异仅为状态归属前缀 |
 | 2026-10-21 | WS6 统一收口复核 | `git diff --check`、`check_architecture.py`、`test_guardrails.py` | 通过 | 无空白错误、边界无违规、护栏自测 6 项 |
+| 2026-10-21 | WS6 Home Screen | 隔离 worktree 编译 + 单测 + 护栏 + Node 测试 | 通过 | 1,168 项 0 失败；字面量 188=188 |
+| 2026-10-21 | WS6 Config Editors | 隔离 worktree 编译 + 单测（两个 lane 各自） | 通过 | ConfigDialogEditors 150=150、ConfigVisualEditors 375=375 字面量零差异 |
+| 2026-10-21 | WS6 第二轮收口 | `./gradlew :app:checkRefactorGuardrails :app:compileDebugKotlin :app:testDebugUnitTest` | 通过 | 234 suite、1,168 项、0 失败 |
+| 2026-10-21 | WS6 第二轮收口 | 三个 Compose lane 字面量多重集独立比对 | 通过 | Home Screen 188=188、ConfigDialogEditors 150=150、ConfigVisualEditors 375=375 |
+| 2026-10-21 | WS6 拆分粒度收敛 | 合并单次调用的 16 行辅助文件回宿主文件 | 通过 | `HomeCacheFileEventPolicy`→`HomeCacheRefreshController`、`HomeDisplayFormatters`→`HomeViewModel`，测试改为指向宿主文件内的同文件函数 |
+| 2026-10-21 | WS6 第二轮收口 | `node --test node-tests/*.test.cjs` | 通过 | 216 项，0 失败 |
 
 ## 进度日志
 
@@ -539,9 +545,30 @@ WS6 起点（`0bcdc40` 之后）：
 - 统一收口：234 suite、1,168 项、0 失败；Node 216 项通过；架构边界与护栏自测通过；
   三个 ViewModel 的字面量多重集独立比对通过（差异仅为状态归属前缀与私有符号改名）。
 
+- `HomeScreen.kt` 从 1,937 行降至 714 行，`HomeScreenSections.kt` 拆成 7 个分区文件（108–352 行），
+  22 个内联弹窗按域拆成核心/运行时/应用更新/公告/队列缓存宿主文件，公告中心独立到 `announcement` 包；
+  188 条字符串字面量零差异，调用顺序与层叠顺序保持不变。
+- `ConfigDialogEditors.kt`（1,707 行）拆为 7 个专职编辑器文件（132–373 行），`ConfigVisualEditors.kt`（1,697 行）
+  拆为 6 个文件（156–379 行）；两者字面量多重集分别 150=150、375=375 零差异，仅共享辅助函数放宽为 `internal`。
+- 按用户新增的拆分粒度约束做了一次收敛：把两个 16 行、单次调用的辅助文件合并回宿主文件
+  （`HomeCacheFileEventPolicy` 并入 `HomeCacheRefreshController`、`HomeDisplayFormatters` 并入 `HomeViewModel`），
+  测试改为直接引用宿主文件内的同文件函数，保持可测性。
+- 第二轮收口：234 suite、1,168 项、0 失败；Node 216 项通过；护栏、架构边界与 `git diff --check` 全部通过。
+
 ## 决策记录
 
 ### 2026-10-21 落盘方式
+
+### 2026-10-21 拆分粒度约束（WS6 起生效）
+
+用户明确要求禁止过度封装，后续拆分与收口按此执行：
+
+1. 单次调用、只服务于原文件的逻辑不单独建文件；简单逻辑不套抽象类、接口或 DTO。
+2. 迁移代码一律「剪切」，不复制新文件再删旧代码，避免 diff 虚高。
+3. 不生成重复样板（重复 try/catch、重复日志、重复状态转发）。
+4. 只有具备复用价值、职责明确的逻辑才独立成文件；预计拆分后不足约 100 行且只有一个调用点的，
+   留在原文件内（可用同文件内的顶层 `internal` 函数保留可测性）。
+5. 收口阶段按此规则复查新增文件，把不达标的合并回原文件，并在进度日志记录合并结果。
 
 - WS0-WS4 的改动按职责拆成 5 个语义提交后推送 `origin/test`：
   `555085b` 护栏与追踪文档、`4e1952d` domain 抽取与工具统一、
