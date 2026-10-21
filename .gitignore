@@ -56,3 +56,6 @@ local.properties
 
 # Generated Python bytecode from source-build helpers
 __pycache__/
+
+# 多代理并行跑 Gradle 用的本地锁文件
+/.gradle-team.lock
