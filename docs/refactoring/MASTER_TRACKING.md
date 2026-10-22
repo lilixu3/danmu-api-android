@@ -301,6 +301,65 @@ WS6 起点（`0bcdc40` 之后）：
   `node --test node-tests/*.test.cjs` 216 项通过；`git diff --check` 干净。
 - 规模：`app/` 侧 35 文件、+512 / −3,602 行（含并回宿主带来的「删文件 + 追加」记账），净减约 3,000 行。
 
+### 2026-10-22 WS10 核心/兼容 lane（`CoreViewModel` + `CompatModeViewModel`）
+
+按「只拆有独立变更理由的子系统、不具备复用价值的不单独立文件」落地两件事：
+
+- `CoreViewModel.kt` 1,419 → 1,146 行：把核心回退对话框子系统（15 个状态属性、分页与页缓存、
+  按提交 sha 补齐版本号、变更详情、待回退提交暂存）剪切为 `CoreRevisionHistoryController.kt`（362 行）。
+  纯搬移，仅为去重名改私有名（`loadRevisionPage` → `loadPage`、`cancelRevisionVersionRequests` → `cancelVersionRequests`、
+  `applyRevisionVersion` → `applyVersion`、`revisionPageCacheKey`/`cacheRevisionPage` → `pageCacheKey`/`cachePage`、
+  `isCurrentRevision*Request` → `isCurrent*Request`）；宿主耦合改为注入：`viewModelScope` → scope 参数，
+  `settingsRepo.customCoreSource` → `customSourceFingerprint` 回调，加载失败重选线路 → `onHistoryLoadFailed`，
+  远端用量后刷新额度 → `onApiUsage`。
+  `CoreViewModel` 保留同名公开属性与函数（属性改为 getter 转发），`CoreRevisionHistoryPanel`/`CoreScreen` 调用点零改动；
+  `openRollbackDialog`/`confirmRollback`/`doRollbackTo` 仍留在 ViewModel（依赖代理门与核心变更编排）。
+- 去重：删除 `CoreViewModel` 内联的代理选择实现（3 个状态属性 + 私有测速任务 + 5 个入口），
+  改用 Home/Settings/Compat/Startup 已在用的 `ui/common/ProxyPickerController`；构造函数新增 `GithubProxySpeedTester`。
+  对外属性名与函数签名不变（`showProxyPickerDialog`/`proxySelectedId`/`proxyTestingIds`/`proxyLatencyMap`/
+  `selectProxy`/`retestProxySpeed`/`confirmProxySelection`/`dismissProxyPickerDialog`），`CoreScreen` 调用点零改动；
+  唯一行为差异是测速改走 `GithubProxySpeedTester.testAll`（与原来逐项并发 `testLatency` 同一实现）。
+- `CompatModeViewModel.kt` 1,278 → 1,257 行：`observeState` 中 15 段逐字段
+  `launch { flow.collectLatest { _uiState.update { it.copy(x = value) } } }` 收敛为同文件私有
+  `observeInto(flow) { state, value -> ... }`（不拆文件、不新增抽象）；`runtimeState` 段因带
+  `syncServer.updateHost` 与 keepAlive 重算保持显式，keepAlive 五条流仍走 `refreshKeepAliveUi()`。
+- 未动：`CoreViewModel` 其余 8 个 80–120 行簇（工作区刷新、更新检查、分支、依赖修复、GitHub 账号等）与
+  `CompatModeViewModel` 其余结构；按评审结论单拆任一个都是为拆而拆。
+- 验证（独立 worktree：HEAD `76f3cc5` + 仅本 lane 三个文件，避开并行 lane 的在途编辑）：
+  `:app:compileDebugKotlin` 通过；`:app:testDebugUnitTest` 210 suite / 1,068 项 / 0 失败（与 WS9 基线一致）；
+  `:app:checkRefactorGuardrails` 通过（含护栏自测 10 项）；主工作树 `check_architecture.py`、
+  `audit_runtime_hardcoding.py`、`git diff --check` 通过。原生任务按 WS7 结论以
+  `-x :app:prepareNativeRuntime -x :app:verifyNativeRuntimeInputs` 排除，与本次改动无关。
+
+### 2026-10-22 WS10 弹幕测试 lane（`ApiTestViewModel`）
+
+按「只拆有独立变更理由的子系统、不具备复用价值的不单独立文件」落地：
+
+- `ApiTestViewModel.kt` 1,511 → 306 行门面：只保留依赖装配、跨流程状态
+  （`errorMessage`、`uiNotice`、`lastApiActionStartedAtMs`、搜索布局偏好）与对外 API 转发。
+- 拆出的 6 个同包文件都对应界面上一块独立功能区，不是按行数切：
+  - `ApiTestRequestExecutor.kt`（231）：出站 GET/POST/字节请求、请求记录落库、Base URL 归一化、
+    二进制响应片段；调试、自动匹配、手动搜索、收藏、导出五条流程共用同一份实现。
+  - `ApiTestDebugController.kt`（245）：接口调试页参数拼装、cURL 生成与调试响应/调用记录。
+  - `ApiTestAutoMatchController.kt`（241）：文件名自动匹配与 URL 直达解析两条入口。
+  - `ApiTestManualSearchController.kt`（392）：关键词/URL 搜索、剧集加载、手动取弹幕（含来源 URL 兜底）与步骤回退。
+  - `ApiTestFavoriteController.kt`（246）：收藏列表加载、增删/刷新/定时设置与收藏态展示。
+  - `ApiTestExportController.kt`（125）：导出请求、载荷校验与待保存文件状态。
+- 共用但不足以独立成模块的 `buildDanmuInsightOrFallback`（55 行，自动匹配与手动搜索共用）移入既有
+  `ApiTestDanmuParser.kt`，不新开文件。
+- 宿主耦合按既有做法注入：`viewModelScope` → scope 参数，`errorMessage` 读写 → `setError`/`currentError`，
+  `emitNotice`/`nextUiEventId` → 回调，跨控制器调用走回调（手动搜索成功后重载收藏）。
+- 行为保持证据：对外 API 60 → 60 零差异（属性由 `var x private set` 改为 `val x get()` 转发，函数签名不变）；
+  字面量多重集 166 → 166，仅 7 处调用点限定名变化（`urlEncode` → `executor.urlEncode`）与 1 处
+  `"二进制响应：$size 字节"` → `"二进制响应：${bytes.size} 字节"`（`ByteArray.toTextSnippet` 改为
+  `textSnippet(bytes, contentType)`）。
+- 未动：`UrlDanmuMetadataResolver`（822）等本包其它文件不在超大文件登记范围内。
+- 验证：`:app:compileDebugKotlin` 通过；`:app:testDebugUnitTest` 210 suite / 1,068 项 / 0 失败；
+  `:app:checkRefactorGuardrails`、`:app:checkNodeRuntimeScripts` 通过；`git diff --check` 干净。
+- 环境记录：三个 lane 并行时主工作树的 Gradle daemon 被系统回收过一次
+  （`Gradle build daemon disappeared unexpectedly`，KSP 缓存也出现过半成品状态）；按 `flock .gradle-team.lock`
+  串行后通过，失败残留的 `app/build/kspCaches/debug` 移开后重建即可。
+
 ## 验证记录
 
 | 日期 | 范围 | 命令或方法 | 结果 | 备注 |
@@ -466,6 +525,9 @@ WS6 起点（`0bcdc40` 之后）：
 | 2026-10-22 | WS9 清理 | `./gradlew :app:testDebugUnitTest :app:checkRefactorGuardrails` | 通过 | 210 suite、1,068 项、0 失败；架构边界、资产清单 27 项/28 文件、护栏自测 10 项 |
 | 2026-10-22 | WS9 清理 | `node --test node-tests/*.test.cjs` | 通过 | 216 项通过 |
 | 2026-10-22 | WS9 清理 | `git diff --check` | 通过 | 无空白错误 |
+| 2026-10-22 | WS10 core/compat | 独立 worktree `:app:compileDebugKotlin` | 通过 | HEAD `76f3cc5` + 本 lane 三文件，规避并行 lane 在途编辑 |
+| 2026-10-22 | WS10 core/compat | 独立 worktree `:app:testDebugUnitTest :app:checkRefactorGuardrails` | 通过 | 210 suite、1,068 项、0 失败；护栏自测 10 项 |
+| 2026-10-22 | WS10 core/compat | `check_architecture.py` / `audit_runtime_hardcoding.py` / `git diff --check` | 通过 | 主工作树执行 |
 
 ## 进度日志
 
