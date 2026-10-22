@@ -48,6 +48,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -999,81 +1000,47 @@ class CompatModeViewModel(
                 }
             }
         }
-        viewModelScope.launch {
-            graph.coreRepository.coreInfoList.collectLatest { coreInfos ->
-                _uiState.update { it.copy(coreInfos = coreInfos) }
-            }
+        observeInto(graph.coreRepository.coreInfoList) { state, value -> state.copy(coreInfos = value) }
+        observeInto(graph.coreRepository.downloadProgress) { state, value ->
+            state.copy(downloadProgress = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.downloadProgress.collectLatest { progress ->
-                _uiState.update { it.copy(downloadProgress = progress) }
-            }
+        observeInto(graph.coreRepository.isCoreInfoLoading) { state, value ->
+            state.copy(isCoreInfoLoading = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.isCoreInfoLoading.collectLatest { loading ->
-                _uiState.update { it.copy(isCoreInfoLoading = loading) }
-            }
+        observeInto(graph.coreRepository.pendingDependencyRepair) { state, value ->
+            state.copy(pendingDependencyRepair = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.pendingDependencyRepair.collectLatest { request ->
-                _uiState.update { it.copy(pendingDependencyRepair = request) }
-            }
+        observeInto(graph.settingsRepository.coreDisplayNames) { state, value ->
+            state.copy(coreDisplayNames = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.coreDisplayNames.collectLatest { names ->
-                _uiState.update { it.copy(coreDisplayNames = names) }
-            }
+        observeInto(graph.settingsRepository.coreBranchSelections) { state, value ->
+            state.copy(coreBranchSelections = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.coreBranchSelections.collectLatest { selections ->
-                _uiState.update { it.copy(coreBranchSelections = selections) }
-            }
+        observeInto(graph.settingsRepository.customCoreSource) { state, value ->
+            state.copy(customCoreSource = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customCoreSource.collectLatest { source ->
-                _uiState.update { it.copy(customCoreSource = source) }
-            }
+        observeInto(graph.settingsRepository.customRepo) { state, value ->
+            state.copy(customRepo = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customRepo.collectLatest { repo ->
-                _uiState.update { it.copy(customRepo = repo) }
-            }
+        observeInto(graph.settingsRepository.customRepoBranch) { state, value ->
+            state.copy(customRepoBranch = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customRepoBranch.collectLatest { branch ->
-                _uiState.update { it.copy(customRepoBranch = branch) }
-            }
+        observeInto(graph.settingsRepository.nightMode) { state, value ->
+            state.copy(nightMode = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.nightMode.collectLatest { mode ->
-                _uiState.update { it.copy(nightMode = mode) }
-            }
+        observeInto(graph.settingsRepository.glassMaterial) { state, value ->
+            state.copy(glassMaterial = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.glassMaterial.collectLatest { material ->
-                _uiState.update { it.copy(glassMaterial = material) }
-            }
+        observeInto(graph.settingsRepository.glassTuning) { state, value ->
+            state.copy(glassTuning = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.glassTuning.collectLatest { tuning ->
-                _uiState.update { it.copy(glassTuning = tuning) }
-            }
+        observeInto(graph.settingsRepository.appBackground) { state, value ->
+            state.copy(appBackground = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.appBackground.collectLatest { background ->
-                _uiState.update { it.copy(appBackground = background) }
-            }
+        observeInto(graph.settingsRepository.compatDpiOverride) { state, value ->
+            state.copy(appDpiOverride = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.compatDpiOverride.collectLatest { dpi ->
-                _uiState.update { it.copy(appDpiOverride = dpi) }
-            }
-        }
-        viewModelScope.launch {
-            syncServer.uiState.collectLatest { syncState ->
-                _uiState.update { it.copy(syncState = syncState) }
-            }
-        }
+        observeInto(syncServer.uiState) { state, value -> state.copy(syncState = value) }
 
         val keepAliveFlows = listOf(
             graph.settingsRepository.autoStart,
@@ -1087,6 +1054,18 @@ class CompatModeViewModel(
                 flow.collectLatest {
                     refreshKeepAliveUi()
                 }
+            }
+        }
+    }
+
+    /** 把单个仓库 flow 的每次发射写回同一份页面状态，避免逐字段重复样板。 */
+    private fun <T> observeInto(
+        flow: Flow<T>,
+        update: (CompatModeUiState, T) -> CompatModeUiState
+    ) {
+        viewModelScope.launch {
+            flow.collectLatest { value ->
+                _uiState.update { update(it, value) }
             }
         }
     }
