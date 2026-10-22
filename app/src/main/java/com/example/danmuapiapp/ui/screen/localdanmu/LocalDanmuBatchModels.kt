@@ -1,17 +1,9 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
-import com.example.danmuapiapp.data.repository.LocalDanmuFileBrowser
 import com.example.danmuapiapp.domain.model.LocalDanmuBatchItem
 import com.example.danmuapiapp.domain.model.LocalDanmuBatchStatus
 import com.example.danmuapiapp.domain.model.LocalDanmuResourceKey
 import com.example.danmuapiapp.domain.model.LocalDanmuType
-
-/** 目录浏览里的一行：目录/文件 + 「已导入」标记 + 多选状态。 */
-data class LocalDanmuBrowserRow(
-    val entry: LocalDanmuFileBrowser.Entry,
-    val importedLabel: String? = null,
-    val selected: Boolean = false
-)
 
 internal fun applyImportType(items: List<LocalDanmuBatchItem>, type: LocalDanmuType?): List<LocalDanmuBatchItem> = items.map { item ->
     if (!item.selected || item.status == LocalDanmuBatchStatus.Success || item.status == LocalDanmuBatchStatus.Uploading) item
