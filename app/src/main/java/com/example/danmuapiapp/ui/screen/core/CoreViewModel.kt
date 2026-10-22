@@ -9,14 +9,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.danmuapiapp.data.repository.CoreDisplayInfoCache
 import com.example.danmuapiapp.data.service.GithubAccountService
+import com.example.danmuapiapp.data.service.GithubProxySpeedTester
 import com.example.danmuapiapp.data.service.GithubProxyService
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.CoreRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.common.RuntimeRestartEvidence
+import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.awaitCoreRestart
-import com.example.danmuapiapp.ui.common.cancelTrackedJobs
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +30,6 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -41,6 +40,7 @@ class CoreViewModel @Inject constructor(
     private val runtimeRepo: RuntimeRepository,
     private val settingsRepo: SettingsRepository,
     private val githubProxyService: GithubProxyService,
+    private val githubProxySpeedTester: GithubProxySpeedTester,
     private val githubAccountService: GithubAccountService,
     private val coreDisplayCache: CoreDisplayInfoCache
 ) : ViewModel() {
@@ -125,63 +125,74 @@ class CoreViewModel @Inject constructor(
         private set
     var showGearMenu by mutableStateOf<ApiVariant?>(null)
         private set
-    var showRevisionHistory by mutableStateOf(false)
-        private set
-    var rollbackVariant by mutableStateOf<ApiVariant?>(null)
-        private set
-    var revisionHistory by mutableStateOf<List<CoreRevision>>(emptyList())
-        private set
-    var isLoadingHistory by mutableStateOf(false)
-        private set
-    var revisionHistoryError by mutableStateOf<String?>(null)
-        private set
-    var revisionVersionLoadingShas by mutableStateOf<Set<String>>(emptySet())
-        private set
-    var revisionSearchQuery by mutableStateOf("")
-        private set
-    var appliedRevisionSearchQuery by mutableStateOf("")
-        private set
-    var revisionPage by mutableStateOf(1)
-        private set
-    var revisionHasNextPage by mutableStateOf(false)
-        private set
-    var selectedRevisionDetails by mutableStateOf<CoreRevisionDetails?>(null)
-        private set
-    var selectedRevision by mutableStateOf<CoreRevision?>(null)
-        private set
-    var isLoadingRevisionDetails by mutableStateOf(false)
-        private set
-    var revisionDetailsError by mutableStateOf<String?>(null)
-        private set
-    var pendingRollbackRevision by mutableStateOf<CoreRevision?>(null)
-        private set
     var showGithubTokenDialog by mutableStateOf(false)
         private set
-    var showProxyPickerDialog by mutableStateOf(false)
-        private set
-    var proxySelectedId by mutableStateOf(githubProxyService.currentSelectedOption().id)
-        private set
-    var proxyTestingIds by mutableStateOf<Set<String>>(emptySet())
-        private set
-    var proxyLatencyMap by mutableStateOf<Map<String, Long>>(emptyMap())
-        private set
+
+    val showRevisionHistory: Boolean
+        get() = revisionHistoryController.isVisible
+    val rollbackVariant: ApiVariant?
+        get() = revisionHistoryController.variant
+    val revisionHistory: List<CoreRevision>
+        get() = revisionHistoryController.revisions
+    val isLoadingHistory: Boolean
+        get() = revisionHistoryController.isLoading
+    val revisionHistoryError: String?
+        get() = revisionHistoryController.historyError
+    val revisionVersionLoadingShas: Set<String>
+        get() = revisionHistoryController.loadingVersionShas
+    val revisionSearchQuery: String
+        get() = revisionHistoryController.searchQuery
+    val appliedRevisionSearchQuery: String
+        get() = revisionHistoryController.appliedSearchQuery
+    val revisionPage: Int
+        get() = revisionHistoryController.page
+    val revisionHasNextPage: Boolean
+        get() = revisionHistoryController.hasNextPage
+    val selectedRevisionDetails: CoreRevisionDetails?
+        get() = revisionHistoryController.selectedDetails
+    val selectedRevision: CoreRevision?
+        get() = revisionHistoryController.selectedRevision
+    val isLoadingRevisionDetails: Boolean
+        get() = revisionHistoryController.isLoadingDetails
+    val revisionDetailsError: String?
+        get() = revisionHistoryController.detailsError
+    val pendingRollbackRevision: CoreRevision?
+        get() = revisionHistoryController.pendingRollback
+
+    val showProxyPickerDialog: Boolean
+        get() = proxyPickerController.uiState.isVisible
+    val proxySelectedId: String
+        get() = proxyPickerController.uiState.selectedId
+    val proxyTestingIds: Set<String>
+        get() = proxyPickerController.uiState.testingIds
+    val proxyLatencyMap: Map<String, Long>
+        get() = proxyPickerController.uiState.latencyMap
+
+    private val proxyPickerController = ProxyPickerController(
+        githubProxyService = githubProxyService,
+        githubProxySpeedTester = githubProxySpeedTester,
+        scope = viewModelScope,
+        proxyOptionsProvider = { proxyOptions }
+    )
+    private val revisionHistoryController = CoreRevisionHistoryController(
+        coreRepo = coreRepo,
+        scope = viewModelScope,
+        customSourceFingerprint = {
+            settingsRepo.customCoreSource.value.let { "${it.repo}:${it.branch}" }
+        },
+        onApiUsage = ::refreshGithubAccountAfterApiUsage,
+        onHistoryLoadFailed = { variant ->
+            promptProxyReselectIfNeeded(PendingProxyAction.LoadRollbackHistory(variant))
+        }
+    )
 
     private var pendingProxyAction: PendingProxyAction? = null
     private var updateComparisonJob: Job? = null
     private var updateComparisonGeneration = 0L
-    private var proxyTestJob: Job? = null
     private var githubAccountJob: Job? = null
     private var githubAccountGeneration = 0L
-    private var revisionDetailsJob: Job? = null
-    private var revisionDetailsGeneration = 0L
-    private var revisionHistoryJob: Job? = null
     private var branchLoadJob: Job? = null
     private var branchLoadGeneration = 0L
-    private val revisionVersionJobs = mutableMapOf<String, Job>()
-    private val revisionVersionLookupSemaphore = Semaphore(REVISION_VERSION_LOOKUP_CONCURRENCY)
-    private var revisionHistoryGeneration = 0L
-    private val revisionPageCache = linkedMapOf<RevisionPageCacheKey, CachedRevisionPage>()
-    private var activeRevisionPageCacheKey: RevisionPageCacheKey? = null
 
     init {
         observeRuntimeDrivenCoreRefresh()
@@ -605,281 +616,40 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun loadRollbackHistory(variant: ApiVariant) {
-        cancelRevisionDetailsRequest()
         showGearMenu = null
-        rollbackVariant = variant
-        showRevisionHistory = true
-        revisionHistoryError = null
-        revisionSearchQuery = ""
-        appliedRevisionSearchQuery = ""
-        revisionPage = 1
-        revisionHasNextPage = false
-        selectedRevision = null
-        selectedRevisionDetails = null
-        revisionDetailsError = null
-        loadRevisionPage(variant = variant, page = 1, query = "")
+        revisionHistoryController.open(variant)
     }
 
-    private fun loadRevisionPage(variant: ApiVariant, page: Int, query: String) {
-        revisionHistoryGeneration += 1
-        val generation = revisionHistoryGeneration
-        revisionHistoryJob?.cancel()
-        cancelRevisionVersionRequests()
-        val cacheKey = revisionPageCacheKey(variant, page, query)
-        val cached = revisionPageCache[cacheKey]?.takeIf {
-            System.currentTimeMillis() - it.cachedAtMs < REVISION_PAGE_CACHE_TTL_MS
-        }
-        if (cached != null) {
-            revisionHistoryError = null
-            revisionHistory = cached.page.revisions
-            revisionPage = cached.page.page
-            revisionHasNextPage = cached.page.hasNextPage
-            appliedRevisionSearchQuery = query
-            isLoadingHistory = false
-            revisionHistoryJob = null
-            activeRevisionPageCacheKey = cacheKey
-            return
-        }
-        revisionHistoryJob = viewModelScope.launch {
-            isLoadingHistory = true
-            revisionHistoryError = null
-            val result = coreRepo.fetchRevisionHistory(
-                variant = variant,
-                page = page,
-                pageSize = REVISION_PAGE_SIZE,
-                query = query
-            )
-            result.fold(
-                onSuccess = { result ->
-                    if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
-                    revisionHistory = result.revisions
-                    revisionPage = result.page
-                    revisionHasNextPage = result.hasNextPage
-                    appliedRevisionSearchQuery = query
-                    activeRevisionPageCacheKey = cacheKey
-                    cacheRevisionPage(cacheKey, result)
-                },
-                onFailure = { error ->
-                    if (!isCurrentRevisionPageRequest(generation, variant)) return@fold
-                    revisionHistory = emptyList()
-                    revisionHasNextPage = false
-                    activeRevisionPageCacheKey = null
-                    revisionHistoryError = error.message ?: "无法读取提交记录"
-                    promptProxyReselectIfNeeded(PendingProxyAction.LoadRollbackHistory(variant))
-                }
-            )
-            if (!isCurrentRevisionPageRequest(generation, variant)) return@launch
-            isLoadingHistory = false
-            revisionHistoryJob = null
-            refreshGithubAccountAfterApiUsage()
-        }
-    }
+    fun onRevisionVisible(revision: CoreRevision) = revisionHistoryController.onRevisionVisible(revision)
 
-    fun onRevisionVisible(revision: CoreRevision) {
-        val variant = rollbackVariant ?: return
-        val generation = revisionHistoryGeneration
-        val commitSha = revision.commitSha
-        if (!isCurrentRevisionPageRequest(generation, variant) ||
-            revision.version.isNotBlank() ||
-            commitSha in revisionVersionJobs
-        ) {
-            return
-        }
-        revisionVersionLoadingShas = revisionVersionLoadingShas + commitSha
-        revisionVersionJobs[commitSha] = viewModelScope.launch {
-            try {
-                val version = revisionVersionLookupSemaphore.withPermit {
-                    coreRepo.fetchRevisionVersion(variant, revision).getOrNull()
-                }
-                if (isCurrentRevisionPageRequest(generation, variant)) {
-                    applyRevisionVersion(commitSha, version)
-                }
-            } finally {
-                revisionVersionJobs.remove(commitSha)
-                if (isCurrentRevisionPageRequest(generation, variant)) {
-                    revisionVersionLoadingShas = revisionVersionLoadingShas - commitSha
-                }
-            }
-        }
-    }
+    fun previousRevisionPage() = revisionHistoryController.previousPage()
 
-    private fun cancelRevisionVersionRequests() {
-        revisionVersionJobs.cancelTrackedJobs()
-        revisionVersionLoadingShas = emptySet()
-    }
+    fun nextRevisionPage() = revisionHistoryController.nextPage()
 
-    private fun applyRevisionVersion(commitSha: String, version: String?) {
-        val resolvedVersion = version.orEmpty()
-        revisionHistory = revisionHistory.map { revision ->
-            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
-        }
-        selectedRevision = selectedRevision?.let { revision ->
-            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
-        }
-        selectedRevisionDetails = selectedRevisionDetails?.let { details ->
-            if (details.revision.commitSha == commitSha) {
-                details.copy(revision = details.revision.copy(version = resolvedVersion))
-            } else {
-                details
-            }
-        }
-        pendingRollbackRevision = pendingRollbackRevision?.let { revision ->
-            if (revision.commitSha == commitSha) revision.copy(version = resolvedVersion) else revision
-        }
-        revisionVersionLoadingShas = revisionVersionLoadingShas - commitSha
-        activeRevisionPageCacheKey?.let { key ->
-            val cached = revisionPageCache[key] ?: return@let
-            revisionPageCache[key] = cached.copy(
-                page = cached.page.copy(revisions = revisionHistory)
-            )
-        }
-    }
+    fun dismissRollbackDialog() = revisionHistoryController.dismiss()
 
-    private fun revisionPageCacheKey(
-        variant: ApiVariant,
-        page: Int,
-        query: String
-    ): RevisionPageCacheKey {
-        val sourceFingerprint = if (variant == ApiVariant.Custom) {
-            settingsRepo.customCoreSource.value.let { "${it.repo}:${it.branch}" }
-        } else {
-            variant.key
-        }
-        return RevisionPageCacheKey(
-            variant = variant,
-            page = page,
-            query = query,
-            sourceFingerprint = sourceFingerprint
-        )
-    }
+    fun updateRevisionSearchQuery(query: String) =
+        revisionHistoryController.updateSearchQuery(query)
 
-    private fun cacheRevisionPage(key: RevisionPageCacheKey, page: CoreRevisionPage) {
-        revisionPageCache[key] = CachedRevisionPage(page, System.currentTimeMillis())
-        while (revisionPageCache.size > MAX_REVISION_PAGE_CACHE_ENTRIES) {
-            revisionPageCache.remove(revisionPageCache.keys.first())
-        }
-    }
+    fun submitRevisionSearch() = revisionHistoryController.submitSearch()
 
-    private fun isCurrentRevisionPageRequest(
-        generation: Long,
-        variant: ApiVariant
-    ): Boolean = generation == revisionHistoryGeneration &&
-        showRevisionHistory && rollbackVariant == variant
+    fun openRevisionDetails(revision: CoreRevision) = revisionHistoryController.openDetails(revision)
 
-    fun previousRevisionPage() {
-        val variant = rollbackVariant ?: return
-        if (isLoadingHistory || revisionPage <= 1) return
-        loadRevisionPage(variant, revisionPage - 1, appliedRevisionSearchQuery)
-    }
+    fun closeRevisionDetails() = revisionHistoryController.closeDetails()
 
-    fun nextRevisionPage() {
-        val variant = rollbackVariant ?: return
-        if (isLoadingHistory || !revisionHasNextPage) return
-        loadRevisionPage(variant, revisionPage + 1, appliedRevisionSearchQuery)
-    }
+    fun requestRollback(revision: CoreRevision) = revisionHistoryController.requestRollback(revision)
 
-    fun dismissRollbackDialog() {
-        revisionHistoryGeneration += 1
-        revisionHistoryJob?.cancel()
-        revisionHistoryJob = null
-        cancelRevisionVersionRequests()
-        activeRevisionPageCacheKey = null
-        isLoadingHistory = false
-        revisionVersionLoadingShas = emptySet()
-        cancelRevisionDetailsRequest()
-        showRevisionHistory = false
-        rollbackVariant = null
-        revisionHistory = emptyList()
-        revisionHistoryError = null
-        revisionSearchQuery = ""
-        appliedRevisionSearchQuery = ""
-        revisionPage = 1
-        revisionHasNextPage = false
-        selectedRevision = null
-        selectedRevisionDetails = null
-        revisionDetailsError = null
-        pendingRollbackRevision = null
-    }
-
-    fun updateRevisionSearchQuery(query: String) {
-        revisionSearchQuery = query
-    }
-
-    fun submitRevisionSearch() {
-        val variant = rollbackVariant ?: return
-        loadRevisionPage(variant, page = 1, query = revisionSearchQuery.trim())
-    }
-
-    fun openRevisionDetails(revision: CoreRevision) {
-        val variant = rollbackVariant ?: return
-        onRevisionVisible(revision)
-        cancelRevisionDetailsRequest()
-        val generation = revisionDetailsGeneration
-        val revisionSha = revision.commitSha
-        selectedRevision = revision
-        selectedRevisionDetails = null
-        revisionDetailsError = null
-        revisionDetailsJob = viewModelScope.launch {
-            isLoadingRevisionDetails = true
-            val result = coreRepo.fetchRevisionDetails(variant, revision)
-            if (!isCurrentRevisionDetailsRequest(generation, variant, revisionSha)) return@launch
-            result.fold(
-                onSuccess = { selectedRevisionDetails = it },
-                onFailure = { revisionDetailsError = it.message ?: "无法获取变动详情" }
-            )
-            if (isCurrentRevisionDetailsRequest(generation, variant, revisionSha)) {
-                isLoadingRevisionDetails = false
-                revisionDetailsJob = null
-                refreshGithubAccountAfterApiUsage()
-            }
-        }
-    }
-
-    fun closeRevisionDetails() {
-        cancelRevisionDetailsRequest()
-        selectedRevision = null
-        selectedRevisionDetails = null
-        revisionDetailsError = null
-        isLoadingRevisionDetails = false
-    }
-
-    private fun cancelRevisionDetailsRequest() {
-        revisionDetailsGeneration += 1
-        revisionDetailsJob?.cancel()
-        revisionDetailsJob = null
-        isLoadingRevisionDetails = false
-    }
-
-    private fun isCurrentRevisionDetailsRequest(
-        generation: Long,
-        variant: ApiVariant,
-        revisionSha: String
-    ): Boolean {
-        return generation == revisionDetailsGeneration &&
-            showRevisionHistory &&
-            rollbackVariant == variant &&
-            selectedRevision?.commitSha == revisionSha
-    }
-
-    fun requestRollback(revision: CoreRevision) {
-        onRevisionVisible(revision)
-        pendingRollbackRevision = revision
-    }
-
-    fun cancelRollbackRequest() {
-        pendingRollbackRevision = null
-    }
+    fun cancelRollbackRequest() = revisionHistoryController.cancelRollbackRequest()
 
     fun confirmRollback() {
-        val variant = rollbackVariant ?: return
-        val revision = pendingRollbackRevision ?: return
-        pendingRollbackRevision = null
+        val variant = revisionHistoryController.variant ?: return
+        val revision = revisionHistoryController.pendingRollback ?: return
+        revisionHistoryController.cancelRollbackRequest()
         requireProxyAndRun(PendingProxyAction.Rollback(variant, revision))
     }
 
     private fun doRollbackTo(variant: ApiVariant, revision: CoreRevision) {
-        cancelRevisionDetailsRequest()
-        showRevisionHistory = false
+        revisionHistoryController.hideForRollback()
         val versionLabel = revision.version.trim().takeIf { it.isNotBlank() }
             ?.let { "v$it" }
             ?: "提交 ${revision.shortSha}"
@@ -980,25 +750,6 @@ class CoreViewModel @Inject constructor(
         if (githubAccountJob?.isActive == true) return
         refreshGithubAccount()
     }
-
-    companion object {
-        private const val REVISION_PAGE_SIZE = 15
-        private const val REVISION_VERSION_LOOKUP_CONCURRENCY = 1
-        private const val REVISION_PAGE_CACHE_TTL_MS = 2L * 60L * 1000L
-        private const val MAX_REVISION_PAGE_CACHE_ENTRIES = 12
-    }
-
-    private data class RevisionPageCacheKey(
-        val variant: ApiVariant,
-        val page: Int,
-        val query: String,
-        val sourceFingerprint: String
-    )
-
-    private data class CachedRevisionPage(
-        val page: CoreRevisionPage,
-        val cachedAtMs: Long
-    )
 
     fun openVariantSettingsDialog(variant: ApiVariant) {
         showGearMenu = null
@@ -1327,29 +1078,28 @@ class CoreViewModel @Inject constructor(
     }
 
     fun dismissProxyPickerDialog() {
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
+        proxyPickerController.dismiss()
         pendingProxyAction = null
     }
 
     fun selectProxy(proxyId: String) {
-        proxySelectedId = proxyId
+        proxyPickerController.select(proxyId)
     }
 
     fun retestProxySpeed() {
-        startProxySpeedTest()
+        proxyPickerController.retest()
     }
 
     fun confirmProxySelection() {
-        githubProxyService.setSelectedProxy(proxySelectedId)
-        showProxyPickerDialog = false
-        stopProxySpeedTest()
-        val action = pendingProxyAction
-        pendingProxyAction = null
-        if (action != null) {
-            executePendingProxyAction(action)
-        } else {
-            operationMessage = "已切换 GitHub 线路：${proxyOptions.firstOrNull { it.id == proxySelectedId }?.name ?: "未知"}"
+        proxyPickerController.confirm {
+            val action = pendingProxyAction
+            pendingProxyAction = null
+            if (action != null) {
+                executePendingProxyAction(action)
+            } else {
+                val selectedId = proxyPickerController.uiState.selectedId
+                operationMessage = "已切换 GitHub 线路：${proxyOptions.firstOrNull { it.id == selectedId }?.name ?: "未知"}"
+            }
         }
     }
 
@@ -1386,31 +1136,8 @@ class CoreViewModel @Inject constructor(
     }
 
     private fun openProxyPickerDialog(withTip: String?) {
-        showProxyPickerDialog = true
-        proxySelectedId = githubProxyService.currentSelectedOption().id
+        proxyPickerController.open()
         withTip?.let { operationMessage = it }
-        startProxySpeedTest()
-    }
-
-    private fun startProxySpeedTest() {
-        stopProxySpeedTest()
-        proxyLatencyMap = emptyMap()
-        proxyTestingIds = proxyOptions.map { it.id }.toSet()
-        proxyTestJob = viewModelScope.launch {
-            proxyOptions.forEach { option ->
-                launch {
-                    val latency = githubProxyService.testLatency(option)
-                    proxyLatencyMap = proxyLatencyMap + (option.id to latency)
-                    proxyTestingIds = proxyTestingIds - option.id
-                }
-            }
-        }
-    }
-
-    private fun stopProxySpeedTest() {
-        proxyTestJob?.cancel()
-        proxyTestJob = null
-        proxyTestingIds = emptySet()
     }
 
     private fun variantLabel(variant: ApiVariant): String {
