@@ -52,7 +52,7 @@
 - **请求记录**：查看所有经过服务的请求
 - **实时日志**：查看服务运行日志
 - **设备控制**：设备黑名单管理
-- **弹幕下载**：支持下载弹幕到本地
+- **弹幕下载**：支持按剧名搜索下载，也可直接粘贴视频链接解析后下载到本地
 - **本地弹幕**：导入、维护和预览本地弹幕文件；文件名自动解析剧名/年份/季/集，支持批量导入、
   目录直读（需系统「所有文件访问」权限）、预览以及删除单集/整季/整部
 - **缓存管理**：查看和管理弹幕缓存
@@ -104,9 +104,21 @@
 
 ### 项目结构
 
-- **Android 应用**：提供用户界面和系统集成
-- **Node.js 服务**：弹幕 API 核心服务
-- **公告中心**：服务端公告管理
+Gradle 模块：
+
+- **`:app`**：应用入口，负责 UI、业务编排、系统集成与运行时打包
+- **`:core:model`**：纯 Kotlin 领域模型、纯逻辑与领域仓储接口，不依赖 Android
+- **`:core:common`**：跨模块共用工具（格式化、比较、路径与设备兼容判定）
+- **`:ui:designsystem`**：Compose 设计系统与共用组件
+- **`:feature:records`**：请求记录功能模块
+- **`build-logic`**：Gradle 预编译脚本插件（运行时资产、原生运行时、质量门禁）
+
+其它组成：
+
+- **Node.js 服务**：内嵌的弹幕 API 核心服务
+- **公告中心**：服务端公告管理（Docker + MySQL）
+
+模块依赖方向与分层约定见 [架构说明](docs/architecture.md)。
 
 ### 技术栈
 
@@ -115,13 +127,13 @@
 - **依赖注入**：Hilt
 - **异步编程**：Coroutines
 - **网络请求**：OkHttp
-- **本地存储**：SQLite
+- **本地存储**：DataStore Preferences（Android 端）、MySQL（公告中心）
 - **容器化**：Docker (公告中心)
 
 ### 架构特点
 
-- **分层架构**：domain 层、data 层、ui 层清晰分离
-- **模块化设计**：按功能拆分，便于维护和扩展
+- **分层架构**：domain 层、data 层、ui 层清晰分离，业务层不依赖 UI
+- **模块化设计**：核心模型、设计系统与已验证的功能边界已提取为独立 Gradle 模块，依赖方向由架构护栏检查约束
 - **依赖注入**：使用 Hilt 实现依赖注入，提高代码可测试性
 - **响应式编程**：使用 Coroutines 和 Flow 实现异步操作
 
@@ -157,9 +169,9 @@ APK 不是从应用商店安装，需要手动允许。在弹出的提示中点�
 ## 开发与贡献
 
 ### 开发环境要求
-- Android Studio Arctic Fox 或更高版本
+- Android Studio 需支持 AGP 9.3 与 Gradle 9.6（本仓库固定 AGP 9.3.1、Kotlin 2.4.10、Gradle 9.6.0）
 - JDK 17 或更高版本
-- Node.js 26.12.0 lite + OpenSSL 4.0.3（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
+- Node.js 26.12.1 lite + OpenSSL 4.0.3（正式 APK 的运行时兼容测试必须与内嵌 Node 同 major）
 - 其它 Node.js 版本可用于公告中心开发和普通 Debug 构建
 
 ### 构建项目
@@ -175,20 +187,20 @@ cd danmu-api-android
 ./scripts/prepare_frp_kernel.sh
 
 # 构建发布版本；也可通过 DANMU_TARGET_NODE 指定同版本 Node
-./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.12.0
+./gradlew assembleRelease -PtargetNodeExecutable=/path/to/node-v26.12.1
 ```
 
-Node 运行时使用 **26.12.0 lite + OpenSSL 4.0.3（原生 ECH/H3）**，锁定
-`fogtape/nodejs-mobile` 的 `v26.12.0-0` 预发布版（源码快照 `764f001a`，
-配方提交 `333a9867`）。运行时来自该固定 Release 资产，
+Node 运行时使用 **26.12.1 lite + OpenSSL 4.0.3（原生 ECH/H3）**，锁定
+`fogtape/nodejs-mobile` 的 `v26.12.1-0` 预发布版（源码快照 `a41d5dd1`，
+配方提交 `fd52c3a9`）。运行时来自该固定 Release 资产，
 App 发行附件仅提供三个架构的 APK；运行时 ZIP 不随 App 发行上传。
 来源及 SHA-256 见
 `app/native-runtime-sources.properties`、`app/native-runtime.sha256` 和
 `app/native-runtime-provenance.json`。JNI 桥使用同份 ZIP 的头文件与 NDK r29
 重新编译，libc++、libc++abi、libunwind 由 `scripts/build-native-deps.py` 从固定源码重建。
 
-离线构建可将校验通过的 `nodejs-mobile-android-lite-26.12.0-0.zip` 放入
-`dist/nodejs-mobile/v26.12.0-0-lite/`。缺少本地或 Gradle 缓存时，从固定上游 Release 公开地址下载，无需登录 GitHub CLI；
+离线构建可将校验通过的 `nodejs-mobile-android-lite-26.12.1-0.zip` 放入
+`dist/nodejs-mobile/v26.12.1-0-lite/`。缺少本地或 Gradle 缓存时，从固定上游 Release 公开地址下载，无需登录 GitHub CLI；
 C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提取旧 APK 的原生库。
 
 构建机也可以显式指定已经准备好的运行时 ZIP，或指向同一 ZIP 的固定 HTTPS 下载地址，这两种方式无需登录 GitHub CLI。
@@ -196,10 +208,10 @@ C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提�
 
 ```bash
 # 只校验 ZIP，无需 NDK 编译；也可把这个参数用于 assembleDebug / assembleRelease
-./gradlew :app:verifyNativeRuntimeArchive --offline -PnativeRuntimeArchive=/path/to/nodejs-mobile-android-lite-26.12.0-0.zip
+./gradlew :app:verifyNativeRuntimeArchive --offline -PnativeRuntimeArchive=/path/to/nodejs-mobile-android-lite-26.12.1-0.zip
 
 # 从自建镜像或正式资产地址下载同一 ZIP，无需 gh 登录
-./gradlew :app:verifyNativeRuntimeArchive -PnativeRuntimeArchiveUrl=https://your-host.example/nodejs-mobile-android-lite-26.12.0-0.zip
+./gradlew :app:verifyNativeRuntimeArchive -PnativeRuntimeArchiveUrl=https://your-host.example/nodejs-mobile-android-lite-26.12.1-0.zip
 ```
 
 显式指定的本地文件校验失败会直接报错，不使用缓存代替。公开地址只覆盖下载位置，不能覆盖固定摘要。
@@ -218,6 +230,55 @@ C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提�
 仓库或根目录 `node_modules.zip`。维护依赖资产时，运行 `python3 scripts/rebuild-node-dependencies.py`，从
 `runtime/node-dependencies/package-lock.json` 在新目录准备源码并打包，再检查变更。
 
+### 验证与检查
+
+`preBuild`、`check`、`releaseCheck` 均执行架构/资产护栏和 Node 语法检查；直接构建 APK 也会触发这些门禁。
+
+常规验证一次执行（护栏 + 各模块单测 + Node 回归 + 应用单测）：
+
+```bash
+env -u LD_LIBRARY_PATH ./gradlew :app:verifyAll
+```
+
+也可以单独运行：
+
+```bash
+# 架构边界、运行时资产清单、硬编码审计与护栏自测
+env -u LD_LIBRARY_PATH ./gradlew :app:checkRefactorGuardrails
+
+# Node 入口脚本语法检查
+env -u LD_LIBRARY_PATH ./gradlew :app:checkNodeRuntimeScripts
+
+# Node 侧回归测试（出站桥接、日志、路由、代理等）
+env -u LD_LIBRARY_PATH ./gradlew :app:testAppOutboundBridge
+node --test node-tests/*.test.cjs
+
+# 各模块单测
+env -u LD_LIBRARY_PATH ./gradlew :core:model:testDebugUnitTest :ui:designsystem:testDebugUnitTest \
+  :feature:records:testDebugUnitTest :app:testDebugUnitTest
+```
+
+#### 环境注意（Termux / Codex 包装器）
+
+1. 在 Codex 的 Termux 包装器里执行构建时，`LD_LIBRARY_PATH` 会指向
+   `node_modules/@mmmbuto/codex-cli-termux/bin`，其中一份旧的 `libc++_shared.so` 会让
+   `cmake` 报 `cannot locate symbol _ZNSt6__ndk113__hash_memoryEPKvm`。
+   构建命令前加 `env -u LD_LIBRARY_PATH` 即可（例如 `env -u LD_LIBRARY_PATH ./gradlew :app:assembleDebug`）。
+2. 原生任务失败后直接重跑可能报 `Cannot access output property ... Could not read directory path`，
+   这是失败运行留下的半成品输出目录与 Gradle 快照不一致导致的。先移除
+   `app/build/prepared-native-runtime` 再重新执行即可完整重建（三个 ABI）。
+
+#### 迁移与新增约定
+
+- **新增 Node 文件**：必须同步 `app/src/main/assets/nodejs-project/app-runtime-assets.json`，
+  该清单是运行时资产的唯一来源，Gradle 打包、Root 同步与测试都消费它。
+- **新增 Gradle 模块**：必须在 `scripts/refactoring/check_architecture.py` 的 `MODULE_RULES`
+  登记依赖方向、允许导入的包以及是否允许平台导入，否则边界无人拦截。
+- **移动文件优先保持包名不变**：跨模块搬迁时保持原包名可以让 app 侧 import 零改动，
+  减少不可审查的巨型 diff；确需改包名时单独提交。
+- **拆分粒度**：单次调用、只服务于原文件的简单逻辑留在原文件内；只有具备复用价值、
+  职责明确的逻辑才独立成文件，迁移一律用 `git mv` 剪切。
+
 ### 代码风格
 - 遵循 Kotlin 官方代码风格
 - 遵循 Android 官方编码规范
@@ -235,7 +296,7 @@ C++ 依赖源码缓存也必须预先准备并通过指纹校验。构建不提�
 
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 MIT License 开源。
 
 ---
 

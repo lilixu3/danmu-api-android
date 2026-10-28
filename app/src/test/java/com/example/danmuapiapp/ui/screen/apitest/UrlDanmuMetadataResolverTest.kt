@@ -2,7 +2,14 @@ package com.example.danmuapiapp.ui.screen.apitest
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 class UrlDanmuMetadataResolverTest {
 
@@ -180,7 +187,7 @@ class UrlDanmuMetadataResolverTest {
               "publishYear": "2015",
               "largeVerPicUrl": "http://photocdn.tv.sohu.com/ver.jpg",
               "albumPicUrl": "http://photocdn.tv.sohu.com/album.jpg",
-              "videos": [ { "videoName": "屌丝男士第四季第1集", "order": 1, "publishTime": "2015-05-19" } ]
+              "videos": [ { "pageUrl": "https://m.tv.sohu.com/v/example.html", "videoName": "屌丝男士第四季第1集", "order": 1, "publishTime": "2015-05-19" } ]
             }
         """.trimIndent()
 
@@ -203,7 +210,7 @@ class UrlDanmuMetadataResolverTest {
               <head><title>甄嬛传01 - 在线观看 - 电视剧 - 乐视视频</title><meta name="irAlbumName" content="甄嬛传" /></head>
               <body>
                 <script>
-                  window.__INFO__ = { video: { title:"甄嬛传01", pTitle:"甄嬛传", pPicShutu:"http://i1.letvimg.com/poster-v.jpg", pPic:"http://i1.letvimg.com/poster.jpg", releasedate:"" } };
+                  window.__INFO__ = { video: { vid:1578861, title:"甄嬛传01", pTitle:"甄嬛传", pPicShutu:"http://i1.letvimg.com/poster-v.jpg", pPic:"http://i1.letvimg.com/poster.jpg", releasedate:"" } };
                 </script>
               </body>
             </html>
@@ -219,5 +226,81 @@ class UrlDanmuMetadataResolverTest {
         assertEquals("http://i1.letvimg.com/poster-v.jpg", metadata.posterUrl)
         assertEquals("乐视视频", metadata.platformLabel)
         assertTrue(metadata.year.isBlank())
+    }
+
+    private val viewJson = """{"code":0,"data":{"bvid":"BV11xX5BjECL","aid":123,"title":"康斯坦丁","pic":"https://i0.hdslb.com/current.jpg",
+        "pages":[{"cid":11,"page":1,"part":"上部"},{"cid":22,"page":2,"part":"下部"}],
+        "ugc_season":{"sections":[{"episodes":[{"id":33,"title":"别的电影"}]}]}}}"""
+
+    @Test
+    fun `bilibili selects exact page and excludes uploader collection`() {
+        val metadata = UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(
+            "https://www.bilibili.com/video/BV11xX5BjECL?p=2", viewJson)!!
+        assertEquals(2, metadata.episodes.size)
+        assertEquals("22", metadata.selectedEpisodeId)
+        assertEquals("下部", metadata.episodeTitle)
+        assertEquals("P2", metadata.episodeLabel)
+        assertEquals("https://www.bilibili.com/video/BV11xX5BjECL?p=2", metadata.canonicalUrl)
+        assertTrue(metadata.episodesComplete)
+    }
+
+    @Test
+    fun `bilibili rejects wrong video and never defaults an invalid page to P1`() {
+        assertNull(UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson("https://www.bilibili.com/video/BVwrong", viewJson))
+        for (page in listOf("9", "0", "bad")) {
+            val result = UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(
+                "https://www.bilibili.com/video/BV11xX5BjECL?p=$page", viewJson)!!
+            assertEquals("", result.selectedEpisodeId)
+            assertTrue(result.episodes.isEmpty())
+            assertFalse(result.episodesComplete)
+        }
+    }
+
+    @Test
+    fun `bilibili missing requested episode preserves URL and never takes the first episode`() {
+        val result = UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(
+            "https://www.bilibili.com/bangumi/play/ep99",
+            """{"code":0,"result":{"title":"剧名","episodes":[{"id":1,"title":"1"}]}}""", "99")!!
+        assertEquals("", result.selectedEpisodeId)
+        assertTrue(result.episodes.isEmpty())
+        assertEquals("https://www.bilibili.com/bangumi/play/ep99", result.canonicalUrl)
+    }
+
+    @Test
+    fun `bilibili special episodes keep their group and exact identity`() {
+        val result = UrlDanmuMetadataPlatformParsers.parseBilibiliSeasonJson(
+            "https://www.bilibili.com/bangumi/play/ep2",
+            """{"code":0,"result":{"title":"剧名","episodes":[{"id":1,"title":"1"}],
+                "section":[{"title":"特别篇","episodes":[{"id":2,"title":"SP","long_title":"花絮"}]}]}}""", "2")!!
+        assertEquals("2", result.selectedEpisodeId)
+        assertEquals("特别篇", result.episodes[1].group)
+    }
+
+    @Test
+    fun `source detection validates host rather than text in query`() {
+        assertEquals(UrlDanmuMetadataPlatform.Unknown, UrlDanmuMetadataPlatform.detect("https://evil.test/?url=https://www.bilibili.com/video/BVabc"))
+        assertEquals(UrlDanmuMetadataPlatform.Unknown, UrlDanmuMetadataPlatform.detect("https://b23.tv.evil.test/a"))
+    }
+
+    @Test
+    fun `short URL is expanded before the platform API and never needs the video HTML`() = runBlocking {
+        val requests = mutableListOf<String>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests.add(request.url.toString())
+            val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).message("OK")
+            when (request.url.host) {
+                "b23.tv" -> response.code(302).header("Location", "https://www.bilibili.com/video/BV11xX5BjECL?p=2").body("".toResponseBody()).build()
+                "api.bilibili.com" -> response.code(200).body(viewJson.toResponseBody()).build()
+                else -> throw AssertionError("Unexpected HTML request: ${request.url.host}")
+            }
+        }.build()
+        val result = UrlDanmuMetadataResolver(client).resolve("https://b23.tv/NZWHH6K")!!
+        assertEquals("22", result.selectedEpisodeId)
+        assertEquals("https://i0.hdslb.com/current.jpg", result.posterUrl)
+        assertEquals(2, requests.size)
+        val withCollection = UrlDanmuMetadataResolver(client).resolve("https://www.bilibili.com/video/BV11xX5BjECL?p=2&season_id=6674023")!!
+        assertEquals("22", withCollection.selectedEpisodeId)
+        assertTrue(requests.last().contains("/x/web-interface/view"))
     }
 }

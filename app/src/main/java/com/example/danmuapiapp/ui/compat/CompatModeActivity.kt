@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +29,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.ui.screen.settings.applyInterfaceMode
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.R
 import com.example.danmuapiapp.data.util.AppAppearancePrefs
 import com.example.danmuapiapp.data.service.RuntimeWarmupCoordinator
@@ -61,7 +61,7 @@ class CompatModeActivity : ComponentActivity() {
     ) { granted ->
         refreshLocalNetworkPermissionState()
         if (granted) {
-            Toast.makeText(this, "已允许局域网访问", Toast.LENGTH_SHORT).show()
+            AppToast.success("已允许局域网访问")
         }
     }
 
@@ -89,7 +89,7 @@ class CompatModeActivity : ComponentActivity() {
         }.getOrDefault(false)
         if (!opened) {
             runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())) }
-                .onFailure { Toast.makeText(this, "当前系统未提供权限设置入口", Toast.LENGTH_SHORT).show() }
+                .onFailure { AppToast.warning("当前系统未提供权限设置入口") }
         }
     }
 
@@ -151,11 +151,7 @@ class CompatModeActivity : ComponentActivity() {
 
                     LaunchedEffect(compatViewModel) {
                         compatViewModel.events.collect { message ->
-                            Toast.makeText(
-                                this@CompatModeActivity,
-                                message,
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            AppToast.show(message)
                         }
                     }
 
@@ -164,6 +160,19 @@ class CompatModeActivity : ComponentActivity() {
                         return@CompatConsoleTheme
                     }
                     CorePullRequestUpdateChoiceHost(compatViewModel.coreUpdateChoice)
+                    com.example.danmuapiapp.ui.component.GithubQuotaNoticeHost(
+                        compatViewModel.githubApiQuota, compatViewModel::openGithubTokenDialog
+                    )
+                    if (compatViewModel.showGithubTokenDialog) {
+                        val account by compatViewModel.githubAccountStatus.collectAsStateWithLifecycle()
+                        com.example.danmuapiapp.ui.screen.core.GithubTokenDialog(
+                            tokenConfigured = account.tokenConfigured,
+                            status = account,
+                            onValidate = compatViewModel::validateAndSaveGithubToken,
+                            onClear = { compatViewModel.validateAndSaveGithubToken("") },
+                            onDismiss = compatViewModel::dismissGithubTokenDialog
+                        )
+                    }
                     val management by compatViewModel.managementState.collectAsStateWithLifecycle()
                     val logs by compatViewModel.logs.collectAsStateWithLifecycle()
                     CompatModeScreen(
@@ -207,7 +216,7 @@ class CompatModeActivity : ComponentActivity() {
                             onOpenNotificationPermission = ::openNotificationPermission,
                             onOpenBatterySettings = {
                                 val opened = NormalModeKeepAliveGuideNavigator.requestIgnoreBatteryOptimization(this@CompatModeActivity)
-                                if (!opened) Toast.makeText(this@CompatModeActivity, "当前系统未提供后台权限设置入口", Toast.LENGTH_SHORT).show()
+                                if (!opened) AppToast.warning("当前系统未提供后台权限设置入口")
                             },
                             onCheckAppUpdate = compatViewModel::checkAppUpdate,
                             onDownloadAppUpdate = compatViewModel::downloadAppUpdate,
@@ -293,6 +302,7 @@ class CompatModeActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        AppToast.dismiss()
         if (::compatViewModel.isInitialized) {
             compatViewModel.onActivityStopped()
         }
@@ -343,7 +353,7 @@ class CompatModeActivity : ComponentActivity() {
                     true
                 }.getOrDefault(false)
                 if (opened.not()) {
-                    Toast.makeText(this, "请在应用设置中开启局域网访问权限", Toast.LENGTH_SHORT).show()
+                    AppToast.warning("请在应用设置中开启局域网访问权限")
                 }
             }
 

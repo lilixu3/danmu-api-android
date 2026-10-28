@@ -1,6 +1,6 @@
-# Node 26.12.0 lite + OpenSSL 4.0.3（ECH/H3）。
-# fogtape/nodejs-mobile Release v26.12.0-0，源码快照 764f001a。
+# Node 26.12.1 lite + OpenSSL 4.0.3（ECH/H3）。
+# fogtape/nodejs-mobile Release v26.12.1-0，源码快照 a41d5dd1。
 # JNI 与 C++ 运行库由本次构建从源码重编，全部使用 16 KB ELF 对齐。
-695df887ec166270fca05492b6b43fb96ce16822a59577fd73ec4e12a04cb931  libnode/bin/arm64-v8a/libnode.so
-8491312feb6f6e8bcfaeeb35124cc42e4caee13ce7c19815018df6e47cce01f6  libnode/bin/armeabi-v7a/libnode.so
-7775b71ff85e01d4dc7e04330277d0eb2cf1494814766bd75d7e907a21dcadda  libnode/bin/x86_64/libnode.so
+41056974a8b52624103dae846093cc191d1bf0047319547b3f79c467c90e39a1  libnode/bin/arm64-v8a/libnode.so
+d486f78e38b87bde4726e727f44811bb0fc749f1447a08f47912b8739a57bd43  libnode/bin/armeabi-v7a/libnode.so
+89adaa51c541fef79512be4e2751e8f42f12c5ec551bbfae6548a8c17de9bce9  libnode/bin/x86_64/libnode.so

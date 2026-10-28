@@ -32,7 +32,7 @@ import java.util.Calendar
                 ToolInput(state.title, onTitleChange, "标题")
                 ToolInput(state.year?.toString().orEmpty(), onYearChange, "年份", number = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LocalDanmuType.entries.forEach { type -> ToolChip(type.label, type == state.type, { if (!state.isSaving) onTypeChange(type) }) }
+                    LocalDanmuType.entries.filter { it != LocalDanmuType.Unknown }.forEach { type -> ToolChip(type.label, type == state.type, { if (!state.isSaving) onTypeChange(type) }) }
                 }
                 ToolInput(state.season?.toString().orEmpty(), onSeasonChange, "季数", number = true)
             }

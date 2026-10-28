@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.download
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppDialog
 import android.content.Context
 import android.content.ContextWrapper
@@ -9,6 +11,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -24,8 +27,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.domain.model.*
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
 import com.example.danmuapiapp.ui.component.AnimePosterThumbnail
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.longPressDragSelection
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.tools.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,14 +45,13 @@ import java.util.Locale
     val records by vm.records.collectAsStateWithLifecycle()
     val tasks by vm.queueTasks.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val snackbar = remember { SnackbarHostState() }
     BackHandler(tab == 0 && vm.currentAnime != null) { vm.backToAnimeList() }
-    LaunchedEffect(vm.operationMessage) { vm.operationMessage?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
+    LaunchedEffect(vm.operationMessage) { vm.operationMessage?.let { AppToast.show(it); vm.dismissMessage() } }
     LaunchedEffect(tab, vm.isSyncingRecords) { if (tab == 2 && !vm.isSyncingRecords) importer.refreshMatches() }
     Scaffold(containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { AppSnackbarHost(snackbar) }) { padding ->
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            ToolHeader("弹幕下载", onBack) {
+            ToolHeader("弹幕下载", { if (tab == 0 && vm.currentAnime != null) vm.backToAnimeList() else onBack() }) {
                 ToolIcon(Icons.Outlined.Tune, "下载设置", onOpenDownloadSettings, size = 40)
                 if (tab == 2) ToolIcon(Icons.Outlined.Sync, "同步已有文件", vm::syncExistingFiles,
                     busy = vm.isSyncingRecords, size = 40)
@@ -77,101 +81,99 @@ import java.util.Locale
     DownloadImportDialog(importer)
     if (vm.previewDialogState.isVisible) DanmuPreviewDialog(vm.previewDialogState, vm::dismissRecordPreview)
     vm.missingEpisodes?.let { state ->
-        AppDialog(onDismissRequest = vm::dismissMissing, scrollContent = false, title = { ToolTitle("刷新《${state.title}》", size = 16) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolHint("源里 ${state.sourceTotal} 集 · 已下载 ${state.downloadedCount} 集 · ${state.way}")
-                ToolTitle("源里有、本地还没下载（${state.episodes.size} 集）", size = 12)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolChip("全选", onClick = { vm.selectAllMissing(true) }); ToolChip("全不选", onClick = { vm.selectAllMissing(false) })
-                }
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
-                    items(state.episodes, key = { it.episodeId }) { episode ->
-                        Row(Modifier.fillMaxWidth().clickable { vm.toggleMissingEpisode(episode.episodeId) }, verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(episode.episodeId in state.selectedIds, { vm.toggleMissingEpisode(episode.episodeId) }, Modifier.size(36.dp))
-                            Text("第${episode.episodeNumber}集", fontSize = 12.sp, modifier = Modifier.width(50.dp))
-                            ToolHint(episode.title, Modifier.weight(1f), maxLines = 1)
-                        }
-                    }
-                }
-                ToolHint("下载后可用记录旁的导入按钮把新集导入本地库")
-            } }, dismissButton = { TextButton(vm::dismissMissing) { Text("取消", fontSize = 12.sp) } },
-            confirmButton = { ToolButton("下载 ${state.selectedIds.size} 集", { vm.downloadMissing(); if (vm.missingEpisodes == null) tab = 1 }, enabled = state.selectedIds.isNotEmpty()) })
+        MissingEpisodesDialog(state, vm::dismissMissing, vm::setMissingSelection, vm::toggleMissingEpisode) {
+            vm.downloadMissing()
+            if (vm.missingEpisodes == null) tab = 1
+        }
     }
 }
 @Composable private fun DownloadSearchContent(vm: DanmuDownloadViewModel, records: List<DanmuDownloadRecord>,
     openSettings: () -> Unit, openQueue: () -> Unit) {
-    LazyColumn(contentPadding = PaddingValues(14.dp, 6.dp, 14.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { ToolHint("下载在后台进行，可以退出本页。保存位置、格式、模板和限速在右上角下载设置里修改。") }
-        item {
-            ToolCard {
-                ToolTitle("搜索动漫")
-                ToolInput(vm.keyword, vm::updateKeyword, "例如：凡人修仙传", icon = Icons.Outlined.Search, onSubmit = vm::searchAnime)
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolChip("本机 127.0.0.1", vm.sourceBase.contains("127.0.0.1"), vm::useLocalBase)
-                    ToolChip("局域网", !vm.sourceBase.contains("127.0.0.1"), vm::useLanBase)
+    val anime = vm.currentAnime
+    val searchListState = rememberLazyListState()
+    val episodeListState = key(anime?.animeId) { rememberLazyListState() }
+    val listState = if (anime == null) searchListState else episodeListState
+    val episodes = vm.visibleEpisodes()
+    val keys = episodes.map { it.episodeId }
+    LazyColumn(Modifier.longPressDragSelection(listState, keys, vm.selectedEpisodeIds,
+        enabled = anime != null && !vm.isLoadingEpisodes, onSelectionChange = vm::setEpisodeSelection),
+        state = listState, contentPadding = PaddingValues(14.dp, 6.dp, 14.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (anime == null) {
+            item(key = "search-help") {
+                ToolHint("下载在后台进行，可以退出本页。保存位置、格式、模板和限速在右上角下载设置里修改。")
+            }
+            item(key = "search") {
+                ToolCard {
+                    ToolTitle("搜索动漫")
+                    ToolInput(vm.keyword, vm::updateKeyword, "例如：凡人修仙传", icon = Icons.Outlined.Search, onSubmit = { vm.searchAnime() })
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolChip("本机 127.0.0.1", vm.sourceBase.contains("127.0.0.1"), vm::useLocalBase)
+                        ToolChip("局域网", !vm.sourceBase.contains("127.0.0.1"), vm::useLanBase)
+                    }
+                    ToolButton("搜索", { vm.searchAnime() }, Modifier.fillMaxWidth(), Icons.Outlined.Search, busy = vm.isSearching)
                 }
-                ToolButton("搜索", vm::searchAnime, Modifier.fillMaxWidth(), Icons.Outlined.Search, busy = vm.isSearching)
             }
         }
-        vm.errorMessage?.let { error -> item { ToolError(error, vm::clearError) } }
-        val anime = vm.currentAnime
+        vm.errorMessage?.let { error -> item(key = "error") { ToolError(error, vm::clearError) } }
         if (anime == null) {
-            if (vm.animeCandidates.isEmpty()) item { ToolEmpty(if (vm.hasSearchedAnime) "没有搜索结果" else "搜索后选择番剧与剧集", Icons.Outlined.Download,
-                "支持批量下载与断点查看记录") }
+            if (vm.isSearching) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            else if (vm.animeCandidates.isEmpty()) item {
+                ToolEmpty(if (vm.hasSearchedAnime) "没有搜索结果" else "搜索后选择要下载的剧集", Icons.Outlined.Download)
+            }
             items(vm.animeCandidates, key = { it.animeId }) { candidate ->
                 ToolCard(onClick = { vm.openAnimeDetail(candidate) }) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AnimePosterThumbnail(candidate.imageUrl, candidate.title, Modifier.size(58.dp, 82.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            ToolTitle(candidate.title, size = 14)
-                            ToolHint(listOf(candidate.sourceLabel.ifBlank { extractSourceFromAnimeTitle(candidate.title) }, candidate.typeDescription).filter { it.isNotBlank() }.joinToString(" · "))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                ToolHint(if (candidate.episodeCount > 0) "${candidate.episodeCount} 集" else "集数未知", Modifier.weight(1f))
-                                Text("选择剧集", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
-                                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                            }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AnimePosterThumbnail(candidate.imageUrl, candidate.title, Modifier.size(44.dp, 62.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ToolTitle(candidate.title, size = 13)
+                            ToolHint(listOf(candidate.sourceLabel.ifBlank { extractSourceFromAnimeTitle(candidate.title) },
+                                candidate.typeDescription, if (candidate.episodeCount > 0) "${candidate.episodeCount} 集" else "集数未知")
+                                .filter { it.isNotBlank() }.joinToString(" · "), maxLines = 1)
                         }
+                        Icon(Icons.Outlined.ChevronRight, "选择剧集", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         } else {
             val downloaded = vm.episodeCandidates.filter { vm.episodeUiState(it).downloadedBefore || vm.episodeUiState(it).state == EpisodeDownloadState.Success }.map { it.episodeId }.toSet()
-            item {
+            item(key = "episode-selection") {
                 ToolCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ToolTitle(anime.title, Modifier.weight(1f), size = 14)
-                        TextButton(vm::backToAnimeList) { Text("返回结果", fontSize = 12.sp) }
-                    }
-                    ToolHint("共 ${vm.episodeCandidates.size} 集 · 已选 ${vm.selectedEpisodeIds.size} · 已下载 ${vm.episodeCandidates.count { it.episodeId in downloaded }}")
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ToolChip("全选", onClick = vm::selectAllVisible)
-                        ToolChip("全不选", onClick = vm::clearSelection)
-                        ToolChip("反选", onClick = vm::invertVisibleSelection)
-                        ToolChip("只选未下载", onClick = vm::selectUndownloadedEpisodes)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            ToolTitle(anime.title, size = 14)
+                            ToolHint("共 ${vm.episodeCandidates.size} 集 · 已下载 ${downloaded.size}", maxLines = 1)
+                        }
+                        TextButton(vm::backToAnimeList, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                            Icon(Icons.Outlined.ChevronLeft, null, Modifier.size(16.dp))
+                            Text("返回结果", fontSize = 12.sp)
+                        }
                     }
                     if (vm.sourceOptions().size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ToolChip("全部来源", vm.sourceFilter == null, { vm.selectSourceFilter(null) })
                         vm.sourceOptions().forEach { source -> ToolChip(source, vm.sourceFilter == source, { vm.selectSourceFilter(source) }) }
                     }
-                    ToolButton("下载 ${vm.selectedEpisodeIds.size} 集", { vm.startDownloadSelectedEpisodes(); if (vm.errorMessage == null) openQueue() },
-                        Modifier.fillMaxWidth(), Icons.Outlined.Download, enabled = vm.selectedEpisodeIds.isNotEmpty())
+                    SelectionToolbar(keys, vm.selectedEpisodeIds, vm::setEpisodeSelection, enabled = !vm.isLoadingEpisodes,
+                        unit = "集", showSummary = false, onSelectUndownloaded = vm::selectUndownloadedEpisodes)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolHint("长按滑动多选", Modifier.weight(1f), maxLines = 1)
+                        ToolButton("下载 ${vm.selectedEpisodeIds.size} 集", { if (vm.startDownloadSelectedEpisodes()) openQueue() },
+                            icon = Icons.Outlined.Download, enabled = vm.selectedEpisodeIds.isNotEmpty() && !vm.isLoadingEpisodes)
+                    }
                     if (vm.settings.value.saveDirPath.isBlank() && vm.settings.value.saveTreeUri.isBlank())
                         TextButton(openSettings) { Text("先选择保存目录", fontSize = 12.sp) }
                 }
             }
             if (vm.isLoadingEpisodes) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            items(vm.visibleEpisodes(), key = { it.episodeId }) { episode ->
+            else if (episodes.isEmpty()) item { ToolHint("暂无可下载剧集") }
+            items(episodes, key = { it.episodeId }) { episode ->
                 val ui = vm.episodeStates[episode.episodeId]
-                ToolCard(onClick = { vm.toggleEpisodeSelection(episode.episodeId) }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(episode.episodeId in vm.selectedEpisodeIds, { vm.toggleEpisodeSelection(episode.episodeId) }, Modifier.size(34.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            ToolTitle("第${episode.episodeNumber}集  ${episode.title}", size = 12)
-                            ToolHint(listOf(episode.source, if (episode.episodeId in downloaded) "已下载" else "未下载",
-                                ui?.detail.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "))
-                        }
+                SelectionRow(episode.episodeId in vm.selectedEpisodeIds, { vm.toggleEpisodeSelection(episode.episodeId) },
+                    trailing = {
                         if (episode.episodeId in downloaded) Icon(Icons.Outlined.TaskAlt, "已下载", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
+                    }) {
+                    ToolTitle("第 ${episode.episodeNumber} 集 · ${episode.title}", size = 13)
+                    ToolHint(listOf(episode.source, if (episode.episodeId in downloaded) "已下载" else "未下载",
+                        ui?.detail.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "), maxLines = 2)
                 }
             }
         }
@@ -256,7 +258,7 @@ import java.util.Locale
         }
         items(groups, key = { it.key }) { group ->
             val good = group.records.filter { it.statusEnum() == DownloadRecordStatus.Success }
-            val imported = good.isNotEmpty() && good.all { it.importedToLocal || it.id in importer.importedKeys }
+            val imported = good.isNotEmpty() && good.all { it.id in importer.importedKeys }
             ToolCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ToolIcon(if (group.key in expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, "展开记录", {
@@ -269,12 +271,12 @@ import java.util.Locale
                     ToolIcon(Icons.Outlined.Refresh, "刷新未下载剧集", { vm.refreshSeries(group) }, busy = vm.refreshingSeriesKey == group.key)
                     ToolIcon(Icons.Outlined.DeleteOutline, "删除整部记录", { deleting = group.records }, enabled = !vm.isDownloading, danger = true)
                 }
-                ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${downloadBytes(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
+                ToolHint("成功 ${good.size} · 失败 ${group.failedCount} · 跳过 ${group.skippedCount} · ${formatByteSize(group.totalBytes)}${if (imported) " · 已导入本地库" else ""}")
                 if (group.key in expanded) group.records.forEach { record ->
-                    val isImported = record.importedToLocal || record.id in importer.importedKeys
+                    val isImported = record.id in importer.importedKeys
                     ToolListRow("第${record.episodeNo}集", record.danmuCount?.let { "$it 条" } ?: record.statusEnum().label,
                         record.fileName.ifBlank { record.episodeTitle },
-                        "${downloadTime(record.createdAt)} · ${downloadBytes(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",
+                        "${downloadTime(record.createdAt)} · ${formatByteSize(record.bytes)}${if (isImported) " · 已导入本地弹幕" else ""}${record.errorMessage?.let { " · $it" }.orEmpty()}",
                         actions = {
                             ToolIcon(Icons.Outlined.Visibility, "预览", { vm.openRecordPreview(record) })
                             ToolIcon(if (isImported) Icons.Outlined.TaskAlt else Icons.Outlined.DownloadForOffline, "导入本地弹幕",
@@ -300,5 +302,4 @@ private fun Context.downloadActivity(): ComponentActivity? = when (this) {
     is ContextWrapper -> baseContext.downloadActivity()
     else -> null
 }
-internal fun downloadBytes(bytes: Long): String = if (bytes >= 1024 * 1024) String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0) else "${bytes / 1024} KB"
 internal fun downloadTime(time: Long): String = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))

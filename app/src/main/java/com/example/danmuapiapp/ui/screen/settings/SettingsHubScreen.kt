@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import android.app.Activity
 import android.content.Context
@@ -23,7 +24,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tv
@@ -32,7 +32,6 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.BuildConfig
-import com.example.danmuapiapp.data.service.HarmonyCompatDetector
 import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.ui.component.SettingsDivider
 import com.example.danmuapiapp.ui.component.CompactOverviewCard
@@ -72,7 +70,6 @@ fun SettingsHubScreen(
     onOpenGithubToken: () -> Unit,
     onOpenAdminMode: () -> Unit,
     onOpenAbout: () -> Unit,
-    onOpenHarmonyGuide: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -80,7 +77,6 @@ fun SettingsHubScreen(
     val hideFromRecents by viewModel.hideFromRecents.collectAsStateWithLifecycle()
     val githubAccountStatus by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val snackbarHostState = remember { SnackbarHostState() }
     val runModeLabel = state.runMode.label
     val workDirPath = viewModel.workDirInfo.currentBaseDir.absolutePath
     val selectedGithubProxyId by viewModel.selectedGithubProxyId.collectAsStateWithLifecycle()
@@ -122,7 +118,7 @@ fun SettingsHubScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
@@ -132,7 +128,6 @@ fun SettingsHubScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -332,13 +327,6 @@ fun SettingsHubScreen(
 
             SettingsGroup(title = "偏好与信息") {
                 SettingsItem(
-                    title = "兼容模式",
-                    subtitle = "界面选择、电视 / 盒子与遥控器操作",
-                    icon = Icons.Rounded.Tv,
-                    onClick = onOpenCompatMode
-                )
-                SettingsDivider()
-                SettingsItem(
                     title = "主题与显示",
                     subtitle = "主题模式、访问入口形式与界面缩放",
                     icon = Icons.Rounded.Palette,
@@ -358,14 +346,10 @@ fun SettingsHubScreen(
                 )
                 SettingsDivider()
                 SettingsItem(
-                    title = "鸿蒙后台权限引导",
-                    subtitle = if (HarmonyCompatDetector.isLikelyHarmonyCompat()) {
-                        "检测到疑似鸿蒙兼容环境，建议查看权限放行指引"
-                    } else {
-                        "手动查看鸿蒙/卓易通后台权限设置指引"
-                    },
-                    icon = Icons.Rounded.PhoneAndroid,
-                    onClick = onOpenHarmonyGuide
+                    title = "兼容模式",
+                    subtitle = "界面选择、电视 / 盒子与遥控器操作",
+                    icon = Icons.Rounded.Tv,
+                    onClick = onOpenCompatMode
                 )
                 SettingsDivider()
                 SettingsItem(

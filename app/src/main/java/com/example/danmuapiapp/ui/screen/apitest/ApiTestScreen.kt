@@ -1,10 +1,10 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import com.example.danmuapiapp.ui.component.AppDialog
+import com.example.danmuapiapp.ui.component.AppToast
 import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,7 +66,7 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
     var pendingText by remember { mutableStateOf("") }
     val copy: (String) -> Unit = { text ->
         clipboard.nativeClipboard.setPrimaryClip(ClipData.newPlainText("接口调试", text))
-        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+        AppToast.success("已复制")
     }
     val saveText = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
@@ -74,7 +74,10 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
                 context.contentResolver.openOutputStream(uri, "w")?.use { it.write(pendingText.toByteArray()) }
                     ?: error("无法打开文件")
             } }
-            Toast.makeText(context, result.fold({ "已导出" }, { "导出失败：${it.message}" }), Toast.LENGTH_LONG).show()
+            result.fold(
+                onSuccess = { AppToast.success("已导出") },
+                onFailure = { AppToast.error("导出失败：${it.message}") }
+            )
         }
     }
     val saveDanmu = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -104,7 +107,7 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
     }
     LaunchedEffect(viewModel.uiNotice?.id) {
         viewModel.uiNotice?.let {
-            Toast.makeText(context, it.message, Toast.LENGTH_LONG).show()
+            AppToast.show(it.message)
             viewModel.consumeUiNotice(it.id)
         }
     }
@@ -133,7 +136,7 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
             keyword = query
             viewModel.searchAnime(base, query)
             nav.navigate("results") { launchSingleTop = true }
-        } else if (query.isBlank()) Toast.makeText(context, "请输入搜索关键词或视频 URL", Toast.LENGTH_SHORT).show()
+        } else if (query.isBlank()) AppToast.warning("请输入搜索关键词或视频 URL")
     }
 
     NavHost(navController = nav, startDestination = "test", modifier = Modifier.fillMaxSize(),
@@ -144,7 +147,7 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
             Column(Modifier.fillMaxSize()) {
                 ApiPageHeader("接口调试", onBack, actions = {
                     TextButton(onClick = {
-                        if (!useLan && lanBase.isBlank()) Toast.makeText(context, "没有检测到局域网地址", Toast.LENGTH_SHORT).show()
+                        if (!useLan && lanBase.isBlank()) AppToast.warning("没有检测到局域网地址")
                         else { useLan = !useLan; customBase = "" }
                     }) {
                         Icon(if (useLan) Icons.Rounded.Lan else Icons.Rounded.PhoneAndroid, null, Modifier.size(16.dp))
@@ -240,20 +243,12 @@ fun ApiTestScreen(onBack: () -> Unit, viewModel: ApiTestViewModel = hiltViewMode
 
 @Composable
 private fun ApiTopSegments(selected: Int, onSelect: (Int) -> Unit) {
-    Surface(Modifier.padding(horizontal = 14.dp, vertical = 6.dp).fillMaxWidth(), shape = RoundedCornerShape(11.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))) {
-        Row(Modifier.height(36.dp).padding(2.dp)) {
-            listOf("弹幕测试", "接口调试").forEachIndexed { index, text ->
-                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(9.dp))
-                    .background(if (index == selected) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent)
-                    .clickable { onSelect(index) }, contentAlignment = Alignment.Center) {
-                    Text(text, fontSize = 12.5.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected == index) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
+    ApiSegmentedTabs(
+        labels = listOf("弹幕测试", "接口调试"),
+        selected = selected,
+        onSelect = onSelect,
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+    )
 }
 
 @Composable

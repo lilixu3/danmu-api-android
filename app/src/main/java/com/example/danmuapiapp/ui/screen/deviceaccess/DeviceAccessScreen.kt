@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.deviceaccess
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -39,25 +40,16 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,7 +61,6 @@ import com.example.danmuapiapp.domain.model.DeviceAccessDevice
 import com.example.danmuapiapp.domain.model.DeviceAccessMode
 import com.example.danmuapiapp.domain.model.DeviceAccessSnapshot
 import com.example.danmuapiapp.domain.model.DeviceAccessSource
-import com.example.danmuapiapp.ui.theme.appPrimaryButtonColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -84,11 +75,10 @@ fun DeviceAccessScreen(
 ) {
     val snapshot = viewModel.snapshot.collectAsStateWithLifecycle().value
     val adminState = viewModel.adminSessionState.collectAsStateWithLifecycle().value
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
-            snackbarHostState.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
@@ -98,7 +88,6 @@ fun DeviceAccessScreen(
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        snackbarHost = { AppSnackbarHost(hostState = snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -651,9 +640,6 @@ private fun AdminActionsCard(
         }
     }
 }
-
-@Composable
-private fun primaryActionButtonColors() = appPrimaryButtonColors()
 
 private fun sourceText(source: DeviceAccessSource): String {
     return when (source) {

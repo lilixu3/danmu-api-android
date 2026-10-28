@@ -117,8 +117,11 @@ private class GithubRouteSnapshot(
 
 /** All shared HTTP entry points freeze a route before OkHttp considers pooled connections. */
 internal fun OkHttpClient.newOutboundCall(request: okhttp3.Request): okhttp3.Call {
-    val selector = proxySelector as? GithubRouteSelector ?: return newCall(request)
-    if (proxy != null) return newCall(request)
+    val tagged = if (com.example.danmuapiapp.data.service.GithubQuotaRequestContext.isAutomatic()) {
+        request.newBuilder().tag(GithubQuotaRequestMode::class.java, GithubQuotaRequestMode(true)).build()
+    } else request
+    val selector = proxySelector as? GithubRouteSelector ?: return newCall(tagged)
+    if (proxy != null) return newCall(tagged)
     val snapshot = selector.snapshot()
-    return snapshot.call(this, request)
+    return snapshot.call(this, tagged)
 }

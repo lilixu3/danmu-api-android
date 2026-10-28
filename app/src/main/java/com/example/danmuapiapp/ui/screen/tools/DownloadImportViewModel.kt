@@ -9,13 +9,15 @@ import com.example.danmuapiapp.domain.repository.*
 import com.example.danmuapiapp.ui.screen.localdanmu.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 @HiltViewModel
 internal class DownloadImportViewModel @Inject constructor(
     private val downloads: DanmuDownloadRepository,
     private val local: LocalDanmuRepository,
-    private val uploader: LocalDanmuUploadService
+    private val uploader: LocalDanmuUploadService,
+    private val runtimeData: com.example.danmuapiapp.data.service.RuntimeDataAccess
 ) : ViewModel() {
     val records = downloads.records
     var batch by mutableStateOf(LocalDanmuBatchState())
@@ -32,15 +34,34 @@ internal class DownloadImportViewModel @Inject constructor(
         private set
     var completedVersion by mutableIntStateOf(0)
         private set
+    private var matchJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            var observed = runtimeData.changes.value
+            runtimeData.changes.collect { generation ->
+                if (observed != generation) {
+                    observed = generation
+                    importedKeys = emptyMap()
+                    batch = if (batch.isRunning) batch.copy(cancelRequested = true) else LocalDanmuBatchState()
+                    refreshMatches()
+                }
+            }
+        }
+    }
 
     fun refreshMatches() {
-        viewModelScope.launch {
-            val resources = local.refresh(force = true).getOrNull()?.resources ?: return@launch
-            val existing = DownloadLocalImportPlanner.existingKeys(resources)
-            importedKeys = downloads.records.value.mapNotNull { record ->
-                existing[DownloadLocalImportPlanner.key(record)]?.let { record.id to it }
-            }.toMap()
-            downloads.markRecordsImported(importedKeys.filterKeys { id -> downloads.records.value.any { it.id == id && !it.importedToLocal } })
+        matchJob?.cancel()
+        matchJob = viewModelScope.launch {
+            val matched = runLocalDanmuRequest {
+                runtimeData.withRuntime {
+                    val snapshot = local.refresh(force = true).getOrThrow()
+                    val keys = DownloadLocalImportPlanner.matches(downloads.records.value, snapshot)
+                    downloads.markRecordsImported(snapshot.libraryId, keys, reconcile = true)
+                    snapshot.sessionKey to keys
+                }
+            }.getOrElse { importedKeys = emptyMap(); return@launch }
+            if (runtimeData.isCurrentSession(matched.first)) importedKeys = matched.second
         }
     }
     fun open(records: List<DanmuDownloadRecord>, label: String = "导入本地弹幕") {
@@ -50,15 +71,24 @@ internal class DownloadImportViewModel @Inject constructor(
         title = label
         viewModelScope.launch {
             try {
-                val existing = local.refresh(force = true).getOrNull()?.resources?.let(DownloadLocalImportPlanner::existingKeys).orEmpty()
-                val plans = records.map { DownloadLocalImportPlanner.plan(it, existing) }
+                val snapshot = local.refresh(force = true).getOrElse { error = it.message; return@launch }
+                if (!runtimeData.isCurrentSession(snapshot.sessionKey)) return@launch
+                val existing = DownloadLocalImportPlanner.existingKeys(snapshot.resources)
+                val associations = DownloadLocalImportPlanner.matches(records, snapshot)
+                val plans = records.map { DownloadLocalImportPlanner.plan(it, existing, associations[it.id]) }
                 blocked = plans.filter { it.blockedReason.isNotBlank() }.map { "第${it.record.episodeNo}集：${it.blockedReason}" }
-                batch = LocalDanmuBatchState(visible = true, items = markBatchDuplicates(plans.mapNotNull { it.item }))
+                batch = LocalDanmuBatchState(visible = true, items = markBatchDuplicates(plans.mapNotNull {
+                    it.item?.copy(expectedSessionKey = snapshot.sessionKey)
+                }))
             } finally { planning = false }
         }
     }
     fun dismiss() { if (!batch.isRunning) { batch = LocalDanmuBatchState(); blocked = emptyList(); error = null } }
-    fun toggle(id: Long) { update(id) { it.copy(selected = !it.selected) } }
+    fun selectItems(ids: Set<Long>) { batch = batch.withSelection(ids) }
+    fun toggle(id: Long) { selectItems(if (id in batch.selectedIds) batch.selectedIds - id else batch.selectedIds + id) }
+    fun setBatchType(type: LocalDanmuType?) {
+        if (!batch.isRunning) batch = batch.copy(items = applyImportType(batch.items, type))
+    }
     fun edit(id: Long, title: String, year: Int?, type: LocalDanmuType, season: Int?, episode: Int?) {
         update(id) { it.copy(title = title, year = year, type = type, season = season,
             episode = if (type == LocalDanmuType.Movie) null else episode, status = LocalDanmuBatchStatus.Ready, message = "", selected = true) }
@@ -84,7 +114,8 @@ internal class DownloadImportViewModel @Inject constructor(
                     update(item.id) { it.copy(status = LocalDanmuBatchStatus.Uploading, message = "上传中") }
                     uploader.upload(item) { p -> update(item.id) { it.copy(progress = p) } }.fold(
                         onSuccess = { resource ->
-                            downloads.markRecordsImported(mapOf(item.id to resource.resourceKey))
+                            if (!runtimeData.isCurrentSession(resource.sessionKey)) return@fold
+                            downloads.markRecordsImported(resource.libraryId, mapOf(item.id to resource.resourceKey))
                             importedKeys = importedKeys + (item.id to resource.resourceKey)
                             update(item.id) { it.copy(status = LocalDanmuBatchStatus.Success, progress = 1f, message = "已导入 ${resource.count} 条") }
                             if (downloads.settings.value.deleteSourceAfterImport) {
@@ -99,6 +130,7 @@ internal class DownloadImportViewModel @Inject constructor(
             } finally {
                 batch = batch.copy(isRunning = false, cancelRequested = false)
                 completedVersion++
+                refreshMatches()
             }
         }
     }

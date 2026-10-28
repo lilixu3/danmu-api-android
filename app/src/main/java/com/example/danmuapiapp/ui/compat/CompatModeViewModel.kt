@@ -4,6 +4,9 @@ import com.example.danmuapiapp.ui.common.CoreUpdateChoiceController
 import android.app.Activity
 import android.content.Context
 import android.os.Build
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -38,13 +41,14 @@ import com.example.danmuapiapp.domain.model.normalizeGithubBranch
 import com.example.danmuapiapp.ui.common.ProxyPickerController
 import com.example.danmuapiapp.ui.common.CoreDependencyRepairController
 import com.example.danmuapiapp.ui.common.continueAfterDependencyRepair
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.screen.push.PushLanScanner
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -156,6 +160,32 @@ class CompatModeViewModel(
         }
     }
     val proxyOptions: List<GithubProxyOption> = graph.githubProxyService.proxyOptions()
+    val githubApiQuota = graph.githubProxyService.apiQuota
+    val githubAccountStatus = graph.githubAccountService.status
+    var showGithubTokenDialog by mutableStateOf(false)
+        private set
+
+    fun openGithubTokenDialog() { showGithubTokenDialog = true }
+    fun dismissGithubTokenDialog() { showGithubTokenDialog = false }
+
+    fun validateAndSaveGithubToken(input: String) {
+        if (githubAccountStatus.value.isLoading) return
+        viewModelScope.launch {
+            val token = input.trim()
+            val status = graph.githubAccountService.refresh(token)
+            if (token.isNotBlank() && status.tokenValid != true) {
+                emitEvent(status.error ?: "暂时无法验证 Token，未保存")
+                return@launch
+            }
+            runCatching { graph.settingsRepository.setGithubToken(token) }.fold(
+                onSuccess = {
+                    showGithubTokenDialog = false
+                    emitEvent(if (token.isBlank()) "已清空 GitHub Token" else "GitHub Token 已验证并保存")
+                },
+                onFailure = { emitEvent(it.message ?: "GitHub Token 安全保存失败") }
+            )
+        }
+    }
 
     private val proxyPickerController = ProxyPickerController(
         githubProxyService = graph.githubProxyService,
@@ -258,7 +288,13 @@ class CompatModeViewModel(
         updateLogsRefresh()
         if (currentCompatPage == CompatPage.Config) managementController.refresh()
         graph.runtimeRepository.setAppForeground(true)
-        graph.appUpdateService.tryResumePendingInstall(activity)
+        when (val result = graph.appUpdateService.tryResumePendingInstall(activity)) {
+            AppUpdateService.ResumeInstallResult.Launched,
+            AppUpdateService.ResumeInstallResult.NoPendingInstall -> Unit
+            AppUpdateService.ResumeInstallResult.NeedUnknownSourcePermission ->
+                _events.tryEmit("请先允许安装未知应用，授权后返回将自动继续安装")
+            is AppUpdateService.ResumeInstallResult.Failed -> _events.tryEmit(result.message)
+        }
         refreshKeepAliveUi()
         graph.updateChecker.onAppResume()
     }
@@ -398,6 +434,7 @@ class CompatModeViewModel(
     }
 
     fun openBranchDialog(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (_uiState.value.isOperating) return
         if (_uiState.value.coreInfos.firstOrNull { it.variant == variant }?.isInstalled != true) {
             emitEvent("请先安装 ${resolveVariantLabel(variant)}")
@@ -477,6 +514,7 @@ class CompatModeViewModel(
     }
 
     private fun doSwitchCoreBranch(variant: ApiVariant, branch: String) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在切换 ${resolveVariantLabel(variant)} 分支") {
             graph.coreRepository.switchCoreBranch(variant, branch).fold(
                 onSuccess = {
@@ -490,6 +528,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}切换已暂停，等待修复依赖")
                     } else {
@@ -505,6 +544,7 @@ class CompatModeViewModel(
     }
 
     fun installCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Install(variant)
@@ -516,6 +556,7 @@ class CompatModeViewModel(
     }
 
     private fun doInstallCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在下载 ${resolveVariantLabel(variant)}") {
             graph.coreRepository.installCore(variant).fold(
                 onSuccess = {
@@ -529,6 +570,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}安装已暂停，等待修复依赖")
                     } else {
@@ -544,6 +586,7 @@ class CompatModeViewModel(
     }
 
     fun updateCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.Update(variant)
@@ -557,9 +600,12 @@ class CompatModeViewModel(
     val coreUpdateChoice = CoreUpdateChoiceController()
 
     private fun doUpdateCore(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在更新 ${resolveVariantLabel(variant)}") {
             val request = coreUpdateChoice.prepare(graph.coreRepository, variant).getOrElse {
-                emitEvent("无法准备更新：${it.message}")
+                if (it !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+                    emitEvent("无法准备更新：${it.message}")
+                }
                 return@performCoreOperation
             } ?: return@performCoreOperation
             graph.coreRepository.updateCore(request).fold(
@@ -574,6 +620,7 @@ class CompatModeViewModel(
                     }
                 },
                 onFailure = { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) return@fold
                     if (error is CoreDependencyRepairRequiredException) {
                         emitEvent("${resolveVariantLabel(variant)}更新已暂停，等待修复依赖")
                     } else {
@@ -589,6 +636,7 @@ class CompatModeViewModel(
     }
 
     fun checkCoreUpdate(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         if (!canOperateVariant(variant)) return
         if (!graph.githubProxyService.hasUserSelectedProxy()) {
             pendingProxyAction = PendingProxyAction.CheckUpdate(variant)
@@ -600,10 +648,12 @@ class CompatModeViewModel(
     }
 
     private fun doCheckCoreUpdate(variant: ApiVariant) {
+        if (!githubApiQuota.allowManualOperation()) return
         performCoreOperation("正在检查 ${resolveVariantLabel(variant)} 更新") {
             runCatching {
                 graph.coreRepository.checkAndMarkUpdate(variant)
                 val refreshed = graph.coreRepository.coreInfoList.value.find { it.variant == variant }
+                if (refreshed?.updateCheckError != null && !githubApiQuota.allowManualOperation()) return@runCatching
                 when {
                     refreshed?.updateCheckError != null -> {
                         emitEvent("${resolveVariantLabel(variant)} 检查更新失败：${refreshed.updateCheckError}")
@@ -757,6 +807,9 @@ class CompatModeViewModel(
 
     fun checkAppUpdate(showFreshToast: Boolean = true) {
         if (_uiState.value.appUpdate.isChecking) return
+        if (showFreshToast) {
+            if (!githubApiQuota.allowManualOperation()) return
+        } else if (githubApiQuota.blocked() != null) return
         _uiState.update {
             it.copy(
                 appUpdate = it.appUpdate.copy(
@@ -765,7 +818,7 @@ class CompatModeViewModel(
                 )
             )
         }
-        viewModelScope.launch {
+        viewModelScope.launch(com.example.danmuapiapp.data.service.GithubQuotaRequestContext.element(!showFreshToast)) {
             val result = withContext(Dispatchers.IO) {
                 graph.appUpdateService.checkLatestRelease()
             }
@@ -790,11 +843,12 @@ class CompatModeViewModel(
                         it.copy(
                             appUpdate = it.appUpdate.copy(
                                 isChecking = false,
-                                checkError = error.message ?: "检查失败"
+                                checkError = if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) ""
+                                    else error.message ?: "检查失败"
                             )
                         )
                     }
-                    if (showFreshToast) {
+                    if (showFreshToast && error !is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
                         emitEvent("检查 App 更新失败：${error.message ?: "未知错误"}")
                     }
                 }
@@ -831,9 +885,9 @@ class CompatModeViewModel(
                 ) { soFar, total ->
                     _uiState.update { state ->
                         val detail = if (total > 0) {
-                            "${formatBytes(soFar)} / ${formatBytes(total)}"
+                            "${formatByteSize(soFar)} / ${formatByteSize(total)}"
                         } else {
-                            "已下载 ${formatBytes(soFar)}"
+                            "已下载 ${formatByteSize(soFar)}"
                         }
                         state.copy(
                             appUpdate = state.appUpdate.copy(
@@ -946,81 +1000,47 @@ class CompatModeViewModel(
                 }
             }
         }
-        viewModelScope.launch {
-            graph.coreRepository.coreInfoList.collectLatest { coreInfos ->
-                _uiState.update { it.copy(coreInfos = coreInfos) }
-            }
+        observeInto(graph.coreRepository.coreInfoList) { state, value -> state.copy(coreInfos = value) }
+        observeInto(graph.coreRepository.downloadProgress) { state, value ->
+            state.copy(downloadProgress = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.downloadProgress.collectLatest { progress ->
-                _uiState.update { it.copy(downloadProgress = progress) }
-            }
+        observeInto(graph.coreRepository.isCoreInfoLoading) { state, value ->
+            state.copy(isCoreInfoLoading = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.isCoreInfoLoading.collectLatest { loading ->
-                _uiState.update { it.copy(isCoreInfoLoading = loading) }
-            }
+        observeInto(graph.coreRepository.pendingDependencyRepair) { state, value ->
+            state.copy(pendingDependencyRepair = value)
         }
-        viewModelScope.launch {
-            graph.coreRepository.pendingDependencyRepair.collectLatest { request ->
-                _uiState.update { it.copy(pendingDependencyRepair = request) }
-            }
+        observeInto(graph.settingsRepository.coreDisplayNames) { state, value ->
+            state.copy(coreDisplayNames = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.coreDisplayNames.collectLatest { names ->
-                _uiState.update { it.copy(coreDisplayNames = names) }
-            }
+        observeInto(graph.settingsRepository.coreBranchSelections) { state, value ->
+            state.copy(coreBranchSelections = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.coreBranchSelections.collectLatest { selections ->
-                _uiState.update { it.copy(coreBranchSelections = selections) }
-            }
+        observeInto(graph.settingsRepository.customCoreSource) { state, value ->
+            state.copy(customCoreSource = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customCoreSource.collectLatest { source ->
-                _uiState.update { it.copy(customCoreSource = source) }
-            }
+        observeInto(graph.settingsRepository.customRepo) { state, value ->
+            state.copy(customRepo = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customRepo.collectLatest { repo ->
-                _uiState.update { it.copy(customRepo = repo) }
-            }
+        observeInto(graph.settingsRepository.customRepoBranch) { state, value ->
+            state.copy(customRepoBranch = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.customRepoBranch.collectLatest { branch ->
-                _uiState.update { it.copy(customRepoBranch = branch) }
-            }
+        observeInto(graph.settingsRepository.nightMode) { state, value ->
+            state.copy(nightMode = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.nightMode.collectLatest { mode ->
-                _uiState.update { it.copy(nightMode = mode) }
-            }
+        observeInto(graph.settingsRepository.glassMaterial) { state, value ->
+            state.copy(glassMaterial = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.glassMaterial.collectLatest { material ->
-                _uiState.update { it.copy(glassMaterial = material) }
-            }
+        observeInto(graph.settingsRepository.glassTuning) { state, value ->
+            state.copy(glassTuning = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.glassTuning.collectLatest { tuning ->
-                _uiState.update { it.copy(glassTuning = tuning) }
-            }
+        observeInto(graph.settingsRepository.appBackground) { state, value ->
+            state.copy(appBackground = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.appBackground.collectLatest { background ->
-                _uiState.update { it.copy(appBackground = background) }
-            }
+        observeInto(graph.settingsRepository.compatDpiOverride) { state, value ->
+            state.copy(appDpiOverride = value)
         }
-        viewModelScope.launch {
-            graph.settingsRepository.compatDpiOverride.collectLatest { dpi ->
-                _uiState.update { it.copy(appDpiOverride = dpi) }
-            }
-        }
-        viewModelScope.launch {
-            syncServer.uiState.collectLatest { syncState ->
-                _uiState.update { it.copy(syncState = syncState) }
-            }
-        }
+        observeInto(syncServer.uiState) { state, value -> state.copy(syncState = value) }
 
         val keepAliveFlows = listOf(
             graph.settingsRepository.autoStart,
@@ -1034,6 +1054,18 @@ class CompatModeViewModel(
                 flow.collectLatest {
                     refreshKeepAliveUi()
                 }
+            }
+        }
+    }
+
+    /** 把单个仓库 flow 的每次发射写回同一份页面状态，避免逐字段重复样板。 */
+    private fun <T> observeInto(
+        flow: Flow<T>,
+        update: (CompatModeUiState, T) -> CompatModeUiState
+    ) {
+        viewModelScope.launch {
+            flow.collectLatest { value ->
+                _uiState.update { update(it, value) }
             }
         }
     }
@@ -1207,19 +1239,6 @@ class CompatModeViewModel(
 
     private fun resolveSyncHost(state: RuntimeState): String {
         return PushLanScanner.resolveSelfLanIpv4(state.lanUrl).orEmpty()
-    }
-
-    private fun formatBytes(bytes: Long): String {
-        if (bytes <= 0L) return "0 B"
-        val kb = 1024.0
-        val mb = kb * 1024.0
-        val gb = mb * 1024.0
-        return when {
-            bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
-            bytes >= mb -> String.format(Locale.getDefault(), "%.2f MB", bytes / mb)
-            bytes >= kb -> String.format(Locale.getDefault(), "%.2f KB", bytes / kb)
-            else -> "$bytes B"
-        }
     }
 
     private fun emitEvent(message: String) {

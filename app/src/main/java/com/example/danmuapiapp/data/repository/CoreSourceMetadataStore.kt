@@ -2,6 +2,7 @@ package com.example.danmuapiapp.data.repository
 
 import com.example.danmuapiapp.domain.model.RunMode
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -20,7 +21,25 @@ internal data class CoreSourceMetadata(
 )
 
 internal object CoreSourceMetadataStore {
+    const val FILE_NAME = ".danmuapiapp-core-source.json"
+
     private val json = Json { ignoreUnknownKeys = true }
+
+    fun fileIn(coreDir: File): File = File(coreDir, FILE_NAME)
+
+    fun write(coreDir: File, metadata: CoreSourceMetadata?, now: Long = System.currentTimeMillis()) {
+        val file = fileIn(coreDir)
+        if (metadata == null || (metadata.repo.isBlank() && metadata.branch.isBlank() && metadata.commitSha.isBlank())) {
+            runCatching { file.delete() }
+            return
+        }
+        runCatching {
+            file.writeText(
+                json.encodeToString(metadata.copy(installedAtEpochMillis = now)),
+                Charsets.UTF_8
+            )
+        }
+    }
 
     fun read(mode: RunMode, normalFile: File, rootPath: String, readRoot: (String) -> String?): CoreSourceMetadata? {
         // /data/adb 不允许普通 UID 遍历。Root 核心必须通过 su 读取，不能拿普通目录副本代替。

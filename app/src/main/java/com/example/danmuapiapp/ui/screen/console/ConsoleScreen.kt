@@ -2,7 +2,6 @@ package com.example.danmuapiapp.ui.screen.console
 
 import android.content.Intent
 import android.content.Context
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -46,6 +45,10 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.AppToast
+import com.example.danmuapiapp.ui.component.AdminModeRequiredDialog
+import com.example.danmuapiapp.ui.component.AdminModeRequiredTarget
+import com.example.danmuapiapp.ui.component.adminModeRequiredPrompt
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
@@ -56,7 +59,10 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
+fun ConsoleScreen(
+    onOpenAdminMode: () -> Unit,
+    viewModel: ConsoleViewModel = hiltViewModel()
+) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val runtimeState by viewModel.runtimeState.collectAsStateWithLifecycle()
     val logEnabled by viewModel.logEnabled.collectAsStateWithLifecycle()
@@ -64,6 +70,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     val logMaxCount by viewModel.logMaxCount.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val adminState by viewModel.adminSessionState.collectAsStateWithLifecycle()
+    val showAdminRequiredDialog by viewModel.showAdminRequiredDialog.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboard.current
@@ -83,9 +90,9 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
                     output.write(pendingExportText.toByteArray(Charsets.UTF_8))
                 } ?: error("无法打开导出文件")
             }.onSuccess {
-                Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
+                AppToast.success("日志已导出")
             }.onFailure { throwable ->
-                Toast.makeText(context, throwable.message ?: "导出日志失败", Toast.LENGTH_SHORT).show()
+                AppToast.error(throwable.message ?: "导出日志失败")
             }
         }
     }
@@ -147,6 +154,7 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
     }
 
     LaunchedEffect(adminState.isAdminMode) {
+        if (adminState.isAdminMode) viewModel.dismissAdminRequiredDialog()
         viewModel.refreshLogs()
     }
 
@@ -154,6 +162,17 @@ fun ConsoleScreen(viewModel: ConsoleViewModel = hiltViewModel()) {
         if (filteredLogs.isNotEmpty()) {
             listState.animateScrollToItem(filteredLogs.size - 1)
         }
+    }
+
+    if (showAdminRequiredDialog) {
+        AdminModeRequiredDialog(
+            prompt = adminModeRequiredPrompt(
+                target = AdminModeRequiredTarget.ClearLogs,
+                hasAdminTokenConfigured = adminState.hasAdminTokenConfigured
+            ),
+            onOpenAdminMode = onOpenAdminMode,
+            onDismiss = viewModel::dismissAdminRequiredDialog
+        )
     }
 
     // Settings dialog
@@ -644,7 +663,7 @@ internal fun shareLogsAsTextFile(
         }
         context.startActivity(Intent.createChooser(sendIntent, "分享日志文件"))
     }.onFailure { throwable ->
-        Toast.makeText(context, throwable.message ?: "分享日志失败", Toast.LENGTH_SHORT).show()
+        AppToast.error(throwable.message ?: "分享日志失败")
     }
 }
 

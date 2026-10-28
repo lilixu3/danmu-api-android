@@ -108,6 +108,62 @@ internal fun parseDanmuInsight(
     )
 }
 
+/** 解析弹幕响应；不可解析时退回仅携带预览的兜底结果。 */
+internal fun buildDanmuInsightOrFallback(
+    raw: String,
+    commentId: Long?,
+    exportTarget: DanmuExportTarget? = commentId?.let(DanmuExportTarget::Episode),
+    animeTitle: String,
+    episodeTitle: String,
+    source: String,
+    sourceUrl: String = "",
+    pathLabel: String,
+    requestDurationMs: Long?,
+    posterUrl: String = "",
+    year: String = "",
+    resolvedEpisodeLabel: String = ""
+): DanmuInsight {
+    return parseDanmuInsight(
+        raw = raw,
+        commentId = commentId,
+        exportTarget = exportTarget,
+        animeTitle = animeTitle,
+        episodeTitle = episodeTitle,
+        source = source,
+        sourceUrl = sourceUrl,
+        pathLabel = pathLabel,
+        matchedAtMillis = System.currentTimeMillis(),
+        requestDurationMs = requestDurationMs,
+        posterUrl = posterUrl,
+        year = year,
+        resolvedEpisodeLabel = resolvedEpisodeLabel
+    ) ?: run {
+        val preview = buildTextPreview(raw, 4_000)
+        DanmuInsight(
+            commentId = commentId,
+            exportTarget = exportTarget,
+            animeTitle = animeTitle,
+            episodeTitle = episodeTitle,
+            source = source,
+            sourceUrl = sourceUrl,
+            pathLabel = pathLabel,
+            matchedAtMillis = System.currentTimeMillis(),
+            totalCount = 0,
+            durationSeconds = 0.0,
+            maxHeatCount = 0,
+            requestDurationMs = requestDurationMs,
+            rawPreview = preview.text,
+            rawPreviewTruncated = preview.isTruncated,
+            heatBuckets = emptyList(),
+            highMoments = emptyList(),
+            comments = emptyList(),
+            posterUrl = posterUrl,
+            year = year,
+            resolvedEpisodeLabel = resolvedEpisodeLabel
+        )
+    }
+}
+
 private fun parseJsonNode(raw: String): Any? {
     val trimmed = raw.trim()
     if (trimmed.isEmpty()) return null

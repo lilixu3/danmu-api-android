@@ -15,6 +15,14 @@ import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.EnvConfigRepository
 import com.example.danmuapiapp.domain.repository.RequestRecordRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
+import com.example.danmuapiapp.ui.screen.apitest.ApiTestFavoriteController
+import com.example.danmuapiapp.ui.screen.apitest.ApiTestFavoriteItem
+import com.example.danmuapiapp.ui.screen.apitest.ApiTestRequestExecutor
+import com.example.danmuapiapp.ui.screen.apitest.FavoriteOperation
+import com.example.danmuapiapp.ui.screen.apitest.FavoriteScheduleDraft
+import com.example.danmuapiapp.ui.screen.apitest.FavoriteSupportState
+import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
+import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -33,19 +41,10 @@ import java.net.URLEncoder
 import java.util.Locale
 import javax.inject.Inject
 
-data class PushAnimeCandidate(
-    val animeId: Long,
-    val title: String,
-    val episodeCount: Int,
-    val imageUrl: String = "",
-    val source: String = "",
-    val typeDescription: String = ""
-)
-
-data class PushEpisodeCandidate(
-    val episodeId: Long,
-    val episodeNumber: Int,
-    val title: String
+data class PushUiNotice(
+    val id: Long,
+    val message: String,
+    val isError: Boolean = false
 )
 
 enum class PushClientSupportLevel {
@@ -85,7 +84,7 @@ data class PushLanDeviceCandidate(
 
 @HiltViewModel
 class PushDanmuViewModel @Inject constructor(
-    runtimeRepository: RuntimeRepository,
+    private val runtimeRepository: RuntimeRepository,
     private val envConfigRepo: EnvConfigRepository,
     private val recordRepository: RequestRecordRepository,
     private val httpClient: OkHttpClient,
@@ -96,6 +95,32 @@ class PushDanmuViewModel @Inject constructor(
     val runtimeState = runtimeRepository.runtimeState
     val envVars = envConfigRepo.envVars
     val adminSessionState: StateFlow<AdminSessionState> = adminSessionRepo.sessionState
+
+    private val requestExecutor = ApiTestRequestExecutor(
+        httpClient = httpClient,
+        recordRepository = recordRepository,
+        runtimeState = runtimeState
+    )
+
+    private var uiEventSequence = 0L
+
+    var uiNotice by mutableStateOf<PushUiNotice?>(null)
+        private set
+
+    var lastSearchKeyword by mutableStateOf("")
+        private set
+
+    var successfulSearchKeyword by mutableStateOf("")
+        private set
+
+    private val favoriteController = ApiTestFavoriteController(
+        scope = viewModelScope,
+        executor = requestExecutor,
+        emitNotice = ::emitNotice,
+        successfulSearchKeyword = { successfulSearchKeyword },
+        hasAnimeCandidates = { animeCandidates.isNotEmpty() },
+        scenePrefix = "弹幕推送"
+    )
 
     private val targetHistoryStore = PushTargetHistoryStore(context)
     private val _recentTargets = MutableStateFlow(targetHistoryStore.recent())
@@ -129,13 +154,13 @@ class PushDanmuViewModel @Inject constructor(
     var hasSearchedAnime by mutableStateOf(false)
         private set
 
-    var animeCandidates by mutableStateOf<List<PushAnimeCandidate>>(emptyList())
+    var animeCandidates by mutableStateOf<List<DownloadAnimeCandidate>>(emptyList())
         private set
 
-    var currentAnime by mutableStateOf<PushAnimeCandidate?>(null)
+    var currentAnime by mutableStateOf<DownloadAnimeCandidate?>(null)
         private set
 
-    var episodeCandidates by mutableStateOf<List<PushEpisodeCandidate>>(emptyList())
+    var episodeCandidates by mutableStateOf<List<DownloadEpisodeCandidate>>(emptyList())
         private set
 
     var statusText by mutableStateOf("")
@@ -236,6 +261,10 @@ class PushDanmuViewModel @Inject constructor(
         errorMessage = null
     }
 
+    fun consumeUiNotice(id: Long) {
+        if (uiNotice?.id == id) uiNotice = null
+    }
+
     fun clearLanScan() {
         lanDevices = emptyList()
         lanScanStatus = "未扫描"
@@ -308,6 +337,37 @@ class PushDanmuViewModel @Inject constructor(
         loadingAnimeId = null
     }
 
+    // 收藏：与接口调试页共用控制器与卡片交互。
+    val favoriteSupportState: FavoriteSupportState
+        get() = favoriteController.favoriteSupportState
+    val favoriteItems: List<ApiTestFavoriteItem>
+        get() = favoriteController.favoriteItems
+    val scheduledFavoriteRefreshSupported: Boolean
+        get() = favoriteController.scheduledFavoriteRefreshSupported
+    val favoriteLoadError: String?
+        get() = favoriteController.favoriteLoadError
+    val favoriteOperation: FavoriteOperation?
+        get() = favoriteController.favoriteOperation
+    val favoriteOperationKeyword: String?
+        get() = favoriteController.favoriteOperationKeyword
+
+    fun favoriteForKeyword(keyword: String): ApiTestFavoriteItem? =
+        favoriteController.favoriteForKeyword(keyword)
+
+    fun loadFavorites(baseUrl: String) = favoriteController.loadFavorites(baseUrl)
+
+    fun toggleSearchFavorite(baseUrl: String) =
+        favoriteController.toggleManualFavorite(baseUrl, lastSearchKeyword)
+
+    fun refreshFavorite(baseUrl: String, item: ApiTestFavoriteItem) =
+        favoriteController.refreshFavorite(baseUrl, item)
+
+    fun removeFavorite(baseUrl: String, item: ApiTestFavoriteItem) =
+        favoriteController.removeFavorite(baseUrl, item)
+
+    fun updateFavoriteSchedule(baseUrl: String, item: ApiTestFavoriteItem, schedule: FavoriteScheduleDraft?) =
+        favoriteController.updateFavoriteSchedule(baseUrl, item, schedule)
+
     fun searchAnime(baseUrl: String, keyword: String) {
         if (isSearching || isLoadingEpisodes) return
 
@@ -325,9 +385,17 @@ class PushDanmuViewModel @Inject constructor(
 
         val url = "$base/api/v2/search/anime?keyword=${urlEncode(q)}"
 
+        lastSearchKeyword = q
+        successfulSearchKeyword = ""
+        animeCandidates = emptyList()
+        currentAnime = null
+        episodeCandidates = emptyList()
+        resultText = ""
+        statusText = ""
+        errorMessage = null
+        isSearching = true
+
         viewModelScope.launch {
-            isSearching = true
-            errorMessage = null
             val startedAt = System.currentTimeMillis()
 
             val result = withContext(Dispatchers.IO) {
@@ -340,20 +408,15 @@ class PushDanmuViewModel @Inject constructor(
             result.fold(
                 onSuccess = { (code, body) ->
                     if (code in 200..299) {
-                        val parsed = parseAnimeCandidates(body)
+                        val parsed = withContext(Dispatchers.Default) { parseAnimeCandidates(body) }
                         animeCandidates = parsed
-                        currentAnime = null
-                        episodeCandidates = emptyList()
-                        resultText = if (parsed.isEmpty()) {
-                            "未找到匹配动漫，请尝试其他关键词。"
-                        } else {
-                            "已找到 ${parsed.size} 个动漫，请点击进入剧集详情。"
+                        successfulSearchKeyword = q.takeIf { parsed.isNotEmpty() }.orEmpty()
+                        if (parsed.isNotEmpty()) {
+                            requestExecutor.resolveApiBaseUrl(base)?.let { favoriteBase ->
+                                favoriteController.loadFavoritesResolved(favoriteBase, showLoading = false)
+                            }
                         }
                     } else {
-                        animeCandidates = emptyList()
-                        currentAnime = null
-                        episodeCandidates = emptyList()
-                        resultText = ""
                         errorMessage = "搜索失败：HTTP $code"
                     }
 
@@ -372,9 +435,6 @@ class PushDanmuViewModel @Inject constructor(
                 onFailure = { throwable ->
                     val msg = throwable.message ?: "搜索失败"
                     errorMessage = msg
-                    animeCandidates = emptyList()
-                    currentAnime = null
-                    episodeCandidates = emptyList()
                     recordRepository.addRecord(
                         RequestRecord(
                             scene = "弹幕推送/搜索动漫",
@@ -393,7 +453,7 @@ class PushDanmuViewModel @Inject constructor(
         }
     }
 
-    fun openAnimeDetail(baseUrl: String, anime: PushAnimeCandidate) {
+    fun openAnimeDetail(baseUrl: String, anime: DownloadAnimeCandidate) {
         if (isSearching || isLoadingEpisodes) return
 
         val base = normalizeBaseUrl(baseUrl)
@@ -404,10 +464,13 @@ class PushDanmuViewModel @Inject constructor(
 
         val url = "$base/api/v2/bangumi/${anime.animeId}"
 
+        currentAnime = anime
+        episodeCandidates = emptyList()
+        isLoadingEpisodes = true
+        loadingAnimeId = anime.animeId
+        errorMessage = null
+
         viewModelScope.launch {
-            isLoadingEpisodes = true
-            loadingAnimeId = anime.animeId
-            errorMessage = null
             val startedAt = System.currentTimeMillis()
 
             val result = withContext(Dispatchers.IO) {
@@ -419,18 +482,9 @@ class PushDanmuViewModel @Inject constructor(
             result.fold(
                 onSuccess = { (code, body) ->
                     if (code in 200..299) {
-                        val parsed = parseEpisodeCandidates(body)
-                        currentAnime = anime
-                        episodeCandidates = parsed
-                        resultText = if (parsed.isEmpty()) {
-                            "该动漫暂无可推送剧集。"
-                        } else {
-                            "已进入《${anime.title}》剧集页，共 ${parsed.size} 集。"
-                        }
+                        episodeCandidates = withContext(Dispatchers.Default) { parseEpisodeCandidates(body) }
                     } else {
-                        currentAnime = null
                         episodeCandidates = emptyList()
-                        resultText = ""
                         errorMessage = "加载剧集失败：HTTP $code"
                     }
 
@@ -449,7 +503,6 @@ class PushDanmuViewModel @Inject constructor(
                 onFailure = { throwable ->
                     val msg = throwable.message ?: "加载剧集失败"
                     errorMessage = msg
-                    currentAnime = null
                     episodeCandidates = emptyList()
                     recordRepository.addRecord(
                         RequestRecord(
@@ -473,7 +526,7 @@ class PushDanmuViewModel @Inject constructor(
     fun pushEpisode(
         targetInput: String,
         baseUrl: String,
-        episode: PushEpisodeCandidate,
+        episode: DownloadEpisodeCandidate,
         offsetRaw: String,
         fontRaw: String,
         envDanmuFontSize: Int?
@@ -591,7 +644,7 @@ class PushDanmuViewModel @Inject constructor(
         }
     }
 
-    private fun parseAnimeCandidates(raw: String): List<PushAnimeCandidate> {
+    private fun parseAnimeCandidates(raw: String): List<DownloadAnimeCandidate> {
         val trimmed = raw.trim()
         if (trimmed.isBlank()) return emptyList()
         val arr = when {
@@ -602,7 +655,7 @@ class PushDanmuViewModel @Inject constructor(
             }
         }
 
-        val out = ArrayList<PushAnimeCandidate>(arr.length())
+        val out = ArrayList<DownloadAnimeCandidate>(arr.length())
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
             val animeId = readLong(item, "animeId", "id")
@@ -618,19 +671,19 @@ class PushDanmuViewModel @Inject constructor(
                     readString(images, "common", "large", "medium", "small")
                 }.orEmpty()
             }
-            out += PushAnimeCandidate(
+            out += DownloadAnimeCandidate(
                 animeId = animeId,
                 title = title,
                 episodeCount = episodeCount.coerceAtLeast(0),
                 imageUrl = imageUrl,
-                source = item.optString("source").ifBlank { title.substringAfter(" from ", "") },
+                sourceLabel = item.optString("source").ifBlank { title.substringAfter(" from ", "") },
                 typeDescription = item.optString("typeDescription").ifBlank { Regex("【([^】]+)】").find(title)?.groupValues?.get(1).orEmpty() }
             )
         }
         return out.distinctBy { it.animeId }
     }
 
-    private fun parseEpisodeCandidates(raw: String): List<PushEpisodeCandidate> {
+    private fun parseEpisodeCandidates(raw: String): List<DownloadEpisodeCandidate> {
         val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
         val bangumi = root.optJSONObject("bangumi")
             ?: root.optJSONObject("data")
@@ -640,7 +693,7 @@ class PushDanmuViewModel @Inject constructor(
             ?: root.optJSONArray("episodes")
             ?: JSONArray()
 
-        val out = ArrayList<PushEpisodeCandidate>(episodes.length())
+        val out = ArrayList<DownloadEpisodeCandidate>(episodes.length())
         for (i in 0 until episodes.length()) {
             val item = episodes.optJSONObject(i) ?: continue
             val episodeId = readLong(item, "episodeId", "id", "cid")
@@ -648,15 +701,16 @@ class PushDanmuViewModel @Inject constructor(
             val number = readInt(item, "episodeNumber", "number", "sort", "index")
                 .takeIf { it > 0 } ?: (i + 1)
             val title = readString(item, "episodeTitle", "title", "name")
-            out += PushEpisodeCandidate(
+            out += DownloadEpisodeCandidate(
                 episodeId = episodeId,
                 episodeNumber = number,
-                title = title.ifBlank { "第${number}集" }
+                title = title.ifBlank { "第${number}集" },
+                source = readString(item, "source").ifBlank { "unknown" }
             )
         }
         return out
             .distinctBy { it.episodeId }
-            .sortedWith(compareBy<PushEpisodeCandidate> { it.episodeNumber }.thenBy { it.episodeId })
+            .sortedWith(compareBy<DownloadEpisodeCandidate> { it.episodeNumber }.thenBy { it.episodeId })
     }
 
     private fun normalizeBaseUrl(baseUrl: String): String? {
@@ -730,5 +784,18 @@ class PushDanmuViewModel @Inject constructor(
         } else {
             "本机：$selfIp · 可达端口 $open9978 台 · 已验证接口 $verified 台 · 耗时 $elapsedText"
         }
+    }
+
+    private fun emitNotice(message: String, isError: Boolean = false) {
+        uiNotice = PushUiNotice(
+            id = nextUiEventId(),
+            message = message,
+            isError = isError
+        )
+    }
+
+    private fun nextUiEventId(): Long {
+        uiEventSequence += 1L
+        return (System.currentTimeMillis() shl 8) xor uiEventSequence
     }
 }

@@ -1,10 +1,15 @@
 package com.example.danmuapiapp.ui.screen.tools
 
 import com.example.danmuapiapp.ui.component.AppDialog
-import androidx.compose.foundation.clickable
+import com.example.danmuapiapp.ui.component.AppDialogStyle
+import com.example.danmuapiapp.ui.component.longPressDragSelection
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -12,10 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchItem
 import com.example.danmuapiapp.domain.model.LocalDanmuType
-import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuBatchItem
-import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuBatchStatus
 
 @Composable internal fun DownloadImportDialog(vm: DownloadImportViewModel) {
     var editing by remember { mutableStateOf<LocalDanmuBatchItem?>(null) }
@@ -25,49 +28,60 @@ import com.example.danmuapiapp.ui.screen.localdanmu.LocalDanmuBatchStatus
         } }, confirmButton = {})
     if (vm.batch.visible) {
         val batch = vm.batch
-        AppDialog(onDismissRequest = vm::dismiss, scrollContent = false, title = { ToolTitle(vm.title, size = 16) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolHint(if (batch.isRunning) "正在导入 ${batch.completed}/${batch.total} · 成功 ${batch.successCount} · 失败 ${batch.failedCount}"
-                    else "共 ${batch.items.size} 个文件 · 待导入 ${batch.pendingCount} · 已导入默认跳过，点条目可订正年份 / 季 / 集数")
-                if (batch.total > 0) LinearProgressIndicator(progress = { batch.progress }, modifier = Modifier.fillMaxWidth())
-                vm.error?.let { ToolError(it) }
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp)) {
-                    items(vm.blocked) { ToolError(it) }
+        val listState = rememberLazyListState()
+        AppDialog(onDismissRequest = vm::dismiss, style = AppDialogStyle.Selection, scrollContent = false,
+            icon = { Icon(Icons.Outlined.UploadFile, null) }, title = { ToolTitle(vm.title, size = 18) },
+            supportingText = { ToolHint("共 ${batch.items.size} 个文件 · 可导入 ${batch.pendingCount} 个") },
+            text = {
+                if (batch.total > 0) {
+                    LinearProgressIndicator(progress = { batch.progress }, modifier = Modifier.fillMaxWidth())
+                    ToolHint("已处理 ${batch.completed}/${batch.total} · 成功 ${batch.successCount} · 失败 ${batch.failedCount}")
+                }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp).weight(1f, fill = false)
+                    .longPressDragSelection(listState, batch.selectableIds, batch.selectedIds,
+                        enabled = !batch.isRunning, onSelectionChange = vm::selectItems),
+                    state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item(key = "selection") {
+                        SelectionToolbar(batch.selectableIds, batch.selectedIds, vm::selectItems, enabled = !batch.isRunning, unit = "个")
+                    }
+                    item(key = "import-help") {
+                        ToolHint("铅笔可订正；已导入默认跳过，重选将覆盖同集弹幕。")
+                    }
+                    if (!batch.isRunning) item(key = "import-type") { ImportTypeActions(vm::setBatchType) }
+                    vm.error?.let { error -> item(key = "import-error") { ToolError(error) } }
+                    itemsIndexed(vm.blocked, key = { index, _ -> "blocked-$index" }) { _, reason -> ToolError(reason) }
+                    if (batch.items.isEmpty()) item(key = "empty") { ToolHint("没有可导入的文件，请检查下载文件是否仍然存在。") }
                     items(batch.items, key = { it.id }) { item ->
-                        Row(Modifier.fillMaxWidth().clickable(enabled = !batch.isRunning) { editing = item }.padding(vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = item.selected, onCheckedChange = { vm.toggle(item.id) },
-                                enabled = !batch.isRunning && item.status != LocalDanmuBatchStatus.Success, modifier = Modifier.size(34.dp))
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                ToolTitle(item.title, size = 12)
-                                ToolHint("${item.year ?: "年份待订正"} · ${item.type.label} · ${item.episodeLabel}")
-                                ToolHint(item.displayName, maxLines = 1)
-                                val hint = item.validationError ?: item.message.ifBlank { item.importedLabel.orEmpty() }
-                                if (hint.isNotBlank()) Text(hint, fontSize = 10.5.sp,
-                                    color = if (item.validationError != null || item.status == LocalDanmuBatchStatus.Failed)
-                                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                            }
-                            if (item.status == LocalDanmuBatchStatus.Uploading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            else if (item.status == LocalDanmuBatchStatus.Success) Icon(Icons.Outlined.TaskAlt, "已导入", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                            else ToolIcon(Icons.Outlined.Edit, "订正元数据", { editing = item }, enabled = !batch.isRunning)
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
+                        ImportSelectionRow(item, batch.isRunning, { vm.toggle(item.id) }, { editing = item })
                     }
                 }
-            } },
-            dismissButton = { TextButton(if (batch.isRunning) vm::cancel else vm::dismiss) {
-                Text(if (batch.isRunning) if (batch.cancelRequested) "正在停止" else "取消导入" else "关闭", fontSize = 12.sp)
-            } },
-            confirmButton = {
-                if (!batch.isRunning) {
-                    if (batch.failedCount > 0) TextButton(vm::retry) { Text("重试失败", fontSize = 12.sp) }
-                    ToolButton("导入 ${batch.pendingCount} 个", vm::run, enabled = batch.pendingCount > 0)
+            },
+            actions = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (!batch.isRunning && batch.failedCount > 0) TextButton(vm::retry) { Text("重试失败的 ${batch.failedCount} 个文件") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (batch.isRunning) ToolButton(if (batch.cancelRequested) "正在停止" else "取消导入", vm::cancel,
+                            Modifier.fillMaxWidth(), outlined = true, enabled = !batch.cancelRequested)
+                        else {
+                            ToolButton("关闭", vm::dismiss, outlined = true)
+                            ToolButton("导入 ${batch.pendingCount} 个", vm::run, Modifier.weight(1f), Icons.Outlined.UploadFile, enabled = batch.pendingCount > 0)
+                        }
+                    }
                 }
             })
     }
     editing?.let { item -> ImportMetadataDialog(item, { editing = null }) { title, year, type, season, episode ->
         vm.edit(item.id, title, year, type, season, episode); editing = null
     } }
+}
+@Composable internal fun ImportTypeActions(onSetType: (LocalDanmuType?) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ToolHint("选中类型")
+        ToolChip("自动", false, { onSetType(null) })
+        ToolChip("电影", false, { onSetType(LocalDanmuType.Movie) })
+        ToolChip("电视剧", false, { onSetType(LocalDanmuType.Tv) })
+    }
 }
 @Composable internal fun ImportMetadataDialog(item: LocalDanmuBatchItem, onDismiss: () -> Unit,
     onSave: (String, Int?, LocalDanmuType, Int?, Int?) -> Unit) {

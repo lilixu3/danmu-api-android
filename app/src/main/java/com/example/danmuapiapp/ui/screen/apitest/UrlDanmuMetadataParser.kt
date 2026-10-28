@@ -2,75 +2,86 @@ package com.example.danmuapiapp.ui.screen.apitest
 
 import java.net.URI
 import java.util.Locale
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal fun parseUrlDanmuMetadata(inputUrl: String, html: String): UrlDanmuMetadata? {
     if (html.isBlank()) return null
-    val normalizedHtml = decodeJsStringEscapes(html)
     val platform = detectUrlPlatform(inputUrl)
-    val pageTitle = findTitle(normalizedHtml).ifBlank { findTitle(html) }
-    val ogTitle = findMetaContent(normalizedHtml, "og:title").ifBlank { findMetaContent(html, "og:title") }
-    val rawTitle = ogTitle.ifBlank { pageTitle }.trim()
-    val episodeNo = findEpisodeNumber(rawTitle, pageTitle, normalizedHtml)
-    val title = chooseSeriesTitle(
-        platform = platform,
-        episodeNo = episodeNo,
-        candidates = buildList {
-            addAll(findStringValues(normalizedHtml, "second_title"))
-            addAll(findStringValues(normalizedHtml, "cover_title"))
-            addAll(findStringValues(normalizedHtml, "coverTitle"))
-            addAll(findStringValues(normalizedHtml, "video_title"))
-            addAll(findStringValues(normalizedHtml, "c_title"))
-            addAll(findStringValues(normalizedHtml, "title"))
-            add(rawTitle)
-            add(pageTitle)
+    // Only parse known, identity-bound state. Recommendations and ads contain the same field names.
+    if (UrlDanmuMetadataPlatform.detect(inputUrl) == UrlDanmuMetadataPlatform.Bilibili) {
+        extractUrlPageObject(html, "__INITIAL_STATE__")?.let { state ->
+            val video = runCatching { org.json.JSONObject(state).optJSONObject("videoData") }.getOrNull()
+            if (video != null) {
+                UrlDanmuMetadataPlatformParsers.parseBilibiliViewJson(inputUrl,
+                    org.json.JSONObject().put("code", 0).put("data", video).toString())?.let { return it }
+            }
         }
-    )
-    val year = findYear(
-        candidates = buildList {
-            add(findMetaContent(normalizedHtml, "video:release_date"))
-            add(findMetaContent(normalizedHtml, "op:video:release_date"))
-            add(findMetaContent(normalizedHtml, "datePublished"))
-            add(rawTitle)
-        },
-        html = normalizedHtml
-    )
-
-    val poster = choosePosterUrl(
-        pageUrl = inputUrl,
-        candidates = buildList {
-            addAll(findStringValues(normalizedHtml, "new_pic_vt"))
-            addAll(findStringValues(normalizedHtml, "vertical_pic"))
-            addAll(findStringValues(normalizedHtml, "poster"))
-            addAll(findStringValues(normalizedHtml, "coverUrl"))
-            addAll(findStringValues(normalizedHtml, "cover_url"))
-            addAll(findStringValues(normalizedHtml, "pic"))
-            addAll(findStringValues(normalizedHtml, "pic496x280"))
-            addAll(findStringValues(normalizedHtml, "imgVtUrl"))
-            addAll(findStringValues(normalizedHtml, "imgUrl"))
-            addAll(findStringValues(normalizedHtml, "new_pic_hz"))
-            add(findMetaContent(normalizedHtml, "og:image"))
-            add(findMetaContent(normalizedHtml, "twitter:image"))
-            add(findMetaContent(normalizedHtml, "image"))
-            add(findMetaContent(html, "og:image"))
-            add(findMetaContent(html, "twitter:image"))
-            add(findMetaContent(html, "image"))
-        }
-    )
-    val episodeLabel = episodeNo?.let { "第${it}集" }.orEmpty()
-    val episodeTitle = when {
-        title.isNotBlank() && episodeLabel.isNotBlank() -> "$title $episodeLabel"
-        title.isNotBlank() -> title
-        rawTitle.isNotBlank() -> rawTitle
-        else -> inputUrl
     }
-    return UrlDanmuMetadata(
-        title = title.ifBlank { rawTitle.ifBlank { inputUrl } },
-        episodeTitle = episodeTitle,
-        posterUrl = poster,
-        year = year,
-        episodeLabel = episodeLabel,
-        platformLabel = platform
-    )
+    val pageTitle = findTitle(html)
+    val rawTitle = findMetaContent(html, "og:title").ifBlank { pageTitle }.trim()
+    val pageIdentity = findMetaContent(html, "og:url")
+    if (pageIdentity.isNotBlank() && !sameUrlVideo(inputUrl, pageIdentity)) return null
+    val cid = Regex("""/x/cover/([^/?.]+)""").find(inputUrl)?.groupValues?.get(1)
+        ?: runCatching { inputUrl.toHttpUrlOrNull()?.queryParameter("cid") }.getOrNull()
+    val coverState = if (platform == "腾讯视频" && cid != null) {
+        extractUrlPageObject(html, "COVER_INFO")?.takeIf { state ->
+            (findStringValues(state, "id") + findStringValues(state, "cid")).contains(cid)
+        }.orEmpty()
+    } else ""
+    val vid = Regex("""/x/cover/[^/]+/([^/.?]+)""").find(inputUrl)?.groupValues?.get(1)
+        ?: runCatching { inputUrl.toHttpUrlOrNull()?.queryParameter("vid") }.getOrNull()
+    val videoState = if (platform == "腾讯视频" && vid != null) {
+        extractUrlPageObject(html, "VIDEO_INFO")?.takeIf { findStringValues(it, "vid").contains(vid) }.orEmpty()
+    } else ""
+    val episodeNo = findEpisodeNumber(rawTitle, pageTitle, videoState)
+    val scopedTitle = (findStringValues(coverState, "title") + findStringValues(coverState, "second_title")).firstOrNull().orEmpty()
+    val title = cleanUrlTitle(scopedTitle.ifBlank { rawTitle }, platform, if (scopedTitle.isBlank()) episodeNo else null)
+    val poster = (listOf("new_pic_vt", "vertical_pic", "pic").flatMap { findStringValues(coverState, it) } +
+        listOf(findMetaContent(html, "og:image"), findMetaContent(html, "twitter:image"), findMetaContent(html, "image")))
+        .asSequence().map { normalizeUrlDanmuPosterUrl(inputUrl, it) }
+        .firstOrNull { it.startsWith("http://") || it.startsWith("https://") }.orEmpty()
+    val year = findYear(listOf(findMetaContent(html, "video:release_date"),
+        findMetaContent(html, "op:video:release_date"), findMetaContent(html, "datePublished")), coverState)
+    if (title.isBlank() && poster.isBlank()) return null
+    val label = episodeNo?.let { "第${it}集" }.orEmpty()
+    return UrlDanmuMetadata(title = title.ifBlank { inputUrl },
+        episodeTitle = listOf(title, label).filter { it.isNotBlank() }.joinToString(" "),
+        posterUrl = poster, year = year, episodeLabel = label, platformLabel = platform, canonicalUrl = inputUrl)
+}
+
+/** Extract one balanced object, preserving JSON escapes and braces inside strings. */
+internal fun extractUrlPageObject(html: String, name: String): String? {
+    val marker = Regex("""(?:window\.)?${Regex.escape(name)}\s*=\s*""").find(html) ?: return null
+    val start = marker.range.last + 1
+    if (html.getOrNull(start) != '{') return null
+    var depth = 0
+    var quote: Char? = null
+    var escaped = false
+    for (i in start until html.length) {
+        val ch = html[i]
+        if (quote != null) {
+            if (escaped) escaped = false
+            else if (ch == '\\') escaped = true
+            else if (ch == quote) quote = null
+        } else when (ch) {
+            '\'', '"' -> quote = ch
+            '{' -> depth++
+            '}' -> if (--depth == 0) return html.substring(start, i + 1)
+        }
+    }
+    return null
+}
+
+internal fun sameUrlVideo(first: String, second: String): Boolean {
+    fun identity(value: String): String {
+        val url = runCatching { URI(value) }.getOrNull() ?: return value
+        // Share metadata may omit the selected P; compare the video identity, not tracking fields.
+        val bili = Regex("""/(BV[0-9A-Za-z]+|av\d+|ep\d+|ss\d+)(?:/|$)""").find(url.path.orEmpty())?.groupValues?.get(1)
+        if (bili != null && UrlDanmuMetadataPlatform.detect(value) == UrlDanmuMetadataPlatform.Bilibili) return "bilibili:$bili"
+        return url.host.orEmpty().removePrefix("m.").removePrefix("www.") + url.path.orEmpty().trimEnd('/') +
+            url.rawQuery.orEmpty().split('&').filter { it.substringBefore('=') in setOf("cid", "vid", "id", "sn") }.sorted().joinToString("&")
+    }
+    return identity(first) == identity(second)
 }
 
 internal fun normalizeUrlDanmuPosterUrl(pageUrl: String, assetUrl: String): String {
@@ -84,27 +95,6 @@ internal fun normalizeUrlDanmuPosterUrl(pageUrl: String, assetUrl: String): Stri
             }
         }
     return normalizePosterDeliveryUrl(absolute)
-}
-
-private fun choosePosterUrl(pageUrl: String, candidates: List<String>): String {
-    return candidates.asSequence()
-        .map { normalizeUrlDanmuPosterUrl(pageUrl, it) }
-        .filter { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
-        .distinct()
-        .sortedWith(compareBy<String> { posterRank(it) }.thenBy { it.length })
-        .firstOrNull()
-        .orEmpty()
-}
-
-private fun posterRank(url: String): Int {
-    val lower = url.lowercase(Locale.ROOT)
-    return when {
-        "format/avif" in lower || lower.endsWith(".avif") -> 40
-        "vcover_vt" in lower || "new_pic_vt" in lower -> 0
-        "poster" in lower || "cover" in lower -> 1
-        "vpic_cover" in lower || "pic496x280" in lower -> 2
-        else -> 10
-    }
 }
 
 private fun normalizePosterDeliveryUrl(url: String): String {
@@ -127,17 +117,17 @@ private fun normalizePosterDeliveryUrl(url: String): String {
 }
 
 private fun detectUrlPlatform(inputUrl: String): String {
-    val lower = inputUrl.lowercase(Locale.ROOT)
-    return when {
-        ".qq.com" in lower -> "腾讯视频"
-        ".bilibili.com" in lower || "b23.tv" in lower -> "哔哩哔哩"
-        ".iqiyi.com" in lower -> "爱奇艺"
-        ".youku.com" in lower -> "优酷"
-        ".mgtv.com" in lower -> "芒果TV"
-        ".miguvideo.com" in lower -> "咪咕视频"
-        ".sohu.com" in lower -> "搜狐视频"
-        ".le.com" in lower -> "乐视视频"
-        else -> "URL"
+    return when (UrlDanmuMetadataPlatform.detect(inputUrl)) {
+        UrlDanmuMetadataPlatform.Tencent -> "腾讯视频"
+        UrlDanmuMetadataPlatform.Bilibili -> "哔哩哔哩"
+        UrlDanmuMetadataPlatform.Iqiyi -> "爱奇艺"
+        UrlDanmuMetadataPlatform.Youku -> "优酷"
+        UrlDanmuMetadataPlatform.Mango -> "芒果TV"
+        UrlDanmuMetadataPlatform.Migu -> "咪咕视频"
+        UrlDanmuMetadataPlatform.Sohu -> "搜狐视频"
+        UrlDanmuMetadataPlatform.Leshi -> "乐视视频"
+        UrlDanmuMetadataPlatform.Xigua -> "西瓜视频"
+        UrlDanmuMetadataPlatform.Unknown -> "URL"
     }
 }
 
@@ -216,19 +206,6 @@ private fun findEpisodeNumber(vararg sources: String): Int? {
     return null
 }
 
-private fun chooseSeriesTitle(
-    platform: String,
-    episodeNo: Int?,
-    candidates: List<String>
-): String {
-    return candidates.asSequence()
-        .map { cleanUrlTitle(it, platform, episodeNo) }
-        .filter { isLikelySeriesTitle(it) }
-        .distinct()
-        .firstOrNull()
-        .orEmpty()
-}
-
 private fun cleanUrlTitle(rawTitle: String, platform: String, episodeNo: Int?): String {
     var title = decodeJsStringEscapes(rawTitle)
         .replace(Regex("""[\r\n\t]+"""), " ")
@@ -253,6 +230,8 @@ private fun cleanUrlTitle(rawTitle: String, platform: String, episodeNo: Int?): 
             .substringBefore("-番剧")
             .substringBefore("-高清")
             .substringBefore("-bilibili")
+            .substringBefore("_哔哩哔哩")
+            .substringBefore("_bilibili")
             .trim()
         else -> title
     }
@@ -265,18 +244,6 @@ private fun cleanUrlTitle(rawTitle: String, platform: String, episodeNo: Int?): 
         .replace(Regex("""\s+from\s+.+$""", RegexOption.IGNORE_CASE), "")
         .replace(Regex("""[｜|].*$"""), "")
         .trim(' ', '-', '_', '｜', '|', '《', '》')
-}
-
-private fun isLikelySeriesTitle(title: String): Boolean {
-    if (title.isBlank()) return false
-    if (title.length > 80) return false
-    if (title.startsWith("http://", true) || title.startsWith("https://", true)) return false
-    val lower = title.lowercase(Locale.ROOT)
-    val badKeywords = listOf("高清", "在线观看", "热搜榜", "客户端", "专享礼包", "选集", "播放", "立即")
-    if (badKeywords.any { it in lower }) return false
-    if (Regex("""^第\s*\d+\s*[集话話]?$""").matches(title)) return false
-    if (Regex("""^\d{1,4}$""").matches(title)) return false
-    return true
 }
 
 private fun decodeJsStringEscapes(raw: String): String {

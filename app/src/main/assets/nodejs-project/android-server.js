@@ -1,12 +1,23 @@
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
-const net = require('net');
 const path = require('path');
 const { URL, pathToFileURL } = require('url');
 const { clearStartupFailure, recordStartupFailure } = require('./startup-failure.js');
 const { startFavoriteSchedulerHost } = require('./favorite-scheduler-host.js');
 const { createAppOutboundRuntime, networkRuntimeFingerprint } = require('./app-outbound-runtime.js');
+const { createAccessControl, isLoopbackIp, normalizeClientIp, readClientIp } = require('./app-access-control.js');
+const { createServerLogging } = require('./app-server-logging.js');
+const { createServerWorkerRuntime } = require('./server-worker-runtime.js');
+const { applyDanmuXmlOverrides, createDanmakuCache } = require('./app-danmaku-cache.js');
+const { createProxyHelper } = require('./app-proxy-helper.js');
+const { createHttpRoutes } = require('./app-http-routes.js');
+const {
+  createConfigRuntime,
+  listenOptions,
+  listenUrl,
+  readListenConfig,
+} = require('./app-config-runtime.js');
 const appManagement = require('./app-management.js');
 const { coreProxyConfig } = require('./app-proxy-routing.js');
 const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG};
@@ -24,15 +35,9 @@ const _appOutboundPaths = {configPath:process.env.DANMU_APP_OUTBOUND_CONFIG};
 let handleRequest = null;
 let _directCoreGlobals = null;
 let _loadedCoreDirectory = '';
-let _activeWorkerState = null;
-let _workerSeq = 1;
 let _workerEnabled = true;
 let _hotReloadEnabled = true;
-let _workerSupport = null;
-let _WorkerCtor = null;
 let _mainServer = null;
-let _proxyServer = null;
-let _proxyHelperSync = Promise.resolve();
 let _shutdownPromise = null;
 let _directFavoriteSchedulerStop = () => {};
 let _directFavoriteSchedulerSync = async () => {};
@@ -89,185 +94,13 @@ function _refreshRuntimeFlags() {
   if (!_hotReloadEnabled) {
     _clearCoreWatchers();
   }
-  if (!_workerEnabled && _activeWorkerState) {
-    _scheduleWorkerShutdown(_activeWorkerState);
-    _activeWorkerState = null;
+  const activeWorker = workerRuntime.activeState;
+  if (!_workerEnabled && activeWorker) {
+    workerRuntime.shutdownWorker(activeWorker);
   }
-}
-
-async function _ensureWorkerSupport() {
-  if (_workerSupport !== null) return _workerSupport;
-  try {
-    const mod = await import('node:worker_threads');
-    _WorkerCtor = mod?.Worker || null;
-    _workerSupport = !!_WorkerCtor;
-    return _workerSupport;
-  } catch (_e) {
-    _WorkerCtor = null;
-    _workerSupport = false;
-    return false;
-  }
-}
-
-function _newWorkerState(worker, variantKey) {
-  return {
-    worker,
-    variantKey,
-    pending: new Map(),
-    ready: false,
-    readyPromise: null,
-    readyResolve: null,
-    readyReject: null,
-    createdAt: Date.now(),
-  };
-}
-
-function _onWorkerMessage(state, msg) {
-  if (!msg || typeof msg !== 'object') return;
-
-  if (msg.type === 'ready') {
-    state.ready = true;
-    if (state.readyResolve) {
-      state.readyResolve();
-      state.readyResolve = null;
-      state.readyReject = null;
-    }
-    return;
-  }
-
-  if (msg.type === 'log') {
-    _emitWorkerLog(msg.level, msg.message);
-    return;
-  }
-
-  if (msg.type === 'response' || msg.type === 'error') {
-    const id = msg.id;
-    const pending = state.pending.get(id);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    state.pending.delete(id);
-    if (msg.type === 'error') {
-      pending.reject(new Error(msg.error || 'worker error'));
-    } else {
-      pending.resolve(msg);
-    }
-    return;
-  }
-}
-
-function _onWorkerExit(state, err) {
-  if (state.readyResolve) {
-    state.readyReject && state.readyReject(err || new Error('worker exit'));
-    state.readyResolve = null;
-    state.readyReject = null;
-  }
-
-  for (const [id, pending] of state.pending.entries()) {
-    clearTimeout(pending.timer);
-    pending.reject(err || new Error('worker exit'));
-    state.pending.delete(id);
-  }
-
-  if (_activeWorkerState === state) {
-    _activeWorkerState = null;
-  }
-}
-
-function _withTimeout(promise, timeoutMs, message) {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(message || 'timeout')), timeoutMs);
-    promise.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      }
-    );
-  });
-}
-
-function _emitWorkerLog(level, line) {
-  const text = String(line || '').replace(/\r$/, '');
-  if (!text) return;
-  const useOrig = _origConsole || null;
-  if (useOrig) {
-    const fn = level === 'error'
-      ? (useOrig.error || useOrig.log)
-      : level === 'warn'
-        ? (useOrig.warn || useOrig.log)
-        : (useOrig.log || console.log);
-    try { fn(text); } catch {}
-    _writeLogLine(level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info', [text]);
-    return;
-  }
-  if (level === 'error') console.error(text);
-  else if (level === 'warn') console.warn(text);
-  else console.log(text);
-}
-
-async function _spawnWorkerForVariant(variantKey, info) {
-  const ok = await _ensureWorkerSupport();
-  if (!ok || !_WorkerCtor) {
-    throw new Error('worker_threads unavailable');
-  }
-
-  const workerPath = path.join(__dirname, 'worker-proxy.js');
-  const envSnapshot = _getEnvSnapshot();
-  const worker = new _WorkerCtor(workerPath, {
-    workerData: {
-      variantDir: info.dir,
-      projectDir: __dirname,
-      env: envSnapshot,
-      outbound: _appOutbound?.snapshot(),
-    },
-  });
-
-  const state = _newWorkerState(worker, variantKey);
-  state.readyPromise = new Promise((resolve, reject) => {
-    state.readyResolve = resolve;
-    state.readyReject = reject;
-  });
-
-  worker.on('message', (msg) => _onWorkerMessage(state, msg));
-  worker.on('error', (err) => {
-    log('Worker error:', err?.stack || err);
-    _onWorkerExit(state, err);
-  });
-  worker.on('exit', (code) => {
-    if (code !== 0) {
-      log('Worker exit:', code);
-    }
-    _onWorkerExit(state, new Error(`worker exit ${code}`));
-  });
-
-  await _withTimeout(state.readyPromise, 10000, 'worker ready timeout');
-  state.ready = true;
-  return state;
-}
-
-function _scheduleWorkerShutdown(state) {
-  const deadline = Date.now() + 10000;
-
-  const tick = () => {
-    if (!state || !state.worker) return;
-    if (state.pending.size === 0 || Date.now() > deadline) {
-      try { state.worker.terminate(); } catch {}
-      return;
-    }
-    setTimeout(tick, 200);
-  };
-
-  setTimeout(tick, 200);
 }
 
 const _SERVER_CLOSE_TIMEOUT_MS = 350;
-const _WORKER_TERMINATE_TIMEOUT_MS = 350;
-const _LOG_STREAM_CLOSE_TIMEOUT_MS = 120;
-// 弹幕拉取等核心请求的上游等待上限（原 30 秒对慢源偏紧）。
-const _WORKER_REQUEST_TIMEOUT_MS = 60000;
 
 function _closeServer(server) {
   if (!server) return Promise.resolve();
@@ -291,43 +124,6 @@ function _closeServer(server) {
       finish();
     }
   });
-}
-
-function _closeLogStreamAsync(stream) {
-  if (!stream) return Promise.resolve();
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    const fallback = setTimeout(finish, _LOG_STREAM_CLOSE_TIMEOUT_MS);
-    try {
-      stream.end(() => {
-        clearTimeout(fallback);
-        finish();
-      });
-    } catch {
-      clearTimeout(fallback);
-      finish();
-    }
-  });
-}
-
-async function _terminateWorkerImmediately(state) {
-  if (!state || !state.worker) return;
-  const worker = state.worker;
-  state.worker = null;
-  state.pending.clear();
-  try {
-    await Promise.race([
-      worker.terminate(),
-      new Promise((resolve) => setTimeout(resolve, _WORKER_TERMINATE_TIMEOUT_MS)),
-    ]);
-  } catch {
-    // ignore
-  }
 }
 
 function _exitProcess(exitCode) {
@@ -358,10 +154,7 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
     log('Shutting down ...', reason);
     shutdownFn = null;
 
-    if (_configReloadTimer) {
-      clearTimeout(_configReloadTimer);
-      _configReloadTimer = null;
-    }
+    configRuntime.dispose();
     if (_coreReloadTimer) {
       clearTimeout(_coreReloadTimer);
       _coreReloadTimer = null;
@@ -370,21 +163,18 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
     _clearCoreWatchers();
     _stopDirectFavoriteScheduler();
 
-    const workerState = _activeWorkerState;
+    const workerState = workerRuntime.takeActiveState();
     const mainServer = _mainServer;
-    const proxyServer = _proxyServer;
-    const logStream = _logStream;
-    _activeWorkerState = null;
+    const proxyServer = proxyHelper.takeServer();
+    const logStream = serverLogging.takeLogStream();
     _mainServer = null;
-    _proxyServer = null;
-    _logStream = null;
 
     await Promise.allSettled([
-      _terminateWorkerImmediately(workerState),
+      workerRuntime.terminateWorker(workerState),
       _appOutbound?.stop(),
       _closeServer(proxyServer),
       _closeServer(mainServer),
-      _closeLogStreamAsync(logStream),
+      serverLogging.closeStreamAsync(logStream),
     ]);
 
     _exitProcess(exitCode);
@@ -395,34 +185,6 @@ async function _gracefulShutdown(exitCode = 0, reason = 'shutdown') {
   } finally {
     _shutdownPromise = null;
   }
-}
-
-async function _ensureActiveWorkerForVariant(variantKey, info, forceReload = false) {
-  if (!forceReload && _activeWorkerState && _activeWorkerState.variantKey === variantKey && _activeWorkerState.ready) {
-    return _activeWorkerState;
-  }
-
-  const next = await _spawnWorkerForVariant(variantKey, info);
-  const prev = _activeWorkerState;
-  _activeWorkerState = next;
-  if (prev) _scheduleWorkerShutdown(prev);
-  return next;
-}
-
-function _postToWorker(state, msg) {
-  if (!state || !state.worker) return false;
-  try {
-    state.worker.postMessage(msg);
-    return true;
-  } catch (_e) {
-    return false;
-  }
-}
-
-function _syncEnvToWorker() {
-  if (!_activeWorkerState) return;
-  const snapshot = _getEnvSnapshot();
-  _postToWorker(_activeWorkerState, { type: 'setEnv', env: snapshot, outbound: _appOutbound?.snapshot() });
 }
 
 function _stopDirectFavoriteScheduler() {
@@ -472,125 +234,6 @@ function _wrapDirectFavoritePersistence(coreHandler) {
   };
 }
 
-function _sendWorkerRequest(state, payload, timeoutMs = _WORKER_REQUEST_TIMEOUT_MS, signal) {
-  return new Promise((resolve, reject) => {
-    if (!state || !state.worker || !state.ready) {
-      reject(new Error('worker not ready'));
-      return;
-    }
-
-    const id = _workerSeq++;
-    const cancel=()=>{
-      if(!state.pending.delete(id))return;
-      cleanup();
-      if(payload.type==='sourceProbe')_postToWorker(state,{type:'cancelSourceProbe',id});
-      reject(signal?.reason || new Error('worker request cancelled'));
-    };
-    const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
-    const timer = setTimeout(() => {
-      state.pending.delete(id);
-      cleanup();
-      if(payload.type==='sourceProbe')_postToWorker(state,{type:'cancelSourceProbe',id});
-      reject(new Error('worker request timeout'));
-    }, timeoutMs);
-
-    state.pending.set(id, { resolve:value=>{cleanup();resolve(value);}, reject:error=>{cleanup();reject(error);}, timer });
-    signal?.addEventListener('abort',cancel,{once:true});
-    if(signal?.aborted){cancel();return;}
-    try {
-      state.worker.postMessage({ type: 'request', id, ...payload });
-    } catch (e) {
-      clearTimeout(timer);
-      cleanup();
-      state.pending.delete(id);
-      reject(e);
-    }
-  });
-}
-
-async function _handleRequestViaWorker(req, clientIp, variantKey = '', info = null) {
-  let state = _activeWorkerState;
-  if ((!state || !state.ready || (variantKey && state.variantKey !== variantKey)) && variantKey && info) {
-    state = await _ensureActiveWorkerForVariant(variantKey, info, false);
-  }
-  if (!state || !state.ready) {
-    throw new Error('worker not ready');
-  }
-
-  const headers = [];
-  try {
-    req.headers.forEach((value, key) => {
-      headers.push([key, value]);
-    });
-  } catch {}
-
-  let bodyBuf = null;
-  try {
-    const ab = await req.arrayBuffer();
-    if (ab && ab.byteLength) bodyBuf = Buffer.from(ab);
-  } catch {}
-
-  const payload = {
-    url: req.url,
-    method: req.method,
-    headers,
-    body: bodyBuf,
-    clientIp: clientIp || '',
-  };
-
-  let resp = null;
-  try {
-    resp = await _sendWorkerRequest(state, payload);
-  } catch (e) {
-    const message = String(e?.message || '');
-    const retryable = !!variantKey && !!info && (
-      message.includes('worker not ready') ||
-      message.includes('worker exit') ||
-      message.includes('worker request timeout')
-    );
-    if (!retryable) throw e;
-
-    log('Worker request failed, retry with respawn:', message);
-    const next = await _ensureActiveWorkerForVariant(variantKey, info, true);
-    if (!next || !next.ready) throw e;
-    resp = await _sendWorkerRequest(next, payload);
-  }
-  const outHeaders = new Headers(resp.headers || []);
-  if (Array.isArray(resp.setCookie)) {
-    for (const c of resp.setCookie) {
-      if (!c) continue;
-      try { outHeaders.append('set-cookie', c); } catch {}
-    }
-    if (typeof outHeaders.getSetCookie !== 'function') {
-      outHeaders.getSetCookie = () => resp.setCookie;
-    }
-  }
-
-  const body = resp.body ? Buffer.from(resp.body) : undefined;
-  return new Response(body, { status: resp.status || 500, headers: outHeaders });
-}
-
-async function _tryLoadViaWorker(variantKey, info, forceReload = false) {
-  if (!_workerEnabled) return null;
-  const ok = await _ensureWorkerSupport();
-  if (!ok || !_WorkerCtor) return null;
-
-  try {
-    await _ensureActiveWorkerForVariant(variantKey, info, forceReload);
-  } catch (e) {
-    log('Worker init failed, fallback to direct import:', e?.stack || e);
-    if (_activeWorkerState) {
-      _scheduleWorkerShutdown(_activeWorkerState);
-      _activeWorkerState = null;
-    }
-    return null;
-  }
-  const handler = async (req, env, deployPlatform, clientIp) => {
-    return _handleRequestViaWorker(req, clientIp, variantKey, info);
-  };
-  return { handler, info, variantKey, viaWorker: true };
-}
-
 async function _loadHandleRequestForVariant(options = {}) {
   const forceReload = !!options.forceReload;
   const reloadTag = forceReload ? (_coreReloadSeq++) : 0;
@@ -602,7 +245,7 @@ async function _loadHandleRequestForVariant(options = {}) {
   // This avoids breaking existing requests if reload fails.
   const tryLoad = async (variantKey) => {
     const i = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
-    const workerLoaded = await _tryLoadViaWorker(variantKey, i, forceReload);
+    const workerLoaded = await workerRuntime.tryLoadViaWorker(variantKey, i, forceReload);
     if (workerLoaded) return workerLoaded;
     // 动态 import worker.js
     const workerUrl = pathToFileURL(path.join(__dirname, i.dir, 'worker.js'));
@@ -630,7 +273,7 @@ async function _loadHandleRequestForVariant(options = {}) {
     }
     return {
       handler: _wrapDirectFavoritePersistence(require('./app-series-refresh.js').wrapSeriesRefresh(
-        mod.handleRequest, path.join(__dirname, i.dir))),
+        require('./app-url-metadata.js').wrapUrlMetadata(mod.handleRequest, path.join(__dirname, i.dir)), path.join(__dirname, i.dir))),
       info: i,
       variantKey,
       coreGlobals,
@@ -647,6 +290,8 @@ async function _loadHandleRequestForVariant(options = {}) {
     handleRequest = loaded.handler;
     _directCoreGlobals = loaded.coreGlobals || null;
     _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
+    _loadedRuntimeVariant = loaded.variantKey;
+    runtimeDataContext.markLoaded();
     console.log('[danmu_api]', `Using variant: ${loaded.variantKey} => ${loaded.info.label}`);
     _setupCoreWatchersForVariant(loaded.variantKey);
     return;
@@ -666,6 +311,8 @@ async function _loadHandleRequestForVariant(options = {}) {
         handleRequest = loaded.handler;
         _directCoreGlobals = loaded.coreGlobals || null;
         _loadedCoreDirectory=path.join(__dirname,loaded.info.dir);
+        _loadedRuntimeVariant = loaded.variantKey;
+        runtimeDataContext.markLoaded();
         console.log('[danmu_api]', `Fallback to stable => ${loaded.info.label}`);
         _setupCoreWatchersForVariant(loaded.variantKey);
         return;
@@ -681,6 +328,39 @@ async function _loadHandleRequestForVariant(options = {}) {
 
 // Persistent home (config/logs are stored outside the module folder)
 const HOME = process.env.DANMU_API_HOME || __dirname;
+const serverLogging = createServerLogging({
+  home: HOME,
+  env: process.env,
+  fs,
+  console,
+  process,
+});
+const LOG_DIR = serverLogging.logDir;
+const LOG_FILE = serverLogging.logFile;
+
+function log(...args) {
+  console.log('[danmu_api]', ...args);
+}
+
+const workerRuntime = createServerWorkerRuntime({
+  projectDir: __dirname,
+  getEnvSnapshot: _getEnvSnapshot,
+  getOutboundSnapshot: () => _appOutbound?.snapshot(),
+  emitLog: (level, line) => serverLogging.emitWorkerLog(level, line),
+  log,
+  isEnabled: () => _workerEnabled,
+});
+let _loadedRuntimeVariant = '';
+const { createRuntimeContext, guardSession } = require('./app-runtime-context.js');
+const runtimeDataContext = createRuntimeContext(HOME, () => _loadedRuntimeVariant || _getVariant(), _getEnvSnapshot);
+const danmakuCache = createDanmakuCache({
+  sendJson: _sendJson,
+  isAdminAuthorized: _isAdminAuthorized,
+  stripTokenPrefix: _stripTokenPrefix,
+  getRequestHandler: () => handleRequest,
+  getEnvSnapshot: _getEnvSnapshot,
+  port: () => PORT,
+});
 if (!process.env.DANMU_API_HOME || !String(process.env.DANMU_API_HOME).trim()) {
   process.env.DANMU_API_HOME = HOME;
 }
@@ -694,70 +374,33 @@ const CONFIG_DIR = path.join(HOME, 'config');
 
 const ENV_FILE = path.join(CONFIG_DIR, '.env');
 const ACCESS_CONTROL_FILE = path.join(CONFIG_DIR, 'access-control.json');
-// 记录基础环境，删除 .env 键时回滚到进程初始值。
-const _baseEnvSnapshot = _getEnvSnapshot();
-let _lastLoadedDotEnvKeys = new Set();
 
-// Config reload debounce + passive reload (no polling):
-// - Prefer fs.watch (event-driven) when available.
-// - If fs.watch is unavailable, DO NOT fall back to fs.watchFile polling (battery drain on mobile).
-//   Instead, we check file mtimes only when requests arrive (throttled).
-let _configReloadTimer = null;
-let _lastConfigStatCheckMs = 0;
-let _lastEnvMtimeMs = 0;
-let _lastAccessControlMtimeMs = 0;
-
-function _readMtimeMs(file) {
-  try {
-    return fs.statSync(file).mtimeMs || 0;
-  } catch {
-    return 0;
-  }
+function ensureDirs() {
+  try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); } catch {}
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
 }
 
-function _recordConfigMtimes() {
-  _lastEnvMtimeMs = _readMtimeMs(ENV_FILE);
-  _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
-}
-
-function scheduleConfigReload() {
-  if (_configReloadTimer) clearTimeout(_configReloadTimer);
-  // NOTE: the callback must be async if we want to await inside.
-  _configReloadTimer = setTimeout(async () => {
-    log('Config changed, reloading ...');
-    loadConfigOnce();
-    _loadAccessControlFromDisk();
-    // Refresh log level if user changed LOG_LEVEL in .env
-    _refreshLogLevel();
-    // Refresh file logging config if user changed App log settings in .env
-    _refreshLogConfig();
+const configRuntime = createConfigRuntime({
+  env: process.env,
+  fs,
+  home: HOME,
+  ensureDirs,
+  getBaseEnvSnapshot: _getEnvSnapshot,
+  loadAccessControl: () => accessControl.loadFromDisk(),
+  onReload: async () => {
+    serverLogging.refreshLogLevel();
+    serverLogging.refreshLogConfig();
     _refreshRuntimeFlags();
-    await _syncForwardProxyHelper();
-    // If variant/env changed, refresh handleRequest too.
+    await proxyHelper.sync();
     try {
       await _loadHandleRequestForVariant();
-    } catch (e) {
-      // Keep the old handler if reload fails; avoid crashing the host process.
-      log('Reload handler failed:', e?.stack || e);
+    } catch (error) {
+      log('Reload handler failed:', error?.stack || error);
     }
-    _syncEnvToWorker();
-  }, 500);
-}
-
-function maybeReloadConfigOnTraffic() {
-  const now = Date.now();
-  if (now - _lastConfigStatCheckMs < 2000) return;
-  _lastConfigStatCheckMs = now;
-
-  const envM = _readMtimeMs(ENV_FILE);
-  const aclM = _readMtimeMs(ACCESS_CONTROL_FILE);
-  if (envM > _lastEnvMtimeMs || aclM > _lastAccessControlMtimeMs) {
-    scheduleConfigReload();
-  }
-}
-
-const LOG_DIR = path.join(HOME, 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'danmuapi.log');
+    workerRuntime.syncEnvToWorker();
+  },
+  log,
+});
 
 function _resolveCacheProbeDir() {
   const envHome = String(process.env.DANMU_API_HOME || '').trim();
@@ -782,14 +425,6 @@ function _checkCacheProbeWritable(cacheDir) {
   }
 }
 
-// App-managed log settings (written by Android into config/.env):
-//   DANMU_API_LOG_TO_FILE=1|0            (default: 0)
-//   DANMU_API_LOG_MAX_BYTES=1048576      (default: 1MB)
-//
-// NOTE: This is NOT "polling". We only check size when writing logs.
-const DEFAULT_LOG_MAX_BYTES = 1 * 1024 * 1024; // 1MB per file
-const LOG_MAX_BACKUPS = 2; // danmuapi.log.1, danmuapi.log.2
-
 // Basic in-memory runtime metrics (exposed via /__health)
 const METRICS = {
   startedAt: Date.now(),
@@ -799,30 +434,6 @@ const METRICS = {
   lastClientIp: '',
 };
 
-const _ACCESS_CONTROL_MODES = new Set(['off', 'blacklist']);
-const _ACCESS_INTERNAL_PATHS = new Set(['/__health', '/__shutdown', '/__access-control', '/__outbound', '/__source-probe']);
-const _ACCESS_TRACK_MAX_DEVICES = 240;
-
-let _accessControl = {
-  mode: 'off',
-  blacklist: new Set(),
-  updatedAtMs: 0,
-};
-let _accessAllowCount = 0;
-let _accessBlockCount = 0;
-const _accessDevices = new Map();
-
-// File logging (best-effort):
-// - Optionally writes console logs to LOG_FILE with rotation.
-// - Respects LOG_LEVEL from env (.env supports it; default: info).
-let _logStream = null;
-let _origConsole = null;
-let _logLevelValue = 2; // info
-
-let _fileLogEnabled = false;
-let _logMaxBytes = DEFAULT_LOG_MAX_BYTES;
-let _logCurrentBytes = 0;
-
 function _readBoolEnv(key, def = false) {
   const raw = process.env[key];
   if (raw === undefined || raw === null) return def;
@@ -831,445 +442,27 @@ function _readBoolEnv(key, def = false) {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
-function _readIntEnv(key, def, min, max) {
-  const raw = process.env[key];
-  if (raw === undefined || raw === null) return def;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return def;
-  const v = Math.trunc(n);
-  if (min !== undefined && v < min) return min;
-  if (max !== undefined && v > max) return max;
-  return v;
-}
-
-function _refreshLogLevel() {
-  const raw = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase();
-  if (raw === 'error') _logLevelValue = 0;
-  else if (raw === 'warn' || raw === 'warning') _logLevelValue = 1;
-  else _logLevelValue = 2;
-}
-
-function _refreshLogConfig() {
-  // default: disabled
-  const enabled = _readBoolEnv('DANMU_API_LOG_TO_FILE', false);
-  const maxBytes = _readIntEnv('DANMU_API_LOG_MAX_BYTES', DEFAULT_LOG_MAX_BYTES, 64 * 1024, 200 * 1024 * 1024);
-
-  const enabledChanged = enabled !== _fileLogEnabled;
-  const maxChanged = maxBytes !== _logMaxBytes;
-
-  _fileLogEnabled = enabled;
-  _logMaxBytes = maxBytes;
-
-  if (!_fileLogEnabled) {
-    // Close ASAP to stop file growth.
-    try { _logStream && _logStream.end(); } catch {}
-    try { _logStream && _logStream.destroy(); } catch {}
-    _logStream = null;
-    _logCurrentBytes = 0;
-    return;
-  }
-
-  // Ensure directory exists when enabled.
-  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
-
-  // If max shrunk while stream is open and file already too big -> rotate once.
-  if (_logStream && (enabledChanged || maxChanged)) {
-    try {
-      const st = fs.statSync(LOG_FILE);
-      _logCurrentBytes = st?.size || _logCurrentBytes || 0;
-    } catch {
-      // ignore
-    }
-    if (_logCurrentBytes >= _logMaxBytes) {
-      _rotateLogsOnce();
-    }
-  }
-}
-
-function _shouldWrite(level) {
-  const v = level === 'error' ? 0 : level === 'warn' ? 1 : 2;
-  return v <= _logLevelValue;
-}
-
-function _formatArg(a) {
-  if (a === null) return 'null';
-  if (a === undefined) return 'undefined';
-  if (a instanceof Error) return a.stack || a.message || String(a);
-  const t = typeof a;
-  if (t === 'string') return a;
-  if (t === 'bigint') return a.toString();
-  if (t === 'object') {
-    try {
-      return JSON.stringify(a);
-    } catch {
-      try { return String(a); } catch { return '[object]'; }
-    }
-  }
-  try {
-    return String(a);
-  } catch {
-    return '[unprintable]';
-  }
-}
-
-function _timestamp() {
-  // ISO without milliseconds (smaller)
-  const d = new Date();
-  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
-
-function _closeLogStream() {
-  try { _logStream && _logStream.end(); } catch {}
-  try { _logStream && _logStream.destroy(); } catch {}
-  _logStream = null;
-  _logCurrentBytes = 0;
-}
-
-function _rotateLogsOnce() {
-  try {
-    // Close current stream before renaming
-    _closeLogStream();
-
-    // Rotate: .2 (oldest) is dropped
-    for (let i = LOG_MAX_BACKUPS; i >= 1; i--) {
-      const src = `${LOG_FILE}.${i}`;
-      const dst = `${LOG_FILE}.${i + 1}`;
-      if (fs.existsSync(src)) {
-        if (i === LOG_MAX_BACKUPS) {
-          try { fs.rmSync(src, { force: true }); } catch {}
-        } else {
-          try { fs.renameSync(src, dst); } catch {}
-        }
-      }
-    }
-    if (fs.existsSync(LOG_FILE)) {
-      try { fs.renameSync(LOG_FILE, `${LOG_FILE}.1`); } catch {}
-    }
-  } catch {
-    // ignore
-  }
-}
-
-function _ensureWritableLogFile() {
-  try {
-    if (!fs.existsSync(LOG_FILE)) return;
-  } catch {
-    return;
-  }
-
-  try {
-    const st = fs.statSync(LOG_FILE);
-    if (!st.isFile()) {
-      const bad = `${LOG_FILE}.bad.${Date.now()}`;
-      try { fs.renameSync(LOG_FILE, bad); } catch {}
-      return;
-    }
-  } catch {
-    // ignore
-  }
-
-  try {
-    fs.accessSync(LOG_FILE, fs.constants.W_OK);
-    return;
-  } catch {
-    // not writable
-  }
-
-  const suffix = new Date().toISOString().replace(/[:.]/g, '').replace('Z', '');
-  const renamed = `${LOG_FILE}.readonly.${suffix}`;
-  try {
-    fs.renameSync(LOG_FILE, renamed);
-    return;
-  } catch {
-    // ignore
-  }
-
-  try { fs.unlinkSync(LOG_FILE); } catch {}
-}
-
-function _ensureLogStream() {
-  if (!_fileLogEnabled) return;
-  if (_logStream) return;
-  try {
-    try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
-    _ensureWritableLogFile();
-
-    // Initialize size counter from current file size once.
-    try {
-      const st = fs.statSync(LOG_FILE);
-      _logCurrentBytes = st?.size || 0;
-    } catch {
-      _logCurrentBytes = 0;
-    }
-
-    // If already too big, rotate before opening.
-    if (_logCurrentBytes >= _logMaxBytes) {
-      _rotateLogsOnce();
-      _logCurrentBytes = 0;
-    }
-
-    const stream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
-    stream.on('error', () => {
-      try { stream.destroy(); } catch {}
-      if (_logStream === stream) {
-        _logStream = null;
-        _logCurrentBytes = 0;
-      }
-    });
-    _logStream = stream;
-  } catch {
-    _logStream = null;
-  }
-}
-
-function _writeLogLine(level, args) {
-  if (!_shouldWrite(level)) return;
-  if (!_fileLogEnabled) return;
-
-  try {
-    _ensureLogStream();
-    if (!_logStream) return;
-
-    const line = `${_timestamp()} [${level.toUpperCase()}] ${args.map(_formatArg).join(' ')}\n`;
-    const lineBytes = Buffer.byteLength(line, 'utf8');
-
-    // Rotate before writing if this line would exceed max bytes (best-effort).
-    if (_logCurrentBytes > 0 && (_logCurrentBytes + lineBytes) > _logMaxBytes) {
-      _rotateLogsOnce();
-      _ensureLogStream();
-      if (!_logStream) return;
-    }
-
-    _logStream.write(line);
-    _logCurrentBytes += lineBytes;
-
-    // If a single line is huge and pushes us over, rotate on next write.
-    if (_logCurrentBytes >= _logMaxBytes) {
-      // Do nothing here to avoid rotating in the same tick; next line will rotate before writing.
-    }
-  } catch {
-    // ignore
-  }
-}
-
-function setupFileLogging() {
-  // Must be called after loadConfigOnce() so .env is applied.
-  _refreshLogLevel();
-  _refreshLogConfig();
-
-  if (!_origConsole) {
-    _origConsole = {
-      log: console.log.bind(console),
-      info: (console.info || console.log).bind(console),
-      warn: (console.warn || console.log).bind(console),
-      error: (console.error || console.log).bind(console),
-    };
-
-    console.log = (...args) => { _origConsole.log(...args); _writeLogLine('info', args); };
-    console.info = (...args) => { _origConsole.info(...args); _writeLogLine('info', args); };
-    console.warn = (...args) => { _origConsole.warn(...args); _writeLogLine('warn', args); };
-    console.error = (...args) => { _origConsole.error(...args); _writeLogLine('error', args); };
-  }
-
-  // Capture crashes
-  process.on('unhandledRejection', (reason) => {
-    console.error('[unhandledRejection]', reason && (reason.stack || reason));
-  });
-  process.on('uncaughtException', (err) => {
-    console.error('[uncaughtException]', err && (err.stack || err));
-  });
-
-  process.on('exit', () => {
-    _closeLogStream();
-  });
-
-  // Mark the beginning of a boot session in the log file (only if enabled)
-  _writeLogLine('info', ['[danmu_api]', `log file: ${LOG_FILE}`, `LOG_LEVEL=${process.env.LOG_LEVEL || 'info'}`]);
-}
-
 let HOST = '0.0.0.0';
 let PORT = 9321;
 let PROXY_PORT = 5321;
 
-function _safePort(raw, def) {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return def;
-  const p = Math.trunc(n);
-  if (p < 1 || p > 65535) return def;
-  return p;
-}
-
 function _refreshListenConfigFromEnv() {
-  const host = String(process.env.DANMU_API_HOST || '0.0.0.0').trim();
-  HOST = host || '0.0.0.0';
-  PORT = _safePort(process.env.DANMU_API_PORT, 9321);
-  PROXY_PORT = _safePort(process.env.DANMU_API_PROXY_PORT, 5321);
+  const config = readListenConfig(process.env);
+  HOST = config.host;
+  PORT = config.port;
+  PROXY_PORT = config.proxyPort;
 }
 
 function _listenOptions(port) {
-  const options = { port, host: HOST };
-  if (net.isIP(HOST) === 6) {
-    // Android currently defaults to dual stack, but make IPv4 compatibility explicit.
-    options.ipv6Only = false;
-  }
-  return options;
+  return listenOptions(HOST, port);
 }
 
 function _listenUrl(port, pathSuffix = '') {
-  const displayHost = net.isIP(HOST) === 6 ? `[${HOST}]` : HOST;
-  return `http://${displayHost}:${port}${pathSuffix}`;
+  return listenUrl(HOST, port, pathSuffix);
 }
 
 // Will be set after servers are created (used by the Android app to stop Node gracefully)
 let shutdownFn = null;
-
-function log(...args) {
-  console.log('[danmu_api]', ...args);
-}
-
-function _hasForwardProxyHelperDemand() {
-  return Boolean(coreProxyConfig(process.env.PROXY_URL).forward);
-}
-
-function ensureDirs() {
-  try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); } catch {}
-  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
-}
-
-function parseDotEnv(envText) {
-  const out = {};
-  const lines = envText.split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = rawLine.trim().replace(/^\uFEFF/, '');
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).trim();
-    if (val.startsWith('"') && val.endsWith('"')) {
-      val = unescapeDoubleQuotedEnvValue(val.slice(1, -1));
-    } else if (val.startsWith("'") && val.endsWith("'")) {
-      val = val.slice(1, -1);
-    }
-    out[key] = val;
-  }
-  return out;
-}
-
-function unescapeDoubleQuotedEnvValue(value) {
-  let out = '';
-  for (let i = 0; i < value.length; i++) {
-    const ch = value[i];
-    if (ch !== '\\' || i === value.length - 1) {
-      out += ch;
-      continue;
-    }
-
-    const next = value[++i];
-    if (next === '\\') out += '\\';
-    else if (next === '"') out += '"';
-    else if (next === 'n') out += '\n';
-    else if (next === 'r') out += '\r';
-    else if (next === 't') out += '\t';
-    else out += `\\${next}`;
-  }
-  return out;
-}
-
-function flattenObject(obj, prefix = '') {
-  const result = {};
-  if (!obj || typeof obj !== 'object') return result;
-
-  for (const [k, v] of Object.entries(obj)) {
-    if (!k) continue;
-    const newKey = prefix ? `${prefix}_${k}` : k;
-
-    if (v === null || v === undefined) continue;
-
-    if (Array.isArray(v)) {
-      // arrays -> JSON string
-      result[newKey] = JSON.stringify(v);
-    } else if (typeof v === 'object') {
-      Object.assign(result, flattenObject(v, newKey));
-    } else {
-      result[newKey] = String(v);
-    }
-  }
-  return result;
-}
-
-const _appReservedPaths = new Set(['DANMU_APP_OUTBOUND_CONFIG','DANMUAPI_LIBDIR']);
-function applyEnv(kv, { override = true } = {}) {
-  for (const [k, v] of Object.entries(kv)) {
-    if (_appReservedPaths.has(k)) continue;
-    if (!override && process.env[k] !== undefined) continue;
-    process.env[k] = v;
-  }
-}
-
-function _restoreEnvKeyFromBase(key) {
-  if (Object.prototype.hasOwnProperty.call(_baseEnvSnapshot, key)) {
-    process.env[key] = _baseEnvSnapshot[key];
-  } else {
-    delete process.env[key];
-  }
-}
-
-function _replaceDotEnv(kv) {
-  const next = kv && typeof kv === 'object' ? kv : {};
-  for (const key of _lastLoadedDotEnvKeys) {
-    if (!(key in next)) {
-      _restoreEnvKeyFromBase(key);
-    }
-  }
-  applyEnv(next, { override: true });
-  _lastLoadedDotEnvKeys = new Set(Object.keys(next));
-}
-
-function loadConfigOnce() {
-  ensureDirs();
-
-  const envFile = ENV_FILE;
-
-  // 1) .env (runtime overrides system env if same key is set here)
-  if (fs.existsSync(envFile)) {
-    try {
-      const t = fs.readFileSync(envFile, 'utf-8');
-      const kv = parseDotEnv(t);
-      _replaceDotEnv(kv);
-      log('Loaded .env:', envFile);
-    } catch (e) {
-      log('Failed to load .env:', e?.message || e);
-    }
-  } else {
-    _replaceDotEnv({});
-    log('.env not found, skipping:', envFile);
-  }
-  _loadAccessControlFromDisk();
-  _recordConfigMtimes();
-}
-
-function watchConfigs() {
-  // Watch the config directory if possible (covers file create/rename).
-  try {
-    if (fs.existsSync(CONFIG_DIR)) {
-      fs.watch(CONFIG_DIR, { persistent: false }, () => scheduleConfigReload());
-    }
-  } catch (e) {
-    log('fs.watch(CONFIG_DIR) unavailable:', e?.message || e);
-  }
-
-  // Also watch individual files (some platforms are more reliable this way).
-  for (const f of [ENV_FILE, ACCESS_CONTROL_FILE]) {
-    try {
-      if (!fs.existsSync(f)) continue;
-      fs.watch(f, { persistent: false }, () => scheduleConfigReload());
-    } catch (e) {
-      // No polling fallback here to avoid battery drain on mobile.
-      log('fs.watch unavailable for', f, '- will reload on traffic');
-    }
-  }
-}
 
 function _clearCoreWatchers() {
   for (const w of _coreWatchers) {
@@ -1335,7 +528,7 @@ function _scheduleCoreReload(reason) {
     try {
       log('Core changed, reloading ...', reason || '');
       await _loadHandleRequestForVariant({ forceReload: true });
-      _syncEnvToWorker();
+      workerRuntime.syncEnvToWorker();
     } catch (e) {
       log('Core reload failed:', e?.stack || e);
     } finally {
@@ -1445,294 +638,19 @@ function _setupCoreWatchersForVariant(variantKey) {
   }
 }
 
-function _normalizeClientIp(rawIp) {
-  let value = String(rawIp || '').trim().toLowerCase();
-  if (!value) return '';
-  if (value.includes(',')) value = value.split(',')[0].trim();
-
-  if (value.startsWith('[')) {
-    const closeIdx = value.indexOf(']');
-    if (closeIdx > 0) {
-      value = value.substring(1, closeIdx);
-    }
-  }
-
-  const zoneIdx = value.indexOf('%');
-  if (zoneIdx > 0) {
-    value = value.substring(0, zoneIdx);
-  }
-
-  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) {
-    value = value.split(':')[0];
-  }
-
-  if (value.startsWith('::ffff:')) {
-    const mapped = value.substring(7);
-    if (net.isIP(mapped) === 4) return mapped;
-  }
-
-  if (net.isIP(value) > 0) return value;
-  return '';
-}
-
-function _normalizeIpList(rawList) {
-  const source = Array.isArray(rawList)
-    ? rawList
-    : typeof rawList === 'string'
-      ? rawList.split(/[\s,;]+/)
-      : [];
-  const seen = new Set();
-  const out = [];
-  for (const item of source) {
-    const ip = _normalizeClientIp(item);
-    if (!ip || seen.has(ip)) continue;
-    seen.add(ip);
-    out.push(ip);
-  }
-  return out;
-}
-
-function _normalizeAccessMode(raw, fallback = 'off') {
-  const mode = String(raw || '').trim().toLowerCase();
-  if (!mode) return fallback;
-  if (mode === 'blacklist' || mode === 'black' || mode === 'block' || mode === 'deny') return 'blacklist';
-  if (mode === 'whitelist' || mode === 'white' || mode === 'allow') return 'off';
-  if (mode === 'off' || mode === 'none' || mode === 'disable' || mode === 'disabled') return 'off';
-  return fallback;
-}
-
-function _snapshotAccessControl() {
-  const updatedAtMs = Number(_accessControl.updatedAtMs || Date.now()) || Date.now();
-  return {
-    mode: _accessControl.mode || 'off',
-    blacklist: Array.from(_accessControl.blacklist || []).sort(),
-    updatedAtMs,
-    updatedAt: new Date(updatedAtMs).toISOString(),
-  };
-}
-
-function _sanitizeAccessControl(raw, fallback = null, strictMode = false) {
-  const base = fallback || _snapshotAccessControl();
-  const data = raw && typeof raw === 'object' ? raw : {};
-
-  let mode = base.mode;
-  if (Object.prototype.hasOwnProperty.call(data, 'mode')) {
-    const parsed = _normalizeAccessMode(data.mode, '');
-    if (!parsed) {
-      if (strictMode) {
-        throw new Error('mode 仅支持 off / blacklist');
-      }
-    } else {
-      mode = parsed;
-    }
-  }
-  if (!_ACCESS_CONTROL_MODES.has(mode)) {
-    mode = 'off';
-  }
-
-  const blacklist = Object.prototype.hasOwnProperty.call(data, 'blacklist')
-    ? _normalizeIpList(data.blacklist)
-    : _normalizeIpList(base.blacklist);
-
-  const updatedAtMs = Number(data.updatedAtMs || base.updatedAtMs || Date.now()) || Date.now();
-  return { mode, blacklist, updatedAtMs };
-}
-
-function _applyAccessControl(next) {
-  _accessControl = {
-    mode: _normalizeAccessMode(next?.mode, 'off'),
-    blacklist: new Set(_normalizeIpList(next?.blacklist)),
-    updatedAtMs: Number(next?.updatedAtMs || Date.now()) || Date.now(),
-  };
-}
-
-function _persistAccessControl() {
-  try {
-    ensureDirs();
-    const current = _snapshotAccessControl();
-    const next = {
-      mode: current.mode,
-      blacklist: current.blacklist,
-      updatedAtMs: Date.now(),
-    };
-    _applyAccessControl(next);
-
-    const tmpFile = `${ACCESS_CONTROL_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
-    fs.renameSync(tmpFile, ACCESS_CONTROL_FILE);
-    _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
-    return true;
-  } catch (e) {
-    log('Failed to persist access-control config:', e?.message || e);
-    return false;
-  }
-}
-
-function _loadAccessControlFromDisk() {
-  try {
-    if (!fs.existsSync(ACCESS_CONTROL_FILE)) {
-      _lastAccessControlMtimeMs = 0;
-      if (!_ACCESS_CONTROL_MODES.has(_accessControl.mode)) {
-        _applyAccessControl({ mode: 'off', blacklist: [], updatedAtMs: Date.now() });
-      }
-      return;
-    }
-    const raw = fs.readFileSync(ACCESS_CONTROL_FILE, 'utf-8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
-    const next = _sanitizeAccessControl(parsed, {
-      mode: 'off',
-      blacklist: [],
-      updatedAtMs: Date.now(),
-    });
-    _applyAccessControl(next);
-    _lastAccessControlMtimeMs = _readMtimeMs(ACCESS_CONTROL_FILE);
-  } catch (e) {
-    log('Failed to load access-control config:', e?.message || e);
-  }
-}
-
-function _isInternalAccessPath(pathname) {
-  const stripped = _stripTokenPrefix(String(pathname || '/'));
-  return _ACCESS_INTERNAL_PATHS.has(stripped);
-}
-
-function _evaluateClientAccess(clientIp, pathname) {
-  const normalizedIp = _normalizeClientIp(clientIp);
-  const mode = _accessControl.mode || 'off';
-
-  if (_isInternalAccessPath(pathname)) {
-    return { allowed: true, reason: 'internal', clientIp: normalizedIp };
-  }
-  if (_isLoopbackIp(normalizedIp)) {
-    return { allowed: true, reason: 'loopback', clientIp: normalizedIp };
-  }
-  if (mode === 'off') {
-    return { allowed: true, reason: 'mode_off', clientIp: normalizedIp };
-  }
-
-  if (mode === 'blacklist') {
-    if (normalizedIp && _accessControl.blacklist.has(normalizedIp)) {
-      return { allowed: false, reason: 'blacklist_hit', clientIp: normalizedIp };
-    }
-    return { allowed: true, reason: 'blacklist_pass', clientIp: normalizedIp };
-  }
-
-  return { allowed: true, reason: 'unknown_mode', clientIp: normalizedIp };
-}
-
-function _evictOldestAccessDevice() {
-  let oldestKey = '';
-  let oldestSeen = Number.MAX_SAFE_INTEGER;
-  for (const [ip, item] of _accessDevices.entries()) {
-    const ts = Number(item.lastSeenAtMs || 0);
-    if (ts < oldestSeen) {
-      oldestSeen = ts;
-      oldestKey = ip;
-    }
-  }
-  if (oldestKey) {
-    _accessDevices.delete(oldestKey);
-  }
-}
-
-function _recordDeviceAccess({ clientIp, method, pathname, allowed, reason, userAgent }) {
-  const ip = _normalizeClientIp(clientIp);
-  if (!ip || _isLoopbackIp(ip)) return;
-
-  const now = Date.now();
-  let item = _accessDevices.get(ip);
-  if (!item) {
-    if (_accessDevices.size >= _ACCESS_TRACK_MAX_DEVICES) {
-      _evictOldestAccessDevice();
-    }
-    item = {
-      ip,
-      firstSeenAtMs: now,
-      lastSeenAtMs: now,
-      totalRequests: 0,
-      allowedRequests: 0,
-      blockedRequests: 0,
-      lastMethod: 'GET',
-      lastPath: '/',
-      lastReason: '',
-      lastUserAgent: '',
-    };
-    _accessDevices.set(ip, item);
-  }
-
-  item.lastSeenAtMs = now;
-  item.totalRequests += 1;
-  if (allowed) item.allowedRequests += 1;
-  else item.blockedRequests += 1;
-  item.lastMethod = String(method || 'GET').toUpperCase();
-  item.lastPath = String(pathname || '/');
-  item.lastReason = String(reason || '');
-  if (userAgent) {
-    item.lastUserAgent = String(userAgent).slice(0, 220);
-  }
-
-  if (allowed) _accessAllowCount += 1;
-  else _accessBlockCount += 1;
-}
-
-function _buildAccessDevicesPayload() {
-  const mode = _accessControl.mode || 'off';
-  const blacklist = _accessControl.blacklist || new Set();
-
-  const list = [];
-  for (const item of _accessDevices.values()) {
-    const ip = item.ip;
-    const inBlacklist = blacklist.has(ip);
-    const effectiveBlocked = !_isLoopbackIp(ip) && mode === 'blacklist' && inBlacklist;
-    list.push({
-      ip,
-      firstSeenAtMs: item.firstSeenAtMs,
-      firstSeenAt: new Date(item.firstSeenAtMs).toISOString(),
-      lastSeenAtMs: item.lastSeenAtMs,
-      lastSeenAt: new Date(item.lastSeenAtMs).toISOString(),
-      totalRequests: item.totalRequests,
-      allowedRequests: item.allowedRequests,
-      blockedRequests: item.blockedRequests,
-      lastMethod: item.lastMethod,
-      lastPath: item.lastPath,
-      lastReason: item.lastReason,
-      lastUserAgent: item.lastUserAgent,
-      inWhitelist: false,
-      inBlacklist,
-      effectiveBlocked,
-    });
-  }
-  list.sort((a, b) => b.lastSeenAtMs - a.lastSeenAtMs);
-  return list;
-}
-
-function _buildAccessControlPayload() {
-  const snapshot = _snapshotAccessControl();
-  return {
-    success: true,
-    config: {
-      mode: snapshot.mode,
-      whitelist: [],
-      blacklist: snapshot.blacklist,
-      updatedAtMs: snapshot.updatedAtMs,
-      updatedAt: snapshot.updatedAt,
-      file: ACCESS_CONTROL_FILE,
-    },
-    stats: {
-      trackedDevices: _accessDevices.size,
-      whitelistCount: 0,
-      blacklistCount: snapshot.blacklist.length,
-      totalAllowedRequests: _accessAllowCount,
-      totalBlockedRequests: _accessBlockCount,
-    },
-    devices: _buildAccessDevicesPayload(),
-  };
-}
-
 function _sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(payload));
+}
+
+async function readRequestBody(req) {
+  return await new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
 async function _readJsonBody(req) {
@@ -1743,75 +661,6 @@ async function _readJsonBody(req) {
   } catch {
     throw new Error('请求体必须是 JSON');
   }
-}
-
-async function _handleAccessControlEndpoint(req, res, urlObj, clientIp) {
-  if (!_isAdminAuthorized(req, urlObj, clientIp)) {
-    _sendJson(res, 403, {
-      success: false,
-      errorCode: 403,
-      errorMessage: 'Forbidden',
-    });
-    return true;
-  }
-
-  const method = String(req.method || 'GET').toUpperCase();
-  if (method === 'GET') {
-    _sendJson(res, 200, _buildAccessControlPayload());
-    return true;
-  }
-  if (!['POST', 'PUT', 'PATCH'].includes(method)) {
-    _sendJson(res, 405, {
-      success: false,
-      errorCode: 405,
-      errorMessage: 'Method Not Allowed',
-    });
-    return true;
-  }
-
-  try {
-    const body = await _readJsonBody(req);
-    if (body && body.clearDevices === true) {
-      _accessDevices.clear();
-    }
-
-    const current = _snapshotAccessControl();
-    const next = _sanitizeAccessControl(body, current, true);
-    if (body && body.clearRules === true) {
-      next.blacklist = [];
-    }
-    next.updatedAtMs = Date.now();
-    _applyAccessControl(next);
-
-    if (!_persistAccessControl()) {
-      throw new Error('保存访问控制配置失败');
-    }
-    _sendJson(res, 200, _buildAccessControlPayload());
-  } catch (e) {
-    _sendJson(res, 400, {
-      success: false,
-      errorCode: 400,
-      errorMessage: e?.message || '参数错误',
-    });
-  }
-  return true;
-}
-
-function getClientIp(req) {
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff) return _normalizeClientIp(xff);
-  const xrip = req.headers['x-real-ip'];
-  if (typeof xrip === 'string' && xrip) return _normalizeClientIp(xrip);
-  return _normalizeClientIp(req.socket?.remoteAddress || '');
-}
-
-function _isLoopbackIp(ip) {
-  const raw = _normalizeClientIp(ip);
-  if (!raw) return false;
-  if (raw === '::1' || raw === '0:0:0:0:0:0:0:1') return true;
-  if (raw.startsWith('127.')) return true;
-  if (raw.startsWith('::ffff:127.')) return true;
-  return false;
 }
 
 const QUIET_CORE_LOG_PATH_RE = /(^|\/)api\/(?:logs|reqrecords|cache\/animes)(?=(["'\s?#]|$))/i;
@@ -1836,7 +685,7 @@ function _isFavoriteMutationRequest(url, method) {
 }
 
 function _isQuietCoreLogRequest(urlObj, clientIp) {
-  if (!_isLoopbackIp(clientIp)) return false;
+  if (!isLoopbackIp(clientIp)) return false;
   try {
     const pathname = _stripLikelyTokenPrefix(urlObj?.pathname || '/');
     return QUIET_CORE_LOG_PATH_RE.test(pathname);
@@ -1928,7 +777,7 @@ function _removeQuietCoreLogNoise(startHint = 0) {
 }
 
 function _isAdminAuthorized(req, urlObj, clientIp) {
-  if (_isLoopbackIp(clientIp)) return true;
+  if (isLoopbackIp(clientIp)) return true;
 
   const token = String(process.env.TOKEN || '').trim();
   if (!token) return false;
@@ -1947,45 +796,6 @@ function _isAdminAuthorized(req, urlObj, clientIp) {
   return queryToken && queryToken === token;
 }
 
-function bufferFromArrayBuffer(ab) {
-  return Buffer.from(ab);
-}
-
-async function toNodeResponse(webResponse, res) {
-  res.statusCode = webResponse.status;
-
-  // Copy headers
-  // Handle set-cookie specially
-  if (typeof webResponse.headers.getSetCookie === 'function') {
-    const cookies = webResponse.headers.getSetCookie();
-    if (cookies && cookies.length) res.setHeader('set-cookie', cookies);
-  } else {
-    const sc = webResponse.headers.get('set-cookie');
-    if (sc) res.setHeader('set-cookie', sc);
-  }
-
-  webResponse.headers.forEach((value, key) => {
-    if (key.toLowerCase() === 'set-cookie') return;
-    try { res.setHeader(key, value); } catch {}
-  });
-
-  const ab = await webResponse.arrayBuffer();
-  res.end(bufferFromArrayBuffer(ab));
-}
-
-async function readRequestBody(req) {
-  return await new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', c => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
-// ------------------------------------------------------------
-// Danmu XML one-shot overrides (used by Android push UI)
-// ------------------------------------------------------------
-
 function _stripTokenPrefix(pathname) {
   try {
     const token = String(process.env.TOKEN || '').trim();
@@ -1999,837 +809,109 @@ function _stripTokenPrefix(pathname) {
   }
 }
 
-function _normalizeNumber(n, digits = 3) {
-  if (!Number.isFinite(n)) return null;
-  const fixed = Number(n).toFixed(digits);
-  return fixed.replace(/\.?0+$/, '');
-}
+const accessControl = createAccessControl({
+  fs,
+  file: ACCESS_CONTROL_FILE,
+  ensureDirs,
+  stripTokenPrefix: _stripTokenPrefix,
+  isAdminAuthorized: _isAdminAuthorized,
+  sendJson: _sendJson,
+  readJsonBody: _readJsonBody,
+  log,
+});
 
-function _applyDanmuXmlOverrides(xml, { offsetSec = 0, fontSize = null } = {}) {
-  const off = Number(offsetSec);
-  const hasOffset = Number.isFinite(off) && Math.abs(off) > 1e-6;
+const proxyHelper = createProxyHelper({
+  readClientIp,
+  stripTokenPrefix: _stripTokenPrefix,
+  isAdminAuthorized: _isAdminAuthorized,
+  accessControl,
+  readRequestBody,
+  coreProxyConfig,
+  requestThroughProxy: require('./app-proxy-routing.js').requestThroughProxy,
+  maybeReloadConfigOnTraffic: () => configRuntime.maybeReloadOnTraffic(),
+  maybeReloadCoreOnTraffic: _maybeReloadCoreOnTraffic,
+  getListenOptions: _listenOptions,
+  getListenUrl: _listenUrl,
+  getHost: () => HOST,
+  getPort: () => PROXY_PORT,
+  isMainServerListening: () => Boolean(_mainServer?.listening),
+  isShuttingDown: () => Boolean(_shutdownPromise),
+  closeServer: _closeServer,
+  log,
+});
 
-  let fsInt = null;
-  if (fontSize !== null && typeof fontSize !== 'undefined') {
-    const tmp = Number.parseInt(String(fontSize), 10);
-    if (Number.isFinite(tmp) && tmp > 0) fsInt = tmp;
-  }
-  const hasFont = fsInt !== null;
-
-  if (!hasOffset && !hasFont) return xml;
-  if (typeof xml !== 'string' || !xml.includes('<d')) return xml;
-
-  // Only rewrite the p="..." attribute inside <d ...> nodes.
-  // B站弹幕 XML: p="time,mode,size,color,ts,pool,hash,rowid"
-  return xml.replace(/(<d[^>]*?\sp=")([^"]+)(")/g, (m, prefix, pVal, suffix) => {
-    const parts = String(pVal).split(',');
-    if (parts.length < 3) return m;
-
-    if (hasOffset) {
-      const t = Number(parts[0]);
-      if (Number.isFinite(t)) {
-        let nt = t + off;
-        if (nt < 0) nt = 0;
-        const norm = _normalizeNumber(nt);
-        if (norm !== null) parts[0] = norm;
-      }
-    }
-
-    if (hasFont) {
-      parts[2] = String(fsInt);
-    }
-
-    return prefix + parts.join(',') + suffix;
-  });
-}
-
-const _PREPARED_DANMAKU_TTL_MS = 2 * 60 * 1000;
-const _PREPARED_DANMAKU_MAX_ENTRIES = 8;
-const _PREPARED_DANMAKU_MAX_ENTRY_BYTES = 16 * 1024 * 1024;
-const _PREPARED_DANMAKU_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
-const _preparedDanmakuEntries = new Map();
-const _preparedDanmakuBySource = new Map();
-const _preparedDanmakuInflight = new Map();
-let _preparedDanmakuBytes = 0;
-let _preparedDanmakuSeq = 1;
-
-function _countDanmakuXml(xml) {
-  const text = String(xml || '');
-  let count = 0;
-  let index = 0;
-  while ((index = text.indexOf('<d', index)) >= 0) {
-    const next = text.charAt(index + 2);
-    if (next === '>' || /\s/.test(next)) count++;
-    index += 2;
-  }
-  return count;
-}
-
-function _looksLikeDanmakuXml(contentType, text) {
-  const type = String(contentType || '').toLowerCase();
-  const value = String(text || '').trimStart();
-  if (!value.startsWith('<')) return false;
-  return type.includes('xml') || value.startsWith('<?xml') ||
-    value.startsWith('<i>') || value.startsWith('<i ') ||
-    value.startsWith('<d>') || value.startsWith('<d ');
-}
-
-function _preparedDanmakuError(message, statusCode = 500) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  return error;
-}
-
-function _deletePreparedDanmaku(id) {
-  const entry = _preparedDanmakuEntries.get(id);
-  if (!entry) return;
-  _preparedDanmakuEntries.delete(id);
-  if (_preparedDanmakuBySource.get(entry.sourceUrl) === id) {
-    _preparedDanmakuBySource.delete(entry.sourceUrl);
-  }
-  _preparedDanmakuBytes = Math.max(0, _preparedDanmakuBytes - entry.body.length);
-}
-
-function _cleanupPreparedDanmaku(now = Date.now()) {
-  for (const [id, entry] of _preparedDanmakuEntries.entries()) {
-    if (entry.expiresAtMs <= now) _deletePreparedDanmaku(id);
-  }
-  while (
-    _preparedDanmakuEntries.size > _PREPARED_DANMAKU_MAX_ENTRIES ||
-    _preparedDanmakuBytes > _PREPARED_DANMAKU_MAX_TOTAL_BYTES
-  ) {
-    const oldest = _preparedDanmakuEntries.keys().next().value;
-    if (!oldest) break;
-    _deletePreparedDanmaku(oldest);
-  }
-}
-
-function _getPreparedDanmakuBySource(sourceUrl) {
-  _cleanupPreparedDanmaku();
-  const id = _preparedDanmakuBySource.get(sourceUrl);
-  const entry = id ? _preparedDanmakuEntries.get(id) : null;
-  if (!entry) return null;
-  _preparedDanmakuEntries.delete(id);
-  _preparedDanmakuEntries.set(id, entry);
-  return entry;
-}
-
-function _getPreparedDanmakuById(id) {
-  _cleanupPreparedDanmaku();
-  const entry = _preparedDanmakuEntries.get(id);
-  if (!entry) return null;
-  _preparedDanmakuEntries.delete(id);
-  _preparedDanmakuEntries.set(id, entry);
-  return entry;
-}
-
-function _normalizePreparedDanmakuTarget(rawUrl) {
-  let target;
-  try {
-    target = new URL(String(rawUrl || '').trim());
-  } catch {
-    throw _preparedDanmakuError('缺少或无法解析弹幕 URL', 400);
-  }
-  if (target.protocol !== 'http:') {
-    throw _preparedDanmakuError('预取仅支持本机 HTTP 弹幕 URL', 400);
-  }
-  if (target.username || target.password) {
-    throw _preparedDanmakuError('弹幕 URL 不允许包含用户信息', 400);
-  }
-  const hostname = String(target.hostname || '').toLowerCase();
-  const isLoopbackHost = hostname === 'localhost' || hostname === '::1' ||
-    hostname === '[::1]' || hostname.startsWith('127.');
-  const targetPort = Number(target.port || 80);
-  if (!isLoopbackHost || targetPort !== PORT) {
-    throw _preparedDanmakuError('预取只允许访问当前核心服务', 400);
-  }
-  const pathname = _stripTokenPrefix(target.pathname || '/');
-  if (pathname !== '/api/v2/comment' && !pathname.startsWith('/api/v2/comment/')) {
-    throw _preparedDanmakuError('预取只允许弹幕评论接口', 400);
-  }
-  target.hash = '';
-  return target;
-}
-
-function _readDanmakuOverrides(urlObj) {
-  const offsetMsRaw = urlObj.searchParams.get('offsetMs') || urlObj.searchParams.get('offset_ms');
-  const offsetRaw = urlObj.searchParams.get('offset') || urlObj.searchParams.get('danmu_offset');
-  const fontRaw = urlObj.searchParams.get('fontSize') || urlObj.searchParams.get('font_size') ||
-    urlObj.searchParams.get('fontsize');
-  let offsetSec = 0;
-  if (offsetMsRaw && String(offsetMsRaw).trim() !== '') {
-    const ms = Number.parseFloat(String(offsetMsRaw));
-    if (Number.isFinite(ms)) offsetSec = ms / 1000.0;
-  } else if (offsetRaw && String(offsetRaw).trim() !== '') {
-    const seconds = Number.parseFloat(String(offsetRaw));
-    if (Number.isFinite(seconds)) offsetSec = seconds;
-  }
-  let fontSize = null;
-  if (fontRaw && String(fontRaw).trim() !== '') {
-    const parsed = Number.parseInt(String(fontRaw), 10);
-    if (Number.isFinite(parsed) && parsed > 0) fontSize = parsed;
-  }
-  return { offsetSec, fontSize };
-}
-
-async function _loadPreparedDanmaku(target, requestHeaders, clientIp) {
-  const { offsetSec, fontSize } = _readDanmakuOverrides(target);
-  const cleanUrl = new URL(target.toString());
-  for (const key of ['offset', 'danmu_offset', 'offsetMs', 'offset_ms', 'fontSize', 'font_size', 'fontsize']) {
-    cleanUrl.searchParams.delete(key);
-  }
-
-  const headers = { ...requestHeaders, host: cleanUrl.host };
-  delete headers['content-length'];
-  delete headers['content-encoding'];
-  const coreResponse = await handleRequest(new Request(cleanUrl.toString(), {
-    method: 'GET',
-    headers,
-  }), _getEnvSnapshot(), 'node', clientIp);
-  const contentType = String(coreResponse.headers.get('content-type') || '');
-  const rawText = await coreResponse.text();
-  if (coreResponse.status < 200 || coreResponse.status > 299) {
-    const summary = rawText.trim().replace(/\s+/g, ' ').slice(0, 160);
-    throw _preparedDanmakuError(`核心弹幕接口返回 HTTP ${coreResponse.status}${summary ? `: ${summary}` : ''}`, 502);
-  }
-
-  const outText = _applyDanmuXmlOverrides(rawText, { offsetSec, fontSize });
-  if (!_looksLikeDanmakuXml(contentType, outText)) {
-    throw _preparedDanmakuError('核心弹幕接口未返回有效 XML', 502);
-  }
-  const body = Buffer.from(outText, 'utf-8');
-  if (body.length > _PREPARED_DANMAKU_MAX_ENTRY_BYTES) {
-    throw _preparedDanmakuError('弹幕 XML 超出预取缓存上限', 413);
-  }
-  return {
-    sourceUrl: target.toString(),
-    body,
-    count: _countDanmakuXml(outText),
-    contentType: contentType.toLowerCase().includes('xml')
-      ? contentType
-      : 'application/xml; charset=utf-8',
-  };
-}
-
-function _cachePreparedDanmaku(payload) {
-  const oldId = _preparedDanmakuBySource.get(payload.sourceUrl);
-  if (oldId) _deletePreparedDanmaku(oldId);
-  const id = `${Date.now().toString(36)}-${(_preparedDanmakuSeq++).toString(36)}`;
-  const entry = {
-    ...payload,
-    id,
-    expiresAtMs: Date.now() + _PREPARED_DANMAKU_TTL_MS,
-  };
-  _preparedDanmakuEntries.set(id, entry);
-  _preparedDanmakuBySource.set(entry.sourceUrl, id);
-  _preparedDanmakuBytes += entry.body.length;
-  _cleanupPreparedDanmaku();
-  return entry;
-}
-
-async function _prepareDanmaku(rawUrl, requestHeaders, clientIp) {
-  const target = _normalizePreparedDanmakuTarget(rawUrl);
-  const sourceUrl = target.toString();
-  const cached = _getPreparedDanmakuBySource(sourceUrl);
-  if (cached) return { entry: cached, cached: true };
-
-  let pending = _preparedDanmakuInflight.get(sourceUrl);
-  if (!pending) {
-    pending = _loadPreparedDanmaku(target, requestHeaders, clientIp)
-      .then(_cachePreparedDanmaku);
-    _preparedDanmakuInflight.set(sourceUrl, pending);
-  }
-  try {
-    return { entry: await pending, cached: false };
-  } finally {
-    if (_preparedDanmakuInflight.get(sourceUrl) === pending) {
-      _preparedDanmakuInflight.delete(sourceUrl);
-    }
-  }
-}
-
-async function _handleDanmakuPrepare(req, res, fullUrl, clientIp, headers) {
-  if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
-    _sendJson(res, 403, { success: false, errorMessage: 'Forbidden' });
-    return;
-  }
-  if (String(req.method || 'GET').toUpperCase() !== 'GET') {
-    _sendJson(res, 405, { success: false, errorMessage: 'Method Not Allowed' });
-    return;
-  }
-  try {
-    const result = await _prepareDanmaku(fullUrl.searchParams.get('url'), headers, clientIp);
-    const entry = result.entry;
-    _sendJson(res, 200, {
-      success: true,
-      url: `http://127.0.0.1:${PORT}/__danmaku/prepared/${entry.id}.xml`,
-      count: entry.count,
-      size: entry.body.length,
-      expiresAt: entry.expiresAtMs,
-      cached: result.cached,
-    });
-  } catch (error) {
-    const statusCode = Number(error?.statusCode || 500);
-    _sendJson(res, statusCode, {
-      success: false,
-      errorMessage: error?.message || '弹幕预取失败',
-    });
-  }
-}
-
-function _handlePreparedDanmaku(req, res, strippedPathname, fullUrl, clientIp) {
-  if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
-    _sendJson(res, 403, { success: false, errorMessage: 'Forbidden' });
-    return;
-  }
-  const method = String(req.method || 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    _sendJson(res, 405, { success: false, errorMessage: 'Method Not Allowed' });
-    return;
-  }
-  const prefix = '/__danmaku/prepared/';
-  const fileName = strippedPathname.substring(prefix.length);
-  const id = fileName.endsWith('.xml') ? fileName.slice(0, -4) : '';
-  if (!/^[a-z0-9-]+$/.test(id)) {
-    _sendJson(res, 404, { success: false, errorMessage: 'Prepared danmaku not found' });
-    return;
-  }
-  const entry = _getPreparedDanmakuById(id);
-  if (!entry) {
-    _sendJson(res, 404, { success: false, errorMessage: 'Prepared danmaku expired' });
-    return;
-  }
-  res.statusCode = 200;
-  res.setHeader('content-type', entry.contentType);
-  res.setHeader('content-length', String(entry.body.length));
-  res.setHeader('cache-control', 'no-store');
-  res.setHeader('x-danmaku-count', String(entry.count));
-  res.end(method === 'HEAD' ? undefined : entry.body);
-}
+const httpRoutes = createHttpRoutes({
+  http,
+  appManagement,
+  readClientIp,
+  readRequestBody,
+  normalizeClientIp,
+  guardSession,
+  runtimeDataContext,
+  configRuntime,
+  accessControl,
+  danmakuCache,
+  workerRuntime,
+  sourceProbe: require('./app-source-probe.js'),
+  appOutboundDiagnostics: require('./app-outbound-diagnostics.js'),
+  sendJson: _sendJson,
+  stripTokenPrefix: _stripTokenPrefix,
+  isAdminAuthorized: _isAdminAuthorized,
+  getEnvSnapshot: _getEnvSnapshot,
+  getOutboundSnapshot: () => _appOutbound?.snapshot(),
+  getRequestHandler: () => handleRequest,
+  getVariant: _getVariant,
+  getVariantInfo: variantKey => _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable,
+  getLoadedCoreDirectory: () => _loadedCoreDirectory,
+  getLoadedRuntimeVariant: () => _loadedRuntimeVariant,
+  getRuntimeIdentity: _getRuntimeIdentity,
+  getHost: () => HOST,
+  getPort: () => PORT,
+  getProxyPort: () => PROXY_PORT,
+  getCacheProbeDir: _resolveCacheProbeDir,
+  checkCacheProbeWritable: _checkCacheProbeWritable,
+  getMetrics: () => METRICS,
+  getLogFile: () => LOG_FILE,
+  getHome: () => HOME,
+  getProcess: () => process,
+  getNetworkFingerprint: () => networkRuntimeFingerprint,
+  maybeReloadCoreOnTraffic: _maybeReloadCoreOnTraffic,
+  removeQuietCoreLogNoise: _removeQuietCoreLogNoise,
+  quietLogScanStartHint: _quietLogScanStartHint,
+  isQuietCoreLogRequest: _isQuietCoreLogRequest,
+  applyDanmuXmlOverrides,
+  refreshLogLevel: () => serverLogging.refreshLogLevel(),
+  refreshLogConfig: () => serverLogging.refreshLogConfig(),
+  syncEnvToWorker: () => workerRuntime.syncEnvToWorker(),
+  requestShutdown: () => {
+    try { shutdownFn && shutdownFn(); } catch {}
+  },
+  envFile: ENV_FILE,
+  projectDir: __dirname,
+});
 
 function createMainServer() {
-  const server = http.createServer(async (req, res) => {
-    try {
-      const host = req.headers.host || `127.0.0.1:${PORT}`;
-      const fullUrl = new URL(req.url || '/', `http://${host}`);
-      const rawPathname = fullUrl.pathname || '/';
-      const strippedPathname = _stripTokenPrefix(rawPathname);
-      const clientIp = getClientIp(req);
-      const method = (req.method || 'GET').toUpperCase();
-
-      // Public discovery requests are not core API calls or malformed tokens.
-      if (rawPathname === '/.well-known/security.txt') {
-        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('Not Found');
-        return;
-      }
-
-      // Update simple metrics (for diagnostics UI)
-      try {
-        METRICS.requestCount++;
-        METRICS.lastRequestAt = Date.now();
-        METRICS.lastRequestPath = fullUrl.pathname || '';
-        METRICS.lastClientIp = clientIp || '';
-      } catch {}
-
-      maybeReloadConfigOnTraffic();
-      _maybeReloadCoreOnTraffic();
-
-      if (strippedPathname === '/__source-probe') {
-        if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
-          res.writeHead(403); res.end('Forbidden'); return;
-        }
-        const probe = require('./app-source-probe.js');
-        const info = _VARIANT_MAP[_getVariant()] || _VARIANT_MAP.stable;
-        const directory = _loadedCoreDirectory || path.join(__dirname, info.dir);
-        const env = _getEnvSnapshot();
-        if (method === 'GET') {
-          res.writeHead(200, {'content-type':'application/json'});
-          res.end(JSON.stringify(probe.catalog(directory, env))); return;
-        }
-        if (method !== 'POST') {res.writeHead(405);res.end();return;}
-        const controller = new AbortController();
-        const disconnect = () => {if(!res.writableEnded)controller.abort();};
-        res.once('close',disconnect);
-        try {
-          const source=fullUrl.searchParams.get('source');
-          const state=_activeWorkerState;
-          const result=state?.ready
-            ? (await _sendWorkerRequest(state,{type:'sourceProbe',source},20000,controller.signal)).result
-            : await probe.probeSource(source, {directory,env,snapshot:_appOutbound?.snapshot(),signal:controller.signal});
-          if(!res.destroyed){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(result));}
-        } catch {if(!res.destroyed){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({connected:false,status:'failed',reason:'来源探测未完成，请检查来源与服务状态'}));}}
-        finally {res.removeListener('close',disconnect);}
-        return;
-      }
-
-      // App-owned diagnostic; independent of the selected core version.
-      if (strippedPathname === '/__outbound') {
-        if (!_isAdminAuthorized(req, fullUrl, _normalizeClientIp(req.socket?.remoteAddress || ''))) {
-          res.writeHead(403); res.end('Forbidden'); return;
-        }
-        const current = _appOutbound?.snapshot() || {};
-        if (method !== 'POST') {
-          const {status, reason, config} = current;
-          res.writeHead(200, {'content-type':'application/json'});
-          res.end(JSON.stringify({status, reason, config:config ? {...config,proxy:undefined} : undefined})); return;
-        }
-        const source = fullUrl.searchParams.get('source');
-        const {diagnoseSource,diagnosticSources} = require('./app-outbound-diagnostics.js');
-        if (!diagnosticSources.includes(source)) { res.writeHead(400); res.end('Invalid source'); return; }
-        if (current.status !== 'ready' || !current.config?.enabled || !current.config.sources.includes(source)) {
-          res.writeHead(409, {'content-type':'application/json'});
-          res.end(JSON.stringify({ok:false,reason:current.reason || '请先启用对应来源并等待组件就绪'})); return;
-        }
-        const controller = new AbortController();
-        const disconnect = () => { if (!res.writableEnded) controller.abort(); };
-        res.once('close', disconnect);
-        try {
-          const result = await diagnoseSource(source, current, _getEnvSnapshot(), {signal:controller.signal});
-          if (!res.destroyed) {
-            const {httpStatus = 200, ...publicResult} = result;
-            res.writeHead(httpStatus, {'content-type':'application/json'});
-            res.end(JSON.stringify(publicResult));
-          }
-        } catch (error) {
-          if (!res.destroyed) {
-            res.writeHead(200, {'content-type':'application/json'});
-            res.end(JSON.stringify({ok:false,reason:'连接失败或取消'}));
-          }
-        } finally {
-          res.removeListener('close', disconnect);
-        }
-        return;
-      }
-
-      // Health endpoint (used by the Android app for status/diagnostics)
-      if (strippedPathname === '/__health') {
-        const variantKey = _getVariant();
-        const info = _VARIANT_MAP[variantKey] || _VARIANT_MAP.stable;
-        const cacheProbeDir = _resolveCacheProbeDir();
-        const cacheProbeWritable = _checkCacheProbeWritable(cacheProbeDir);
-        const runtimeIdentity = _getRuntimeIdentity();
-        const payload = {
-          ok: true,
-          time: new Date().toISOString(),
-          pid: process.pid,
-          node: process.version,
-          networkRuntimeFingerprint,
-          uptimeSec: Math.floor(process.uptime()),
-          host: HOST,
-          ports: { main: PORT, proxy: PROXY_PORT },
-          cwd: process.cwd(),
-          envHome: String(process.env.DANMU_API_HOME || ''),
-          resolvedHome: HOME,
-          cacheProbeDir,
-          cacheProbeWritable,
-          variant: variantKey,
-          variantLabel: info.label,
-          runtimeIdentity: runtimeIdentity || null,
-          requestCount: METRICS.requestCount,
-          lastRequestAt: METRICS.lastRequestAt,
-          lastRequestPath: METRICS.lastRequestPath,
-          lastClientIp: METRICS.lastClientIp,
-          envFileMtimeMs: _lastEnvMtimeMs,
-          logFile: LOG_FILE,
-          logLevel: String(process.env.LOG_LEVEL || 'info'),
-          accessControl: {
-            mode: _accessControl.mode || 'off',
-            whitelistCount: 0,
-            blacklistCount: _accessControl.blacklist.size,
-            blockedRequests: _accessBlockCount,
-          },
-        };
-        res.statusCode = 200;
-        res.setHeader('content-type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify(payload));
-        return;
-      }
-
-      // Android app uses this endpoint to request a graceful shutdown.
-      if (strippedPathname === '/__shutdown') {
-        if (!_isAdminAuthorized(req, fullUrl, clientIp)) {
-          res.statusCode = 403;
-          res.setHeader('content-type', 'text/plain; charset=utf-8');
-          res.end('Forbidden');
-          return;
-        }
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/plain; charset=utf-8');
-        res.end('OK');
-        // Delay a tick so the response has a chance to flush.
-        setTimeout(() => {
-          try { shutdownFn && shutdownFn(); } catch {}
-        }, 10);
-        return;
-      }
-
-      if (strippedPathname === '/__access-control') {
-        await _handleAccessControlEndpoint(req, res, fullUrl, clientIp);
-        return;
-      }
-
-      const accessResult = _evaluateClientAccess(clientIp, rawPathname);
-      const userAgent = String(req.headers['user-agent'] || '').trim();
-      if (!accessResult.allowed) {
-        _recordDeviceAccess({
-          clientIp: accessResult.clientIp,
-          method,
-          pathname: strippedPathname,
-          allowed: false,
-          reason: accessResult.reason,
-          userAgent,
-        });
-        _sendJson(res, 403, {
-          success: false,
-          errorCode: 403,
-          errorMessage: '设备访问受限',
-          mode: _accessControl.mode || 'off',
-          clientIp: accessResult.clientIp,
-          reason: accessResult.reason,
-        });
-        return;
-      }
-      if (!_isInternalAccessPath(fullUrl.pathname || '/')) {
-        _recordDeviceAccess({
-          clientIp: accessResult.clientIp || clientIp,
-          method,
-          pathname: strippedPathname,
-          allowed: true,
-          reason: accessResult.reason,
-          userAgent,
-        });
-      }
-
-      // All core variants use the App's shared config/.env. Never let a variant-local
-      // Node handler write a different .env and report a false successful hot update.
-      if (method === 'POST' && /\/api\/env\/(set|add|del)$/.test(rawPathname)) {
-        loadConfigOnce();
-        const action = appManagement.routeForAdmin(rawPathname, String(process.env.ADMIN_TOKEN || '').trim());
-        const origin = String(req.headers.origin || '');
-        if (!action || !appManagement.isManagementOriginAllowed(origin, host)) {
-          _sendJson(res, 403, { success: false, message: '需要管理员权限' });
-          return;
-        }
-        try {
-          const data = await appManagement.readManagementBody(req);
-          appManagement.saveEnvValue(ENV_FILE, data.key, data.value, action === 'del');
-          loadConfigOnce();
-          _refreshLogLevel();
-          _refreshLogConfig();
-          _syncEnvToWorker();
-          _sendJson(res, 200, { success: true, message: '配置已保存并热更新' });
-        } catch (error) {
-          _sendJson(res, error?.statusCode || 400, { success: false, message: '配置保存失败，请检查配置内容与目录权限' });
-        }
-        return;
-      }
-
-      // Build headers (Node gives lower-cased keys)
-      const headers = {};
-      for (const [k, v] of Object.entries(req.headers)) {
-        if (typeof v === 'undefined') continue;
-        headers[k] = v;
-      }
-
-      let body;
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-        const buf = await readRequestBody(req);
-        body = buf.length ? buf : undefined;
-      }
-
-      if (strippedPathname === '/__danmaku/prepare') {
-        await _handleDanmakuPrepare(req, res, fullUrl, clientIp, headers);
-        return;
-      }
-      if (strippedPathname.startsWith('/__danmaku/prepared/')) {
-        _handlePreparedDanmaku(req, res, strippedPathname, fullUrl, clientIp);
-        return;
-      }
-
-      // ------------------------------------------------------------
-      // Optional one-shot overrides for danmu XML output.
-      // Used by Android "Push danmu" UI to fix drift and temporarily override font size
-      // without mutating core env vars.
-      //
-      // Query params:
-      //  - offset (seconds, can be negative)
-      //  - offsetMs (milliseconds)
-      //  - fontSize (int)
-      // ------------------------------------------------------------
-      const offsetMsRaw = fullUrl.searchParams.get('offsetMs') || fullUrl.searchParams.get('offset_ms');
-      const offsetRaw = fullUrl.searchParams.get('offset') || fullUrl.searchParams.get('danmu_offset');
-      const fontRaw = fullUrl.searchParams.get('fontSize') || fullUrl.searchParams.get('font_size') || fullUrl.searchParams.get('fontsize');
-
-      let offsetSec = 0;
-      if (offsetMsRaw && String(offsetMsRaw).trim() !== '') {
-        const ms = Number.parseFloat(String(offsetMsRaw));
-        if (Number.isFinite(ms)) offsetSec = ms / 1000.0;
-      } else if (offsetRaw && String(offsetRaw).trim() !== '') {
-        const s = Number.parseFloat(String(offsetRaw));
-        if (Number.isFinite(s)) offsetSec = s;
-      }
-
-      let fontSize = null;
-      if (fontRaw && String(fontRaw).trim() !== '') {
-        const fs = Number.parseInt(String(fontRaw), 10);
-        if (Number.isFinite(fs) && fs > 0) fontSize = fs;
-      }
-
-      const shouldQuietCoreLogs = _isQuietCoreLogRequest(fullUrl, clientIp);
-      const quietLogStart = shouldQuietCoreLogs ? _quietLogScanStartHint() : 0;
-      const wantsOverride = strippedPathname.startsWith('/api/v2/comment/') &&
-        (Math.abs(offsetSec) > 1e-6 || fontSize !== null);
-
-      if (wantsOverride) {
-        // Hand a clean URL to core (avoid unknown param side-effects), then post-process output.
-        const cleanUrl = new URL(fullUrl.toString());
-        for (const k of ['offset', 'danmu_offset', 'offsetMs', 'offset_ms', 'fontSize', 'font_size', 'fontsize']) {
-          cleanUrl.searchParams.delete(k);
-        }
-
-        const coreReq = new Request(cleanUrl.toString(), {
-          method,
-          headers,
-          body,
-        });
-
-        let coreRes;
-        try {
-          coreRes = await handleRequest(coreReq, _getEnvSnapshot(), 'node', clientIp);
-        } finally {
-          if (shouldQuietCoreLogs) {
-            _removeQuietCoreLogNoise(quietLogStart);
-          }
-        }
-        const ct = String(coreRes.headers.get('content-type') || '').toLowerCase();
-        const rawText = await coreRes.text();
-
-        let outText = rawText;
-        if (ct.includes('xml') || rawText.trimStart().startsWith('<')) {
-          outText = _applyDanmuXmlOverrides(rawText, { offsetSec, fontSize });
-        }
-
-        const outHeaders = new Headers(coreRes.headers);
-        // Body has been rewritten; remove content-length/content-encoding to avoid mismatch.
-        outHeaders.delete('content-length');
-        outHeaders.delete('content-encoding');
-
-        const outRes = new Response(outText, {
-          status: coreRes.status,
-          headers: outHeaders,
-        });
-
-        await toNodeResponse(outRes, res);
-        return;
-      }
-
-      const webReq = new Request(fullUrl.toString(), {
-        method,
-        headers,
-        body,
-      });
-
-      let webRes;
-      try {
-        webRes = await handleRequest(webReq, _getEnvSnapshot(), 'node', clientIp);
-      } finally {
-        if (shouldQuietCoreLogs) {
-          _removeQuietCoreLogNoise(quietLogStart);
-        }
-      }
-      const section = fullUrl.searchParams.get('app_section');
-      if (method === 'GET' && webRes.status === 200 && ['env', 'logs'].includes(section) &&
-          String(webRes.headers.get('content-type') || '').toLowerCase().includes('text/html')) {
-        const html = appManagement.injectWebSection(await webRes.text(), section);
-        const rewrittenHeaders = new Headers(webRes.headers);
-        rewrittenHeaders.delete('content-length');
-        rewrittenHeaders.delete('content-encoding');
-        rewrittenHeaders.set('cache-control', 'no-store');
-        webRes = new Response(html, { status: webRes.status, headers: rewrittenHeaders });
-      }
-      await toNodeResponse(webRes, res);
-    } catch (e) {
-      res.statusCode = 500;
-      res.setHeader('content-type', 'text/plain; charset=utf-8');
-      res.end(`danmu_api server error: ${e?.stack || e}`);
-    }
-  });
-
-  return server;
-}
-
-// Proxy server mostly copied from upstream server.js, but rewritten for ESM
-function createProxyServer() {
-  const server = http.createServer(async (req, res) => {
-    if (!req.url) {
-      res.writeHead(400);
-      res.end('Invalid request');
-      return;
-    }
-
-    try {
-      const urlObj = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
-      const proxyPath = _stripTokenPrefix(urlObj.pathname || '/');
-      const clientIp = getClientIp(req);
-      const method = (req.method || 'GET').toUpperCase();
-      const userAgent = String(req.headers['user-agent'] || '').trim();
-
-      maybeReloadConfigOnTraffic();
-      _maybeReloadCoreOnTraffic();
-
-      if (proxyPath !== '/proxy') {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found');
-        return;
-      }
-
-      const accessResult = _evaluateClientAccess(clientIp, proxyPath);
-      if (!accessResult.allowed) {
-        _recordDeviceAccess({
-          clientIp: accessResult.clientIp,
-          method,
-          pathname: proxyPath,
-          allowed: false,
-          reason: accessResult.reason,
-          userAgent,
-        });
-        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({
-          success: false,
-          errorCode: 403,
-          errorMessage: '设备访问受限',
-          mode: _accessControl.mode || 'off',
-          clientIp: accessResult.clientIp,
-          reason: accessResult.reason,
-        }));
-        return;
-      }
-      _recordDeviceAccess({
-        clientIp: accessResult.clientIp || clientIp,
-        method,
-        pathname: proxyPath,
-        allowed: true,
-        reason: accessResult.reason,
-        userAgent,
-      });
-
-      if (!_isAdminAuthorized(req, urlObj, clientIp)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Forbidden');
-        return;
-      }
-
-      const targetUrl = urlObj.searchParams.get('url');
-      if (!targetUrl) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Missing url parameter');
-        return;
-      }
-
-      const proxyUrl = coreProxyConfig(process.env.PROXY_URL).forward;
-      if (!proxyUrl) throw new Error('未配置核心 HTTP 代理');
-      let proxyNode;
-      try {
-        const parsed=new URL(proxyUrl);
-        proxyNode={type:parsed.protocol.slice(0,-1),host:parsed.hostname,port:Number(parsed.port || (parsed.protocol==='https:'?443:80)),
-          username:decodeURIComponent(parsed.username),password:decodeURIComponent(parsed.password)};
-      } catch { throw new Error('核心 HTTP 代理地址无效，请检查 PROXY_URL'); }
-
-      const targetUrlObj = new URL(targetUrl);
-      if (!['http:', 'https:'].includes(targetUrlObj.protocol)) throw new Error('仅支持 HTTP/HTTPS 目标');
-
-      const requestOptions = {
-        hostname: targetUrlObj.hostname,
-        port: targetUrlObj.port || (targetUrlObj.protocol === 'https:' ? 443 : 80),
-        path: targetUrlObj.pathname + targetUrlObj.search,
-        method: req.method || 'GET',
-        headers: {
-          ...req.headers,
-          host: targetUrlObj.host,
-        },
-      };
-
-      // Read body if needed
-      let bodyBuf = null;
-      if (method !== 'GET') {
-        bodyBuf = await readRequestBody(req);
-      }
-
-      const proxyReq = require('./app-proxy-routing.js').requestThroughProxy(targetUrlObj,requestOptions,proxyNode,(proxyRes) => {
-        // Copy status + headers
-        res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
-
-        proxyRes.on('data', (chunk) => res.write(chunk));
-        proxyRes.on('end', () => res.end());
-      });
-
-      proxyReq.on('error', (err) => {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end(`Proxy error: ${err.message}`);
-      });
-
-      if (bodyBuf && bodyBuf.length) proxyReq.write(bodyBuf);
-      proxyReq.end();
-    } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end(`Error: ${error.message}`);
-    }
-  });
-
-  return server;
-}
-
-// Serialize config reloads so rapid edits cannot open duplicate helper listeners.
-function _syncForwardProxyHelper() {
-  const sync = async () => {
-    if (_shutdownPromise || !_mainServer?.listening) return;
-    if (!_hasForwardProxyHelperDemand()) {
-      const previous = _proxyServer;
-      _proxyServer = null;
-      await _closeServer(previous);
-      return;
-    }
-    if (_proxyServer?.listening) return;
-    const server = createProxyServer();
-    _proxyServer = server;
-    try {
-      await new Promise((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(_listenOptions(PROXY_PORT), () => {
-          log(`Proxy server listening on ${_listenUrl(PROXY_PORT, '/proxy?url=...')}`);
-          resolve();
-        });
-      });
-    } catch (error) {
-      log(`Proxy helper unavailable on ${HOST}:${PROXY_PORT}:`, error.code || 'listen failed');
-      await _closeServer(server);
-      if (_proxyServer === server) _proxyServer = null;
-    }
-  };
-  _proxyHelperSync = _proxyHelperSync.then(sync, sync);
-  return _proxyHelperSync;
+  return httpRoutes.createServer();
 }
 
 async function main() {
   clearStartupFailure();
   ensureDirs();
-  loadConfigOnce();
+  configRuntime.loadConfigOnce();
   // .env 读取后再解析监听地址，确保 App 设置端口生效。
   _refreshListenConfigFromEnv();
   _refreshRuntimeFlags();
   const startupCacheDir = _resolveCacheProbeDir();
   log(`[runtime] cwd=${process.cwd()} envHome=${String(process.env.DANMU_API_HOME || '')} home=${HOME} cacheDir=${startupCacheDir}`);
   // Enable file logging after .env has been loaded (LOG_LEVEL takes effect)
-  setupFileLogging();
-  _appOutbound = createAppOutboundRuntime({..._appOutboundPaths, log, onSnapshot: () => _syncEnvToWorker()});
+  serverLogging.setupFileLogging();
+  _appOutbound = createAppOutboundRuntime({..._appOutboundPaths, log, onSnapshot: () => workerRuntime.syncEnvToWorker()});
   await _appOutbound.start();
   await _loadHandleRequestForVariant();
-  _syncEnvToWorker();
-  watchConfigs();
+  workerRuntime.syncEnvToWorker();
+  configRuntime.watch();
 
   _mainServer = createMainServer();
-  _proxyServer = null;
 
   await new Promise((resolve, reject) => {
     _mainServer.listen(_listenOptions(PORT), () => {
@@ -2839,7 +921,7 @@ async function main() {
     _mainServer.on('error', reject);
   });
 
-  await _syncForwardProxyHelper();
+  await proxyHelper.sync();
 
   shutdownFn = () => {
     void _gracefulShutdown(0, 'api');

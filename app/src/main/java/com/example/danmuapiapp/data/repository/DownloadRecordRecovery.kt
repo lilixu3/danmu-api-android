@@ -3,9 +3,9 @@ package com.example.danmuapiapp.data.repository
 import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
 import com.example.danmuapiapp.domain.model.DanmuDownloadFormat
 import com.example.danmuapiapp.domain.model.DownloadRecordStatus
-import com.example.danmuapiapp.ui.screen.download.canonicalSourceKey
 import com.example.danmuapiapp.domain.model.cleanDownloadAnimeTitle
-import com.example.danmuapiapp.ui.screen.download.extractSourceFromAnimeTitle
+import com.example.danmuapiapp.domain.model.canonicalSourceKey
+import com.example.danmuapiapp.domain.model.extractSourceFromAnimeTitle
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 

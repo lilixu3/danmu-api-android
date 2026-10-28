@@ -7,6 +7,30 @@ import org.junit.Test
 class AdminModeRequiredPromptPolicyTest {
 
     @Test
+    fun `clear logs prompt offers admin login when a password is configured`() {
+        val prompt = adminModeRequiredPrompt(
+            target = AdminModeRequiredTarget.ClearLogs,
+            hasAdminTokenConfigured = true
+        )
+
+        assertEquals("需要管理员模式", prompt.title)
+        assertTrue(prompt.message.contains("清理日志"))
+        assertTrue(prompt.message.contains("开启管理员模式"))
+        assertEquals("输入管理员密码", prompt.confirmText)
+    }
+
+    @Test
+    fun `clear logs prompt offers quick setup when an admin password is missing`() {
+        val prompt = adminModeRequiredPrompt(
+            target = AdminModeRequiredTarget.ClearLogs,
+            hasAdminTokenConfigured = false
+        )
+
+        assertTrue(prompt.message.contains("配置管理员密码"))
+        assertEquals("配置管理员密码", prompt.confirmText)
+    }
+
+    @Test
     fun `config item prompt should offer admin password entry`() {
         val prompt = adminModeRequiredPrompt(
             target = AdminModeRequiredTarget.ConfigItem("AI_API_KEY"),

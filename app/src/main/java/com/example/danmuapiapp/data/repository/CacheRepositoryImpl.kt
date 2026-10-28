@@ -6,34 +6,29 @@ import android.content.Context
 import com.example.danmuapiapp.data.util.ParseUtils.decodeUtf8
 import com.example.danmuapiapp.data.util.ParseUtils.parseTimestamp
 import com.example.danmuapiapp.data.util.RuntimeApiAccess
-import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.RuntimeManagementPaths
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
-import com.example.danmuapiapp.data.service.RootShell
-import com.example.danmuapiapp.data.service.RuntimePaths
-import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
-import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CacheClearCapability
 import com.example.danmuapiapp.domain.model.CacheClearItem
 import com.example.danmuapiapp.domain.model.CacheClearResult
 import com.example.danmuapiapp.domain.model.CacheClearSupport
 import com.example.danmuapiapp.domain.model.CacheEntry
 import com.example.danmuapiapp.domain.model.CacheStats
-import com.example.danmuapiapp.domain.model.RunMode
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CacheRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,18 +41,10 @@ import javax.inject.Singleton
 class CacheRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient,
-    private val adminSessionRepository: AdminSessionRepository
+    private val adminSessionRepository: AdminSessionRepository,
+    private val runtimeData: com.example.danmuapiapp.data.service.RuntimeDataAccess
 ) : CacheRepository {
 
-    companion object {
-        private const val RUNTIME_PREFS_NAME = "runtime"
-        private const val CAPABILITY_PREFS_NAME = "cache_clear_capability"
-        private const val DEFAULT_PORT = 9321
-    }
-
-
-    private val runtimePrefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-    private val capabilityPrefs = context.getSharedPreferences(CAPABILITY_PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _cacheStats = MutableStateFlow(CacheStats())
     override val cacheStats: StateFlow<CacheStats> = _cacheStats.asStateFlow()
@@ -71,42 +58,64 @@ class CacheRepositoryImpl @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     private var capabilityIdentity: String? = null
-    private var capabilitySourceFingerprint: String? = null
+
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    init {
+        runtimeData.changes.onEach {
+            _cacheStats.value = CacheStats()
+            _cacheEntries.value = emptyList()
+            _clearCapability.value = CacheClearCapability()
+        }.launchIn(scope)
+    }
 
     override suspend fun refresh() {
         _isLoading.value = true
         try {
-            val runtime = resolveRuntimeApiAccess()
-            refreshClearCapabilityWithoutPassiveRootProbe()
-            val previousStats = _cacheStats.value
-            val result = fetchReqRecordStats(runtime)
-            val animeSummary = fetchAnimeCacheSummary(runtime)
-            _cacheStats.value = result?.let { stats ->
-                val base = stats.copy(
-                    lastClearedAt = stats.lastClearedAt ?: previousStats.lastClearedAt
-                )
-                if (animeSummary.available) {
-                    base.copy(
-                        animeCacheCount = animeSummary.animeCacheCount,
-                        mergedSourceCount = animeSummary.mergedSourceCount,
-                        episodeLinkCount = animeSummary.episodeLinkCount
-                    )
-                } else {
-                    base.copy(
-                        animeCacheCount = previousStats.animeCacheCount,
-                        mergedSourceCount = previousStats.mergedSourceCount,
-                        episodeLinkCount = previousStats.episodeLinkCount
-                    )
+            runtimeData.withRuntime { target ->
+                val runtime = target.access
+                if (capabilityIdentity != target.sessionKey) {
+                    _cacheStats.value = CacheStats()
+                    _cacheEntries.value = emptyList()
                 }
-            } ?: previousStats.copy(
-                isAvailable = animeSummary.available,
-                animeCacheCount = if (animeSummary.available) animeSummary.animeCacheCount else previousStats.animeCacheCount,
-                mergedSourceCount = if (animeSummary.available) animeSummary.mergedSourceCount else previousStats.mergedSourceCount,
-                episodeLinkCount = if (animeSummary.available) animeSummary.episodeLinkCount else previousStats.episodeLinkCount
-            )
-            if (result != null) {
-                _cacheEntries.value = result.recentEntries
+                capabilityIdentity = target.sessionKey
+                _clearCapability.value = CacheClearCapability(target.cacheClearSupport)
+                val previousStats = _cacheStats.value
+                val result = fetchReqRecordStats(runtime)
+                val animeSummary = fetchAnimeCacheSummary(runtime)
+                runtimeData.requireCurrent(target)
+                _cacheStats.value = result?.let { stats ->
+                    val base = stats.copy(
+                        lastClearedAt = stats.lastClearedAt ?: previousStats.lastClearedAt
+                    )
+                    if (animeSummary.available) {
+                        base.copy(
+                            animeCacheCount = animeSummary.animeCacheCount,
+                            mergedSourceCount = animeSummary.mergedSourceCount,
+                            episodeLinkCount = animeSummary.episodeLinkCount
+                        )
+                    } else {
+                        base.copy(
+                            animeCacheCount = previousStats.animeCacheCount,
+                            mergedSourceCount = previousStats.mergedSourceCount,
+                            episodeLinkCount = previousStats.episodeLinkCount
+                        )
+                    }
+                } ?: previousStats.copy(
+                    isAvailable = animeSummary.available,
+                    animeCacheCount = if (animeSummary.available) animeSummary.animeCacheCount else previousStats.animeCacheCount,
+                    mergedSourceCount = if (animeSummary.available) animeSummary.mergedSourceCount else previousStats.mergedSourceCount,
+                    episodeLinkCount = if (animeSummary.available) animeSummary.episodeLinkCount else previousStats.episodeLinkCount
+                )
+                if (result != null) {
+                    _cacheEntries.value = result.recentEntries
+                }
             }
+        } catch (error: Exception) {
+            _cacheStats.value = CacheStats()
+            _cacheEntries.value = emptyList()
+            _clearCapability.value = CacheClearCapability()
+            throw error
         } finally {
             _isLoading.value = false
         }
@@ -114,76 +123,72 @@ class CacheRepositoryImpl @Inject constructor(
 
     override suspend fun clear(items: Set<CacheClearItem>): Result<CacheClearResult> {
         return runCatchingCancellable {
-            require(items.isNotEmpty()) { "请至少选择一项缓存" }
-            val runtime = resolveRuntimeApiAccess()
-            val adminState = adminSessionRepository.sessionState.value
-            val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim('/')
-            when {
-                !adminState.hasAdminTokenConfigured -> {
-                    throw Exception("当前核心要求 ADMIN_TOKEN，请先到 设置 > 管理员权限 配置")
+            runtimeData.withRuntime { target ->
+                require(items.isNotEmpty()) { "请至少选择一项缓存" }
+                val runtime = target.access
+                val adminState = adminSessionRepository.sessionState.value
+                val adminToken = adminSessionRepository.currentAdminTokenOrNull().trim('/')
+                when {
+                    !adminState.hasAdminTokenConfigured -> {
+                        throw Exception("当前核心要求 ADMIN_TOKEN，请先到 设置 > 管理员权限 配置")
+                    }
+                    !adminState.isAdminMode -> {
+                        throw Exception("请先到 设置 > 管理员权限 开启管理员模式，再清理缓存")
+                    }
+                    adminToken.isBlank() -> {
+                        throw Exception("管理员令牌为空，请重新进入管理员模式后重试")
+                    }
                 }
-                !adminState.isAdminMode -> {
-                    throw Exception("请先到 设置 > 管理员权限 开启管理员模式，再清理缓存")
-                }
-                adminToken.isBlank() -> {
-                    throw Exception("管理员令牌为空，请重新进入管理员模式后重试")
-                }
-            }
 
-            val identity = currentCapabilityIdentity()
-            val sourceFingerprint = currentCapabilitySourceFingerprint()
-            val support = _clearCapability.value.support.takeIf {
-                capabilityIdentity == identity &&
-                    capabilitySourceFingerprint == sourceFingerprint &&
-                    it != CacheClearSupport.Unknown
-            } ?: detectClearSupport()
-            capabilityIdentity = identity
-            capabilitySourceFingerprint = sourceFingerprint
-            persistClearCapability(capabilityIdentity.orEmpty(), support)
-            _clearCapability.value = CacheClearCapability(support)
-            val allItems = CacheClearItem.entries.toSet()
-            if (support != CacheClearSupport.Selective && items != allItems) {
-                throw IllegalStateException("当前核心不支持按项清理，请全选后使用兼容清理")
-            }
-            val useSelective = support == CacheClearSupport.Selective
-            val requestBody = if (useSelective) CacheClearProtocol.requestBody(items) else ""
-            val url = RuntimeApiUrls.local(runtime.port, adminToken, "api/cache/clear")
-            val request = Request.Builder()
-                .url(url)
-                .applyRuntimeApiAuth(runtime)
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val result = httpClient.newOutboundCall(request).executeCancellable().use { response ->
-                val body = runCatching { response.body.string() }.getOrDefault("")
-                response.code to body
-            }
-            val code = result.first
-            val body = result.second
-            if (code in 200..299) {
-                val response = CacheClearProtocol.parseResponse(body)
-                if (response.success == false) {
-                    throw Exception(response.message ?: "核心拒绝了缓存清理请求")
+                val support = target.cacheClearSupport
+                check(support != CacheClearSupport.Unknown) { "无法确认当前核心清理协议，未发送删除请求" }
+                capabilityIdentity = target.sessionKey
+                _clearCapability.value = CacheClearCapability(support)
+                val allItems = CacheClearItem.entries.toSet()
+                if (support != CacheClearSupport.Selective && items != allItems) {
+                    throw IllegalStateException("当前核心不支持按项清理，请全选后使用兼容清理")
                 }
-                val clearedAt = System.currentTimeMillis()
-                val effectiveItems = response.clearedItems?.let { clearedKeys ->
-                    val requestedItems = if (useSelective) items else allItems
-                    requestedItems.filterTo(linkedSetOf()) { it.wireKey in clearedKeys }
-                }.orEmpty()
-                val isVerified = response.clearedItems != null
-                if (isVerified) applyOptimisticClear(effectiveItems, clearedAt)
-                refresh()
-                if (isVerified) {
-                    _cacheStats.value = _cacheStats.value.copy(lastClearedAt = clearedAt)
-                }
-                return@runCatchingCancellable CacheClearResult(
-                    clearedItems = effectiveItems,
-                    usedSelectiveProtocol = useSelective,
-                    isVerified = isVerified
-                )
-            }
+                val useSelective = support == CacheClearSupport.Selective
+                val requestBody = if (useSelective) CacheClearProtocol.requestBody(items) else ""
+                val url = RuntimeApiUrls.local(runtime.port, adminToken, "api/cache/clear")
+                val request = Request.Builder()
+                    .url(url)
+                    .applyRuntimeApiAuth(runtime)
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .build()
 
-            throw Exception(extractErrorMessage(body, code))
+                val result = httpClient.newBuilder().retryOnConnectionFailure(false).build()
+                    .newOutboundCall(request).executeCancellable().use { response ->
+                    val body = runCatching { response.body.string() }.getOrDefault("")
+                    response.code to body
+                }
+                val code = result.first
+                val body = result.second
+                if (code in 200..299) {
+                    val response = CacheClearProtocol.parseResponse(body)
+                    if (response.success == false) {
+                        throw Exception(response.message ?: "核心拒绝了缓存清理请求")
+                    }
+                    val clearedAt = System.currentTimeMillis()
+                    val effectiveItems = response.clearedItems?.let { clearedKeys ->
+                        val requestedItems = if (useSelective) items else allItems
+                        requestedItems.filterTo(linkedSetOf()) { it.wireKey in clearedKeys }
+                    }.orEmpty()
+                    val isVerified = response.clearedItems != null
+                    if (isVerified) applyOptimisticClear(effectiveItems, clearedAt)
+                    refresh()
+                    if (isVerified) {
+                        _cacheStats.value = _cacheStats.value.copy(lastClearedAt = clearedAt)
+                    }
+                    return@withRuntime CacheClearResult(
+                        clearedItems = effectiveItems,
+                        usedSelectiveProtocol = useSelective,
+                        isVerified = isVerified
+                    )
+                }
+
+                throw Exception(extractErrorMessage(body, code))
+            }
         }
     }
 
@@ -206,165 +211,6 @@ class CacheRepositoryImpl @Inject constructor(
         )
         if (clearRequests) _cacheEntries.value = emptyList()
     }
-
-    private fun detectClearSupport(): CacheClearSupport {
-        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
-            .orEmpty()
-            .ifBlank { ApiVariant.Stable.key }
-        val mode = RuntimePaths.currentRunMode(context)
-        val coreDir = File(RuntimePaths.projectDir(context, mode), "danmu_api_$variantKey")
-        val sources = if (mode == RunMode.Root) {
-            readRootClearProtocolSources(coreDir.absolutePath)
-        } else {
-            readNormalClearProtocolSources(coreDir)
-        }
-        return CacheClearProtocol.detectSupport(sources.systemApi, sources.worker)
-    }
-
-    private fun refreshClearCapabilityWithoutPassiveRootProbe() {
-        val mode = RuntimePaths.currentRunMode(context)
-        val identity = currentCapabilityIdentity()
-        val sourceFingerprint = currentCapabilitySourceFingerprint()
-        if (capabilityIdentity == identity &&
-            capabilitySourceFingerprint == sourceFingerprint &&
-            _clearCapability.value.support != CacheClearSupport.Unknown
-        ) {
-            return
-        }
-        if (mode == RunMode.Root) {
-            val mirrorSupport = detectClearSupportFromNormalMirror()
-            val support = if (mirrorSupport != CacheClearSupport.Unknown) {
-                persistClearCapability(identity, mirrorSupport)
-                mirrorSupport
-            } else {
-                readPersistedClearCapability(identity)
-            }
-            capabilityIdentity = identity
-            capabilitySourceFingerprint = sourceFingerprint
-            _clearCapability.value = CacheClearCapability(support)
-            return
-        }
-        capabilityIdentity = identity
-        capabilitySourceFingerprint = sourceFingerprint
-        val support = detectClearSupport()
-        persistClearCapability(identity, support)
-        _clearCapability.value = CacheClearCapability(support)
-    }
-
-    private fun currentCapabilityIdentity(): String {
-        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
-            .orEmpty()
-            .ifBlank { ApiVariant.Stable.key }
-        return "${RuntimePaths.currentRunMode(context).name}:$variantKey"
-    }
-
-    private fun currentCapabilitySourceFingerprint(): String {
-        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
-            .orEmpty()
-            .ifBlank { ApiVariant.Stable.key }
-        val mode = RuntimePaths.currentRunMode(context)
-        val coreDir = if (mode == RunMode.Root) {
-            File(RuntimePaths.normalProjectDir(context), "danmu_api_$variantKey")
-        } else {
-            File(RuntimePaths.projectDir(context, mode), "danmu_api_$variantKey")
-        }
-        return (systemApiCandidates(coreDir) + workerCandidates(coreDir))
-            .asSequence()
-            .filter { it.isFile }
-            .joinToString("|") { file ->
-                "${file.absolutePath}:${file.length()}:${file.lastModified()}"
-            }
-            .ifBlank { "missing" }
-    }
-
-    private fun detectClearSupportFromNormalMirror(): CacheClearSupport {
-        val variantKey = runtimePrefs.getString("variant", ApiVariant.Stable.key)
-            .orEmpty()
-            .ifBlank { ApiVariant.Stable.key }
-        val mirrorDir = File(RuntimePaths.normalProjectDir(context), "danmu_api_$variantKey")
-        val sources = readNormalClearProtocolSources(mirrorDir)
-        return CacheClearProtocol.detectSupport(sources.systemApi, sources.worker)
-    }
-
-    private fun persistClearCapability(identity: String, support: CacheClearSupport) {
-        if (identity.isBlank() || support == CacheClearSupport.Unknown) return
-        if (capabilityPrefs.getString(identity, null) == support.name) return
-        capabilityPrefs.edit().putString(identity, support.name).apply()
-    }
-
-    private fun readPersistedClearCapability(identity: String): CacheClearSupport {
-        val raw = capabilityPrefs.getString(identity, null) ?: return CacheClearSupport.Unknown
-        return CacheClearSupport.entries.firstOrNull { it.name == raw }
-            ?: CacheClearSupport.Unknown
-    }
-
-    private data class CacheClearProtocolSources(
-        val systemApi: String?,
-        val worker: String?
-    )
-
-    private fun readNormalClearProtocolSources(coreDir: File): CacheClearProtocolSources {
-        return CacheClearProtocolSources(
-            systemApi = readNormalSource(systemApiCandidates(coreDir)),
-            worker = readNormalSource(workerCandidates(coreDir))
-        )
-    }
-
-    private fun readNormalSource(candidates: List<File>): String? {
-        return candidates.firstNotNullOfOrNull { file ->
-            runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()
-        }
-    }
-
-    private fun readRootClearProtocolSources(coreDirPath: String): CacheClearProtocolSources {
-        return CacheClearProtocolSources(
-            systemApi = readRootSource(rootSystemApiCandidates(coreDirPath)),
-            worker = readRootSource(rootWorkerCandidates(coreDirPath))
-        )
-    }
-
-    private fun readRootSource(candidates: List<String>): String? {
-        val args = candidates.joinToString(" ") { shellQuote(it) }
-        val script = """
-            for FILE in $args; do
-              [ -f "${'$'}FILE" ] || continue
-              cat "${'$'}FILE" 2>/dev/null
-              exit ${'$'}?
-            done
-            exit 2
-        """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 3500L)
-        return result.stdout.takeIf { result.ok && it.isNotBlank() }
-    }
-
-    private fun systemApiCandidates(coreDir: File): List<File> = listOf(
-        File(coreDir, "apis/system-api.js"),
-        File(coreDir, "danmu_api/apis/system-api.js"),
-        File(coreDir, "danmu-api/apis/system-api.js")
-    )
-
-    private fun workerCandidates(coreDir: File): List<File> = listOf(
-        File(coreDir, "worker.js"),
-        File(coreDir, "danmu_api/worker.js"),
-        File(coreDir, "danmu-api/worker.js")
-    )
-
-    private fun rootSystemApiCandidates(coreDirPath: String): List<String> = listOf(
-        "$coreDirPath/apis/system-api.js",
-        "$coreDirPath/danmu_api/apis/system-api.js",
-        "$coreDirPath/danmu-api/apis/system-api.js"
-    )
-
-    private fun rootWorkerCandidates(coreDirPath: String): List<String> = listOf(
-        "$coreDirPath/worker.js",
-        "$coreDirPath/danmu_api/worker.js",
-        "$coreDirPath/danmu-api/worker.js"
-    )
-
-    private fun resolveRuntimeApiAccess(): RuntimeApiAccess {
-        return RuntimeApiAccessResolver.resolve(context, runtimePrefs, DEFAULT_PORT)
-    }
-
 
     private fun fetchReqRecordStats(runtime: RuntimeApiAccess): CacheStats? {
         recordTokenPaths(runtime).forEach { tokenPath ->
@@ -402,22 +248,22 @@ class CacheRepositoryImpl @Inject constructor(
     )
 
     private fun fetchAnimeCacheSummary(runtime: RuntimeApiAccess): AnimeCacheSummary {
-        recordTokenPaths(runtime).forEach { tokenPath ->
-            val url = RuntimeApiUrls.local(runtime.port, tokenPath, "api/cache/animes")
-            val summary = runCatching {
-                val request = Request.Builder()
-                    .url(url)
-                    .applyRuntimeApiAuth(runtime)
-                    .get()
-                    .build()
-                httpClient.newOutboundCall(request).execute().use { response ->
-                    if (response.code !in 200..299) return@use null
-                    parseAnimeCacheSummary(response.body.string())
-                }
-            }.getOrNull()
-            if (summary != null) return summary
-        }
-        return AnimeCacheSummary()
+        val tokenPath = RuntimeManagementPaths.adminTokenPath(
+            adminMode = adminSessionRepository.sessionState.value.isAdminMode,
+            adminToken = adminSessionRepository.currentAdminTokenOrNull()
+        ) ?: return AnimeCacheSummary()
+        val url = RuntimeApiUrls.local(runtime.port, tokenPath, "api/cache/animes")
+        return runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .applyRuntimeApiAuth(runtime)
+                .get()
+                .build()
+            httpClient.newOutboundCall(request).execute().use { response ->
+                if (response.code !in 200..299) return@use null
+                parseAnimeCacheSummary(response.body.string())
+            }
+        }.getOrNull() ?: AnimeCacheSummary()
     }
 
     private fun parseAnimeCacheSummary(raw: String): AnimeCacheSummary? {

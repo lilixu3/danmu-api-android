@@ -34,31 +34,67 @@ import com.example.danmuapiapp.ui.screen.download.buildAnimeSearchResultPresenta
 @Composable
 internal fun ApiAnimeResultsPage(viewModel: ApiTestViewModel, keyword: String, onBack: () -> Unit,
     onRetry: () -> Unit, onFavorite: () -> Unit, onSelect: (DownloadAnimeCandidate) -> Unit) {
-    val candidates = viewModel.manualAnimeCandidates
-    val favorite = viewModel.favoriteForKeyword(keyword)
+    AnimeResultsPage(
+        keyword = keyword,
+        candidates = viewModel.manualAnimeCandidates,
+        isSearching = viewModel.isSearchingAnime,
+        errorMessage = viewModel.errorMessage,
+        grid = viewModel.animeResultsGrid,
+        isSavingLayout = viewModel.isSavingAnimeResultsLayout,
+        showLayoutToggle = true,
+        favorite = viewModel.favoriteForKeyword(keyword),
+        favoriteBusy = viewModel.favoriteOperation != null,
+        onBack = onBack,
+        onRetry = onRetry,
+        onToggleLayout = viewModel::toggleAnimeResultsLayout,
+        onToggleFavorite = onFavorite,
+        onSelect = onSelect
+    )
+}
+
+@Composable
+internal fun AnimeResultsPage(
+    keyword: String,
+    candidates: List<DownloadAnimeCandidate>,
+    isSearching: Boolean,
+    errorMessage: String?,
+    grid: Boolean,
+    isSavingLayout: Boolean,
+    showLayoutToggle: Boolean,
+    favorite: ApiTestFavoriteItem?,
+    favoriteBusy: Boolean,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onToggleLayout: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onSelect: (DownloadAnimeCandidate) -> Unit
+) {
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     Column(Modifier.fillMaxSize()) {
         ApiPageHeader("搜索结果", onBack, "$keyword · ${candidates.size} 个结果", actions = {
-            TextButton(onClick = viewModel::toggleAnimeResultsLayout, enabled = !viewModel.isSavingAnimeResultsLayout,
-                modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) {
-                if (viewModel.isSavingAnimeResultsLayout) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                else Icon(if (viewModel.animeResultsGrid) Icons.Outlined.ViewAgenda else Icons.Outlined.GridView,
-                    if (viewModel.animeResultsGrid) "切换为列表布局" else "切换为双列布局", Modifier.size(18.dp))
+            if (showLayoutToggle) {
+                TextButton(onClick = onToggleLayout, enabled = !isSavingLayout,
+                    modifier = Modifier.size(40.dp), contentPadding = PaddingValues(0.dp)) {
+                    if (isSavingLayout) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                    else Icon(if (grid) Icons.Outlined.ViewAgenda else Icons.Outlined.GridView,
+                        if (grid) "切换为列表布局" else "切换为双列布局", Modifier.size(18.dp))
+                }
             }
-            TextButton(onClick = onFavorite, enabled = viewModel.favoriteOperation == null && keyword.isNotBlank()) {
-                Icon(if (favorite == null) Icons.Rounded.BookmarkBorder else Icons.Rounded.Bookmark, null, Modifier.size(18.dp))
+            TextButton(onClick = onToggleFavorite, enabled = !favoriteBusy && keyword.isNotBlank()) {
+                if (favoriteBusy && favorite == null) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                else Icon(if (favorite == null) Icons.Rounded.BookmarkBorder else Icons.Rounded.Bookmark, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(5.dp))
                 Text(if (favorite == null) "收藏" else "已收藏", fontSize = 12.sp)
             }
         })
         when {
-            viewModel.isSearchingAnime -> ApiLoading()
-            viewModel.errorMessage != null && candidates.isEmpty() -> ApiEmpty("搜索失败", viewModel.errorMessage.orEmpty()) {
+            isSearching -> ApiLoading()
+            errorMessage != null && candidates.isEmpty() -> ApiEmpty("搜索失败", errorMessage.orEmpty()) {
                 ApiAction("重试", Icons.Rounded.Refresh, onRetry)
             }
             candidates.isEmpty() -> ApiEmpty("没有搜索到「$keyword」", "返回搜索页，换个关键词试试")
-            viewModel.animeResultsGrid -> LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
+            grid -> LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -148,9 +184,15 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
         episodes.filter { filter.isBlank() || it.title.contains(filter.trim(), ignoreCase = true) ||
             it.episodeNumber.toString() == filter.trim() }
     }
+    val episodeListState = rememberLazyListState()
+    LaunchedEffect(anime?.animeId, anime?.directUrl, visible) {
+        val currentIndex = visible.indexOfFirst { it.directUrl.isNotBlank() && it.directUrl == anime?.directUrl }
+        if (currentIndex >= 0 && filter.isBlank()) episodeListState.scrollToItem(currentIndex)
+    }
     Column(Modifier.fillMaxSize()) {
         ApiPageHeader(anime?.title ?: "选择剧集", onBack,
-            listOfNotNull(anime?.sourceLabel?.ifBlank { "未知来源" }, "${episodes.size} 集").joinToString(" · "))
+            listOfNotNull(anime?.sourceLabel?.ifBlank { "未知来源" },
+                if (anime?.directUrl?.isNotBlank() == true) "${episodes.size} 个播放条目" else "${episodes.size} 集").joinToString(" · "))
         when {
             viewModel.isLoadingEpisodes -> ApiLoading()
             viewModel.errorMessage != null && episodes.isEmpty() -> ApiEmpty("获取剧集失败", viewModel.errorMessage.orEmpty()) {
@@ -159,12 +201,16 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
             anime == null -> ApiEmpty("请返回选择番剧")
             episodes.isEmpty() -> ApiEmpty("该动漫暂无剧集")
             else -> {
+                if (anime.directMetadataNotice.isNotBlank()) {
+                    Text(anime.directMetadataNotice, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 ApiInput(filter, { filter = it }, "筛选集数（例如 12）", Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     leading = Icons.Rounded.Search, trailing = {
                         if (filter.isNotEmpty()) IconButton(onClick = { filter = "" }) { Icon(Icons.Rounded.Close, "清空筛选", Modifier.size(16.dp)) }
                     })
                 if (visible.isEmpty()) ApiEmpty("没有匹配的剧集", "换个集数或清空筛选")
-                else LazyColumn(contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp),
+                else LazyColumn(state = episodeListState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(visible, key = { index, episode -> "$index:${episode.episodeId}:${episode.directUrl}" }) { _, episode ->
                         ApiCard(radius = 14, onClick = { if (!viewModel.isLoadingManualDanmu) onSelect(anime, episode) }) {
@@ -172,7 +218,8 @@ internal fun ApiEpisodePage(viewModel: ApiTestViewModel, onBack: () -> Unit, onR
                                 Text(episode.title.ifBlank { "第 ${episode.episodeNumber} 集" }, Modifier.weight(1f),
                                     fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.width(8.dp))
-                                Text("弹幕", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(if (anime.directUrl.isNotBlank() && episode.directUrl == anime.directUrl) "当前链接 · 弹幕" else "弹幕",
+                                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.primary)
                                 Icon(Icons.Rounded.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                             }
                         }

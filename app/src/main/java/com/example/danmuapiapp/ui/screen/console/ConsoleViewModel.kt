@@ -27,9 +27,23 @@ class ConsoleViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
+    private val _showAdminRequiredDialog = MutableStateFlow(false)
+    val showAdminRequiredDialog = _showAdminRequiredDialog.asStateFlow()
+
     fun refreshLogs() = runtimeRepo.refreshLogs()
 
-    fun clearLogs() = runtimeRepo.clearLogs()
+    fun clearLogs() {
+        if (!adminSessionState.value.isAdminMode) {
+            _showAdminRequiredDialog.value = true
+            return
+        }
+        _showAdminRequiredDialog.value = false
+        runtimeRepo.clearLogs()
+    }
+
+    fun dismissAdminRequiredDialog() {
+        _showAdminRequiredDialog.value = false
+    }
 
     fun setLogEnabled(enabled: Boolean) = settingsRepository.setLogEnabled(enabled)
 

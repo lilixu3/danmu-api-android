@@ -7,8 +7,6 @@ import com.example.danmuapiapp.data.repository.LocalDanmuErrorKind
 import com.example.danmuapiapp.data.repository.LocalDanmuImportManager
 import com.example.danmuapiapp.data.repository.LocalDanmuFileBrowser
 import com.example.danmuapiapp.data.repository.LocalDanmuImportedIndex
-import com.example.danmuapiapp.data.repository.LocalDanmuMetadataResolver
-import com.example.danmuapiapp.data.repository.LocalDanmuResourceKey
 import com.example.danmuapiapp.data.repository.LocalDanmuSourceStore
 import com.example.danmuapiapp.data.repository.LocalDanmuUploadHistoryStore
 import com.example.danmuapiapp.data.repository.matchMigratedResourceKeys
@@ -16,14 +14,10 @@ import com.example.danmuapiapp.data.repository.validateLocalDanmuEdit
 import com.example.danmuapiapp.domain.model.LocalDanmuEditScope
 import com.example.danmuapiapp.domain.model.LocalDanmuGroup
 import com.example.danmuapiapp.domain.model.LocalDanmuMetadataPatch
-import com.example.danmuapiapp.domain.model.LocalDanmuParseConfidence
 import com.example.danmuapiapp.domain.model.LocalDanmuResource
+import com.example.danmuapiapp.domain.model.LocalDanmuResourceKey
 import com.example.danmuapiapp.domain.model.LocalDanmuSnapshot
-import com.example.danmuapiapp.domain.model.LocalDanmuSourceKind
-import com.example.danmuapiapp.domain.model.LocalDanmuSourceRef
 import com.example.danmuapiapp.domain.model.LocalDanmuType
-import com.example.danmuapiapp.domain.model.LocalDanmuUploadRequest
-import com.example.danmuapiapp.domain.model.LocalDanmuWritePermission
 import com.example.danmuapiapp.domain.repository.LocalDanmuRepository
 import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.ui.screen.download.DanmuPreviewDialogState
@@ -35,106 +29,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Calendar
 import javax.inject.Inject
-
-/**
- * 元数据编辑弹窗状态。scope=Resource 时只有集数/文件名字段生效，
- * scope=Group 时只有标题/年份/类型/季数生效（对应核心 PATCH 的两档范围）。
- */
-data class LocalDanmuEditState(
-    val target: LocalDanmuResource? = null,
-    val scope: LocalDanmuEditScope = LocalDanmuEditScope.Resource,
-    val title: String = "",
-    val year: Int? = null,
-    val type: LocalDanmuType = LocalDanmuType.Tv,
-    val season: Int? = null,
-    val episode: Int? = null,
-    val filename: String = "",
-    val isSaving: Boolean = false,
-    val errorMessage: String? = null
-) {
-    val isVisible: Boolean get() = target != null
-    val isMovie: Boolean get() = type == LocalDanmuType.Movie
-}
-
-data class LocalDanmuUiState(
-    val isLoading: Boolean = false,
-    val snapshot: LocalDanmuSnapshot = LocalDanmuSnapshot(emptyList(), emptyList()),
-    val writePermission: LocalDanmuWritePermission = LocalDanmuWritePermission.ReadOnly,
-    val localSourceEnabled: Boolean = false,
-    val searchQuery: String = "",
-    val typeFilter: String? = null,
-    val expandedGroupKeys: Set<String> = emptySet(),
-    val message: String? = null,
-    val errorMessage: String? = null,
-    val allFilesAccessGranted: Boolean = false,
-    val browser: LocalDanmuBrowserState = LocalDanmuBrowserState(),
-    val batch: LocalDanmuBatchState = LocalDanmuBatchState(),
-    val detailResource: LocalDanmuResource? = null,
-    val editState: LocalDanmuEditState = LocalDanmuEditState(),
-    val previewState: DanmuPreviewDialogState = DanmuPreviewDialogState(),
-    val pendingDeleteResources: List<LocalDanmuResource> = emptyList(),
-    val deleteInProgress: Boolean = false,
-    val deleteProgress: String = ""
-) {
-    val filteredGroups: List<LocalDanmuGroup>
-        get() {
-            val query = searchQuery.trim()
-            return snapshot.groups.filter { group ->
-                val typeMatches = typeFilter == null || group.type == typeFilter
-                val queryMatches = query.isBlank() ||
-                    group.title.contains(query, ignoreCase = true) ||
-                    group.episodes.any { episode ->
-                        episode.filename.contains(query, ignoreCase = true) ||
-                            episode.episode?.toString() == query
-                    }
-                typeMatches && queryMatches
-            }
-        }
-
-    val totalEpisodeFiles: Int get() = snapshot.resources.size
-    val totalDanmuCount: Int get() = snapshot.resources.sumOf { it.count }
-    val totalSizeBytes: Long get() = snapshot.resources.sumOf { it.sizeBytes }
-}
-
-/**
- * 核心 PATCH scope=group 的作用范围：同标题、同年份、同类型、同季的全部资源。
- * app 侧只用于展示「会改到几个文件」，核心仍是最终判定方。
- */
-internal fun localDanmuGroupResources(
-    resources: List<LocalDanmuResource>,
-    target: LocalDanmuResource
-): List<LocalDanmuResource> {
-    val normalizedTitle = LocalDanmuResourceKey.normalizeKey(target.title)
-    val normalizedType = LocalDanmuResourceKey.normalizeType(target.type)
-    return resources.filter { resource ->
-        LocalDanmuResourceKey.normalizeKey(resource.title) == normalizedTitle &&
-            resource.year == target.year &&
-            LocalDanmuResourceKey.normalizeType(resource.type) == normalizedType &&
-            resource.season == target.season
-    }
-}
-
-data class LocalDanmuBrowserState(
-    val visible: Boolean = false,
-    val path: String = "",
-    val parent: String? = null,
-    val rows: List<LocalDanmuBrowserRow> = emptyList(),
-    val isLoading: Boolean = false,
-    val truncated: Boolean = false,
-    val error: String? = null,
-    val selectedPaths: Set<String> = emptySet(),
-    val isDefaultDirectory: Boolean = false
-) {
-    val selectedCount: Int get() = selectedPaths.size
-    /** 当前目录下可勾选的文件（不含子目录）。 */
-    val selectablePaths: List<String>
-        get() = rows.filterNot { it.entry.isDirectory }.map { it.entry.path }
-    val allSelected: Boolean
-        get() = selectablePaths.isNotEmpty() && selectablePaths.all { it in selectedPaths }
-}
 
 @HiltViewModel
 class LocalDanmuViewModel @Inject constructor(
@@ -144,18 +40,61 @@ class LocalDanmuViewModel @Inject constructor(
     private val sourceStore: LocalDanmuSourceStore,
     private val uploadHistoryStore: LocalDanmuUploadHistoryStore,
     private val runtimeRepository: RuntimeRepository,
-    private val uploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService
+    private val uploader: com.example.danmuapiapp.data.repository.LocalDanmuUploadService,
+    private val runtimeData: com.example.danmuapiapp.data.service.RuntimeDataAccess,
+    private val downloads: com.example.danmuapiapp.domain.repository.DanmuDownloadRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocalDanmuUiState())
     val uiState: StateFlow<LocalDanmuUiState> = _uiState.asStateFlow()
     private var importedIndex: Map<String, String> = emptyMap()
-    private var batchItemId = 0L
     private var refreshJob: Job? = null
     private var detailJob: Job? = null
     private var previewJob: Job? = null
 
+    /**
+     * 目录浏览与批量导入各自的状态与规则都在子控制器里；
+     * 这里持有两者共用的 uiState、导入索引与错误文案映射。
+     */
+    private val batchImport = LocalDanmuBatchImportController(
+        scope = viewModelScope,
+        repository = repository,
+        importManager = importManager,
+        uploader = uploader,
+        downloads = downloads,
+        runtimeData = runtimeData,
+        uiState = _uiState,
+        importedIndex = { importedIndex },
+        userMessage = { userMessage(it) },
+        refreshAndAwait = { refreshAndAwait() }
+    )
+
+    private val directoryBrowser = LocalDanmuDirectoryBrowserController(
+        scope = viewModelScope,
+        fileBrowser = fileBrowser,
+        uploadHistoryStore = uploadHistoryStore,
+        uiState = _uiState,
+        importedIndex = { importedIndex },
+        onImportSelected = { paths -> batchImport.addFilePaths(paths) }
+    )
+
     init {
+        viewModelScope.launch {
+            var observed = runtimeData.changes.value
+            runtimeData.changes.collect { generation ->
+                if (generation != observed) {
+                    observed = generation
+                    detailJob?.cancel()
+                    previewJob?.cancel()
+                    importedIndex = emptyMap()
+                    _uiState.update { it.copy(snapshot = LocalDanmuSnapshot(emptyList(), emptyList()),
+                        detailResource = null, editState = LocalDanmuEditState(), pendingDeleteResources = emptyList(),
+                        previewState = DanmuPreviewDialogState(),
+                        batch = if (it.batch.isRunning) it.batch.copy(cancelRequested = true) else LocalDanmuBatchState()) }
+                    refreshNow()
+                }
+            }
+        }
         viewModelScope.launch {
             repository.writePermission.collect { permission ->
                 _uiState.update { it.copy(writePermission = permission) }
@@ -169,16 +108,27 @@ class LocalDanmuViewModel @Inject constructor(
         refresh()
     }
 
-    /** 自动刷新：命中内存快照或直读核心缓存，通常不发（慢的）列表接口。 */
     fun refresh() = refreshInternal(force = false)
 
     /** 手动刷新（点刷新、导入/删除完成）：强制重新读一次。 */
     fun refreshNow() = refreshInternal(force = true)
 
+    /**
+     * 批量导入结束后：强制刷新列表，并等这次刷新真正结束再报结果
+     * （刷新失败时提示「无需重复上传」依赖这个顺序）。
+     */
+    private suspend fun refreshAndAwait() {
+        refreshNow()
+        refreshJob?.join()
+    }
+
     private fun refreshInternal(force: Boolean) {
         // 进入页面时 init 与 ON_START 会各触发一次刷新，这里合并成一次；
         // 连点「重试」也不会堆叠出重复请求。
-        if (refreshJob?.isActive == true) return
+        if (refreshJob?.isActive == true) {
+            if (!force) return
+            refreshJob?.cancel()
+        }
         refreshJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -189,9 +139,10 @@ class LocalDanmuViewModel @Inject constructor(
             }
             repository.refresh(force = force).fold(
                 onSuccess = { snapshot ->
+                    if (!runtimeData.isCurrentSession(snapshot.sessionKey)) return@fold
                     importedIndex = LocalDanmuImportedIndex.build(
                         resources = snapshot.resources,
-                        sources = sourceStore.all()
+                        sources = sourceStore.all(snapshot.libraryId)
                     )
                     _uiState.update {
                         it.copy(
@@ -199,7 +150,7 @@ class LocalDanmuViewModel @Inject constructor(
                             snapshot = snapshot,
                             errorMessage = null,
                             browser = it.browser.copy(
-                                rows = remapBrowserRows(it.browser.rows, it.browser.selectedPaths)
+                                rows = directoryBrowser.remapBrowserRows(it.browser.rows, it.browser.selectedPaths)
                             )
                         )
                     }
@@ -280,219 +231,33 @@ class LocalDanmuViewModel @Inject constructor(
         _uiState.update { it.copy(allFilesAccessGranted = fileBrowser.isAllFilesAccessGranted()) }
     }
 
-    fun openDirectoryBrowser() {
-        val start = fileBrowser.preferredDirectory(
-            remembered = uploadHistoryStore.recentDirectory(),
-            custom = uploadHistoryStore.customDirectory()
-        )
-        _uiState.update { it.copy(browser = it.browser.copy(visible = true)) }
-        browseDirectory(start)
-    }
+    fun openDirectoryBrowser() = directoryBrowser.openDirectoryBrowser()
 
-    fun browseDirectory(path: String) {
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    browser = it.browser.copy(
-                        visible = true,
-                        isLoading = true,
-                        path = fileBrowser.normalize(path),
-                        error = null
-                    )
-                )
-            }
-            fileBrowser.list(path).fold(
-                onSuccess = { snapshot ->
-                    uploadHistoryStore.saveRecentDirectory(snapshot.path)
-                    _uiState.update {
-                        it.copy(
-                            browser = it.browser.copy(
-                                visible = true,
-                                isLoading = false,
-                                path = snapshot.path,
-                                parent = snapshot.parent,
-                                rows = snapshot.entries.map { entry -> toBrowserRow(entry, it.browser.selectedPaths) },
-                                truncated = snapshot.truncated,
-                                error = null,
-                                isDefaultDirectory = snapshot.path == defaultDirectory()
-                            )
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            browser = it.browser.copy(
-                                isLoading = false,
-                                error = error.message?.takeIf { message -> message.isNotBlank() }
-                                    ?: "无法读取该目录"
-                            )
-                        )
-                    }
-                }
-            )
-        }
-    }
+    fun browseDirectory(path: String) = directoryBrowser.browseDirectory(path)
 
-    fun browseParent() {
-        val parent = _uiState.value.browser.parent ?: return
-        browseDirectory(parent)
-    }
+    fun browseParent() = directoryBrowser.browseParent()
 
-    fun browseDefaultDirectory() {
-        browseDirectory(defaultDirectory())
-    }
+    fun browseDefaultDirectory() = directoryBrowser.browseDefaultDirectory()
 
-    fun closeDirectoryBrowser() {
-        _uiState.update {
-            it.copy(
-                browser = it.browser.copy(
-                    visible = false,
-                    error = null,
-                    selectedPaths = emptySet()
-                )
-            )
-        }
-    }
+    fun closeDirectoryBrowser() = directoryBrowser.closeDirectoryBrowser()
 
-    fun toggleBrowserSelection(path: String) {
-        _uiState.update { state ->
-            val selected = state.browser.selectedPaths.toMutableSet()
-            if (!selected.add(path)) selected.remove(path)
-            state.copy(
-                browser = state.browser.copy(
-                    selectedPaths = selected,
-                    rows = state.browser.rows.map { row ->
-                        if (row.entry.isDirectory) {
-                            row
-                        } else {
-                            row.copy(selected = row.entry.path in selected)
-                        }
-                    }
-                )
-            )
-        }
-    }
+    fun toggleBrowserSelection(path: String) = directoryBrowser.toggleBrowserSelection(path)
 
-    /** 全选 / 取消全选当前目录下的文件（不含子目录）。 */
-    fun toggleBrowserSelectAll() {
-        _uiState.update { state ->
-            val paths = state.browser.selectablePaths
-            if (paths.isEmpty()) return@update state
-            val selected = if (state.browser.allSelected) {
-                state.browser.selectedPaths - paths.toSet()
-            } else {
-                state.browser.selectedPaths + paths
-            }
-            state.copy(
-                browser = state.browser.copy(
-                    selectedPaths = selected,
-                    rows = state.browser.rows.map { row ->
-                        if (row.entry.isDirectory) {
-                            row
-                        } else {
-                            row.copy(selected = row.entry.path in selected)
-                        }
-                    }
-                )
-            )
-        }
-    }
+    fun selectBrowserPaths(paths: Set<String>) = directoryBrowser.selectBrowserPaths(paths)
 
-    fun setBrowserDefaultDirectory() {
-        val path = _uiState.value.browser.path
-        if (path.isBlank()) return
-        uploadHistoryStore.saveCustomDirectory(path)
-        _uiState.update {
-            it.copy(
-                browser = it.browser.copy(isDefaultDirectory = true),
-                message = "已把该目录设为默认浏览目录"
-            )
-        }
-    }
+    fun toggleBrowserSelectAll() = directoryBrowser.toggleBrowserSelectAll()
 
-    /** 目录多选 → 批量导入面板。 */
-    fun importSelectedBrowserFiles() {
-        val paths = _uiState.value.browser.selectedPaths.toList()
-        if (paths.isEmpty()) return
-        closeDirectoryBrowser()
-        addBatchSources(sources = paths) { path -> importManager.preparePath(path) }
-    }
+    fun setBrowserDefaultDirectory() = directoryBrowser.setBrowserDefaultDirectory()
+
+    fun importSelectedBrowserFiles() = directoryBrowser.importSelectedBrowserFiles()
 
     // ───────────────────────────── 批量导入 ─────────────────────────────
 
-    private fun addBatchSources(
-        sources: List<String>,
-        prepare: suspend (String) -> Result<LocalDanmuImportManager.PreparedFile>
-    ) {
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    batch = it.batch.copy(visible = true, isRunning = true, cancelRequested = false),
-                    errorMessage = null
-                )
-            }
-            val items = mutableListOf<LocalDanmuBatchItem>()
-            val failures = mutableListOf<String>()
-            sources.forEach { source ->
-                prepare(source).fold(
-                    onSuccess = { prepared -> items += batchItemOf(prepared) },
-                    onFailure = { error ->
-                        failures += "${source.substringAfterLast('/')}：${
-                            error.message?.takeIf { it.isNotBlank() } ?: "无法读取文件"
-                        }"
-                    }
-                )
-            }
-            val prepared = markBatchDuplicates(items)
-            _uiState.update { state ->
-                state.copy(
-                    batch = state.batch.copy(
-                        visible = true,
-                        isRunning = false,
-                        items = state.batch.items + prepared
-                    ),
-                    errorMessage = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
-                )
-            }
-        }
-    }
+    fun toggleBatchSelected(id: Long) = batchImport.toggleBatchSelected(id)
 
-    private fun batchItemOf(prepared: LocalDanmuImportManager.PreparedFile): LocalDanmuBatchItem {
-        val parsed = LocalDanmuMetadataResolver.resolve(
-            fileName = prepared.displayName,
-            relativePath = prepared.displayName
-        )
-        val imported = LocalDanmuImportedIndex.lookup(importedIndex,
-            LocalDanmuImportedIndex.pathFromUri(prepared.sourceUri).orEmpty(), prepared.displayName, prepared.sizeBytes ?: 0L)
-        return LocalDanmuBatchItem(
-            selected = imported == null,
-            id = ++batchItemId,
-            sourceUri = prepared.sourceUri,
-            displayName = prepared.displayName,
-            sizeBytes = prepared.sizeBytes,
-            formatHint = prepared.formatHint,
-            mimeType = prepared.mimeType,
-            title = parsed.title,
-            year = parsed.year ?: Calendar.getInstance().get(Calendar.YEAR),
-            type = LocalDanmuType.fromWire(parsed.type) ?: LocalDanmuType.Tv,
-            season = parsed.season ?: 1,
-            episode = parsed.episode ?: 1,
-            confidence = parsed.confidence,
-            importedLabel = LocalDanmuImportedIndex.lookup(
-                index = importedIndex,
-                path = LocalDanmuImportedIndex.pathFromUri(prepared.sourceUri).orEmpty(),
-                name = prepared.displayName,
-                sizeBytes = prepared.sizeBytes ?: 0L
-            )
-        )
-    }
+    fun selectBatchItems(ids: Set<Long>) = batchImport.selectBatchItems(ids)
 
-    fun toggleBatchSelected(id: Long) {
-        updateBatchItem(id) {
-            if (it.status == LocalDanmuBatchStatus.Uploading) it else it.copy(selected = !it.selected)
-        }
-    }
+    fun setBatchType(type: LocalDanmuType?) = batchImport.setBatchType(type)
 
     fun updateBatchItemMetadata(
         id: Long,
@@ -501,181 +266,17 @@ class LocalDanmuViewModel @Inject constructor(
         type: LocalDanmuType,
         season: Int?,
         episode: Int?
-    ) {
-        updateBatchItem(id) {
-            it.copy(
-                title = title,
-                year = year,
-                type = type,
-                season = season,
-                episode = episode,
-                confidence = LocalDanmuParseConfidence.Medium
-            )
-        }
-    }
+    ) = batchImport.updateBatchItemMetadata(id, title, year, type, season, episode)
 
-    fun removeBatchItem(id: Long) {
-        _uiState.update { state ->
-            state.copy(batch = state.batch.copy(items = state.batch.items.filterNot { it.id == id }))
-        }
-    }
+    fun removeBatchItem(id: Long) = batchImport.removeBatchItem(id)
 
-    fun closeBatch() {
-        if (_uiState.value.batch.isRunning) return
-        _uiState.update { it.copy(batch = LocalDanmuBatchState()) }
-    }
+    fun closeBatch() = batchImport.closeBatch()
 
-    fun cancelBatchImport() {
-        _uiState.update { it.copy(batch = it.batch.copy(cancelRequested = true)) }
-    }
+    fun cancelBatchImport() = batchImport.cancelBatchImport()
 
-    fun retryFailedBatch() {
-        if (_uiState.value.batch.isRunning) return
-        _uiState.update { state ->
-            state.copy(
-                batch = state.batch.copy(
-                    items = state.batch.items.map { item ->
-                        if (item.status == LocalDanmuBatchStatus.Failed) {
-                            item.copy(status = LocalDanmuBatchStatus.Ready, selected = true, progress = 0f)
-                        } else {
-                            item
-                        }
-                    }
-                )
-            )
-        }
-        runBatchImport()
-    }
+    fun retryFailedBatch() = batchImport.retryFailedBatch()
 
-    fun runBatchImport() {
-        if (_uiState.value.batch.isRunning) return
-        val targets = _uiState.value.batch.items.filter { it.canImport }
-        if (targets.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "没有可导入的条目，请检查标题、年份、季集") }
-            return
-        }
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    batch = it.batch.copy(
-                        isRunning = true,
-                        cancelRequested = false,
-                        total = targets.size,
-                        completed = 0
-                    ),
-                    errorMessage = null
-                )
-            }
-            var success = 0
-            var failed = 0
-            for (item in targets) {
-                if (_uiState.value.batch.cancelRequested) break
-                updateBatchItem(item.id) {
-                    it.copy(status = LocalDanmuBatchStatus.Uploading, progress = 0f, message = "")
-                }
-                val year = item.year ?: continue
-                uploadPreparedFile(
-                    sourceUri = item.sourceUri,
-                    displayName = item.displayName,
-                    year = year,
-                    type = item.type,
-                    season = item.season,
-                    episode = item.episode,
-                    title = item.title,
-                    formatHint = item.formatHint,
-                    sizeBytes = item.sizeBytes,
-                    mimeType = item.mimeType,
-                    onProgress = { progress ->
-                        updateBatchItem(item.id) { current ->
-                            if (progress >= 1f || progress - current.progress >= 0.05f) {
-                                current.copy(progress = progress)
-                            } else {
-                                current
-                            }
-                        }
-                    }
-                ).fold(
-                    onSuccess = { resource ->
-                        success++
-                        updateBatchItem(item.id) {
-                            it.copy(
-                                status = LocalDanmuBatchStatus.Success,
-                                progress = 1f,
-                                message = "${resource.count} 条弹幕"
-                            )
-                        }
-                    },
-                    onFailure = { error ->
-                        failed++
-                        updateBatchItem(item.id) {
-                            it.copy(
-                                status = LocalDanmuBatchStatus.Failed,
-                                progress = 0f,
-                                message = userMessage(error)
-                            )
-                        }
-                    }
-                )
-                _uiState.update { it.copy(batch = it.batch.copy(completed = it.batch.completed + 1)) }
-            }
-            val canceled = _uiState.value.batch.cancelRequested
-            refreshNow()
-            _uiState.update {
-                it.copy(
-                    batch = it.batch.copy(isRunning = false, cancelRequested = false),
-                    message = when {
-                        canceled -> "已取消批量导入：成功 $success 个，失败 $failed 个"
-                        failed == 0 -> "批量导入完成：成功 $success 个"
-                        else -> "批量导入完成：成功 $success 个，失败 $failed 个"
-                    }
-                )
-            }
-        }
-    }
-
-    private fun updateBatchItem(
-        id: Long,
-        transform: (LocalDanmuBatchItem) -> LocalDanmuBatchItem
-    ) {
-        _uiState.update { state ->
-            state.copy(
-                batch = state.batch.copy(
-                    items = state.batch.items.map { if (it.id == id) transform(it) else it }
-                )
-            )
-        }
-    }
-
-    private fun defaultDirectory(): String = fileBrowser.preferredDirectory(
-        remembered = uploadHistoryStore.recentDirectory(),
-        custom = uploadHistoryStore.customDirectory()
-    )
-
-    private fun toBrowserRow(
-        entry: LocalDanmuFileBrowser.Entry,
-        selectedPaths: Set<String>
-    ): LocalDanmuBrowserRow {
-        val imported = if (entry.isDirectory) {
-            null
-        } else {
-            LocalDanmuImportedIndex.lookup(
-                index = importedIndex,
-                path = entry.path,
-                name = entry.name,
-                sizeBytes = entry.sizeBytes
-            )
-        }
-        return LocalDanmuBrowserRow(
-            entry = entry,
-            importedLabel = imported,
-            selected = entry.path in selectedPaths
-        )
-    }
-
-    private fun remapBrowserRows(
-        rows: List<LocalDanmuBrowserRow>,
-        selectedPaths: Set<String>
-    ): List<LocalDanmuBrowserRow> = rows.map { row -> toBrowserRow(row.entry, selectedPaths) }
+    fun runBatchImport() = batchImport.runBatchImport()
 
     // ───────────────────────── 详情/预览/删除 ─────────────────────────
 
@@ -685,7 +286,7 @@ class LocalDanmuViewModel @Inject constructor(
         val cached = _uiState.value.snapshot.resources.firstOrNull { it.resourceKey == resourceKey }
         if (cached != null) _uiState.update { it.copy(detailResource = cached, previewState = DanmuPreviewDialogState()) }
         detailJob = viewModelScope.launch {
-            repository.loadDetail(resourceKey).fold(
+            repository.loadDetail(resourceKey, _uiState.value.snapshot.sessionKey).fold(
                 onSuccess = { resource -> _uiState.update { if (it.detailResource?.resourceKey == resourceKey) it.copy(detailResource = resource) else it } },
                 onFailure = { error ->
                     if (cached == null) {
@@ -804,7 +405,8 @@ class LocalDanmuViewModel @Inject constructor(
             type = edit.type.takeIf { scoped },
             season = edit.season.takeIf { scoped },
             episode = edit.episode.takeIf { !scoped },
-            filename = edit.filename.trim().takeIf { !scoped }
+            filename = edit.filename.trim().takeIf { !scoped },
+            expectedSessionKey = target.sessionKey
         )
         val affected = when (edit.scope) {
             LocalDanmuEditScope.Resource -> listOf(target)
@@ -813,10 +415,20 @@ class LocalDanmuViewModel @Inject constructor(
         }
         viewModelScope.launch {
             updateEdit { it.copy(isSaving = true, errorMessage = null) }
-            repository.updateMetadata(target.resourceKey, patch).fold(
+            com.example.danmuapiapp.data.repository.runLocalDanmuRequest {
+                runtimeData.withRuntime(target.sessionKey) {
+                    repository.updateMetadata(target.resourceKey, patch).getOrThrow().also { result ->
+                        val mappings = matchMigratedResourceKeys(affected, result.resources)
+                        sourceStore.migrate(target.libraryId, mappings)
+                        val associations = downloads.records.value.mapNotNull { record ->
+                            mappings[record.localImports[target.libraryId]]?.let { record.id to it }
+                        }.toMap()
+                        downloads.markRecordsImported(target.libraryId, associations, mediaType = edit.type.wire)
+                    }
+                }
+            }.fold(
                 onSuccess = { result ->
-                    // 编辑会重算 resourceKey，来源记录必须跟着迁移，否则预览失效。
-                    sourceStore.migrate(matchMigratedResourceKeys(affected, result.resources))
+                    if (!runtimeData.isCurrentSession(target.sessionKey)) return@fold
                     _uiState.update {
                         it.copy(
                             editState = LocalDanmuEditState(),
@@ -861,7 +473,7 @@ class LocalDanmuViewModel @Inject constructor(
             it.copy(previewState = DanmuPreviewDialogState(loadingRecordId = -1L))
         }
         previewJob = viewModelScope.launch {
-            repository.loadPreview(resourceKey).fold(
+            repository.loadPreview(resourceKey, _uiState.value.snapshot.sessionKey).fold(
                 onSuccess = { preview ->
                     _uiState.update {
                         it.copy(previewState = DanmuPreviewDialogState(preview = preview))
@@ -909,7 +521,7 @@ class LocalDanmuViewModel @Inject constructor(
         if (resources.isEmpty()) return
         _uiState.update { it.copy(pendingDeleteResources = emptyList(), deleteInProgress = true) }
         viewModelScope.launch {
-            repository.deleteMany(resources.map { it.resourceKey }) { done, total ->
+            repository.deleteMany(resources.map { it.resourceKey }, resources.firstOrNull()?.sessionKey.orEmpty()) { done, total ->
                 _uiState.update { it.copy(deleteProgress = "$done/$total") }
             }.fold(
                 onSuccess = { count ->
@@ -981,25 +593,4 @@ class LocalDanmuViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 单文件上传与批量导入共用：构造上传请求，成功后把来源登记到本地来源表
-     * （详情页预览要用它按 uri 读原文件）。
-     */
-    private suspend fun uploadPreparedFile(
-        sourceUri: String,
-        displayName: String,
-        title: String,
-        year: Int,
-        type: LocalDanmuType,
-        season: Int?,
-        episode: Int?,
-        formatHint: String,
-        sizeBytes: Long?,
-        mimeType: String,
-        onProgress: (Float) -> Unit
-    ): Result<LocalDanmuResource> {
-        return uploader.upload(LocalDanmuBatchItem(id = 0, sourceUri = sourceUri,
-            displayName = displayName, sizeBytes = sizeBytes, formatHint = formatHint, mimeType = mimeType,
-            title = title, year = year, type = type, season = season, episode = episode), onProgress)
-    }
 }

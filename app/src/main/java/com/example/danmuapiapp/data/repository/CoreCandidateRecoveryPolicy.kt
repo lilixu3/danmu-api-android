@@ -3,6 +3,18 @@ package com.example.danmuapiapp.data.repository
 import com.example.danmuapiapp.domain.model.ApiVariant
 import com.example.danmuapiapp.domain.model.CoreCandidateState
 import com.example.danmuapiapp.domain.model.RunMode
+import kotlinx.serialization.Serializable
+
+@Serializable
+internal data class PersistedCoreCandidate(
+    val variantKey: String,
+    val runModeKey: String,
+    val actionLabel: String,
+    val installedAtMs: Long,
+    val targetDirPath: String,
+    val rootDirPath: String,
+    val backupDirPath: String = ""
+)
 
 internal object CoreCandidateRecoveryPolicy {
     fun matchesAttempt(

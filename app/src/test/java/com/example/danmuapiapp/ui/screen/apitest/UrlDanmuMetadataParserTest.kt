@@ -3,6 +3,7 @@ package com.example.danmuapiapp.ui.screen.apitest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class UrlDanmuMetadataParserTest {
@@ -17,7 +18,7 @@ class UrlDanmuMetadataParserTest {
                 <meta property="og:image" content="https://vpic-cover.puui.qpic.cn/r31988651g6/r31988651g6_1775669338_hz.jpg/496?imageMogr2/format/avif/thumbnail/252x" />
               </head>
               <body>
-                second_title:"《罪妻边王》",episode_all:"144",new_pic_hz:"https://vcover-hz-pic.puui.qpic.cn/vcover_hz_pic/0/mzc003ajnrzy3991775668803/0",new_pic_vt:"https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc003ajnrzy3991775668804/0"
+                window.COVER_INFO = {id:"mzc003ajnrzy399",second_title:"《罪妻边王》",episode_all:"144",new_pic_hz:"https://vcover-hz-pic.puui.qpic.cn/vcover_hz_pic/0/mzc003ajnrzy3991775668803/0",new_pic_vt:"https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc003ajnrzy3991775668804/0"};
                 videoInfoMap:{r31988651g6:{title:"第1集",unionTitle:"第1集",imgUrl:"https://vpic-cover.puui.qpic.cn/r31988651g6/r31988651g6_1775669338_hz.jpg/496?imageMogr2/format/avif/thumbnail/252x"}}
               </body>
             </html>
@@ -44,7 +45,8 @@ class UrlDanmuMetadataParserTest {
                 <meta itemprop="image" content="//vcover-hz-pic.puui.qpic.cn/vcover_hz_pic/0/yl6lapwmmx5ivew1754982955561/0?max_age=7776000" />
               </head>
               <body>
-                {"year":"2017","second_title":"妖神记","episode":"01","title":"妖神记_01","pic496x280":"http:\\u002F\\u002Fpuui.qpic.cn\\u002Fvpic_cover\\u002Fm0501m4tc0q\\u002Fm0501m4tc0q_hz.jpg\\u002F496"}
+                window.COVER_INFO = {"id":"yl6lapwmmx5ivew","year":"2017","second_title":"妖神记","pic496x280":"http:\\u002F\\u002Fpuui.qpic.cn\\u002Fvpic_cover\\u002Fm0501m4tc0q\\u002Fm0501m4tc0q_hz.jpg\\u002F496"}
+                window.VIDEO_INFO = {vid:"m0501m4tc0q",title:"妖神记 第1集"};
               </body>
             </html>
         """.trimIndent()
@@ -72,5 +74,35 @@ class UrlDanmuMetadataParserTest {
             "https://vpic-cover.puui.qpic.cn/r31988651g6/r31988651g6_1775669338_hz.jpg/496?imageMogr2/thumbnail/252x",
             normalized
         )
+    }
+
+    @Test
+    fun `unrelated recommendations cannot override current page title poster year or episode`() {
+        val metadata = parseUrlDanmuMetadata("https://www.bilibili.com/video/BV11xX5BjECL", """
+            <title>康斯坦丁_哔哩哔哩_bilibili</title>
+            <meta property="og:image" content="https://i0.hdslb.com/current-video-cover.jpg" />
+            <script>{"title":"广告", "pic":"https://i0.hdslb.com/a.jpg", "year":"1999", "episode":"9"}</script>
+        """)!!
+        assertEquals("康斯坦丁", metadata.title)
+        assertEquals("https://i0.hdslb.com/current-video-cover.jpg", metadata.posterUrl)
+        assertEquals("", metadata.episodeLabel)
+        assertEquals("", metadata.year)
+    }
+
+    @Test
+    fun `page declaring another video is rejected`() {
+        assertNull(parseUrlDanmuMetadata("https://www.bilibili.com/video/BVcurrent", """
+            <title>另一个视频</title><meta property="og:url" content="https://www.bilibili.com/video/BVother" />
+        """))
+    }
+
+    @Test
+    fun `unbound cover state is ignored even when it offers a vertical poster`() {
+        val metadata = parseUrlDanmuMetadata("https://v.qq.com/x/cover/current/ep.html", """
+            <title>当前视频</title><meta property="og:image" content="https://site.test/current.jpg" />
+            <script>window.COVER_INFO = {id:"other", title:"别的剧",new_pic_vt:"https://site.test/wrong.jpg"};</script>
+        """)!!
+        assertEquals("当前视频", metadata.title)
+        assertEquals("https://site.test/current.jpg", metadata.posterUrl)
     }
 }

@@ -2,6 +2,7 @@ package com.example.danmuapiapp.data.tunnel
 
 import android.content.Context
 import android.util.Log
+import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
 import java.io.File
 import java.io.FileOutputStream
 
@@ -238,7 +239,4 @@ class TunnelSupervisor(private val context: Context) {
         }
         pidFile.delete()
     }
-
-    private fun shellQuote(value: String): String =
-        "'" + value.replace("'", "'\\''") + "'"
 }

@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -36,7 +38,6 @@ fun DownloadUpdateSettingsScreen(onBack: () -> Unit, viewModel: SettingsViewMode
     var showInterval by remember { mutableStateOf(false) }
     var showRoute by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<AppProxyNode?>(null) }
-    val snackbar = remember { SnackbarHostState() }
     val nodeChecks = rememberConnectivityChecks(settings.proxy.nodes)
     val fallback = when (selectedId) {
         "github_enhanced" -> "enhanced"
@@ -46,7 +47,7 @@ fun DownloadUpdateSettingsScreen(onBack: () -> Unit, viewModel: SettingsViewMode
     val route = settings.sourceRoute("github", ProxySourceCatalog(emptyList(), emptySet()), fallback)
     val routeLabel = if (route in listOf("inherit", "mirror")) officialRoute else settings.proxy.label(route)
 
-    fun report(message: String) { scope.launch { snackbar.showSnackbar(message) } }
+    fun report(message: String) { AppToast.show(message) }
     fun saveRoute(selected: String) {
         if (busy) return
         busy = true
@@ -65,10 +66,10 @@ fun DownloadUpdateSettingsScreen(onBack: () -> Unit, viewModel: SettingsViewMode
         finally { loading = false }
     }
     LaunchedEffect(viewModel.operationMessage) {
-        viewModel.operationMessage?.let { snackbar.showSnackbar(it); viewModel.dismissMessage() }
+        viewModel.operationMessage?.let { AppToast.show(it); viewModel.dismissMessage() }
     }
 
-    Scaffold(containerColor = Color.Transparent, snackbarHost = { AppSnackbarHost(snackbar) },
+    Scaffold(containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 16.dp),

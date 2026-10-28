@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from check_architecture import check_tree
+from audit_runtime_hardcoding import audit
+from runtime_assets import (
+    MANIFEST_NAME,
+    RuntimeAssetError,
+    copy_assets,
+    normalize_relative_path,
+    validate_manifest,
+)
+
+
+class RuntimeAssetTests(unittest.TestCase):
+    def _fixture(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+        temporary = tempfile.TemporaryDirectory()
+        repo = Path(temporary.name)
+        runtime = repo / "app/src/main/assets/nodejs-project"
+        (runtime / "server").mkdir(parents=True)
+        (runtime / "main.js").write_text("require('./server/app.js')\n", encoding="utf-8")
+        (runtime / "server/app.js").write_text("module.exports = {}\n", encoding="utf-8")
+        (runtime / MANIFEST_NAME).write_text(
+            '["server/app.js", "main.js"]',
+            encoding="utf-8",
+        )
+        return temporary, repo
+
+    def test_normalizes_posix_relative_paths(self) -> None:
+        self.assertEqual("server/app.js", normalize_relative_path("server\\app.js"))
+
+    def test_rejects_path_traversal(self) -> None:
+        for value in ("../secret", "/absolute", "server/../main.js", "", "./main.js", "server//api.js", "server/./api.js"):
+            with self.subTest(value=value):
+                with self.assertRaises(RuntimeAssetError):
+                    normalize_relative_path(value)
+
+    def test_manifest_rejects_noncanonical_paths(self) -> None:
+        temporary, repo = self._fixture()
+        try:
+            manifest = repo / "app/src/main/assets/nodejs-project" / MANIFEST_NAME
+            manifest.write_text('["server/app.js", "./main.js"]', encoding="utf-8")
+            with self.assertRaises(RuntimeAssetError):
+                validate_manifest(repo)
+        finally:
+            temporary.cleanup()
+
+    def test_manifest_supports_nested_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            runtime = repo / "app/src/main/assets/nodejs-project"
+            (runtime / "server").mkdir(parents=True)
+            (runtime / "server/app.js").write_text("ok\n", encoding="utf-8")
+            (runtime / MANIFEST_NAME).write_text('["server/app.js"]', encoding="utf-8")
+            validation = validate_manifest(repo)
+            self.assertEqual(("server/app.js",), validation.entries)
+
+    def test_copy_preserves_nested_directories(self) -> None:
+        temporary, repo = self._fixture()
+        try:
+            validation = validate_manifest(repo)
+            destination = repo / "copied"
+            copied = copy_assets(validation.runtime_root, destination, validation.entries)
+            self.assertEqual(
+                (MANIFEST_NAME, "server/app.js", "main.js"),
+                copied,
+            )
+            self.assertTrue((destination / "server/app.js").is_file())
+        finally:
+            temporary.cleanup()
+
+    def test_hardcoding_audit_finds_clustered_runtime_names(self) -> None:
+        temporary, repo = self._fixture()
+        try:
+            runtime = repo / "app/src/main/assets/nodejs-project"
+            (runtime / "worker.js").write_text("module.exports = {}\n", encoding="utf-8")
+            (runtime / MANIFEST_NAME).write_text(
+                '["server/app.js", "main.js", "worker.js"]',
+                encoding="utf-8",
+            )
+            source = repo / "app/src/main/java"
+            source.mkdir(parents=True)
+            (source / "Bad.kt").write_text(
+                'val files = listOf("main.js", "server/app.js", "worker.js")\n',
+                encoding="utf-8",
+            )
+            findings = audit(repo)
+            self.assertEqual(1, len(findings))
+        finally:
+            temporary.cleanup()
+
+
+class ArchitectureTests(unittest.TestCase):
+    def test_rejects_forbidden_imports_with_alias_comments_or_semicolons(self) -> None:
+        for suffix in (" as UiAlias", " // comment", ";", " as UiAlias; // comment", "/* comment */"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                source = repo / "app/src/main/java/com/example/danmuapiapp/data/Bad.kt"
+                source.parent.mkdir(parents=True)
+                source.write_text(
+                    "import com.example.danmuapiapp.ui.component.AppToast" + suffix + "\n",
+                    encoding="utf-8",
+                )
+                violations = check_tree(repo)
+                self.assertEqual(1, len(violations))
+
+    def test_rejects_data_to_ui_and_domain_to_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            source = repo / "app/src/main/java/com/example/danmuapiapp"
+            (source / "data").mkdir(parents=True)
+            (source / "domain").mkdir(parents=True)
+            (source / "data/Bad.kt").write_text(
+                "import com.example.danmuapiapp.ui.component.AppToast\n",
+                encoding="utf-8",
+            )
+            (source / "domain/Bad.kt").write_text(
+                "import com.example.danmuapiapp.data.repository.CoreRepositoryImpl\n",
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(2, len(violations))
+
+    def test_module_rules_reject_platform_imports_in_core(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            source = repo / "core/model/src/main/kotlin/com/example/danmuapiapp/domain/model"
+            source.mkdir(parents=True)
+            (source / "Bad.kt").write_text(
+                "import androidx.compose.runtime.Composable\n",
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
+    def test_core_common_allows_platform_imports_but_not_app_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            allowed = repo / "core/common/src/main/kotlin/com/example/danmuapiapp/data/util"
+            allowed.mkdir(parents=True)
+            (allowed / "Ok.kt").write_text(
+                "import android.content.Context\n"
+                "import androidx.core.content.edit\n",
+                encoding="utf-8",
+            )
+            forbidden = repo / "core/common/src/main/kotlin/com/example/danmuapiapp/data/service"
+            forbidden.mkdir(parents=True)
+            (forbidden / "Bad.kt").write_text(
+                "import com.example.danmuapiapp.data.service.NodeService\n",
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
+    def test_module_rules_reject_disallowed_project_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            build_file = repo / "core/model/build.gradle.kts"
+            build_file.parent.mkdir(parents=True)
+            build_file.write_text(
+                'dependencies {\n    api(project(":ui:designsystem"))\n}\n',
+                encoding="utf-8",
+            )
+            violations = check_tree(repo)
+            self.assertEqual(1, len(violations))
+
+    def test_module_rules_accept_declared_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            build_file = repo / "core/common/build.gradle.kts"
+            build_file.parent.mkdir(parents=True)
+            build_file.write_text(
+                'dependencies {\n    api(project(":core:model"))\n}\n',
+                encoding="utf-8",
+            )
+            source = repo / "ui/designsystem/src/main/kotlin/com/example/danmuapiapp/ui/theme"
+            source.mkdir(parents=True)
+            (source / "Ok.kt").write_text(
+                "import androidx.compose.runtime.Composable\n"
+                "import com.example.danmuapiapp.domain.model.CoreVariant\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], check_tree(repo))
+
+
+if __name__ == "__main__":
+    unittest.main()

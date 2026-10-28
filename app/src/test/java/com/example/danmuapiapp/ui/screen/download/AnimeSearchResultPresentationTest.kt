@@ -34,4 +34,12 @@ class AnimeSearchResultPresentationTest {
         assertEquals("来源未知", presentation.source)
         assertEquals("1 集", presentation.episodeCountText)
     }
+
+    @Test
+    fun `a URL fallback is not presented as a complete one episode series`() {
+        val presentation = buildAnimeSearchResultPresentation(DownloadAnimeCandidate(
+            animeId = -1, title = "视频", episodeCount = 1, directUrl = "https://site.test/video",
+            directMetadataNotice = "完整分集暂不可用"))
+        assertEquals("当前链接", presentation.episodeCountText)
+    }
 }

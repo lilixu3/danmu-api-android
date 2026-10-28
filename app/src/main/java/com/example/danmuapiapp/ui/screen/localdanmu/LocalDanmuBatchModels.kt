@@ -1,71 +1,25 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
-import com.example.danmuapiapp.data.repository.LocalDanmuFileBrowser
-import com.example.danmuapiapp.data.repository.LocalDanmuResourceKey
-import com.example.danmuapiapp.domain.model.LocalDanmuParseConfidence
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchItem
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchStatus
+import com.example.danmuapiapp.domain.model.LocalDanmuResourceKey
 import com.example.danmuapiapp.domain.model.LocalDanmuType
-import java.util.Calendar
 
-/** 目录浏览里的一行：目录/文件 + 「已导入」标记 + 多选状态。 */
-data class LocalDanmuBrowserRow(
-    val entry: LocalDanmuFileBrowser.Entry,
-    val importedLabel: String? = null,
-    val selected: Boolean = false
-)
+internal val LocalDanmuBatchItem.canSelect: Boolean
+    get() = status != LocalDanmuBatchStatus.Success && status != LocalDanmuBatchStatus.Uploading
 
-enum class LocalDanmuBatchStatus(val label: String) {
-    Ready("待导入"),
-    Uploading("上传中"),
-    Success("已导入"),
-    Failed("失败"),
-    Skipped("已跳过")
+internal fun LocalDanmuBatchState.withSelection(selectedIds: Set<Long>): LocalDanmuBatchState {
+    if (isRunning) return this
+    return copy(items = items.map { if (it.canSelect) it.copy(selected = it.id in selectedIds) else it })
 }
 
-data class LocalDanmuBatchItem(
-    val id: Long,
-    val sourceUri: String,
-    val displayName: String,
-    val sizeBytes: Long?,
-    val formatHint: String,
-    val mimeType: String,
-    val title: String,
-    val year: Int?,
-    val type: LocalDanmuType,
-    val season: Int?,
-    val episode: Int?,
-    val confidence: LocalDanmuParseConfidence = LocalDanmuParseConfidence.Medium,
-    /** 该文件此前已经导入过时的提示（按路径或文件名+大小匹配）。 */
-    val importedLabel: String? = null,
-    val selected: Boolean = true,
-    val status: LocalDanmuBatchStatus = LocalDanmuBatchStatus.Ready,
-    val message: String = "",
-    val progress: Float = 0f
-) {
-    val validationError: String?
-        get() = LocalDanmuResourceKey.validateUpload(
-            title = title,
-            year = year,
-            type = type,
-            season = season,
-            episode = episode,
-            currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        )
-
-    val canImport: Boolean
-        get() = selected &&
-            sourceUri.isNotBlank() &&
-            validationError == null &&
-            status != LocalDanmuBatchStatus.Success &&
-            status != LocalDanmuBatchStatus.Skipped &&
-            status != LocalDanmuBatchStatus.Uploading
-
-    val episodeLabel: String
-        get() = when {
-            type == LocalDanmuType.Movie -> "正片"
-            season != null && episode != null -> "第${season}季 第${episode}集"
-            episode != null -> "第${episode}集"
-            else -> "未识别集数"
-        }
+internal fun applyImportType(items: List<LocalDanmuBatchItem>, type: LocalDanmuType?): List<LocalDanmuBatchItem> = items.map { item ->
+    if (!item.selected || item.status == LocalDanmuBatchStatus.Success || item.status == LocalDanmuBatchStatus.Uploading) item
+    else {
+        val resolved = type ?: item.detectedType
+        item.copy(type = resolved, episode = if (resolved == LocalDanmuType.Movie) null else item.detectedEpisode,
+            status = LocalDanmuBatchStatus.Ready, message = "")
+    }
 }
 
 data class LocalDanmuBatchState(
@@ -76,6 +30,12 @@ data class LocalDanmuBatchState(
     val completed: Int = 0,
     val total: Int = 0
 ) {
+    val selectableIds: List<Long>
+        get() = items.filter { it.canSelect }.map { it.id }
+
+    val selectedIds: Set<Long>
+        get() = items.filter { it.selected }.map { it.id }.toSet()
+
     val pendingCount: Int
         get() = items.count { it.canImport }
 

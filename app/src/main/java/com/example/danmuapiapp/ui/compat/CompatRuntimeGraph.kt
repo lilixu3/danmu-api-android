@@ -34,8 +34,11 @@ object CompatRuntimeGraph {
         val settingsRepository = SettingsRepositoryImpl(context)
         val envConfigRepository = EnvConfigRepositoryImpl(context)
         val adminSessionRepository = AdminSessionRepositoryImpl(context, envConfigRepository)
-        val httpClient = GithubOutboundNetwork.createClient(context)
-        val githubProxyService = GithubProxyService(context, httpClient)
+        val apiQuota = com.example.danmuapiapp.data.service.GithubApiQuota.get(context)
+        val httpClient = GithubOutboundNetwork.createClient(context).newBuilder()
+            .addInterceptor(com.example.danmuapiapp.data.network.GithubQuotaInterceptor(apiQuota)).build()
+        val githubProxyService = GithubProxyService(context, httpClient, apiQuota)
+        val githubAccountService = com.example.danmuapiapp.data.service.GithubAccountService(context, httpClient, apiQuota)
         val githubProxySpeedTester = GithubProxySpeedTester(githubProxyService)
         val githubRemoteService = GithubRemoteService(httpClient, githubProxyService)
         val githubPullRequestService = GithubPullRequestService(githubRemoteService)
@@ -53,8 +56,8 @@ object CompatRuntimeGraph {
         val coreRepository = CoreRepositoryImpl(
             context = context,
             httpClient = httpClient,
-            githubRemoteService = githubRemoteService,
             githubProxyService = githubProxyService,
+            githubRemoteService = githubRemoteService,
             settingsRepository = settingsRepository,
             runtimeDependencyPackManager = runtimeDependencyPackManager,
             githubPullRequestService = githubPullRequestService,
@@ -64,7 +67,8 @@ object CompatRuntimeGraph {
             context = context,
             settingsRepository = settingsRepository,
             adminSessionRepository = adminSessionRepository,
-            coreRepository = coreRepository
+            coreRepository = coreRepository,
+            runtimeData = com.example.danmuapiapp.data.service.RuntimeDataAccess(context, httpClient)
         )
         val appUpdateService = AppUpdateService(
             context = context,
@@ -75,7 +79,8 @@ object CompatRuntimeGraph {
         val updateChecker = UpdateChecker(
             context = context,
             coreRepo = coreRepository,
-            settingsRepo = settingsRepository
+            settingsRepo = settingsRepository,
+            apiQuota = apiQuota
         )
         return Holder(
             context = context,
@@ -85,6 +90,7 @@ object CompatRuntimeGraph {
             appUpdateService = appUpdateService,
             updateChecker = updateChecker,
             githubProxyService = githubProxyService,
+            githubAccountService = githubAccountService,
             githubProxySpeedTester = githubProxySpeedTester,
             envConfigRepository = envConfigRepository,
             adminSessionRepository = adminSessionRepository,
@@ -100,6 +106,7 @@ object CompatRuntimeGraph {
         val appUpdateService: AppUpdateService,
         val updateChecker: UpdateChecker,
         val githubProxyService: GithubProxyService,
+        val githubAccountService: com.example.danmuapiapp.data.service.GithubAccountService,
         val githubProxySpeedTester: GithubProxySpeedTester,
         val envConfigRepository: EnvConfigRepositoryImpl,
         val adminSessionRepository: AdminSessionRepositoryImpl,

@@ -22,10 +22,10 @@ class LocalDanmuPreviewLoader @Inject constructor(
     private val sourceStore: LocalDanmuSourceStore
 ) {
 
-    suspend fun load(resourceKey: String, previewLimit: Int = 500): Result<DanmuFilePreview> =
+    suspend fun load(libraryId: String, resourceKey: String, previewLimit: Int = 500): Result<DanmuFilePreview> =
         withContext(Dispatchers.IO) {
             runLocalDanmuRequest {
-                val ref = sourceStore.get(resourceKey)
+                val ref = sourceStore.get(libraryId, resourceKey)
                     ?: error("该资源没有可用的导入源，重新导入一次即可预览")
                 importManager.withSourceStream(
                     uriText = ref.uri,

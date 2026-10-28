@@ -59,8 +59,9 @@ internal object DanmuPayloadInspector {
                 "XML 解析失败：${throwable.message ?: "未知错误"}"
             )
         }
-        if (preview.parseError != null) {
-            return warning(format, preview.parseError)
+        val parseError = preview.parseError
+        if (parseError != null) {
+            return warning(format, parseError)
         }
         return DanmuPayloadInspection(valid = true, count = preview.count)
     }

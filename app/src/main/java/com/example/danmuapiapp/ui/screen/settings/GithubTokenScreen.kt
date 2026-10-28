@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 
 import androidx.compose.foundation.BorderStroke
@@ -39,7 +40,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,7 +73,6 @@ fun GithubTokenScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val status by viewModel.githubAccountStatus.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     var tokenText by remember { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
 
@@ -86,14 +85,13 @@ fun GithubTokenScreen(
     }
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let {
-            snackbar.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -189,8 +187,10 @@ fun GithubTokenScreen(
 
 @Composable
 private fun GithubStatusPanel(status: GithubAccountStatus, onRefresh: () -> Unit) {
-    val ratio = if (status.coreLimit != null && status.coreLimit > 0 && status.coreRemaining != null) {
-        status.coreRemaining.toFloat() / status.coreLimit
+    val coreLimit = status.coreLimit
+    val coreRemaining = status.coreRemaining
+    val ratio = if (coreLimit != null && coreLimit > 0 && coreRemaining != null) {
+        coreRemaining.toFloat() / coreLimit
     } else null
     val color = when {
         status.tokenValid == true -> Color(0xFF1F7A4D)

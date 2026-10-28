@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.danmuapiapp.ui.common.formatByteSize
 import java.util.Locale
 
 // Geometry follows the Flutter tool pages; colors follow the Android app theme.
@@ -48,6 +50,29 @@ internal fun ApiCard(modifier: Modifier = Modifier, radius: Int = 18, accent: Co
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, accent?.copy(alpha = 0.22f) ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+@Composable
+internal fun ApiSegmentedTabs(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(11.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))) {
+        Row(Modifier.height(36.dp).padding(2.dp)) {
+            labels.forEachIndexed { index, text ->
+                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(9.dp))
+                    .background(if (index == selected) MaterialTheme.colorScheme.surface else Color.Transparent)
+                    .clickable { onSelect(index) }, contentAlignment = Alignment.Center) {
+                    Text(text, fontSize = 12.5.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected == index) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
@@ -124,10 +149,4 @@ internal fun apiTime(seconds: Double): String {
     val value = seconds.toLong().coerceAtLeast(0)
     return if (value >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
     else String.format(Locale.ROOT, "%02d:%02d", value / 60, value % 60)
-}
-
-internal fun apiBytes(bytes: Int): String = when {
-    bytes >= 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
-    bytes >= 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
-    else -> "$bytes B"
 }

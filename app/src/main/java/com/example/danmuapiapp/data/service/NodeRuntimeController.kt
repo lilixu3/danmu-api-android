@@ -806,7 +806,7 @@ internal class NodeRuntimeController private constructor(private val context: Co
     private fun isRuntimeOwnedByApp(port: Int): Boolean {
         if (port !in 1..65535) return false
         val expectedIdentity = RuntimeIdentityStore.ensureInstanceId(context).trim()
-        val expectedHome = NodeProjectManager.projectDir(context).absolutePath
+        val expectedHome = NodeProjectManager.normalProjectDir(context).absolutePath
         val body = readRuntimeHealthBody(port) ?: return false
         return isRuntimeOwnershipOwned(
             determineRuntimeOwnershipFromHealth(
@@ -895,7 +895,7 @@ internal class NodeRuntimeController private constructor(private val context: Co
 
     private fun readPortFromEnvFile(): Int {
         return try {
-            val envFile = java.io.File(NodeProjectManager.projectDir(context), "config/.env")
+            val envFile = java.io.File(NodeProjectManager.normalProjectDir(context), "config/.env")
             if (!envFile.exists()) return 0
             DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["DANMU_API_PORT"]
                 ?.trim()

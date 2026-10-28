@@ -25,3 +25,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "DanmuApiApp"
 include(":app")
+include(":core:model")
+include(":core:common")
+include(":ui:designsystem")
+include(":feature:records")
+includeBuild("build-logic")

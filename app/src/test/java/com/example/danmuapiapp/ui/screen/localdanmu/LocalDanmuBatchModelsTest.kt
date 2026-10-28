@@ -1,6 +1,8 @@
 package com.example.danmuapiapp.ui.screen.localdanmu
 
 import com.example.danmuapiapp.domain.model.LocalDanmuParseConfidence
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchItem
+import com.example.danmuapiapp.domain.model.LocalDanmuBatchStatus
 import com.example.danmuapiapp.domain.model.LocalDanmuType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,6 +10,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalDanmuBatchModelsTest {
+
+    @Test
+    fun `partial selection only imports the chosen episodes`() {
+        val state = LocalDanmuBatchState(items = (1L..10L).map { item(it, "file:///E$it.xml", it.toInt()) })
+            .withSelection(setOf(2L, 3L, 4L, 8L, 99L))
+
+        assertEquals(setOf(2L, 3L, 4L, 8L), state.selectedIds)
+        assertEquals(4, state.pendingCount)
+        assertEquals(0, state.withSelection(emptySet()).pendingCount)
+    }
+
+    @Test
+    fun `successful and uploading items cannot be selected again`() {
+        val state = LocalDanmuBatchState(items = listOf(
+            item(1, "file:///E1.xml", 1).copy(status = LocalDanmuBatchStatus.Success, selected = false),
+            item(2, "file:///E2.xml", 2).copy(status = LocalDanmuBatchStatus.Uploading, selected = false),
+            item(3, "file:///E3.xml", 3).copy(status = LocalDanmuBatchStatus.Failed, selected = false)
+        )).withSelection(setOf(1L, 2L, 3L))
+
+        assertEquals(listOf(3L), state.selectableIds)
+        assertEquals(setOf(3L), state.selectedIds)
+        assertEquals(1, state.pendingCount)
+    }
+
+    @Test
+    fun `running import ignores selection changes`() {
+        val state = LocalDanmuBatchState(isRunning = true, items = listOf(item(1, "file:///E1.xml", 1)))
+        assertEquals(state, state.withSelection(emptySet()))
+    }
+
+    @Test
+    fun `selected invalid metadata is not included in import count`() {
+        val state = LocalDanmuBatchState(items = listOf(
+            item(1, "file:///E1.xml", 1),
+            item(2, "file:///E2.xml", 2, year = null)
+        )).withSelection(setOf(1L, 2L))
+
+        assertEquals(2, state.selectedIds.size)
+        assertEquals(1, state.pendingCount)
+    }
 
     private fun item(
         id: Long,

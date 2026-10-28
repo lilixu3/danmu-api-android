@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -35,7 +37,6 @@ import com.example.danmuapiapp.ui.screen.tools.ToolDirectoryPicker
 fun DownloadSettingsScreen(onBack: () -> Unit, viewModel: DownloadSettingsViewModel = hiltViewModel()) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val snackbar = remember { SnackbarHostState() }
     var path by rememberSaveable(settings.saveDirPath) { mutableStateOf(settings.saveDirPath.ifBlank { "/storage/emulated/0/Download/弹幕下载" }) }
     var template by rememberSaveable(settings.fileNameTemplate) { mutableStateOf(settings.fileNameTemplate) }
     var allFiles by remember { mutableStateOf(RuntimePaths.isAllFilesAccessGranted(context)) }
@@ -72,10 +73,10 @@ fun DownloadSettingsScreen(onBack: () -> Unit, viewModel: DownloadSettingsViewMo
         }
     }
     LaunchedEffect(viewModel.operationMessage) {
-        viewModel.operationMessage?.let { snackbar.showSnackbar(it); viewModel.dismissMessage() }
+        viewModel.operationMessage?.let { AppToast.show(it); viewModel.dismissMessage() }
     }
 
-    Scaffold(containerColor = Color.Transparent, snackbarHost = { AppSnackbarHost(snackbar) },
+    Scaffold(containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 16.dp),

@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const net=require('node:net'),http=require('node:http');
 const {spawn}=require('node:child_process');const {once}=require('node:events');
+const {copyRuntimeAssets}=require('./runtime-fixture.cjs');
 const runtimeRoot=path.resolve('app/src/main/assets/nodejs-project');
 async function listen(server){server.listen(0,'127.0.0.1');await once(server,'listening');return server.address().port;}
 async function until(fn){const end=Date.now()+12000;let error;while(Date.now()<end){try{const result=await fn();if(result)return result;}catch(e){error=e;}await new Promise(r=>setTimeout(r,70));}throw error || new Error('timeout');}
@@ -24,7 +25,7 @@ for(const worker of [false,true])test(`proxy routing, core context, live config 
    socket.pipe(remote);remote.pipe(socket);socket.on('close',()=>remote.destroy());remote.on('close',()=>socket.destroy());};socket.on('data',read);
  });const proxyPort=await listen(proxy);
  try {
-  for(const name of fs.readdirSync(runtimeRoot))if(name.endsWith('.js') || name==='package.json' || name==='app-runtime-assets.json')fs.copyFileSync(path.join(runtimeRoot,name),path.join(directory,name));
+  copyRuntimeAssets(runtimeRoot,directory);
   fs.symlinkSync(path.join(runtimeRoot,'node_modules'),path.join(directory,'node_modules'));
   fs.mkdirSync(path.join(directory,'config'));const core=path.join(directory,'danmu_api_stable');fs.mkdirSync(core);fs.mkdirSync(path.join(core,'utils'));fs.mkdirSync(path.join(core,'configs'));
   fs.writeFileSync(path.join(core,'package.json'),'{"type":"module"}');

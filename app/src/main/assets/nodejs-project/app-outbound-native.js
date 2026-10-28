@@ -62,22 +62,25 @@ async function dialH2(host,ip,records,signal) {
   finally {signal.removeEventListener('abort',abort);}
 }
 async function dialH3(quic,host,ip,records,signal) {
-  let session,draining=false;
-  const closeSession=error=>{if(!session)return;const endpoint=session.endpoint;session.destroy(error);endpoint?.close().catch(()=>{});};
+  signal.throwIfAborted();
+  // Node's default endpoint binds loopback. Outbound connections need a
+  // wildcard bind of the same family as the resolved target address.
+  const endpoint=new quic.QuicEndpoint({address:{address:isIP(ip)===6?'::':'0.0.0.0',port:0,family:isIP(ip)===6?'ipv6':'ipv4'}});
+  let session,draining=false,endpointClosed=false;
+  const closeEndpoint=()=>{if(endpointClosed)return;endpointClosed=true;endpoint.close().catch(()=>{});};
+  const closeSession=error=>{try{session?.destroy(error);}finally{closeEndpoint();}};
   const abort=()=>closeSession(signal.reason);
   signal.addEventListener('abort',abort,{once:true});
   try {
     session=await quic.connect({address:ip,port:443,family:isIP(ip)===6?'ipv6':'ipv4'}, {
-      // Node's default endpoint binds loopback. Outbound connections need a
-      // wildcard bind of the same family as the resolved target address.
-      endpoint:{address:{address:isIP(ip)===6?'::':'0.0.0.0',port:0,family:isIP(ip)===6?'ipv6':'ipv4'}},
+      endpoint,
       servername:host,alpn:'h3',verifyPeer:'strict',keepAlive:0,reuseEndpoint:false,
       enableEarlyData:false,handshakeTimeout:3000,
       transportParams:{maxIdleTimeout:60},
       ongoaway(){draining=true;},
       ...(records.ech?{echConfigList:records.ech}:{}),
     });
-    session.closed.catch(()=>{});
+    session.closed.then(closeEndpoint,closeEndpoint);
     signal.throwIfAborted();
     const info=await waitFor(session.opened,signal);
     if(info.protocol!=='h3' || (records.ech && !info.echAccepted))throw new Error('Required H3/ECH was not negotiated');
@@ -86,19 +89,24 @@ async function dialH3(quic,host,ip,records,signal) {
       alive:()=>!draining && !session.destroyed && !session.closing,
       close:()=>closeSession(),
       async request(target,method,headers,body,requestSignal,downstream) {
-        let stream; let resolveHeaders,rejectHeaders;
+        let stream,finished=false; let resolveHeaders,rejectHeaders;
         const received=new Promise((resolve,reject)=>{resolveHeaders=resolve;rejectHeaders=reject;});
+        received.catch(()=>{});
         const abortRequest=()=>{stream?.destroy(requestSignal.reason);rejectHeaders(requestSignal.reason);};
         requestSignal.addEventListener('abort',abortRequest,{once:true});
         try {
           requestSignal.throwIfAborted();
-          stream=await waitFor(session.createBidirectionalStream({
+          const creating=session.createBidirectionalStream({
             headers:pseudoHeaders(target,method,headers),body:body.length?body:undefined,
             onheaders(headers) { if(Number(headers[':status'])>=200)resolveHeaders(headers); },
             onerror(error) {rejectHeaders(error);},
-          }),requestSignal);
-          stream.closed.catch(rejectHeaders);
-          stream.closed.then(()=>rejectHeaders(new Error('H3 stream closed before headers')),()=>{});
+          }).then(created=>{
+            stream=created;
+            stream.closed.then(()=>rejectHeaders(new Error('H3 stream closed before headers')),rejectHeaders);
+            if(finished || requestSignal.aborted)stream.destroy(requestSignal.reason);
+          });
+          await waitFor(creating,requestSignal);
+          requestSignal.throwIfAborted();
           const response=await waitFor(received,requestSignal);
           downstream.writeHead(Number(response[':status']),cleanHeaders(response));
           for await(const batch of stream)for(const part of Array.isArray(batch)?batch:[batch]) {
@@ -106,7 +114,7 @@ async function dialH3(quic,host,ip,records,signal) {
             if(!downstream.write(Buffer.from(part)))await once(downstream,'drain',{signal:requestSignal});
           }
           requestSignal.throwIfAborted();downstream.end();
-        } finally {requestSignal.removeEventListener('abort',abortRequest);stream?.destroy();}
+        } finally {finished=true;requestSignal.removeEventListener('abort',abortRequest);stream?.destroy();}
       },
     };
   } catch(error) {closeSession(error);throw error;}

@@ -16,7 +16,6 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
-import android.widget.Toast
 import androidx.core.content.edit
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -91,6 +90,13 @@ class AppUpdateService @Inject constructor(
         data class Failed(val message: String) : InstallResult()
     }
 
+    sealed class ResumeInstallResult {
+        data object NoPendingInstall : ResumeInstallResult()
+        data object Launched : ResumeInstallResult()
+        data object NeedUnknownSourcePermission : ResumeInstallResult()
+        data class Failed(val message: String) : ResumeInstallResult()
+    }
+
     private data class PendingInstallRecord(
         val uri: Uri?,
         val displayName: String,
@@ -122,6 +128,7 @@ class AppUpdateService @Inject constructor(
 
     suspend fun checkLatestRelease(): Result<CheckResult> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
+            githubProxyService.apiQuota.requireAvailable()
             val currentVersion = currentVersionName()
             val info = fetchLatestReleaseInfo()
             val latestVersion = info.tagName.removePrefix("v").removePrefix("V").trim()
@@ -202,7 +209,6 @@ class AppUpdateService @Inject constructor(
                 if (canResolve) {
                     savePendingInstall(activity, apk)
                     runCatching { activity.startActivity(settingsIntent) }
-                    Toast.makeText(activity, "请先允许安装未知应用，授权后返回将自动继续安装", Toast.LENGTH_LONG).show()
                     return InstallResult.NeedUnknownSourcePermission
                 }
             }
@@ -211,32 +217,37 @@ class AppUpdateService @Inject constructor(
         return launchInstaller(activity, apk.uri)
     }
 
-    fun tryResumePendingInstall(activity: Activity): Boolean {
-        val pending = loadPendingInstall(activity) ?: return false
+    fun tryResumePendingInstall(activity: Activity): ResumeInstallResult {
+        val pending = loadPendingInstall(activity) ?: return ResumeInstallResult.NoPendingInstall
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !activity.packageManager.canRequestPackageInstalls()
         ) {
-            return false
+            return ResumeInstallResult.NeedUnknownSourcePermission
         }
 
         val candidates = buildPendingInstallCandidates(activity, pending)
         if (candidates.isEmpty()) {
             clearPendingInstall(activity)
-            Toast.makeText(activity, "安装包已不可用，请重新下载", Toast.LENGTH_SHORT).show()
-            return false
+            return ResumeInstallResult.Failed("安装包已不可用，请重新下载")
         }
 
-        candidates.forEach { uri ->
-            when (launchInstaller(activity, uri)) {
+        var lastFailure: ResumeInstallResult.Failed? = null
+        for (uri in candidates) {
+            when (val result = launchInstaller(activity, uri)) {
                 is InstallResult.Launched -> {
                     clearPendingInstall(activity)
-                    return true
+                    return ResumeInstallResult.Launched
                 }
-                else -> Unit
+                is InstallResult.NeedUnknownSourcePermission -> {
+                    return ResumeInstallResult.NeedUnknownSourcePermission
+                }
+                is InstallResult.Failed -> {
+                    lastFailure = ResumeInstallResult.Failed(result.message)
+                }
             }
         }
-        return false
+        return lastFailure ?: ResumeInstallResult.Failed("未找到可用的安装器")
     }
 
     fun openDownloadsApp(activity: Activity) {

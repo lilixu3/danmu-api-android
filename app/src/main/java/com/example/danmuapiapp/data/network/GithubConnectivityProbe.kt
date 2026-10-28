@@ -30,17 +30,22 @@ internal object GithubConnectivityProbe {
         return output.toByteArray()
     }
 
-    suspend fun test(context: Context, source: String): AppOutboundConnectivityResult =
+    suspend fun test(context: Context, source: String): AppOutboundConnectivityResult = try {
         kotlinx.coroutines.withTimeoutOrNull(20_000) { testWithinBudget(context, source) }
             ?: AppOutboundConnectivityResult(source, connected = false)
+    } catch (exhausted: com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) {
+        AppOutboundConnectivityResult(source, connected = false, reason = exhausted.message, configurationRequired = true)
+    }
 
     private suspend fun testWithinBudget(context: Context, source: String): AppOutboundConnectivityResult {
         require(source in labels)
         val start = System.nanoTime()
+        val quota = com.example.danmuapiapp.data.service.GithubApiQuota.get(context)
         val client = GithubOutboundNetwork.createClient(context).newBuilder()
+            .addInterceptor(GithubQuotaInterceptor(quota))
             .connectTimeout(5, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
             .callTimeout(12, TimeUnit.SECONDS).build()
-        val proxy = GithubProxyService(context, client)
+        val proxy = GithubProxyService(context, client, quota)
         suspend fun probe(url: String, metadata: Boolean): ByteArray? {
             val candidates = proxy.buildUrlCandidates(url).distinct()
             for (candidate in candidates) {
@@ -60,7 +65,10 @@ internal object GithubConnectivityProbe {
                             body.byteStream().readNBytesCompat(1024).takeIf { it.isNotEmpty() }
                         }
                     }
-                }.getOrNull()
+                }.getOrElse { error ->
+                    if (error is com.example.danmuapiapp.data.service.GithubQuotaExhaustedException) throw error
+                    null
+                }
                 if (data != null) return data
             }
             return null

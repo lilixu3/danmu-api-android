@@ -70,12 +70,12 @@ import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
 import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.common.formatByteSize
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassDangerButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassPrimaryButton
 import com.example.danmuapiapp.ui.theme.glassBorderColor
 import com.example.danmuapiapp.ui.theme.glassSurfaceColor
-import java.util.Locale
 
 @Composable
 internal fun CoreWorkspaceHeader(refreshing: Boolean, enabled: Boolean, onRefresh: () -> Unit) {
@@ -89,7 +89,6 @@ internal fun CoreWorkspaceHeader(refreshing: Boolean, enabled: Boolean, onRefres
         }
     }
 }
-
 @Composable
 internal fun VariantRail(
     selected: ApiVariant,
@@ -125,7 +124,6 @@ internal fun VariantRail(
         }
     }
 }
-
 @Composable
 internal fun CoreControlPanel(
     info: CoreInfo,
@@ -426,9 +424,10 @@ internal fun GithubQuotaStrip(status: GithubAccountStatus, onRefresh: () -> Unit
                     else TextButton(onClick = onRefresh, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("重试", fontSize = 12.5.sp) }
                 }
             }
-            if (known && status.error != null) {
+            val error = status.error
+            if (known && error != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(status.error, Modifier.weight(1f), fontSize = 11.sp, color = colors.error, maxLines = 2,
+                    Text(error, Modifier.weight(1f), fontSize = 11.sp, color = colors.error, maxLines = 2,
                         overflow = TextOverflow.Ellipsis)
                     TextButton(onClick = onRefresh, enabled = !status.isLoading) { Text("重试", fontSize = 12.sp) }
                 }
@@ -452,15 +451,9 @@ internal fun DownloadProgressBlock(progress: CoreDownloadProgress) {
                 LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(6.dp)))
             }
             if (progress.downloadedBytes > 0) {
-                Text(if (progress.totalBytes > 0) "${coreFormatBytes(progress.downloadedBytes)} / ${coreFormatBytes(progress.totalBytes)}"
-                    else coreFormatBytes(progress.downloadedBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (progress.totalBytes > 0) "${formatByteSize(progress.downloadedBytes)} / ${formatByteSize(progress.totalBytes)}"
+                    else formatByteSize(progress.downloadedBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
-}
-
-private fun coreFormatBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024 -> String.format(Locale.getDefault(), "%.2f MB", bytes / (1024.0 * 1024))
-    bytes >= 1024L -> String.format(Locale.getDefault(), "%.2f KB", bytes / 1024.0)
-    else -> "$bytes B"
 }

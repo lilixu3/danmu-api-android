@@ -1,8 +1,9 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import com.example.danmuapiapp.domain.model.AccessEntryTab
 import com.example.danmuapiapp.domain.model.AccessEntryLayout
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
 import com.example.danmuapiapp.ui.component.AppDialogTone
@@ -40,7 +41,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -84,7 +84,6 @@ fun ThemeDisplayScreen(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    val snackbarHostState = remember { SnackbarHostState() }
     val accessEntryDefaultTab by viewModel.accessEntryDefaultTab.collectAsStateWithLifecycle()
     val accessEntryLayout by viewModel.accessEntryLayout.collectAsStateWithLifecycle()
     val nightMode by viewModel.nightMode.collectAsStateWithLifecycle()
@@ -151,14 +150,13 @@ fun ThemeDisplayScreen(
 
     LaunchedEffect(viewModel.operationMessage) {
         viewModel.operationMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+            AppToast.show(message)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(

@@ -1,0 +1,700 @@
+package com.example.danmuapiapp.ui.component
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalContext
+import com.example.danmuapiapp.data.util.DeviceCompatMode
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.example.danmuapiapp.ui.theme.DialogColorTokens
+import com.example.danmuapiapp.ui.theme.LocalAppDarkTheme
+import com.example.danmuapiapp.ui.theme.LocalAppDialogContext
+import com.example.danmuapiapp.ui.theme.LocalGlassBackgroundBackdrop
+import com.example.danmuapiapp.ui.theme.LocalGlassMaterial
+import com.example.danmuapiapp.ui.theme.GlassMaterialRole
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+
+/** Layout contract for the structured application dialogs. */
+enum class AppDialogStyle {
+    Confirm,
+    Form,
+    Selection,
+    Status
+}
+
+/** Semantic intent used by the leading icon and assistive content. */
+enum class AppDialogTone {
+    Neutral,
+    Brand,
+    Success,
+    Warning,
+    Danger,
+    Info
+}
+
+private class AppDialogEntry(
+    val onDismissRequest: () -> Unit,
+    val maxWidth: () -> Dp,
+    val modifier: () -> Modifier,
+    val backdrop: () -> Backdrop?,
+    val content: @Composable () -> Unit
+)
+
+private class AppDialogHostState {
+    val entries = mutableStateListOf<AppDialogEntry>()
+
+    fun attach(entry: AppDialogEntry) {
+        if (entry !in entries) entries += entry
+    }
+
+    fun detach(entry: AppDialogEntry) {
+        entries -= entry
+    }
+}
+
+private val LocalAppDialogHost = staticCompositionLocalOf<AppDialogHostState?> { null }
+
+/** Keeps liquid dialogs in the same render tree as the content they refract. */
+@Composable
+fun AppDialogHost(content: @Composable () -> Unit) {
+    val state = remember { AppDialogHostState() }
+    val spec = LocalGlassMaterial.current
+    val backdrop = rememberLayerBackdrop()
+
+    CompositionLocalProvider(LocalAppDialogHost provides state) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (spec.enabled) {
+                            Modifier.layerBackdrop(backdrop)
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
+                content()
+            }
+
+            if (spec.enabled) {
+                state.entries.lastOrNull()?.let { entry ->
+                    AppLiquidDialogOverlay(entry = entry, fallbackBackdrop = backdrop)
+                }
+            }
+        }
+    }
+}
+
+private data class DialogTonePalette(
+    val foreground: Color,
+    val container: Color
+)
+
+@Composable
+private fun dialogTonePalette(tone: AppDialogTone): DialogTonePalette {
+    val colors = MaterialTheme.colorScheme
+    val dark = LocalAppDarkTheme.current
+    val glassEnabled = LocalGlassMaterial.current.enabled
+    return when (tone) {
+        AppDialogTone.Neutral -> DialogTonePalette(
+            foreground = colors.onSurfaceVariant,
+            container = if (glassEnabled) {
+                colors.surfaceContainerHighest.copy(alpha = 0.72f)
+            } else {
+                colors.surfaceContainerHighest
+            }
+        )
+
+        AppDialogTone.Brand -> DialogTonePalette(
+            foreground = colors.primary,
+            container = if (glassEnabled) colors.primary.copy(alpha = 0.16f) else colors.primaryContainer
+        )
+
+        AppDialogTone.Success -> if (dark) {
+            DialogTonePalette(
+                Color(DialogColorTokens.DARK_SUCCESS),
+                Color(DialogColorTokens.DARK_SUCCESS_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.24f) else it
+                }
+            )
+        } else {
+            DialogTonePalette(
+                Color(DialogColorTokens.LIGHT_SUCCESS),
+                Color(DialogColorTokens.LIGHT_SUCCESS_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.34f) else it
+                }
+            )
+        }
+
+        AppDialogTone.Warning -> if (dark) {
+            DialogTonePalette(
+                Color(DialogColorTokens.DARK_WARNING),
+                Color(DialogColorTokens.DARK_WARNING_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.28f) else it
+                }
+            )
+        } else {
+            DialogTonePalette(
+                Color(DialogColorTokens.LIGHT_WARNING),
+                Color(DialogColorTokens.LIGHT_WARNING_CONTAINER).let {
+                    if (glassEnabled) it.copy(alpha = 0.38f) else it
+                }
+            )
+        }
+
+        AppDialogTone.Danger -> DialogTonePalette(
+            foreground = colors.error,
+            container = if (glassEnabled) colors.error.copy(alpha = 0.15f) else colors.errorContainer
+        )
+
+        AppDialogTone.Info -> DialogTonePalette(
+            foreground = if (glassEnabled) colors.primary else colors.onPrimaryContainer,
+            container = if (glassEnabled) colors.primary.copy(alpha = 0.12f) else colors.primaryContainer
+        )
+    }
+}
+
+/**
+ * Structured dialog with one scroll owner and a fixed action area.
+ *
+ * Content passed to [text] must not add another vertical scroll container while
+ * [scrollContent] is true. Disable it for a lazy body, or use [AppModalPanel] for
+ * a fully custom layout.
+ */
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: AppDialogStyle = AppDialogStyle.Form,
+    tone: AppDialogTone = AppDialogTone.Brand,
+    icon: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    supportingText: (@Composable () -> Unit)? = null,
+    scrollContent: Boolean = true,
+    text: (@Composable ColumnScope.() -> Unit)? = null,
+    confirmButton: (@Composable () -> Unit)? = null,
+    dismissButton: (@Composable () -> Unit)? = null,
+    actions: (@Composable () -> Unit)? = null
+) {
+    val maxWidth = when (style) {
+        AppDialogStyle.Confirm -> 440.dp
+        AppDialogStyle.Form,
+        AppDialogStyle.Selection,
+        AppDialogStyle.Status -> 600.dp
+    }
+
+    AppDialogFrame(
+        onDismissRequest = onDismissRequest,
+        maxWidth = maxWidth,
+        modifier = modifier
+    ) {
+        val palette = dialogTonePalette(tone)
+        CompositionLocalProvider(LocalAppDialogContext provides true) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, top = 22.dp, end = 24.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+            if (icon != null || title != null || supportingText != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (icon != null) {
+                        Surface(
+                            modifier = Modifier.size(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.container,
+                            contentColor = palette.foreground
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                CompositionLocalProvider(
+                                    LocalContentColor provides palette.foreground,
+                                    content = icon
+                                )
+                            }
+                        }
+                    }
+                    if (title != null || supportingText != null) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            if (title != null) {
+                                ProvideTextStyle(
+                                    MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    content = title
+                                )
+                            }
+                            if (supportingText != null) {
+                                CompositionLocalProvider(
+                                    LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant
+                                ) {
+                                    ProvideTextStyle(
+                                        MaterialTheme.typography.bodySmall,
+                                        content = supportingText
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (text != null) {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    val bodyModifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .let { base ->
+                            if (scrollContent) {
+                                base.verticalScroll(rememberScrollState())
+                            } else {
+                                base
+                            }
+                        }
+                    Column(
+                        modifier = bodyModifier,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        content = text
+                    )
+                }
+            }
+
+            if (dismissButton != null || confirmButton != null || actions != null) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    dismissButton?.invoke()
+                    confirmButton?.invoke()
+                    actions?.invoke()
+                }
+            }
+            }
+        }
+    }
+}
+
+/**
+ * Shared selectable row for dialog lists. Liquid dialogs use a dense frosted
+ * surface so selection remains legible without losing the glass treatment.
+ */
+@Composable
+fun AppDialogOption(
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = RoundedCornerShape(12.dp),
+    content: @Composable RowScope.() -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    if (!LocalGlassMaterial.current.enabled) {
+        OutlinedCard(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.remoteFocusHighlight(shape, enabled).fillMaxWidth(),
+            shape = shape,
+            border = BorderStroke(
+                width = 1.dp,
+                color = if (selected) colors.primary else colors.outlineVariant
+            ),
+            colors = CardDefaults.outlinedCardColors(
+                containerColor = if (selected) {
+                    colors.primaryContainer.copy(alpha = 0.36f)
+                } else {
+                    colors.surface
+                },
+                contentColor = colors.onSurface
+            )
+        ) {
+            CompositionLocalProvider(LocalContentColor provides colors.onSurface) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = content
+                )
+            }
+        }
+        return
+    }
+
+    val glassEnabled = LocalGlassMaterial.current.enabled &&
+        LocalGlassBackgroundBackdrop.current != null
+    val selectedAlpha = if (LocalAppDarkTheme.current) 0.42f else 0.30f
+    val selectedBase = colors.primary.copy(alpha = selectedAlpha)
+    val idleBase = colors.surfaceContainerHigh.copy(alpha = 0.82f)
+    val optionColor = (if (selected) selectedBase else idleBase).let { base ->
+        if (glassEnabled) base else base.copy(alpha = 1f)
+    }
+    val optionContentColor = if (selected) {
+        colors.onPrimaryContainer
+    } else {
+        colors.onSurface
+    }
+    AppGlassSurface(
+        modifier = modifier.fillMaxWidth(),
+        shape = shape,
+        color = optionColor,
+        contentColor = optionContentColor,
+        materialRole = if (selected) GlassMaterialRole.Selected else GlassMaterialRole.DialogButton,
+        glassAlpha = if (selected) selectedAlpha else 0.72f,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                colors.primary.copy(alpha = 0.46f)
+            } else {
+                colors.outlineVariant.copy(alpha = 0.28f)
+            }
+        ),
+        onClick = onClick,
+        enabled = enabled
+    ) {
+        CompositionLocalProvider(LocalContentColor provides optionContentColor) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = content
+            )
+        }
+    }
+}
+
+/**
+ * Bounded dialog surface for rich content such as previews and dashboards.
+ * The caller owns the internal layout and any scrolling.
+ */
+@Composable
+fun AppModalPanel(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    maxWidth: Dp = 720.dp,
+    expanded: Boolean = false,
+    contentPadding: PaddingValues = PaddingValues(20.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    AppDialogFrame(
+        onDismissRequest = onDismissRequest,
+        maxWidth = maxWidth
+    ) {
+        CompositionLocalProvider(LocalAppDialogContext provides true) {
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .then(if (expanded) Modifier.fillMaxHeight() else Modifier)
+                    .padding(contentPadding),
+                verticalArrangement = verticalArrangement,
+                horizontalAlignment = horizontalAlignment,
+                content = content
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppDialogFrame(
+    onDismissRequest: () -> Unit,
+    maxWidth: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val host = LocalAppDialogHost.current
+    val backgroundBackdrop = LocalGlassBackgroundBackdrop.current
+    // A portal entry is rendered in place of the original dialog content. If
+    // that content opens another AppDialog, rendering the new entry would
+    // dispose the parent composition and immediately detach the child entry.
+    // Keep nested dialogs in their own window so their state remains mounted.
+    val nestedDialog = LocalAppDialogContext.current
+    // TV modals use a separate focus-owning window so D-pad focus cannot reach
+    // the page behind a liquid portal. Phones retain their inline glass dialogs.
+    val remoteDevice = DeviceCompatMode.isCompatModeDevice(LocalContext.current)
+    if (LocalGlassMaterial.current.enabled && host != null && !nestedDialog && !remoteDevice) {
+        AppDialogPortal(
+            host = host,
+            onDismissRequest = onDismissRequest,
+            maxWidth = maxWidth,
+            modifier = modifier,
+            backdrop = backgroundBackdrop,
+            content = content
+        )
+        return
+    }
+
+    val parentColors = MaterialTheme.colorScheme
+    val parentTypography = MaterialTheme.typography
+    val parentShapes = MaterialTheme.shapes
+    val dialogColors = dialogColorScheme(parentColors, LocalAppDarkTheme.current)
+
+    DisposableEffect(Unit) {
+        AppToastWindowRegistry.attachPlatformDialog()
+        onDispose { AppToastWindowRegistry.detachPlatformDialog() }
+    }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        MaterialTheme(
+            colorScheme = dialogColors,
+            typography = parentTypography,
+            shapes = parentShapes
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val legacyDialog = !LocalGlassMaterial.current.enabled
+                Surface(
+                    modifier = modifier
+                        .widthIn(max = maxWidth)
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight),
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (legacyDialog) {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainer
+                    },
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 12.dp,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (legacyDialog) {
+                            MaterialTheme.colorScheme.outlineVariant
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
+                        }
+                    ),
+                    // A platform Dialog has a separate window, so a backdrop
+                    // owned by the liquid host must not leak into its content.
+                    content = if (LocalGlassMaterial.current.enabled) {
+                        {
+                            CompositionLocalProvider(
+                                LocalGlassBackgroundBackdrop provides null,
+                                content = content
+                            )
+                        }
+                    } else {
+                        content
+                    }
+                )
+                AppToastHost(
+                    bottomPadding = 24.dp,
+                    applyWindowInsets = false,
+                    renderInPlatformDialogWindow = true
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppDialogPortal(
+    host: AppDialogHostState,
+    onDismissRequest: () -> Unit,
+    maxWidth: Dp,
+    modifier: Modifier,
+    backdrop: Backdrop?,
+    content: @Composable () -> Unit
+) {
+    val dismissState = rememberUpdatedState(onDismissRequest)
+    val maxWidthState = rememberUpdatedState(maxWidth)
+    val modifierState = rememberUpdatedState(modifier)
+    val backdropState = rememberUpdatedState(backdrop)
+    val contentState = rememberUpdatedState(content)
+    val entry = remember(host) {
+        AppDialogEntry(
+            onDismissRequest = { dismissState.value.invoke() },
+            maxWidth = { maxWidthState.value },
+            modifier = { modifierState.value },
+            backdrop = { backdropState.value },
+            content = { contentState.value.invoke() }
+        )
+    }
+
+    DisposableEffect(host, entry) {
+        host.attach(entry)
+        onDispose { host.detach(entry) }
+    }
+}
+
+@Composable
+private fun AppLiquidDialogOverlay(
+    entry: AppDialogEntry,
+    fallbackBackdrop: Backdrop
+) {
+    val parentColors = MaterialTheme.colorScheme
+    val parentTypography = MaterialTheme.typography
+    val parentShapes = MaterialTheme.shapes
+    val darkTheme = LocalAppDarkTheme.current
+    val dialogColors = dialogColorScheme(parentColors, darkTheme)
+    val dimColor = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.14f)
+    // Prefer the scene's background-only layer. Sampling the host fallback
+    // records page cards and headers, which creates hard color bands inside a
+    // single dialog when those elements sit behind different vertical areas.
+    val backdrop = entry.backdrop() ?: fallbackBackdrop
+
+    BackHandler(onBack = entry.onDismissRequest)
+
+    MaterialTheme(
+        colorScheme = dialogColors,
+        typography = parentTypography,
+        shapes = parentShapes
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(dimColor)
+                .pointerInput(entry) {
+                    detectTapGestures { entry.onDismissRequest() }
+                }
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AppGlassSurface(
+                modifier = entry.modifier()
+                    .widthIn(max = entry.maxWidth())
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight)
+                    .pointerInput(entry) {
+                        detectTapGestures { /* Consume taps inside the modal surface. */ }
+                },
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(
+                        alpha = if (darkTheme) 0.34f else 0.42f
+                    )
+                ),
+                role = AppGlassSurfaceRole.Dialog,
+                backdropOverride = backdrop,
+            ) {
+                CompositionLocalProvider(LocalGlassBackgroundBackdrop provides backdrop) {
+                    entry.content()
+                }
+            }
+        }
+    }
+}
+
+private fun dialogColorScheme(base: ColorScheme, dark: Boolean): ColorScheme {
+    return if (dark) {
+        base.copy(
+            primary = Color(DialogColorTokens.DARK_PRIMARY),
+            onPrimary = Color(DialogColorTokens.DARK_ON_PRIMARY),
+            primaryContainer = Color(DialogColorTokens.DARK_PRIMARY_CONTAINER),
+            onPrimaryContainer = Color(DialogColorTokens.DARK_ON_PRIMARY_CONTAINER),
+            surface = Color(DialogColorTokens.DARK_DIALOG),
+            onSurface = Color(DialogColorTokens.DARK_TEXT_PRIMARY),
+            surfaceVariant = Color(DialogColorTokens.DARK_SURFACE_ACTIVE),
+            onSurfaceVariant = Color(DialogColorTokens.DARK_TEXT_SECONDARY),
+            surfaceContainerLowest = Color(DialogColorTokens.DARK_SURFACE_LOWEST),
+            surfaceContainerLow = Color(DialogColorTokens.DARK_DIALOG),
+            surfaceContainer = Color(DialogColorTokens.DARK_SURFACE_CONTAINER),
+            surfaceContainerHigh = Color(DialogColorTokens.DARK_SURFACE_HIGH),
+            surfaceContainerHighest = Color(DialogColorTokens.DARK_SURFACE_ACTIVE),
+            outline = Color(DialogColorTokens.DARK_OUTLINE),
+            outlineVariant = Color(DialogColorTokens.DARK_OUTLINE_VARIANT),
+            error = Color(DialogColorTokens.DARK_ERROR),
+            onError = Color(DialogColorTokens.DARK_ON_ERROR),
+            errorContainer = Color(DialogColorTokens.DARK_ERROR_CONTAINER),
+            onErrorContainer = Color(DialogColorTokens.DARK_ON_ERROR_CONTAINER)
+        )
+    } else {
+        base.copy(
+            primary = Color(DialogColorTokens.LIGHT_PRIMARY),
+            onPrimary = Color(DialogColorTokens.LIGHT_ON_PRIMARY),
+            primaryContainer = Color(DialogColorTokens.LIGHT_PRIMARY_CONTAINER),
+            onPrimaryContainer = Color(DialogColorTokens.LIGHT_ON_PRIMARY_CONTAINER),
+            surface = Color(DialogColorTokens.LIGHT_DIALOG),
+            onSurface = Color(DialogColorTokens.LIGHT_TEXT_PRIMARY),
+            surfaceVariant = Color(DialogColorTokens.LIGHT_SURFACE_ACTIVE),
+            onSurfaceVariant = Color(DialogColorTokens.LIGHT_TEXT_SECONDARY),
+            surfaceContainerLowest = Color.White,
+            surfaceContainerLow = Color(DialogColorTokens.LIGHT_DIALOG),
+            surfaceContainer = Color(DialogColorTokens.LIGHT_SURFACE_CONTAINER),
+            surfaceContainerHigh = Color(DialogColorTokens.LIGHT_SURFACE_HIGH),
+            surfaceContainerHighest = Color(DialogColorTokens.LIGHT_SURFACE_ACTIVE),
+            outline = Color(DialogColorTokens.LIGHT_OUTLINE),
+            outlineVariant = Color(DialogColorTokens.LIGHT_OUTLINE_VARIANT),
+            error = Color(DialogColorTokens.LIGHT_ERROR),
+            onError = Color(DialogColorTokens.LIGHT_ON_ERROR),
+            errorContainer = Color(DialogColorTokens.LIGHT_ERROR_CONTAINER),
+            onErrorContainer = Color(DialogColorTokens.LIGHT_ON_ERROR_CONTAINER)
+        )
+    }
+}

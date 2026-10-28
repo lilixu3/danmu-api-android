@@ -3,7 +3,6 @@ package com.example.danmuapiapp.ui.compat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.data.service.TvConfigSyncCodec
 import com.example.danmuapiapp.domain.model.ServiceStatus
+import com.example.danmuapiapp.ui.component.AppToast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -192,7 +192,7 @@ internal fun CompatCopyButton(label: String, value: String) {
     CompatButton(label, {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboard?.setPrimaryClip(ClipData.newPlainText(label, value))
-        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+        AppToast.success("已复制")
     }, icon = Icons.Rounded.ContentCopy)
 }
 

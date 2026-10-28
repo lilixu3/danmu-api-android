@@ -102,20 +102,6 @@ class RuntimeDependencyPackManager @Inject constructor(
         internal fun isManifestSerialAcceptable(highestSeen: Long, incoming: Long): Boolean =
             incoming >= highestSeen
 
-        internal fun readLimited(input: InputStream, maxBytes: Int): ByteArray {
-            require(maxBytes > 0) { "maxBytes 必须大于 0" }
-            val output = ByteArrayOutputStream(minOf(maxBytes, DEFAULT_BUFFER_SIZE * 4))
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            var total = 0
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                total += read
-                if (total > maxBytes) throw IOException("响应超过允许大小")
-                output.write(buffer, 0, read)
-            }
-            return output.toByteArray()
-        }
 
         internal fun verifyManifestSignature(
             manifestBytes: ByteArray,

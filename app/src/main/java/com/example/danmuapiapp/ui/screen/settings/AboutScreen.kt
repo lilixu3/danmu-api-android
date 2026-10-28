@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.settings
 
+import com.example.danmuapiapp.ui.component.AppToast
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -50,7 +52,6 @@ import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.NodeBridge
 import com.example.danmuapiapp.domain.model.ServiceStatus
 import com.example.danmuapiapp.domain.model.formatCoreVersionValue
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
 import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.SimpleMarkdownText
 import com.example.danmuapiapp.ui.theme.glassBorderColor
@@ -63,7 +64,6 @@ private const val ABOUT_PROJECT_URL = "https://github.com/lilixu3/danmu-api-andr
 fun AboutScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val activity = remember(context) { context.findAboutActivity() }
-    val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val runtime by viewModel.runtimeState.collectAsStateWithLifecycle()
@@ -93,7 +93,7 @@ fun AboutScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel
                 "核心提交：${core?.sourceCommitSha?.take(7)?.ifBlank { "未记录" } ?: "未记录"}",
                 "服务：$statusLabel"
             ).joinToString("\n"))))
-            snackbar.showSnackbar("版本信息已复制")
+            AppToast.show("版本信息已复制")
         }
     }
     LifecycleResumeEffect(Unit) {
@@ -105,11 +105,11 @@ fun AboutScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel
         viewModel.operationMessage?.let { message ->
             if (message.contains("更新") || message.contains("下载") || message.contains("安装")) updateMessage = message
             viewModel.dismissMessage()
-            snackbar.showSnackbar(message)
+            AppToast.show(message)
         }
     }
 
-    Scaffold(containerColor = Color.Transparent, snackbarHost = { AppSnackbarHost(snackbar) },
+    Scaffold(containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {

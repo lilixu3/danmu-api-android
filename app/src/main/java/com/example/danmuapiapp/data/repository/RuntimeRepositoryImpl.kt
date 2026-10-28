@@ -1,40 +1,19 @@
 package com.example.danmuapiapp.data.repository
 
-import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
-import android.os.FileObserver
-import androidx.core.content.edit
-import com.example.danmuapiapp.data.util.DotEnvCodec
-import com.example.danmuapiapp.data.util.PortProbe
-import com.example.danmuapiapp.data.util.RuntimeApiUrls
-import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
-import com.example.danmuapiapp.data.util.TokenDefaults
 import com.example.danmuapiapp.data.service.AppDiagnosticLogger
 import com.example.danmuapiapp.data.service.NodeService
-import com.example.danmuapiapp.data.service.NormalNotificationBehaviorPrefs
-import com.example.danmuapiapp.data.service.FavoriteCacheStore
-import com.example.danmuapiapp.data.service.RuntimeIdentityStore
-import com.example.danmuapiapp.data.service.NodeProjectManager
 import com.example.danmuapiapp.data.service.NormalModeRuntimeProfiles
-import com.example.danmuapiapp.data.service.RootRuntimeController
 import com.example.danmuapiapp.data.service.RootRuntimeNotificationManager
-import com.example.danmuapiapp.data.service.RuntimePaths
 import com.example.danmuapiapp.data.service.RootShell
-import com.example.danmuapiapp.data.service.RootAutoStartModule
-import com.example.danmuapiapp.data.service.RootAutoStartPrefs
-import com.example.danmuapiapp.data.service.RuntimeModePrefs
+import com.example.danmuapiapp.data.service.RuntimeDataAccess
 import com.example.danmuapiapp.data.service.RuntimeDependencyHealthChecker
-import com.example.danmuapiapp.data.service.RuntimeNetworkAddressResolver
-import com.example.danmuapiapp.data.service.VideoShellInjectionConfigPublisher
+import com.example.danmuapiapp.data.service.RuntimePaths
+import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.domain.repository.AdminSessionRepository
 import com.example.danmuapiapp.domain.repository.CoreRepository
@@ -45,106 +24,127 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.File
-import com.example.danmuapiapp.data.util.WatcherRegistry
-import java.net.HttpURLConnection
-import java.net.URL
-import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * 运行时仓库门面。
+ *
+ * 只保留装配、串行用户操作入口、NodeService 状态广播桥接与公开 API 转发：
+ * - 状态存储与初始装载：[RuntimeStateStore]
+ * - 端口/进程/归属探测：[RuntimeProcessProbe]
+ * - 状态机与候选核心观察：[RuntimeStatusController]
+ * - 启停、配置应用与模式切换：[RuntimeLifecycleController]
+ * - 初始与周期状态协调：[RuntimeStateReconciler]
+ * - 日志读取与解析：[RuntimeLogController]
+ * - 工作目录热重载：[RuntimeHotReloadController]
+ * - 网络事件与访问地址刷新：[RuntimeNetworkMonitorController]
+ */
 @Singleton
 class RuntimeRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val adminSessionRepository: AdminSessionRepository,
-    private val coreRepository: CoreRepository
+    private val coreRepository: CoreRepository,
+    private val runtimeData: RuntimeDataAccess
 ) : RuntimeRepository {
 
-    companion object {
-        private const val KEY_RUNTIME_STARTED_AT_MS = "runtime_started_at_ms"
-        private const val LOG_HTTP_TIMEOUT_MS = 900
-        private const val LOG_CLEAR_HTTP_TIMEOUT_MS = 1200
-        private const val NETWORK_URL_REFRESH_DEBOUNCE_MS = 300L
-        private const val NORMAL_START_TIMEOUT_PRIMARY_MS = 15_000L
-        private const val NORMAL_START_TIMEOUT_EXTEND_MS = 20_000L
-        private const val NORMAL_STATE_RECONCILE_INTERVAL_MS = 8_000L
-        private const val NORMAL_START_STALE_TIMEOUT_MS =
-            NORMAL_START_TIMEOUT_PRIMARY_MS + NORMAL_START_TIMEOUT_EXTEND_MS + 8_000L
-        private const val NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS = 1500L
-        private const val NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS = 4000L
-        /**
-         * 运行时长刷新间隔。1 秒一次会让整个 RuntimeState 每秒变更一次，
-         * 从而导致首页（含大量液态玻璃节点）每秒重组合/重绘；10 秒一次把这份开销降到 1/10。
-         */
-        private const val UPTIME_REFRESH_INTERVAL_MS = 10_000L
-        private const val NORMAL_STALE_PROCESS_RETRY_DELAY_MS = 220L
-        // 端口探测重试：系统冻结会让单次探测误判，重试期间进程通常已经解冻。
-        private const val PORT_PROBE_ATTEMPTS = 3
-        private const val PORT_PROBE_TIMEOUT_MS = 450
-        private const val PORT_PROBE_RETRY_DELAY_MS = 300L
-        private const val NORMAL_RESTART_STOP_TIMEOUT_MS = 12_000L
-        private const val NORMAL_STOP_TIMEOUT_MS = 8_000L
-        private const val NORMAL_RESTART_START_TIMEOUT_MS = 15_000L
-        private const val CANDIDATE_HEALTHY_OBSERVATION_MS = 25_000L
-        private const val HOT_RELOAD_DEBOUNCE_MS = 800L
-        private const val HOT_RELOAD_MIN_INTERVAL_MS = 2500L
-        private const val ROOT_FINGERPRINT_CHECK_INTERVAL_MS = 6000L
-        private val NORMAL_RESTART_CRITICAL_FILES = setOf(
-            "main.js",
-            "android-server.js",
-            "worker-proxy.js"
-        )
-        private val NORMAL_RESTART_SKIP_PREFIXES = listOf(
-            "config/",
-            "danmu_api_stable/",
-            "danmu_api_dev/",
-            "danmu_api_custom/"
-        )
-        private val ISO_BRACKET_LOG_REGEX =
-            Regex("""^\[?(\d{4}-\d{2}-\d{2}T[^\]]+)\]?\s+\[([A-Z]+)\]\s*(.*)$""")
-        private val LOCAL_BRACKET_LOG_REGEX =
-            Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s+\[([A-Z]+)\]\s*(.*)$""")
-        private val ISO_COLON_LOG_REGEX =
-            Regex("""^\[?(\d{4}-\d{2}-\d{2}T[^\]]+)\]?\s+([A-Za-z]+):\s*(.*)$""")
-        private val LOCAL_COLON_LOG_REGEX =
-            Regex("""^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s+([A-Za-z]+):\s*(.*)$""")
-        private val SERVICE_LOG_REGEX =
-            Regex("""^\[([^\]]+)]\s+([A-Za-z]+):\s*(.*)$""")
-        private val STACK_TRACE_LINE_REGEX =
-            Regex("""^(?:at\s+\S+|\.\.\. \d+ more|Caused by:|Suppressed:).*$""")
-        private val TIMESTAMP_TAG_REGEX =
-            Regex("""^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}.*)?$""")
+    private companion object {
+        /** 候选核心自动恢复前等待旧实例退出的上限。 */
+        const val CANDIDATE_RECOVERY_STOP_TIMEOUT_MS = 8_000L
     }
 
-    private val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val operationMutex = Mutex()
-    private val connectivityManager by lazy {
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-    }
-
-    private val mayRecoverRootModeAfterReinstall = !RuntimeModePrefs.hasExplicitSelection(context)
-    private var rootRecoveryChecked = false
-    private val _runtimeState = MutableStateFlow(loadInitialState())
-    override val runtimeState: StateFlow<RuntimeState> = _runtimeState.asStateFlow()
-    private val runtimeTransitionSequence = AtomicLong(0L)
-
-    private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
-    override val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
-    private val _eventLogs = MutableStateFlow<List<LogEntry>>(emptyList())
-    private var serviceLogsCache: List<LogEntry> = emptyList()
-    private var appFileLogsCache: List<LogEntry> = emptyList()
-    @Volatile
-    private var clearedServiceLogCounts: Map<LogEntry, Int> = emptyMap()
-
+    private val normalStart = NormalRuntimeStartState()
     private val normalRuntimeEventOrder = NormalRuntimeEventOrder()
+    private val userOperationInFlight = AtomicBoolean(false)
+
+    private val probe = RuntimeProcessProbe(context)
+    private val stateStore = RuntimeStateStore(
+        context = context,
+        isNormalProcessRunning = { probe.isNormalProcessRunning() },
+        healthUptimeSeconds = { port -> probe.readHealthUptimeSeconds(port) }
+    )
+
+    private val _runtimeState = stateStore.state
+    override val runtimeState: StateFlow<RuntimeState> = _runtimeState.asStateFlow()
+
+    private val logController = RuntimeLogController(
+        context = context,
+        scope = scope,
+        settingsRepository = settingsRepository,
+        adminSessionRepository = adminSessionRepository,
+        currentState = { _runtimeState.value },
+        isPortOpen = { port -> probe.isPortOpen(port) }
+    )
+    override val logs: StateFlow<List<LogEntry>> = logController.logs
+
+    private val hotReloadController = RuntimeHotReloadController(
+        context = context,
+        scope = scope,
+        state = _runtimeState,
+        operationMutex = operationMutex,
+        hotReloadEnabled = { NormalModeRuntimeProfiles.current(context).hotReloadEnabled },
+        log = ::addLog,
+        restartRuntime = ::restartRuntimeFromHotReload
+    )
+
+    private val statusController = RuntimeStatusController(
+        context = context,
+        scope = scope,
+        state = _runtimeState,
+        stateStore = stateStore,
+        probe = probe,
+        normalStart = normalStart,
+        coreRepository = coreRepository,
+        log = ::addLog,
+        stopHotReload = { hotReloadController.stop() },
+        onRuntimeRunning = { hotReloadController.onRuntimeStateChanged(_runtimeState.value) },
+        recoverCandidateCore = ::recoverCandidateCore
+    )
+
+    private val lifecycleController = RuntimeLifecycleController(
+        context = context,
+        scope = scope,
+        state = _runtimeState,
+        stateStore = stateStore,
+        probe = probe,
+        status = statusController,
+        hotReload = hotReloadController,
+        coreRepository = coreRepository,
+        settingsRepository = settingsRepository,
+        normalStart = normalStart,
+        log = ::addLog
+    )
+
+    private val reconciler = RuntimeStateReconciler(
+        context = context,
+        scope = scope,
+        operationMutex = operationMutex,
+        state = _runtimeState,
+        probe = probe,
+        status = statusController,
+        settingsRepository = settingsRepository,
+        normalStart = normalStart,
+        log = ::addLog
+    )
+
+    private val networkMonitor = RuntimeNetworkMonitorController(
+        context = context,
+        scope = scope,
+        state = _runtimeState,
+        stateStore = stateStore,
+        onRootEndpointChanged = { snapshot ->
+            RootRuntimeNotificationManager.show(
+                context = context,
+                text = snapshot.statusMessage.orEmpty(),
+                endpoint = snapshot.lanUrl
+            )
+        }
+    )
+
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             // 仅普通模式处理 NodeService 广播，避免 Root 模式误更新。
@@ -166,26 +166,26 @@ class RuntimeRepositoryImpl @Inject constructor(
             when (status) {
                 NodeService.STATUS_STARTING -> {
                     if (_runtimeState.value.status != ServiceStatus.Stopping) {
-                        if (normalStartIssuedAtMs <= 0L) {
-                            normalStartIssuedAtMs = System.currentTimeMillis()
+                        if (normalStart.startIssuedAtMs <= 0L) {
+                            normalStart.startIssuedAtMs = System.currentTimeMillis()
                         }
-                        normalPendingExplicitStart = explicitStart
-                        markStarting(message)
+                        normalStart.pendingExplicitStart = explicitStart
+                        statusController.markStarting(message)
                     }
                 }
 
                 NodeService.STATUS_STOPPING -> {
-                    if (pendingNormalRestart) {
-                        markStopping("正在重启服务…")
+                    if (normalStart.pendingRestart) {
+                        statusController.markStopping("正在重启服务…")
                     } else {
-                        markStopping(message)
+                        statusController.markStopping(message)
                     }
                 }
 
                 NodeService.STATUS_RUNNING -> {
-                    val explicit = explicitStart || normalPendingExplicitStart
-                    markRunning(forceNewStart = explicit, statusMessage = message)
-                    normalPendingExplicitStart = false
+                    val explicit = explicitStart || normalStart.pendingExplicitStart
+                    statusController.markRunning(forceNewStart = explicit, statusMessage = message)
+                    normalStart.pendingExplicitStart = false
                     addLog(LogLevel.Info, "服务已启动")
                 }
 
@@ -194,8 +194,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                         decideNormalStoppedBroadcastAction(
                             runMode = _runtimeState.value.runMode,
                             status = _runtimeState.value.status,
-                            pendingNormalRestart = pendingNormalRestart,
-                            normalStartIssuedAtMs = normalStartIssuedAtMs
+                            pendingNormalRestart = normalStart.pendingRestart,
+                            normalStartIssuedAtMs = normalStart.startIssuedAtMs
                         )
                     ) {
                         NormalStoppedBroadcastAction.IgnoreAsStale -> {
@@ -204,8 +204,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                         }
 
                         NormalStoppedBroadcastAction.RestartStopReported -> {
-                            normalPendingExplicitStart = false
-                            updateStatusMessage(
+                            normalStart.pendingExplicitStart = false
+                            statusController.updateStatusMessage(
                                 expectedStatus = ServiceStatus.Stopping,
                                 message = "旧实例已报告停止，正在等待服务销毁…"
                             )
@@ -214,8 +214,8 @@ class RuntimeRepositoryImpl @Inject constructor(
                         }
 
                         NormalStoppedBroadcastAction.MarkStopped -> {
-                            normalPendingExplicitStart = false
-                            markStopped(message)
+                            normalStart.pendingExplicitStart = false
+                            statusController.markStopped(message)
                             addLog(LogLevel.Info, "服务已停止")
                         }
                     }
@@ -223,8 +223,8 @@ class RuntimeRepositoryImpl @Inject constructor(
 
                 NodeService.STATUS_ERROR -> {
                     val error = intent.getStringExtra(NodeService.EXTRA_ERROR) ?: "未知错误"
-                    normalPendingExplicitStart = false
-                    markError(error, statusMessage = message ?: error)
+                    normalStart.pendingExplicitStart = false
+                    statusController.markError(error, statusMessage = message ?: error)
                     addLog(LogLevel.Error, "服务错误: $error")
                     val suspectedMissingPackage = RuntimeDependencyHealthChecker.recordModuleNotFoundIssue(
                         context = context,
@@ -248,43 +248,6 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
-    private var uptimeJob: Job? = null
-    private var hotReloadWatcher: WorkDirHotReloadWatcher? = null
-    private var hotReloadJob: Job? = null
-    private var rootFingerprintCheckJob: Job? = null
-    private var pendingHotReloadReason: String? = null
-    private var lastHotReloadAtMs: Long = 0L
-    private var hotReloadSuppressUntilMs: Long = 0L
-    private var rootWorkDirFingerprint: String? = null
-    private var lastRootFingerprintCheckAtMs: Long = 0L
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var networkUrlRefreshJob: Job? = null
-    @Volatile
-    private var pendingNormalRestart = false
-
-    @Volatile
-    private var normalStartIssuedAtMs = 0L
-
-    @Volatile
-    private var normalPendingExplicitStart = false
-
-    private data class CandidateStartAttempt(
-        val variant: ApiVariant,
-        val runMode: RunMode,
-        val candidateInstalledAtMs: Long,
-        val startedAtMs: Long = System.currentTimeMillis()
-    )
-
-    @Volatile
-    private var candidateStartAttempt: CandidateStartAttempt? = null
-    private var candidateValidationJob: Job? = null
-    private val candidateRecoveryInFlight = AtomicBoolean(false)
-
-    @Volatile
-    private var appForeground = false
-
-    private var rootReconcileConsecutiveDeadCount = 0
-    private var normalReconcileConsecutivePortMisses = 0
     init {
         val filter = IntentFilter(NodeService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -295,146 +258,30 @@ class RuntimeRepositoryImpl @Inject constructor(
 
         val initState = _runtimeState.value
         if (initState.status == ServiceStatus.Starting || initState.status == ServiceStatus.Running) {
-            armCandidateObservation(initState.variant, initState.runMode)
+            statusController.armCandidateObservation(initState.variant, initState.runMode)
         }
         if (shouldCloseRootShellSessionForMode(initState.runMode)) {
             RootShell.closeSession()
         }
         if (initState.status == ServiceStatus.Running) {
-            val startedAt = ensureRuntimeStartedAt(initState.runMode, forceNew = false)
-            startUptimeCounter(startedAt)
-            scheduleCandidateConfirmation()
+            statusController.restoreRunningStateOnStartup()
         }
 
         scope.launch {
-            operationMutex.withLock { reconcileInitialState() }
+            operationMutex.withLock { reconciler.reconcileInitialState() }
         }
-        startNormalStateReconciler()
-        startNetworkMonitor()
+        reconciler.startPeriodicReconcile()
+        networkMonitor.start()
     }
-
-    private fun loadInitialState(): RuntimeState {
-        val mode = RuntimeModePrefs.get(context)
-        val defaultTokenEnvFile = normalRuntimeEnvFileForBootstrap(mode)
-        val envValues = readRuntimeEnvValues(defaultTokenEnvFile)
-        val portFromEnv = envValues["DANMU_API_PORT"]?.toIntOrNull()?.takeIf { it in 1..65535 }
-        val port = if (prefs.contains("port")) {
-            prefs.getInt("port", 9321)
-        } else {
-            portFromEnv ?: 9321
-        }
-        val token = TokenDefaults.resolveTokenFromPrefs(prefs, context, defaultTokenEnvFile)
-        val listenModeFromPrefs = RuntimeListenMode.fromKey(
-            if (prefs.contains(RuntimeListenMode.PREFERENCE_KEY)) {
-                prefs.getString(RuntimeListenMode.PREFERENCE_KEY, null)
-            } else {
-                null
-            }
-        )
-        val listenModeFromEnv = RuntimeListenMode.fromBindHost(
-            envValues[RuntimeListenMode.ENV_KEY]
-        )
-        val listenMode = listenModeFromPrefs
-            ?: listenModeFromEnv
-            ?: RuntimeListenMode.Ipv4Only
-        if (listenModeFromPrefs == null && listenModeFromEnv != null) {
-            prefs.edit {
-                putString(RuntimeListenMode.PREFERENCE_KEY, listenModeFromEnv.key)
-            }
-        }
-        val runtimeVariant = normalizeVariantKey(
-            if (prefs.contains("variant")) prefs.getString("variant", null) else null
-        )
-        val legacyVariant = normalizeVariantKey(
-            context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE)
-                .getString("variant", null)
-        )
-        val envVariant = normalizeVariantKey(envValues["DANMU_API_VARIANT"])
-        val selectedVariantKey = runtimeVariant ?: legacyVariant ?: envVariant ?: ApiVariant.Stable.key
-        val variant = ApiVariant.entries.find { it.key == selectedVariantKey } ?: ApiVariant.Stable
-
-        if (runtimeVariant == null || legacyVariant == null || runtimeVariant != selectedVariantKey || legacyVariant != selectedVariantKey) {
-            persistSelectedVariant(variant, commit = false)
-        }
-
-        // Constructor runs on the app main thread. Use local process markers here and
-        // leave HTTP/Root ownership reconciliation to the existing IO coroutine.
-        val normalRuntimeAlive = mode == RunMode.Normal && isNormalProcessRunning()
-        val rootPid = if (mode == RunMode.Root) RootRuntimeController.getPid(context) else null
-        val running = if (mode == RunMode.Root) {
-            RootRuntimeController.hasPersistedRuntimeHint(context)
-        } else {
-            normalRuntimeAlive
-        }
-        var startedAt = readRuntimeStartedAt()
-
-        if (running) {
-            if (startedAt <= 0L) {
-                startedAt = when (mode) {
-                    RunMode.Root -> {
-                        RootRuntimeController.getProcessStartedAtMs(context)
-                            ?: RootRuntimeController.getPidFileLastModified(context)
-                            ?: System.currentTimeMillis()
-                    }
-
-                    RunMode.Normal -> recoverNormalRuntimeStartedAtFromHealth(port)
-                        ?: System.currentTimeMillis()
-                }
-                saveRuntimeStartedAt(startedAt)
-            }
-        }
-
-        val uptimeSeconds = if (running && startedAt > 0L) {
-            uptimeSecondsFrom(startedAt)
-        } else {
-            0L
-        }
-
-        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
-        return RuntimeState(
-            status = if (running) ServiceStatus.Running else ServiceStatus.Stopped,
-            port = port,
-            token = token,
-            variant = variant,
-            runMode = mode,
-            listenMode = listenMode,
-            pid = if (running && mode == RunMode.Root) rootPid else null,
-            uptimeSeconds = uptimeSeconds,
-            localUrl = buildLocalUrl(port, token),
-            lanUrl = buildLanUrl(networkAddresses.ipv4, port, token),
-            lanIpv6Url = buildLanIpv6Url(networkAddresses.ipv6, port, token, listenMode)
-        )
-    }
-
-    private fun normalRuntimeEnvFileForBootstrap(mode: RunMode): File? {
-        if (mode != RunMode.Normal) return null
-        return runCatching {
-            val projectDir = RuntimePaths.normalProjectDir(context)
-            val entryFile = File(projectDir, "main.js")
-            if (!projectDir.exists() || !projectDir.isDirectory || !entryFile.exists()) {
-                return@runCatching null
-            }
-            File(projectDir, "config/.env")
-        }.getOrNull()
-    }
-
-    private fun readRuntimeEnvValues(envFile: File?): Map<String, String> {
-        if (envFile == null || !envFile.exists() || !envFile.isFile) return emptyMap()
-        return runCatching {
-            DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))
-        }.getOrDefault(emptyMap())
-    }
-
-    private val userOperationInFlight = AtomicBoolean(false)
 
     private fun launchSerializedUserOperation(action: String, block: suspend () -> Unit) {
         if (!userOperationInFlight.compareAndSet(false, true)) return
-        cancelRootFingerprintCheck()
+        hotReloadController.cancelRootFingerprintCheck()
         scope.launch {
             try {
                 operationMutex.withLock {
                     runCatching {
-                        block()
+                        runtimeData.transition { block() }
                     }.onFailure {
                         handleRuntimeOperationFailure(action, it)
                     }
@@ -445,23 +292,114 @@ class RuntimeRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun handleRuntimeOperationFailure(action: String, throwable: Throwable) {
+        val detail = ErrorHandler.buildDetailedMessage(throwable)
+        val message = "${action}异常：$detail"
+        statusController.markError(message)
+        addLog(LogLevel.Error, message)
+    }
+
+    /** 热重载触发的重启：与用户操作共用同一个互斥锁，但不占用用户操作闸门。 */
+    private suspend fun restartRuntimeFromHotReload() {
+        runtimeData.transition { lifecycleController.restartServiceLocked() }
+    }
+
+    /**
+     * 候选核心启动失败后的自动恢复编排：停止异常实例、还原上一个可用版本并重新启动。
+     * 具体状态迁移交给 [RuntimeStatusController]，启停交给 [RuntimeLifecycleController]。
+     */
+    private suspend fun recoverCandidateCore(
+        attempt: RuntimeStatusController.CandidateStartAttempt,
+        reason: String
+    ) {
+        operationMutex.withLock {
+            runtimeData.transition recovery@ {
+                val candidate = coreRepository.candidateState.value ?: return@recovery
+                if (!CoreCandidateRecoveryPolicy.matchesAttempt(
+                        candidate = candidate,
+                        variant = attempt.variant,
+                        runMode = attempt.runMode,
+                        installedAtMs = attempt.candidateInstalledAtMs
+                    )
+                ) {
+                    return@recovery
+                }
+                if (!candidate.hasRecoveryPoint) {
+                    coreRepository.confirmCandidateCore(
+                        attempt.variant,
+                        attempt.runMode,
+                        attempt.candidateInstalledAtMs
+                    )
+                    addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
+                    return@recovery
+                }
+
+                val transitionId = statusController.beginTransition(
+                    kind = RuntimeTransitionKind.RecoveringCore,
+                    message = "新核心启动异常，正在恢复上一个可用版本…"
+                )
+                try {
+                    addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
+                    val snapshot = _runtimeState.value
+                    if (snapshot.status != ServiceStatus.Stopped) {
+                        statusController.updateTransition(transitionId, "正在安全停止异常核心…")
+                        lifecycleController.stopServiceLocked()
+                        val stopped = probe.waitForRuntimeStopped(
+                            mode = attempt.runMode,
+                            oldPort = snapshot.port,
+                            timeoutMs = CANDIDATE_RECOVERY_STOP_TIMEOUT_MS
+                        )
+                        if (!stopped) {
+                            addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
+                            return@recovery
+                        }
+                    }
+
+                    statusController.updateTransition(transitionId, "正在恢复上一个可用核心…")
+                    coreRepository.restoreCandidateCore(
+                        attempt.variant,
+                        attempt.runMode,
+                        attempt.candidateInstalledAtMs
+                    ).fold(
+                        onSuccess = { restored ->
+                            if (!restored) {
+                                addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
+                                return@fold
+                            }
+                            statusController.markStopped("新核心启动失败，已恢复上一个可用版本")
+                            addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
+                            statusController.updateTransition(transitionId, "已恢复上一个版本，正在重新启动服务…")
+                            lifecycleController.startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
+                        },
+                        onFailure = { error ->
+                            statusController.markError("自动恢复失败：${error.message ?: "未知错误"}")
+                            addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
+                        }
+                    )
+                } finally {
+                    statusController.endTransition(transitionId)
+                }
+            }
+        }
+    }
+
     override fun startService() {
         launchSerializedUserOperation("启动服务") {
-            startServiceLocked()
+            lifecycleController.startServiceLocked()
         }
     }
 
     override fun stopService() {
-        cancelCandidateObservation()
+        statusController.cancelCandidateObservation()
         launchSerializedUserOperation("停止服务") {
-            stopServiceLocked()
+            lifecycleController.stopServiceLocked()
         }
     }
 
     override fun restartService() {
-        cancelCandidateObservation()
+        statusController.cancelCandidateObservation()
         launchSerializedUserOperation("重启服务") {
-            restartServiceLocked()
+            lifecycleController.restartServiceLocked()
         }
     }
 
@@ -469,10 +407,10 @@ class RuntimeRepositoryImpl @Inject constructor(
         // 端口探测 / 健康检查都是阻塞网络操作，必须离开主线程，
         // 否则会被 BlockGuard 抛 NetworkOnMainThreadException，探测结果全部变成“关闭”。
         withContext(Dispatchers.IO) {
-            cancelCandidateObservation()
+            statusController.cancelCandidateObservation()
             operationMutex.withLock {
                 runCatching {
-                    restartServiceLocked()
+                    runtimeData.transition { lifecycleController.restartServiceLocked() }
                 }.onFailure {
                     handleRuntimeOperationFailure("重启服务", it)
                 }
@@ -481,151 +419,21 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun refreshRuntimeState() {
-        scope.launch {
-            try {
-                refreshRuntimeStateNow()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                AppDiagnosticLogger.w(
-                    context,
-                    "RuntimeRepo",
-                    "主动刷新运行状态失败：${error.message ?: "未知错误"}",
-                    error
-                )
-            }
-        }
+        reconciler.refreshAsync()
     }
 
     override suspend fun refreshRuntimeStateAndAwait() {
         withContext(Dispatchers.IO) {
-            refreshRuntimeStateNow()
-        }
-    }
-
-    private suspend fun refreshRuntimeStateNow() {
-        operationMutex.withLock {
-            if (shouldCloseRootShellSessionForMode(_runtimeState.value.runMode)) {
-                RootShell.closeSession()
-            }
-            reconcileInitialState()
-            if (_runtimeState.value.runMode == RunMode.Normal) {
-                reconcileNormalStateLocked()
-            } else if (_runtimeState.value.runMode == RunMode.Root) {
-                reconcileRootStateLocked()
-            }
+            reconciler.refreshNow()
         }
     }
 
     override fun setAppForeground(foreground: Boolean) {
-        appForeground = foreground
-        if (foreground) {
-            refreshRuntimeState()
-        } else {
-            restoreForegroundNotificationOnBackground()
-        }
-    }
-
-    /**
-     * 离开应用时仅在通知确实不在位时才重发：
-     * 无条件重发会让每次切后台都把通知刷到顶部，表现为"通知明明还在却被刷新"。
-     *
-     * 端口探测放在 IO 线程并带少量重试：主线程做阻塞网络操作会被 BlockGuard
-     * 直接抛 NetworkOnMainThreadException（曾经把探测结果全部变成"端口已关闭"），
-     * 而刚启动/正忙的核心也可能偶尔吃满探测超时，重试可以避免误判。
-     */
-    private fun restoreForegroundNotificationOnBackground() {
-        val state = _runtimeState.value
-        if (state.runMode != RunMode.Normal ||
-            (state.status != ServiceStatus.Running && state.status != ServiceStatus.Starting)
-        ) {
-            return
-        }
-        scope.launch {
-            restoreForegroundNotificationOffMainThread(state)
-        }
-    }
-
-    private suspend fun restoreForegroundNotificationOffMainThread(state: RuntimeState) {
-        val probe = probeRuntimePort(state)
-        if (!probe.open) {
-            // 只有确认 Node 进程真的不在了才完整启动；进程还在就只补通知，
-            // 避免把后台冻结造成的探测失败当成运行时退出。
-            if (isNormalProcessRunning()) {
-                AppDiagnosticLogger.w(
-                    context,
-                    "RuntimeRepository",
-                    "后台恢复通知时端口探测失败（已重试 ${probe.attempts} 次，耗时 ${probe.elapsedMs} ms，" +
-                        "最后一次 ${probe.error ?: "未知错误"}），Node 进程仍在，仅补发通知"
-                )
-                runCatching { NodeService.ensureForegroundNotification(context) }
-                return
-            }
-            AppDiagnosticLogger.w(
-                context,
-                "RuntimeRepository",
-                "后台恢复通知时确认运行时已退出（重试 ${probe.attempts} 次，耗时 ${probe.elapsedMs} ms），改为完整启动 Node"
-            )
-            runCatching { NodeService.requestRecoveryStart(context) }
-            return
-        }
-        val manuallyHidden = NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
-        if (manuallyHidden) {
-            // 只有"前台恢复"策略才在离开应用时补回被手动划掉的通知，
-            // "尊重关闭"需要保持隐藏，划掉即恢复早在划掉时就已补发。
-            if (settingsRepository.normalNotificationBehavior.value ==
-                NormalNotificationBehavior.ForegroundRestore
-            ) {
-                NormalNotificationBehaviorPrefs.clearManuallyHidden(context)
-                NodeService.ensureForegroundNotification(context)
-            }
-            return
-        }
-        val notificationPresent =
-            NodeService.canDisplayForegroundNotification(context) &&
-                NodeService.isForegroundNotificationActive(context)
-        if (notificationPresent) {
-            return
-        }
-        AppDiagnosticLogger.i(
-            context,
-            "RuntimeRepository",
-            "离开应用时通知不在位，补发前台服务通知"
-        )
-        NodeService.ensureForegroundNotification(context)
-    }
-
-    /**
-     * 带重试的端口探测：任何一次成功即视为存活，全部失败才返回 closed，
-     * 并带上最后一次的错误类型，便于区分"连接被拒"和"被冻结导致的超时"。
-     */
-    private suspend fun probeRuntimePort(
-        state: RuntimeState,
-        attempts: Int = PORT_PROBE_ATTEMPTS,
-        timeoutMs: Int = PORT_PROBE_TIMEOUT_MS,
-        retryDelayMs: Long = PORT_PROBE_RETRY_DELAY_MS
-    ): PortProbe.Result {
-        if (state.runMode == RunMode.Root) {
-            val open = RootRuntimeController.isRunning(context, state.port)
-            return PortProbe.Result(
-                open = open,
-                attempts = 1,
-                elapsedMs = 0L,
-                error = if (open) null else "Root 运行时未响应"
-            )
-        }
-        return PortProbe.probe(
-            port = state.port,
-            attempts = attempts,
-            timeoutMs = timeoutMs,
-            retryDelayMs = retryDelayMs
-        )
+        reconciler.setAppForeground(foreground)
     }
 
     override fun refreshLogs() {
-        scope.launch {
-            refreshLogsOnce()
-        }
+        logController.refresh()
     }
 
     override fun applyServiceConfig(
@@ -634,9 +442,9 @@ class RuntimeRepositoryImpl @Inject constructor(
         restartIfRunning: Boolean,
         listenMode: RuntimeListenMode?
     ) {
-        cancelCandidateObservation()
+        statusController.cancelCandidateObservation()
         launchSerializedUserOperation("应用服务配置") {
-            applyServiceConfigLocked(
+            lifecycleController.applyServiceConfigLocked(
                 port = port,
                 token = RuntimeTokenNormalizer.normalizeInput(token),
                 listenMode = listenMode ?: _runtimeState.value.listenMode,
@@ -663,2385 +471,34 @@ class RuntimeRepositoryImpl @Inject constructor(
     }
 
     override fun updateVariant(variant: ApiVariant) {
-        cancelCandidateObservation()
-        persistSelectedVariant(variant, commit = true)
+        statusController.cancelCandidateObservation()
+        stateStore.persistSelectedVariant(variant, commit = true)
         _runtimeState.update { it.copy(variant = variant) }
     }
 
-    override fun beginRuntimeTransition(kind: RuntimeTransitionKind, message: String): Long {
-        val id = runtimeTransitionSequence.incrementAndGet()
-        _runtimeState.update { state ->
-            state.copy(
-                transition = RuntimeTransition(
-                    id = id,
-                    kind = kind,
-                    message = message
-                )
-            )
+    override fun updateRunMode(mode: RunMode) {
+        launchSerializedUserOperation("切换运行模式") {
+            lifecycleController.switchRunMode(mode)
         }
-        return id
+    }
+
+    override fun beginRuntimeTransition(kind: RuntimeTransitionKind, message: String): Long {
+        return statusController.beginTransition(kind, message)
     }
 
     override fun updateRuntimeTransition(id: Long, message: String) {
-        _runtimeState.update { state ->
-            val current = state.transition
-            if (current?.id == id) {
-                state.copy(transition = current.copy(message = message))
-            } else {
-                state
-            }
-        }
+        statusController.updateTransition(id, message)
     }
 
     override fun endRuntimeTransition(id: Long) {
-        _runtimeState.update { state ->
-            if (state.transition?.id == id) state.copy(transition = null) else state
-        }
+        statusController.endTransition(id)
     }
-
-    private fun persistSelectedVariant(variant: ApiVariant, commit: Boolean) {
-        prefs.edit(commit = commit) { putString("variant", variant.key) }
-        context.getSharedPreferences("danmu_api_variant", Context.MODE_PRIVATE).edit(commit = commit) {
-            putString("variant", variant.key)
-        }
-    }
-
-    private fun normalizeVariantKey(raw: String?): String? {
-        val value = raw?.trim()?.lowercase().orEmpty()
-        return when (value) {
-            "stable" -> "stable"
-            "dev", "develop", "development" -> "dev"
-            "custom" -> "custom"
-            else -> null
-        }
-    }
-
-    override fun updateRunMode(mode: RunMode) {
-        cancelCandidateObservation()
-        launchSerializedUserOperation("切换运行模式") {
-            val current = _runtimeState.value
-            if (current.runMode == mode) return@launchSerializedUserOperation
-
-            if (mode.requiresRoot) {
-                val rootCheck = RootShell.exec("id", timeoutMs = 3500L)
-                if (!rootCheck.ok) {
-                    addLog(LogLevel.Warn, "运行模式切换失败：${rootSwitchDeniedReason(rootCheck)}")
-                    return@launchSerializedUserOperation
-                }
-            }
-
-            if (mode == RunMode.Root && current.status != ServiceStatus.Running && current.status != ServiceStatus.Starting) {
-                val recovered = RootRuntimeController.recoverRuntime(context, current.port)
-                if (recovered != null) {
-                    adoptRecoveredRootRuntime(recovered)
-                    return@launchSerializedUserOperation
-                }
-            }
-
-            val transitionId = beginRuntimeTransition(
-                kind = RuntimeTransitionKind.SwitchingRunMode,
-                message = "正在从${current.runMode.label}模式切换到${mode.label}模式…"
-            )
-            try {
-                val shouldResume = current.status == ServiceStatus.Running ||
-                    current.status == ServiceStatus.Starting
-
-                if (shouldResume) {
-                    updateRuntimeTransition(transitionId, "正在安全停止${current.runMode.label}模式服务…")
-                    stopServiceLocked()
-                    waitForPort(current.port, wantOpen = false, timeoutMs = 5000L)
-                }
-
-                updateRuntimeTransition(transitionId, "正在同步运行数据并切换到${mode.label}模式…")
-                val favoriteSync = FavoriteCacheStore.synchronizeModes(
-                    context = context,
-                    preferredMode = current.runMode,
-                    otherMode = mode
-                )
-                if (favoriteSync.isFailure) {
-                    val detail = favoriteSync.exceptionOrNull()?.message ?: "未知错误"
-                    addLog(LogLevel.Error, "运行模式切换失败：收藏数据同步失败：$detail")
-                    if (shouldResume) {
-                        updateRuntimeTransition(transitionId, "模式切换失败，正在恢复原服务…")
-                        startServiceLocked(startingStatusMessage = "正在恢复原服务…")
-                    }
-                    return@launchSerializedUserOperation
-                }
-                addLog(LogLevel.Info, "已同步 ${favoriteSync.getOrThrow().count} 项收藏到 ${mode.label} 模式")
-
-                clearRuntimeStartedAt()
-                RuntimeModePrefs.put(context, mode)
-                val rootAutoStartEnabled = RootAutoStartPrefs.isBootAutoStartEnabled(context)
-                if (shouldSyncRootAutoStartModeFlag(mode, rootAutoStartEnabled)) {
-                    val flagResult = RootAutoStartModule.writeRunModeFlag(mode)
-                    if (!flagResult.ok) {
-                        addLog(LogLevel.Warn, "开机触发模式同步失败：${flagResult.message}")
-                    }
-                } else if (rootAutoStartEnabled) {
-                    addLog(LogLevel.Info, "已切换到普通模式：跳过 Root 开机触发模式同步，避免普通模式触发 Root 授权")
-                }
-                if (shouldCloseRootShellSessionForMode(mode)) {
-                    RootShell.closeSession()
-                }
-                _runtimeState.update {
-                    it.copy(
-                        runMode = mode,
-                        status = ServiceStatus.Stopped,
-                        uptimeSeconds = 0,
-                        pid = null,
-                        errorMessage = null,
-                        statusMessage = null
-                    )
-                }
-                stopWorkDirHotReload()
-
-                addLog(LogLevel.Info, "运行模式已切换为 ${mode.label}")
-
-                if (mode == RunMode.Root) {
-                    val recovered = RootRuntimeController.recoverRuntime(context, current.port)
-                    rootRecoveryChecked = true
-                    if (recovered != null) {
-                        adoptRecoveredRootRuntime(recovered)
-                        return@launchSerializedUserOperation
-                    }
-                }
-
-                if (shouldResume) {
-                    updateRuntimeTransition(transitionId, "已切换到${mode.label}模式，正在启动服务…")
-                    startServiceLocked(
-                        startingStatusMessage = "已切换到${mode.label}模式，正在启动服务…"
-                    )
-                }
-            } finally {
-                endRuntimeTransition(transitionId)
-            }
-        }
-    }
-
-    private fun rootSwitchDeniedReason(result: RootShell.Result): String {
-        if (result.timedOut) {
-            return "Root 授权超时"
-        }
-        val detail = (result.stderr.ifBlank { result.stdout })
-            .lineSequence()
-            .firstOrNull()
-            ?.trim()
-            .orEmpty()
-        if (detail.contains("not found", ignoreCase = true)) {
-            return "未检测到 su"
-        }
-        if (detail.contains("denied", ignoreCase = true)) {
-            return "未授予 Root 权限"
-        }
-        return detail.ifBlank { "未获得 Root 权限" }
-    }
-
-    private suspend fun applyServiceConfigLocked(
-        port: Int,
-        token: String,
-        listenMode: RuntimeListenMode,
-        restartIfRunning: Boolean
-    ) {
-        if (port !in 1..65535) return
-
-        val snapshot = _runtimeState.value
-        val portChanged = snapshot.port != port
-        val tokenChanged = snapshot.token != token
-        val listenModeChanged = snapshot.listenMode != listenMode
-        if (!portChanged && !tokenChanged && !listenModeChanged) return
-
-        val wasActive = snapshot.status == ServiceStatus.Running ||
-            snapshot.status == ServiceStatus.Starting
-        if (!restartIfRunning || !wasActive) {
-            persistServiceConfigChanges(
-                port = port,
-                token = token,
-                applyPort = portChanged,
-                applyToken = tokenChanged,
-                listenMode = listenMode,
-                applyListenMode = listenModeChanged
-            )
-            syncRuntimeEnvFromPrefs(snapshot.runMode)
-            return
-        }
-
-        val oldPort = snapshot.port
-        val oldMode = snapshot.runMode
-        val suppressStopTimeout = oldMode == RunMode.Normal
-        if (suppressStopTimeout) {
-            pendingNormalRestart = true
-        }
-        val transitionId = beginRuntimeTransition(
-            kind = RuntimeTransitionKind.Restarting,
-            message = "正在应用服务配置并重启…"
-        )
-
-        try {
-            val changedText = buildString {
-                if (portChanged) append("端口 ${snapshot.port} -> $port")
-                if (tokenChanged) {
-                    if (isNotEmpty()) append("，")
-                    append("Token 已更新")
-                }
-                if (listenModeChanged) {
-                    if (isNotEmpty()) append("，")
-                    append("监听 ${snapshot.listenMode.label} -> ${listenMode.label}")
-                }
-            }.ifBlank { "配置已更新" }
-            addLog(LogLevel.Info, "正在应用服务配置：$changedText")
-
-            updateRuntimeTransition(transitionId, "正在安全停止旧服务并应用配置…")
-            stopServiceLocked()
-            val stopped = if (oldMode == RunMode.Normal) {
-                waitForRestartStopCompletion(
-                    mode = oldMode,
-                    oldPort = oldPort,
-                    timeoutMs = 12_000L
-                )
-            } else {
-                waitForRuntimeStopped(oldMode, oldPort, timeoutMs = 12_000L)
-            }
-            if (!stopped) {
-                val detail = "应用服务配置失败：旧实例停止超时"
-                markError(detail)
-                addLog(LogLevel.Error, detail)
-                return
-            }
-
-            persistServiceConfigChanges(
-                port = port,
-                token = token,
-                applyPort = portChanged,
-                applyToken = tokenChanged,
-                listenMode = listenMode,
-                applyListenMode = listenModeChanged
-            )
-            syncRuntimeEnvFromPrefs(oldMode)
-            addLog(LogLevel.Info, "配置已写入，正在启动服务...")
-            updateRuntimeTransition(transitionId, "配置已写入，正在重新启动服务…")
-            startServiceLocked(startingStatusMessage = "正在重启服务以应用新配置…")
-        } finally {
-            endRuntimeTransition(transitionId)
-            if (suppressStopTimeout) {
-                pendingNormalRestart = false
-            }
-        }
-    }
-
-    private fun persistServiceConfigChanges(
-        port: Int,
-        token: String,
-        applyPort: Boolean,
-        applyToken: Boolean,
-        listenMode: RuntimeListenMode,
-        applyListenMode: Boolean
-    ) {
-        prefs.edit(commit = true) {
-            if (applyPort) {
-                putInt("port", port)
-            }
-            if (applyToken) {
-                if (token.isBlank()) {
-                    remove("token")
-                } else {
-                    putString("token", token)
-                }
-            }
-            if (applyListenMode) {
-                putString(RuntimeListenMode.PREFERENCE_KEY, listenMode.key)
-            }
-        }
-
-        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
-        _runtimeState.update { state ->
-            val nextPort = if (applyPort) port else state.port
-            val nextToken = if (applyToken) {
-                token.ifBlank { TokenDefaults.resolveCoreDefaultToken(context) }
-            } else {
-                state.token
-            }
-            val nextListenMode = if (applyListenMode) listenMode else state.listenMode
-            state.copy(
-                port = nextPort,
-                token = nextToken,
-                listenMode = nextListenMode,
-                localUrl = buildLocalUrl(nextPort, nextToken),
-                lanUrl = buildLanUrl(networkAddresses.ipv4, nextPort, nextToken),
-                lanIpv6Url = buildLanIpv6Url(
-                    networkAddresses.ipv6,
-                    nextPort,
-                    nextToken,
-                    nextListenMode
-                )
-            )
-        }
-        VideoShellInjectionConfigPublisher.publishAsync(context)
-    }
-
-    private fun syncRuntimeEnvFromPrefs(mode: RunMode) {
-        if (mode == RunMode.Normal) {
-            val normalDir = runCatching {
-                NodeProjectManager.ensureProjectExtracted(context, RuntimePaths.normalProjectDir(context))
-            }.getOrElse {
-                addLog(LogLevel.Warn, "同步运行时配置失败：${it.message ?: "无法初始化工作目录"}")
-                return
-            }
-
-            runCatching {
-                NodeProjectManager.writeRuntimeEnv(
-                    context = context,
-                    targetProjectDir = normalDir,
-                    preferredVariantKey = _runtimeState.value.variant.key
-                )
-            }.onFailure {
-                addLog(LogLevel.Warn, "写入运行时配置失败：${it.message ?: "未知错误"}")
-                return
-            }
-            return
-        }
-
-        // Root 模式仅同步 Root 目录，避免改配置时回写普通模式目录。
-        val rootSyncResult = RootRuntimeController.syncRuntimeEnvOnly(context)
-        if (!rootSyncResult.ok) {
-            val detail = rootSyncResult.detail.ifBlank { rootSyncResult.message }
-            addLog(LogLevel.Warn, "同步 Root 运行时配置失败：$detail")
-        }
-    }
-
-    private fun normalRuntimeProfile() = NormalModeRuntimeProfiles.current(context)
 
     override fun clearLogs() {
-        clearedServiceLogCounts = serviceLogsCache.groupingBy { it }.eachCount()
-        serviceLogsCache = emptyList()
-        appFileLogsCache = emptyList()
-        _eventLogs.value = emptyList()
-        _logs.value = emptyList()
-        AppDiagnosticLogger.clearAll(context)
-        scope.launch {
-            clearServiceLogsOnce()
-            refreshLogsOnce()
-        }
+        logController.clear()
     }
 
     override fun addLog(level: LogLevel, message: String) {
-        val tagInfo = LogTagClassifier.classifyAppEntry(AppLogSource.App, "Runtime")
-        _eventLogs.update { current ->
-            (current + LogEntry(
-                level = level,
-                message = message,
-                source = AppLogSource.App,
-                tag = "Runtime",
-                category = tagInfo.category,
-                tags = tagInfo.tags
-            )).takeLast(settingsRepository.logMaxCount.value)
-        }
-        publishMergedLogs()
-    }
-
-    private suspend fun ensureRuntimeDependenciesBeforeStart(
-        state: RuntimeState,
-        actionLabel: String,
-        resumeAction: RuntimeDependencyResumeAction
-    ): Boolean {
-        val dependencyRepair = try {
-            coreRepository.prepareInstalledCoreDependencyRepair(
-                variant = state.variant,
-                origin = CoreDependencyRepairOrigin.RuntimeStart,
-                resumeAction = resumeAction
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            val reason = error.message ?: "运行时依赖检测失败"
-            if (state.status == ServiceStatus.Running) {
-                _runtimeState.update {
-                    it.copy(
-                        status = ServiceStatus.Running,
-                        errorMessage = null,
-                        statusMessage = "$actionLabel 前依赖检查失败：$reason"
-                    )
-                }
-            } else {
-                markError(reason)
-            }
-            addLog(LogLevel.Error, "$actionLabel 前依赖检测失败：$reason")
-            return false
-        }
-        if (dependencyRepair == null) return true
-
-        val reason = "当前核心缺少运行时依赖，$actionLabel 已暂停，请先修复依赖"
-        _runtimeState.update {
-            it.copy(
-                status = if (state.status == ServiceStatus.Running) {
-                    ServiceStatus.Running
-                } else {
-                    ServiceStatus.Stopped
-                },
-                errorMessage = null,
-                statusMessage = reason
-            )
-        }
-        addLog(LogLevel.Warn, "$reason：${dependencyRepair.missingDependencies.joinToString(", ")}")
-        return false
-    }
-
-    private suspend fun startServiceLocked(
-        startingStatusMessage: String? = null,
-        dependenciesAlreadyChecked: Boolean = false
-    ) {
-        val state = _runtimeState.value
-        if (state.status == ServiceStatus.Starting) return
-        if (state.status == ServiceStatus.Running) {
-            if (isRuntimePortActive(state)) return
-            // 状态仍记为运行中，但端口已经关闭：这是后台杀进程/异常退出后的
-            // 陈旧状态，继续往下走会直接返回，导致“重启服务”实际没有拉起 Node。
-            addLog(LogLevel.Warn, "检测到服务状态与实际端口不一致，准备重新启动")
-            markStopped()
-        }
-        if (!dependenciesAlreadyChecked && !ensureRuntimeDependenciesBeforeStart(
-                state = state,
-                actionLabel = "启动",
-                resumeAction = RuntimeDependencyResumeAction.Start
-            )
-        ) {
-            return
-        }
-
-        if (state.runMode == RunMode.Normal) {
-            val recovered = recoverStaleNormalProcessIfNeeded(state.port)
-            if (!recovered) return
-        }
-
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Starting,
-                errorMessage = null,
-                statusMessage = startingStatusMessage ?: "正在准备启动服务…"
-            )
-        }
-        normalPendingExplicitStart = state.runMode == RunMode.Normal
-        if (state.runMode == RunMode.Root) {
-            if (shouldClearRootStartedAtBeforeStart(
-                    rootProbablyRunning = isRootRuntimeOwnedByApp(state.port)
-                )
-            ) {
-                clearRuntimeStartedAt()
-            }
-        } else {
-            clearRuntimeStartedAt()
-        }
-        addLog(LogLevel.Info, "正在启动服务...")
-        persistSelectedVariant(state.variant, commit = true)
-
-        when (state.runMode) {
-            RunMode.Normal -> {
-                if (state.port in 1..1023) {
-                    val reason = "普通模式无法监听 1-1023 端口，请切换 Root 模式或改用 1024+ 端口"
-                    markError(reason)
-                    addLog(LogLevel.Error, reason)
-                    return
-                }
-                val portOpenBeforeStart = isPortOpen(state.port)
-                val ownershipBeforeStart = if (portOpenBeforeStart) {
-                    readRuntimeOwnership(state.port, RunMode.Normal)
-                } else {
-                    RuntimeOwnership.Unknown
-                }
-                when (
-                    decideNormalStartPreflight(
-                        portOpen = portOpenBeforeStart,
-                        ownership = ownershipBeforeStart
-                    )
-                ) {
-                    NormalStartPreflightDecision.Proceed -> Unit
-                    NormalStartPreflightDecision.ForeignInstanceOccupiesPort -> {
-                        val reason = buildNormalForeignPortOccupiedMessage(state.port)
-                        markError(reason)
-                        addLog(LogLevel.Error, reason)
-                        return
-                    }
-                }
-                val normalProfile = normalRuntimeProfile()
-                val projectDir = RuntimePaths.normalProjectDir(context)
-                val selectedCoreDir = File(projectDir, "danmu_api_${state.variant.key}")
-                val selectedCoreReady = runCatching {
-                    NodeProjectManager.hasValidCore(selectedCoreDir)
-                }.getOrDefault(false)
-                if (!selectedCoreReady) {
-                    val fallback = ApiVariant.entries.firstOrNull { variant ->
-                        NodeProjectManager.hasValidCore(File(projectDir, "danmu_api_${variant.key}"))
-                    }
-                    val reason = if (fallback != null && fallback != state.variant) {
-                        "当前核心 ${settingsRepository.coreDisplayNames.value.resolve(state.variant)} 未安装，可先切换到 ${settingsRepository.coreDisplayNames.value.resolve(fallback)} 或下载后再启动"
-                    } else {
-                        "当前核心 ${settingsRepository.coreDisplayNames.value.resolve(state.variant)} 未安装，请先下载核心后再启动"
-                    }
-                    markError(reason)
-                    addLog(LogLevel.Error, reason)
-                    return
-                }
-                if (normalProfile.conservativeMode) {
-                    val reasonText = when (normalProfile.strategyMode) {
-                        NormalModeStabilityMode.Auto -> {
-                            val reasons = listOfNotNull(
-                                "低内存设备".takeIf { normalProfile.lowRamDevice },
-                                "共享存储目录".takeIf { normalProfile.slowStorageWorkDir }
-                            )
-                            if (reasons.isEmpty()) {
-                                "（自动）"
-                            } else {
-                                "（自动：${reasons.joinToString("、")}）"
-                            }
-                        }
-                        NormalModeStabilityMode.PreferStability -> "（手动开启）"
-                        NormalModeStabilityMode.PreferPerformance -> ""
-                    }
-                    addLog(
-                        LogLevel.Info,
-                        "已启用普通模式稳定优先策略$reasonText：关闭 worker/热更新并延长启动等待时间"
-                    )
-                }
-                val envSynced = runCatching {
-                    // 仅在现有运行目录可用时做快速配置同步，避免主进程重复走重型解压。
-                    NodeProjectManager.syncRuntimeEnvIfProjectReady(
-                        context = context,
-                        targetProjectDir = projectDir,
-                        preferredVariantKey = state.variant.key
-                    )
-                }
-                if (envSynced.isFailure) {
-                    val reason = envSynced.exceptionOrNull()?.message ?: "未知错误"
-                    markError("运行时配置写入失败：$reason")
-                    addLog(LogLevel.Error, "普通模式启动前写入配置失败: $reason")
-                    return
-                }
-                val startResult = runCatching {
-                    NodeService.start(context, userInitiated = true)
-                }
-                if (startResult.isFailure) {
-                    val reason = ErrorHandler.buildDetailedMessage(
-                        startResult.exceptionOrNull() ?: IllegalStateException("未知错误")
-                    )
-                    markError("普通模式拉起前台服务失败：$reason")
-                    addLog(LogLevel.Error, "普通模式拉起前台服务失败: $reason")
-                    return
-                }
-                armCandidateObservation(state.variant, state.runMode)
-                normalStartIssuedAtMs = System.currentTimeMillis()
-
-                scope.launch {
-                    delay(normalProfile.startupPrimaryNoticeMs)
-                    val snapshot = _runtimeState.value
-                    if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Starting) {
-                        if (isPortOpen(snapshot.port)) {
-                            markRunning(forceNewStart = normalPendingExplicitStart)
-                        } else {
-                            addLog(LogLevel.Warn, "普通模式首次启动较慢，继续等待...")
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Starting,
-                                message = "设备较慢，正在继续等待服务就绪…可点击取消启动"
-                            )
-                            delay(normalProfile.startupSecondaryNoticeMs)
-                            val retrySnapshot = _runtimeState.value
-                            if (retrySnapshot.runMode == RunMode.Normal &&
-                                retrySnapshot.status == ServiceStatus.Starting
-                            ) {
-                                if (isPortOpen(retrySnapshot.port)) {
-                                    markRunning(forceNewStart = normalPendingExplicitStart)
-                                } else {
-                                    addLog(LogLevel.Warn, "普通模式启动耗时较长，继续等待服务自行就绪...")
-                                    updateStatusMessage(
-                                        expectedStatus = ServiceStatus.Starting,
-                                        message = "启动耗时较长，仍在等待服务就绪…"
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            RunMode.Root -> {
-                val recovered = RootRuntimeController.recoverRuntime(context, state.port)
-                if (recovered != null) {
-                    adoptRecoveredRootRuntime(recovered)
-                    return
-                }
-                armCandidateObservation(state.variant, state.runMode)
-                val result = RootRuntimeController.start(context, state.port, quickMode = false)
-                if (result.ok) {
-                    markRunning(
-                        pid = RootRuntimeController.getPid(context),
-                        forceNewStart = shouldForceNewRootStartedAt(result.startOutcome)
-                    )
-                    addLog(LogLevel.Info, result.message)
-                } else {
-                    val detail = result.detail.ifBlank { result.message }
-                    markError(detail)
-                    addLog(LogLevel.Error, "Root 启动失败: $detail")
-                    val suspectedMissingPackage = RuntimeDependencyHealthChecker.recordModuleNotFoundIssue(
-                        context = context,
-                        projectDir = RuntimePaths.normalProjectDir(context),
-                        message = detail,
-                        preferredVariant = state.variant
-                    )
-                    if (detail.startsWith("运行时依赖缺失：") || suspectedMissingPackage != null) {
-                        try {
-                            coreRepository.prepareInstalledCoreDependencyRepair(
-                                variant = state.variant,
-                                origin = CoreDependencyRepairOrigin.RuntimeStart,
-                                suspectedMissingPackage = suspectedMissingPackage
-                            )
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            addLog(LogLevel.Error, "创建 Root 依赖修复任务失败：${error.message ?: "未知错误"}")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private suspend fun stopServiceLocked() {
-        val state = _runtimeState.value
-        if (state.status == ServiceStatus.Stopped || state.status == ServiceStatus.Stopping) return
-
-        val wasStarting = state.status == ServiceStatus.Starting
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Stopping,
-                errorMessage = null,
-                statusMessage = "正在安全停止服务…"
-            )
-        }
-        addLog(LogLevel.Info, "正在停止服务...")
-        uptimeJob?.cancel()
-
-        when (state.runMode) {
-            RunMode.Normal -> {
-                val restarting = pendingNormalRestart
-                val stopResult = runCatching {
-                    NodeService.stop(context)
-                }
-                if (stopResult.isFailure) {
-                    val reason = ErrorHandler.buildDetailedMessage(
-                        stopResult.exceptionOrNull() ?: IllegalStateException("未知错误")
-                    )
-                    markError("普通模式下发停止指令失败：$reason")
-                    addLog(LogLevel.Error, "普通模式下发停止指令失败: $reason")
-                    return
-                }
-                val stopPort = state.port
-                scope.launch {
-                    delay(3_000L)
-                    updateStatusMessage(
-                        expectedStatus = ServiceStatus.Stopping,
-                        message = if (restarting) {
-                            "重启前正在停止旧实例，若长时间无响应会自动处理"
-                        } else {
-                            "仍在停止中，长时间无响应可再次尝试停止"
-                        }
-                    )
-                }
-                scope.launch {
-                    val stopped = if (restarting) {
-                        waitForRestartStopCompletion(
-                            mode = RunMode.Normal,
-                            oldPort = stopPort,
-                            timeoutMs = NORMAL_STOP_TIMEOUT_MS
-                        )
-                    } else {
-                        waitForRuntimeStopped(
-                            mode = RunMode.Normal,
-                            oldPort = stopPort,
-                            timeoutMs = NORMAL_STOP_TIMEOUT_MS
-                        )
-                    }
-                    val snapshot = _runtimeState.value
-                    if (snapshot.runMode == RunMode.Normal && snapshot.status == ServiceStatus.Stopping) {
-                        if (stopped && restarting) {
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Stopping,
-                                message = "旧实例已停止，正在重新启动服务…"
-                            )
-                            addLog(LogLevel.Info, "普通模式停止完成，等待重启流程继续")
-                        } else if (stopped) {
-                            markStopped()
-                        } else if (!restarting) {
-                            addLog(LogLevel.Warn, "普通模式停止较慢，已恢复为可重试状态")
-                            if (wasStarting) {
-                                markStarting("启动取消较慢，可再次点击取消启动")
-                            } else {
-                                markRunning(
-                                    forceNewStart = false,
-                                    statusMessage = "停止较慢，可再次点击停止"
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            RunMode.Root -> {
-                val result = RootRuntimeController.stop(context, state.port)
-                if (result.ok) {
-                    markStopped()
-                    addLog(LogLevel.Info, result.message)
-                } else {
-                    val detail = result.detail.ifBlank { result.message }
-                    markError(detail)
-                    addLog(LogLevel.Error, "Root 停止失败: $detail")
-                }
-            }
-        }
-    }
-
-    private suspend fun restartServiceLocked() {
-        val state = _runtimeState.value
-        if (state.status == ServiceStatus.Starting) return
-        if (state.status == ServiceStatus.Stopping) {
-            if (!isRuntimePortActive(state)) {
-                markStopped()
-                startServiceLocked()
-            }
-            return
-        }
-
-        if (state.status == ServiceStatus.Stopped || state.status == ServiceStatus.Error) {
-            startServiceLocked()
-            return
-        }
-        if (!isRuntimePortActive(state)) {
-            // 运行状态陈旧但服务已经不在，直接重新启动即可。
-            addLog(LogLevel.Warn, "重启时检测到旧实例已不在，直接启动新实例")
-            markStopped()
-            startServiceLocked()
-            return
-        }
-        if (!ensureRuntimeDependenciesBeforeStart(
-                state = state,
-                actionLabel = "重启",
-                resumeAction = RuntimeDependencyResumeAction.Restart
-            )
-        ) {
-            return
-        }
-
-        when (state.runMode) {
-            RunMode.Normal -> {
-                pendingNormalRestart = true
-                try {
-                    val oldPort = state.port
-                    stopServiceLocked()
-                    val stopped = waitForRestartStopCompletion(
-                        mode = RunMode.Normal,
-                        oldPort = oldPort,
-                        timeoutMs = NORMAL_RESTART_STOP_TIMEOUT_MS
-                    )
-                    if (!stopped) {
-                        addLog(LogLevel.Warn, "普通模式重启前停止较慢，请稍后重试")
-                        markRunning(
-                            forceNewStart = false,
-                            statusMessage = "重启前停止较慢，请稍后重试"
-                        )
-                        return
-                    }
-
-                    startServiceLocked(
-                        startingStatusMessage = "正在重启服务…",
-                        dependenciesAlreadyChecked = true
-                    )
-                    val started = waitForPort(
-                        oldPort,
-                        wantOpen = true,
-                        timeoutMs = NORMAL_RESTART_START_TIMEOUT_MS
-                    )
-                    if (started) {
-                        if (_runtimeState.value.status != ServiceStatus.Running) {
-                            markRunning(forceNewStart = true)
-                        }
-                    } else {
-                        if (_runtimeState.value.status == ServiceStatus.Starting) {
-                            addLog(LogLevel.Warn, "普通模式重启耗时较长，继续等待服务自行就绪...")
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Starting,
-                                message = "重启耗时较长，仍在等待服务就绪…"
-                            )
-                        }
-                    }
-                } finally {
-                    pendingNormalRestart = false
-                }
-            }
-
-            RunMode.Root -> {
-                _runtimeState.update {
-                    it.copy(
-                        status = ServiceStatus.Stopping,
-                        errorMessage = null,
-                        statusMessage = "正在重启服务…"
-                    )
-                }
-                armCandidateObservation(state.variant, state.runMode)
-                val result = RootRuntimeController.restart(context, state.port)
-                if (result.ok) {
-                    markRunning(pid = RootRuntimeController.getPid(context), forceNewStart = true)
-                    addLog(LogLevel.Info, "服务已重启")
-                } else {
-                    val detail = result.detail.ifBlank { result.message }
-                    markError(detail)
-                    addLog(LogLevel.Error, "重启失败: $detail")
-                }
-            }
-        }
-    }
-
-    private suspend fun recoverStaleNormalProcessIfNeeded(port: Int): Boolean {
-        val stalePid = confirmStaleNormalProcess(port, NORMAL_STALE_PROCESS_CONFIRM_TIMEOUT_MS)
-            ?: return true
-        if (NodeService.recoveryCandidatePid(context) != stalePid) return true
-
-        addLog(LogLevel.Info, "普通模式启动前回收未监听端口的旧服务进程，PID=$stalePid")
-        val killed = NodeService.killProcessIfRunning(context, expectedPid = stalePid)
-        if (!killed && NodeService.recoveryCandidatePid(context) != stalePid) return true
-        if (!killed && NodeService.isProcessRunning(context)) {
-            markError("普通模式残留进程回收失败，请重试启动")
-            addLog(LogLevel.Error, "普通模式残留进程回收失败：无法结束 :node 进程")
-            return false
-        }
-
-        val stopped = waitForNormalProcessReclaimed(
-            expectedPid = stalePid,
-            timeoutMs = NORMAL_STALE_PROCESS_KILL_TIMEOUT_MS
-        )
-        if (!stopped) {
-            markError("普通模式残留进程回收超时，请重试启动")
-            addLog(LogLevel.Error, "普通模式残留进程回收超时：:node 进程未及时退出")
-            return false
-        }
-
-        markStopped()
-        delay(NORMAL_STALE_PROCESS_RETRY_DELAY_MS)
-        return true
-    }
-
-    private suspend fun confirmStaleNormalProcess(port: Int, timeoutMs: Long): Int? {
-        val expectedPid = NodeService.recoveryCandidatePid(context) ?: return null
-        val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
-        while (System.currentTimeMillis() < deadline) {
-            if (NodeService.recoveryCandidatePid(context) != expectedPid) return null
-            if (port in 1..65535 && isPortOpen(port)) return null
-            delay(180)
-        }
-        return expectedPid.takeIf {
-            NodeService.recoveryCandidatePid(context) == expectedPid &&
-                (port !in 1..65535 || !isPortOpen(port))
-        }
-    }
-
-    private fun markStarting(message: String? = null) {
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Starting,
-                errorMessage = null,
-                statusMessage = message ?: it.statusMessage ?: "正在初始化运行环境，请稍候"
-            )
-        }
-    }
-
-    private fun markStopping(message: String? = null) {
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Stopping,
-                errorMessage = null,
-                statusMessage = message ?: it.statusMessage ?: "正在安全停止服务…"
-            )
-        }
-        uptimeJob?.cancel()
-    }
-
-    private fun updateStatusMessage(expectedStatus: ServiceStatus, message: String) {
-        val changed = _runtimeState.value.status == expectedStatus &&
-            _runtimeState.value.statusMessage != message
-        _runtimeState.update { state ->
-            if (state.status != expectedStatus) {
-                state
-            } else {
-                state.copy(statusMessage = message)
-            }
-        }
-        if (changed) syncRootNotification(expectedStatus, message)
-    }
-
-    /** Root 模式没有前台服务，通知完全跟随状态机，普通模式由 :node 进程的 NodeService 自行维护。 */
-    private fun syncRootNotification(status: ServiceStatus, message: String) {
-        if (_runtimeState.value.runMode != RunMode.Root) return
-        when (status) {
-            ServiceStatus.Running -> RootRuntimeNotificationManager.show(
-                context = context,
-                text = message,
-                endpoint = _runtimeState.value.lanUrl
-            )
-            else -> RootRuntimeNotificationManager.cancel(context)
-        }
-    }
-
-    private fun markRunning(
-        pid: Int? = null,
-        forceNewStart: Boolean = false,
-        statusMessage: String? = null
-    ) {
-        val mode = _runtimeState.value.runMode
-        if (mode == RunMode.Normal) {
-            normalStartIssuedAtMs = 0L
-            normalPendingExplicitStart = false
-        }
-        val startedAt = ensureRuntimeStartedAt(mode, forceNew = forceNewStart)
-        val uptime = uptimeSecondsFrom(startedAt)
-        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
-
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Running,
-                pid = pid ?: it.pid,
-                uptimeSeconds = uptime,
-                localUrl = buildLocalUrl(it.port, it.token),
-                lanUrl = buildLanUrl(networkAddresses.ipv4, it.port, it.token),
-                lanIpv6Url = buildLanIpv6Url(
-                    networkAddresses.ipv6,
-                    it.port,
-                    it.token,
-                    it.listenMode
-                ),
-                errorMessage = null,
-                statusMessage = statusMessage ?: "接口已就绪，可直接在局域网访问"
-            )
-        }
-        VideoShellInjectionConfigPublisher.publishAsync(context)
-        startUptimeCounter(startedAt)
-        // 运行态改为事件驱动刷新时，这里启动热更新监听。
-        handleWorkDirHotReload(_runtimeState.value)
-        scheduleCandidateConfirmation()
-        if (mode == RunMode.Root) {
-            RootRuntimeNotificationManager.show(
-                context = context,
-                text = _runtimeState.value.statusMessage.orEmpty(),
-                endpoint = _runtimeState.value.lanUrl
-            )
-        }
-    }
-
-    private fun markStopped(statusMessage: String? = null) {
-        val failedAttempt = candidateStartAttempt
-        if (_runtimeState.value.runMode == RunMode.Normal) {
-            normalStartIssuedAtMs = 0L
-            normalPendingExplicitStart = false
-        }
-        clearRuntimeStartedAt()
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Stopped,
-                pid = null,
-                uptimeSeconds = 0,
-                errorMessage = null,
-                statusMessage = statusMessage ?: "服务已停止"
-            )
-        }
-        uptimeJob?.cancel()
-        stopWorkDirHotReload()
-        if (_runtimeState.value.runMode == RunMode.Root) {
-            RootRuntimeNotificationManager.cancel(context)
-        }
-        if (failedAttempt != null) {
-            triggerCandidateRecovery("候选核心启动后提前退出")
-        }
-    }
-
-    private fun markError(message: String, statusMessage: String? = message) {
-        val failedAttempt = candidateStartAttempt
-        val state = _runtimeState.value
-        val portOpen = isPortOpen(state.port)
-        val rootProbablyRunning = state.runMode == RunMode.Root &&
-            isRootRuntimeOwnedByApp(state.port)
-        val stillRunning = if (state.runMode == RunMode.Root) {
-            rootProbablyRunning
-        } else {
-            portOpen
-        }
-        if (shouldClearStartedAtOnError(state.runMode, portOpen, rootProbablyRunning)) {
-            clearRuntimeStartedAt()
-        }
-        if (state.runMode == RunMode.Normal && !stillRunning) {
-            normalStartIssuedAtMs = 0L
-            normalPendingExplicitStart = false
-        }
-
-        _runtimeState.update {
-            it.copy(
-                status = ServiceStatus.Error,
-                errorMessage = message,
-                pid = if (stillRunning) it.pid else null,
-                uptimeSeconds = if (stillRunning) it.uptimeSeconds else 0,
-                statusMessage = statusMessage
-            )
-        }
-        uptimeJob?.cancel()
-        if (!stillRunning) {
-            stopWorkDirHotReload()
-        }
-        if (state.runMode == RunMode.Root) {
-            RootRuntimeNotificationManager.cancel(context)
-        }
-        if (failedAttempt != null) {
-            triggerCandidateRecovery(message)
-        }
-    }
-
-    private fun armCandidateObservation(variant: ApiVariant, runMode: RunMode) {
-        val candidate = coreRepository.candidateState.value ?: return
-        if (candidate.variant != variant || candidate.runMode != runMode) return
-        candidateValidationJob?.cancel()
-        candidateStartAttempt = CandidateStartAttempt(
-            variant = variant,
-            runMode = runMode,
-            candidateInstalledAtMs = candidate.installedAtMs
-        )
-        addLog(LogLevel.Info, "${candidate.actionLabel}后的核心已进入启动观察期")
-    }
-
-    private fun cancelCandidateObservation() {
-        candidateValidationJob?.cancel()
-        candidateValidationJob = null
-        candidateStartAttempt = null
-    }
-
-    private fun scheduleCandidateConfirmation() {
-        val attempt = candidateStartAttempt ?: return
-        candidateValidationJob?.cancel()
-        candidateValidationJob = scope.launch {
-            delay(CANDIDATE_HEALTHY_OBSERVATION_MS)
-            val state = _runtimeState.value
-            val candidate = coreRepository.candidateState.value
-            val stillMatches = state.status == ServiceStatus.Running &&
-                state.variant == attempt.variant && state.runMode == attempt.runMode &&
-                CoreCandidateRecoveryPolicy.matchesAttempt(
-                    candidate = candidate,
-                    variant = attempt.variant,
-                    runMode = attempt.runMode,
-                    installedAtMs = attempt.candidateInstalledAtMs
-                )
-            val reachable = when (attempt.runMode) {
-                RunMode.Normal -> isNormalRuntimeReachable(state.port)
-                RunMode.Root -> isRootRuntimeOwnedByApp(state.port)
-            }
-            if (!stillMatches || !reachable || candidateStartAttempt != attempt) return@launch
-            coreRepository.confirmCandidateCore(
-                attempt.variant,
-                attempt.runMode,
-                attempt.candidateInstalledAtMs
-            ).fold(
-                onSuccess = { confirmed ->
-                    if (confirmed) {
-                        addLog(LogLevel.Info, "候选核心已稳定运行，已确认为可用版本")
-                    }
-                },
-                onFailure = { error ->
-                    addLog(LogLevel.Warn, "确认候选核心失败：${error.message ?: "未知错误"}")
-                }
-            )
-            if (candidateStartAttempt == attempt) {
-                candidateStartAttempt = null
-                candidateValidationJob = null
-            }
-        }
-    }
-
-    private fun triggerCandidateRecovery(reason: String) {
-        val attempt = candidateStartAttempt ?: return
-        candidateValidationJob?.cancel()
-        candidateValidationJob = null
-        candidateStartAttempt = null
-        if (!candidateRecoveryInFlight.compareAndSet(false, true)) return
-
-        scope.launch {
-            try {
-                operationMutex.withLock {
-                    val candidate = coreRepository.candidateState.value ?: return@withLock
-                    if (!CoreCandidateRecoveryPolicy.matchesAttempt(
-                            candidate = candidate,
-                            variant = attempt.variant,
-                            runMode = attempt.runMode,
-                            installedAtMs = attempt.candidateInstalledAtMs
-                        )
-                    ) {
-                        return@withLock
-                    }
-                    if (!candidate.hasRecoveryPoint) {
-                        coreRepository.confirmCandidateCore(
-                            attempt.variant,
-                            attempt.runMode,
-                            attempt.candidateInstalledAtMs
-                        )
-                        addLog(LogLevel.Error, "新安装核心启动失败，且没有可恢复的旧版本：$reason")
-                        return@withLock
-                    }
-
-                    val transitionId = beginRuntimeTransition(
-                        kind = RuntimeTransitionKind.RecoveringCore,
-                        message = "新核心启动异常，正在恢复上一个可用版本…"
-                    )
-                    try {
-                        addLog(LogLevel.Warn, "候选核心启动异常，正在恢复上一个可用版本：$reason")
-                        val state = _runtimeState.value
-                        if (state.status != ServiceStatus.Stopped) {
-                            updateRuntimeTransition(transitionId, "正在安全停止异常核心…")
-                            stopServiceLocked()
-                            val stopped = waitForRuntimeStopped(
-                                mode = attempt.runMode,
-                                oldPort = state.port,
-                                timeoutMs = NORMAL_STOP_TIMEOUT_MS
-                            )
-                            if (!stopped) {
-                                addLog(LogLevel.Error, "候选核心进程未能安全停止，已取消自动恢复以保护运行目录")
-                                return@withLock
-                            }
-                        }
-
-                        updateRuntimeTransition(transitionId, "正在恢复上一个可用核心…")
-                        coreRepository.restoreCandidateCore(
-                            attempt.variant,
-                            attempt.runMode,
-                            attempt.candidateInstalledAtMs
-                        ).fold(
-                            onSuccess = { restored ->
-                                if (!restored) {
-                                    addLog(LogLevel.Error, "候选核心恢复点已失效，请手动重新安装核心")
-                                    return@fold
-                                }
-                                markStopped("新核心启动失败，已恢复上一个可用版本")
-                                addLog(LogLevel.Warn, "已恢复上一个可用核心，正在重新启动服务")
-                                updateRuntimeTransition(transitionId, "已恢复上一个版本，正在重新启动服务…")
-                                startServiceLocked(startingStatusMessage = "已恢复上一个版本，正在重新启动…")
-                            },
-                            onFailure = { error ->
-                                markError("自动恢复失败：${error.message ?: "未知错误"}")
-                                addLog(LogLevel.Error, "自动恢复核心失败：${error.message ?: "未知错误"}")
-                            }
-                        )
-                    } finally {
-                        endRuntimeTransition(transitionId)
-                    }
-                }
-            } finally {
-                candidateRecoveryInFlight.set(false)
-            }
-        }
-    }
-
-    private fun startUptimeCounter(startedAtMs: Long) {
-        uptimeJob?.cancel()
-        uptimeJob = scope.launch {
-            while (isActive) {
-                _runtimeState.update { state ->
-                    if (state.status == ServiceStatus.Running) {
-                        state.copy(uptimeSeconds = uptimeSecondsFrom(startedAtMs))
-                    } else {
-                        state
-                    }
-                }
-                delay(UPTIME_REFRESH_INTERVAL_MS)
-            }
-        }
-    }
-
-    private fun adoptRecoveredRootRuntime(recovered: RootRuntimeController.RecoveredRuntime) {
-        val before = _runtimeState.value
-        val env = recovered.env
-        val token = if (env.isNotEmpty()) RuntimeTokenNormalizer.normalizeInput(env["TOKEN"].orEmpty()) else before.token
-        val variant = normalizeVariantKey(env["DANMU_API_VARIANT"])?.let { key -> ApiVariant.entries.firstOrNull { it.key == key } } ?: before.variant
-        val listenMode = RuntimeListenMode.fromBindHost(env[RuntimeListenMode.ENV_KEY]) ?: before.listenMode
-        RuntimeModePrefs.put(context, RunMode.Root)
-        prefs.edit {
-            putInt("port", recovered.port)
-            putString("token", token)
-            putString(RuntimeListenMode.PREFERENCE_KEY, listenMode.key)
-        }
-        persistSelectedVariant(variant, commit = true)
-        _runtimeState.update {
-            it.copy(runMode = RunMode.Root, port = recovered.port, token = token, variant = variant,
-                listenMode = listenMode, pid = recovered.pid, errorMessage = null)
-        }
-        recovered.startedAtMs?.let { saveRuntimeStartedAt(it) }
-        rootRecoveryChecked = true
-        markRunning(
-            pid = recovered.pid, forceNewStart = false,
-            statusMessage = if (recovered.apiReady) "已接管正在运行的 Root 服务"
-                else "已接管 Root 进程，健康接口暂未响应，可停止或重启"
-        )
-        addLog(LogLevel.Info, "已恢复 Root 进程控制，PID=${recovered.pid}，端口=${recovered.port}")
-    }
-
-    private suspend fun reconcileInitialState() {
-        val before = _runtimeState.value
-        if (!rootRecoveryChecked && before.transition == null) {
-            rootRecoveryChecked = true
-            val recovered = when {
-                before.runMode == RunMode.Root -> RootRuntimeController.recoverRuntime(context, before.port)
-                mayRecoverRootModeAfterReinstall && !isNormalProcessRunning() -> {
-                    val passive = RootRuntimeController.recoverRuntimePassive(context, before.port)
-                    val shouldTryRoot = com.example.danmuapiapp.data.service.RootRuntimeRecovery.shouldTryAfterDataLoss(
-                        noExplicitMode = true, normalProcessRunning = false,
-                        rootHealthMatches = passive != null, portOpen = isPortOpen(before.port)
-                    )
-                    if (shouldTryRoot) RootRuntimeController.recoverRuntime(context, before.port) ?: passive else null
-                }
-                else -> null
-            }
-            if (recovered != null) {
-                adoptRecoveredRootRuntime(recovered)
-                return
-            }
-        }
-        val state = _runtimeState.value
-        if (
-            state.status == ServiceStatus.Running ||
-            state.status == ServiceStatus.Starting ||
-            state.status == ServiceStatus.Stopping
-        ) {
-            return
-        }
-
-        when (state.runMode) {
-            RunMode.Normal -> {
-                if (isNormalRuntimeReachable(state.port)) {
-                    val serviceRunning = isNormalServiceRunning()
-                    val notificationSuppressed =
-                        NormalNotificationBehaviorPrefs.shouldSuppressNotification(context)
-                    val foregroundRequested = if (notificationSuppressed && serviceRunning) {
-                        false
-                    } else {
-                        NodeService.ensureForegroundNotification(
-                            context = context,
-                            force = !serviceRunning
-                        )
-                    }
-                    markRunning(
-                        forceNewStart = false,
-                        statusMessage = when {
-                            notificationSuppressed -> "接口已就绪，通知按设置保持隐藏"
-                            foregroundRequested -> "接口可用，正在恢复前台服务通知"
-                            else -> "接口已就绪，可直接在局域网访问"
-                        }
-                    )
-                    if (state.status == ServiceStatus.Error || state.status == ServiceStatus.Stopped) {
-                        addLog(LogLevel.Info, "检测到普通模式服务仍可访问，已自动纠正为运行中")
-                    }
-                }
-            }
-
-            RunMode.Root -> {
-                if (isRootRuntimeOwnedByApp(state.port)) {
-                    markRunning(
-                        pid = RootRuntimeController.getPid(context),
-                        forceNewStart = false
-                    )
-                    if (state.status == ServiceStatus.Error || state.status == ServiceStatus.Stopped) {
-                        addLog(LogLevel.Info, "检测到 Root 模式服务仍在运行，已自动纠正为运行中")
-                    }
-                }
-            }
-        }
-    }
-
-    private fun startNormalStateReconciler() {
-        scope.launch {
-            while (isActive) {
-                delay(NORMAL_STATE_RECONCILE_INTERVAL_MS)
-                if (!shouldRunPeriodicRuntimeReconcile(appForeground)) continue
-                runCatching {
-                    operationMutex.withLock {
-                        reconcileInitialState()
-                        reconcileNormalStateLocked()
-                        reconcileRootStateLocked()
-                    }
-                }
-            }
-        }
-    }
-
-    private suspend fun reconcileNormalStateLocked() {
-        val state = _runtimeState.value
-        if (!shouldRunPeriodicNormalStateReconcile(state.runMode, state.status)) {
-            if (state.runMode != RunMode.Normal) {
-                normalStartIssuedAtMs = 0L
-                normalReconcileConsecutivePortMisses = 0
-            }
-            return
-        }
-
-        val serviceRunning = isNormalServiceRunning()
-        val processRunning = isNormalProcessRunning()
-        val portOpen = isPortOpen(state.port)
-        when (state.status) {
-            ServiceStatus.Starting -> {
-                normalReconcileConsecutivePortMisses = 0
-                if (portOpen) {
-                    markRunning(forceNewStart = normalPendingExplicitStart)
-                    return
-                }
-                val startAt = normalStartIssuedAtMs
-                if (startAt <= 0L) {
-                    when {
-                        serviceRunning || processRunning || portOpen -> {
-                            normalStartIssuedAtMs = System.currentTimeMillis()
-                            updateStatusMessage(
-                                expectedStatus = ServiceStatus.Starting,
-                                message = state.statusMessage ?: "正在初始化运行环境，请稍候"
-                            )
-                        }
-
-                        else -> {
-                            markStopped("服务未运行，可重新启动")
-                            addLog(LogLevel.Warn, "检测到普通模式启动状态残留，已恢复为可重试状态")
-                        }
-                    }
-                    return
-                }
-                val staleTimeoutMs = normalRuntimeProfile().startupStaleTimeoutMs
-                if (System.currentTimeMillis() - startAt >= staleTimeoutMs) {
-                    val message = when {
-                        serviceRunning -> "普通模式启动卡住：服务进程仍在但端口未就绪，请重试启动"
-                        processRunning -> "普通模式启动卡住：旧进程未完全退出，请重试启动"
-                        else -> "普通模式启动状态失效，请重试启动"
-                    }
-                    markError(message)
-                    addLog(
-                        LogLevel.Warn,
-                        when {
-                            serviceRunning -> "普通模式前台服务仍在运行，但端口长时间未就绪，已恢复为可重试状态"
-                            processRunning -> "普通模式旧进程长时间未退出，已恢复为可重试状态"
-                            else -> "普通模式长时间未完成启动，已自动恢复为可重试状态"
-                        }
-                    )
-                }
-            }
-
-            ServiceStatus.Stopping -> {
-                normalReconcileConsecutivePortMisses = 0
-                if (!processRunning && !portOpen) {
-                    markStopped()
-                }
-            }
-
-            ServiceStatus.Running -> {
-                if (portOpen) {
-                    normalReconcileConsecutivePortMisses = 0
-                } else {
-                    normalReconcileConsecutivePortMisses++
-                    if (normalReconcileConsecutivePortMisses >= 2) {
-                        normalReconcileConsecutivePortMisses = 0
-                        markStopped("服务端口已关闭，可重新启动")
-                        addLog(LogLevel.Warn, "检测到普通模式服务端口已关闭，运行状态已自动重置")
-                    }
-                }
-            }
-
-            ServiceStatus.Stopped,
-            ServiceStatus.Error -> {
-                normalReconcileConsecutivePortMisses = 0
-            }
-        }
-    }
-
-    private fun reconcileRootStateLocked() {
-        val state = _runtimeState.value
-        if (state.runMode != RunMode.Root) {
-            rootReconcileConsecutiveDeadCount = 0
-            return
-        }
-        if (state.status != ServiceStatus.Running &&
-            state.status != ServiceStatus.Starting &&
-            state.status != ServiceStatus.Stopping
-        ) {
-            rootReconcileConsecutiveDeadCount = 0
-            return
-        }
-
-        val ownedByCurrentApp = isRootRuntimeOwnedByApp(state.port)
-        val passiveAliveHint = if (ownedByCurrentApp) {
-            true
-        } else {
-            RootRuntimeController.isProbablyRunning(context, state.port)
-        }
-        when (state.status) {
-            ServiceStatus.Running -> {
-                if (ownedByCurrentApp || passiveAliveHint) {
-                    rootReconcileConsecutiveDeadCount = 0
-                } else {
-                    rootReconcileConsecutiveDeadCount++
-                    if (shouldMarkRootStoppedAfterPassiveMiss(rootReconcileConsecutiveDeadCount, passiveAliveHint)) {
-                        markStopped("Root 服务未运行，可重新启动")
-                        addLog(LogLevel.Warn, "检测到 Root 模式服务已退出，状态已自动重置")
-                        rootReconcileConsecutiveDeadCount = 0
-                    }
-                }
-            }
-
-            ServiceStatus.Starting -> {
-                rootReconcileConsecutiveDeadCount = 0
-                if (ownedByCurrentApp) {
-                    markRunning(
-                        pid = RootRuntimeController.getPid(context),
-                        forceNewStart = false
-                    )
-                }
-            }
-
-            ServiceStatus.Stopping -> {
-                rootReconcileConsecutiveDeadCount = 0
-                if (!ownedByCurrentApp && !passiveAliveHint) {
-                    markStopped()
-                }
-            }
-
-            ServiceStatus.Stopped,
-            ServiceStatus.Error -> Unit
-        }
-    }
-
-    private fun handleRuntimeOperationFailure(action: String, throwable: Throwable) {
-        val detail = ErrorHandler.buildDetailedMessage(throwable)
-        val message = "${action}异常：$detail"
-        markError(message)
-        addLog(LogLevel.Error, message)
-    }
-
-    private fun publishMergedLogs() {
-        val merged = (serviceLogsCache + appFileLogsCache + _eventLogs.value)
-            .sortedBy { it.timestamp }
-            .takeLast(settingsRepository.logMaxCount.value)
-        _logs.value = merged
-    }
-
-    private fun refreshLogsOnce() {
-        if (!settingsRepository.logEnabled.value) return
-        runCatching {
-            val serviceLogs = filterClearedServiceLogs(collectServiceLogsOnce())
-            val appLogs = collectAppLogsOnce()
-            val shouldPublish =
-                serviceLogs != serviceLogsCache ||
-                    appLogs != appFileLogsCache ||
-                    _eventLogs.value.isNotEmpty() ||
-                    _logs.value.isNotEmpty()
-            serviceLogsCache = serviceLogs
-            appFileLogsCache = appLogs
-            if (shouldPublish) {
-                publishMergedLogs()
-            }
-        }.onFailure {
-            if (_eventLogs.value.isNotEmpty() && _logs.value != _eventLogs.value) {
-                publishMergedLogs()
-            }
-        }
-    }
-
-    private fun collectAppLogsOnce(): List<LogEntry> {
-        val limit = settingsRepository.logMaxCount.value.coerceAtLeast(100)
-        return (AppDiagnosticLogger.readAppEntries(context, limit) +
-            AppDiagnosticLogger.readRootBootstrapEntries(context, limit) +
-            AppDiagnosticLogger.readNormalBootstrapEntries(context, limit))
-            .sortedBy { it.timestamp }
-            .takeLast(limit)
-    }
-
-    private fun collectServiceLogsOnce(): List<LogEntry> {
-        val state = _runtimeState.value
-        if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return emptyList()
-
-        val baseUrl = resolveRuntimeTokenApiBaseUrl() ?: return emptyList()
-        val raw = runCatching {
-            val conn = (URL("$baseUrl/api/logs").openConnection() as HttpURLConnection).apply {
-                connectTimeout = LOG_HTTP_TIMEOUT_MS
-                readTimeout = LOG_HTTP_TIMEOUT_MS
-                requestMethod = "GET"
-            }
-            try {
-                if (conn.responseCode !in 200..299) return@runCatching ""
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
-            } finally {
-                conn.disconnect()
-            }
-        }.getOrElse { "" }
-        return if (raw.isNotBlank()) parseLogLines(raw) else emptyList()
-    }
-
-    private fun resolveRuntimeTokenApiBaseUrl(): String? {
-        val state = _runtimeState.value
-        val tokenPath = RuntimeTokenNormalizer.normalizeInput(state.token)
-            .trim('/')
-            .takeIf { it.isNotBlank() }
-            ?: return null
-        return RuntimeApiUrls.local(state.port, tokenPath)
-    }
-
-    private fun clearServiceLogsOnce(): Boolean {
-        val state = _runtimeState.value
-        if (state.status != ServiceStatus.Running && !isPortOpen(state.port)) return false
-
-        val baseUrl = resolveRuntimeTokenApiBaseUrl() ?: return false
-        val cleared = runCatching {
-            val conn = (URL("$baseUrl/api/logs/clear").openConnection() as HttpURLConnection).apply {
-                connectTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
-                readTimeout = LOG_CLEAR_HTTP_TIMEOUT_MS
-                requestMethod = "POST"
-                doOutput = true
-                setFixedLengthStreamingMode(0)
-            }
-            try {
-                conn.outputStream.use { }
-                conn.responseCode in 200..299
-            } finally {
-                conn.disconnect()
-            }
-        }.getOrDefault(false)
-        if (cleared) {
-            clearedServiceLogCounts = emptyMap()
-            return true
-        }
-        return false
-    }
-
-    private fun filterClearedServiceLogs(entries: List<LogEntry>): List<LogEntry> {
-        val baseline = clearedServiceLogCounts
-        if (baseline.isEmpty() || entries.isEmpty()) return entries
-
-        val remaining = baseline.toMutableMap()
-        var visibleStartIndex = 0
-        while (visibleStartIndex < entries.size) {
-            val entry = entries[visibleStartIndex]
-            val count = remaining[entry] ?: 0
-            if (count <= 0) break
-            if (count == 1) {
-                remaining.remove(entry)
-            } else {
-                remaining[entry] = count - 1
-            }
-            visibleStartIndex++
-        }
-        return entries.drop(visibleStartIndex)
-    }
-
-    private fun parseLogLines(raw: String): List<LogEntry> {
-        val blocks = CoreLogNoiseFilter.removeLogEndpointPollingBlocks(splitLogBlocks(raw))
-        if (blocks.isEmpty()) return emptyList()
-
-        return blocks.map { block ->
-            val entry = parseStructuredLogLine(block)
-            entry ?: run {
-                val normalized = normalizeCoreMessage(block)
-                val tagInfo = LogTagClassifier.classifyCoreMessage(normalized)
-                LogEntry(
-                    timestamp = System.currentTimeMillis(),
-                    level = LogLevel.Info,
-                    message = normalized,
-                    source = AppLogSource.Core,
-                    tag = tagInfo.category.ifBlank { "Core" },
-                    category = tagInfo.category,
-                    tags = tagInfo.tags
-                )
-            }
-        }.takeLast(settingsRepository.logMaxCount.value)
-    }
-
-    private fun splitLogBlocks(raw: String): List<String> {
-        val blocks = mutableListOf<String>()
-        val current = StringBuilder()
-
-        raw.lineSequence().forEach { rawLine ->
-            val trimmed = rawLine.trim()
-            if (trimmed.isBlank()) return@forEach
-
-            if (isStructuredLogHeader(trimmed)) {
-                if (current.isNotEmpty()) {
-                    blocks += current.toString().trim()
-                    current.setLength(0)
-                }
-                current.append(trimmed)
-            } else {
-                if (current.isNotEmpty()) current.append('\n')
-                current.append(trimmed)
-            }
-        }
-
-        if (current.isNotEmpty()) {
-            blocks += current.toString().trim()
-        }
-
-        return blocks
-    }
-
-    private fun isStructuredLogHeader(line: String): Boolean {
-        if (
-            ISO_BRACKET_LOG_REGEX.matches(line) ||
-            LOCAL_BRACKET_LOG_REGEX.matches(line) ||
-            ISO_COLON_LOG_REGEX.matches(line) ||
-            LOCAL_COLON_LOG_REGEX.matches(line)
-        ) {
-            return true
-        }
-
-        val serviceMatch = SERVICE_LOG_REGEX.find(line) ?: return false
-        return !looksLikeTimestampTag(serviceMatch.groupValues[1].trim())
-    }
-
-    private fun parseStructuredLogLine(block: String): LogEntry? {
-        val lines = block.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
-        if (lines.isEmpty()) return null
-
-        val header = parseStructuredLogHeader(lines.first()) ?: return null
-        val message = buildString {
-            if (header.message.isNotBlank()) {
-                append(header.message.trim())
-            }
-            if (lines.size > 1) {
-                if (isNotBlank()) append('\n')
-                append(lines.drop(1).joinToString("\n"))
-            }
-        }.ifBlank { lines.first() }
-
-        val normalizedMessage = normalizeCoreMessage(message)
-        val tagInfo = LogTagClassifier.classifyCoreMessage(normalizedMessage, header.tag)
-        return LogEntry(
-            timestamp = header.timestamp,
-            level = header.level,
-            message = normalizedMessage,
-            source = AppLogSource.Core,
-            tag = tagInfo.category.ifBlank { header.tag },
-            category = tagInfo.category,
-            tags = tagInfo.tags
-        )
-    }
-
-    private fun parseStructuredLogHeader(line: String): ParsedLogHeader? {
-        ISO_BRACKET_LOG_REGEX.find(line)?.let { match ->
-            return ParsedLogHeader(
-                timestamp = parseIsoTimestamp(match.groupValues[1]),
-                level = parseLogLevel(match.groupValues[2]),
-                message = match.groupValues[3],
-                tag = "Core"
-            )
-        }
-
-        LOCAL_BRACKET_LOG_REGEX.find(line)?.let { match ->
-            return ParsedLogHeader(
-                timestamp = parseLocalTimestamp(match.groupValues[1]),
-                level = parseLogLevel(match.groupValues[2]),
-                message = match.groupValues[3],
-                tag = "Core"
-            )
-        }
-
-        ISO_COLON_LOG_REGEX.find(line)?.let { match ->
-            return ParsedLogHeader(
-                timestamp = parseIsoTimestamp(match.groupValues[1]),
-                level = parseLogLevel(match.groupValues[2]),
-                message = match.groupValues[3],
-                tag = "Core"
-            )
-        }
-
-        LOCAL_COLON_LOG_REGEX.find(line)?.let { match ->
-            return ParsedLogHeader(
-                timestamp = parseLocalTimestamp(match.groupValues[1]),
-                level = parseLogLevel(match.groupValues[2]),
-                message = match.groupValues[3],
-                tag = "Core"
-            )
-        }
-
-        SERVICE_LOG_REGEX.find(line)?.let { match ->
-            val tag = match.groupValues[1].trim()
-            if (looksLikeTimestampTag(tag)) return null
-
-            return ParsedLogHeader(
-                timestamp = System.currentTimeMillis(),
-                level = parseLogLevel(match.groupValues[2]),
-                message = match.groupValues[3],
-                tag = tag
-            )
-        }
-
-        return null
-    }
-
-    private fun parseIsoTimestamp(raw: String): Long {
-        return runCatching { Instant.parse(raw).toEpochMilli() }
-            .getOrElse { System.currentTimeMillis() }
-    }
-
-    private fun parseLocalTimestamp(raw: String): Long {
-        return runCatching {
-            val localDt = LocalDateTime.parse(
-                raw,
-                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-            )
-            localDt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        }.getOrElse { System.currentTimeMillis() }
-    }
-
-    private fun parseLogLevel(raw: String): LogLevel {
-        return when (raw.trim().uppercase()) {
-            "ERROR" -> LogLevel.Error
-            "WARN", "WARNING" -> LogLevel.Warn
-            else -> LogLevel.Info
-        }
-    }
-
-    private fun looksLikeTimestampTag(raw: String): Boolean {
-        return TIMESTAMP_TAG_REGEX.matches(raw)
-    }
-
-    private fun normalizeCoreMessage(message: String): String {
-        val lines = message.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .toList()
-        if (lines.isEmpty()) return message.trim()
-        if (lines.size == 1) return lines.first()
-        if (lines.drop(1).any { STACK_TRACE_LINE_REGEX.matches(it) }) {
-            return lines.joinToString("\n")
-        }
-        return lines.joinToString(" ")
-            .replace(Regex("""\s+([,;:)\]}])"""), "$1")
-            .replace(Regex("""([\[{(])\s+"""), "$1")
-            .replace(Regex("""\s{2,}"""), " ")
-            .trim()
-    }
-
-    private data class ParsedLogHeader(
-        val timestamp: Long,
-        val level: LogLevel,
-        val message: String,
-        val tag: String
-    )
-
-    private fun handleWorkDirHotReload(state: RuntimeState) {
-        if (state.status != ServiceStatus.Running) {
-            stopWorkDirHotReload()
-            return
-        }
-
-        when (state.runMode) {
-            RunMode.Normal -> {
-                if (!normalRuntimeProfile().hotReloadEnabled) {
-                    stopNormalWorkDirWatcher()
-                    hotReloadJob?.cancel()
-                    hotReloadJob = null
-                    pendingHotReloadReason = null
-                    rootWorkDirFingerprint = null
-                    lastRootFingerprintCheckAtMs = 0L
-                    return
-                }
-                ensureNormalWorkDirWatcher()
-                rootWorkDirFingerprint = null
-                lastRootFingerprintCheckAtMs = 0L
-            }
-
-            RunMode.Root -> {
-                // Root 模式以 Root 工作目录为唯一热更新来源，避免普通目录变更干扰。
-                stopNormalWorkDirWatcher()
-                // 被动运行态刷新不再扫描 Root 工作目录；该扫描需要 su，容易在
-                // 回前台、控制中心监听和周期状态纠正时触发 Root 管理器授权提示。
-                // Root 目录变更改由明确的核心/配置操作负责重启或同步。
-                cancelRootFingerprintCheck()
-                rootWorkDirFingerprint = null
-                lastRootFingerprintCheckAtMs = 0L
-            }
-        }
-    }
-
-    private fun startNetworkMonitor() {
-        val cm = connectivityManager ?: return
-        if (networkCallback != null) return
-
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                scheduleRuntimeUrlRefresh()
-            }
-
-            override fun onLost(network: Network) {
-                scheduleRuntimeUrlRefresh()
-            }
-
-            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                scheduleRuntimeUrlRefresh()
-            }
-
-            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-                scheduleRuntimeUrlRefresh()
-            }
-        }
-
-        val registered = runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                cm.registerDefaultNetworkCallback(callback)
-            } else {
-                val request = NetworkRequest.Builder().build()
-                @Suppress("DEPRECATION")
-                cm.registerNetworkCallback(request, callback)
-            }
-            true
-        }.getOrElse { false }
-
-        if (registered) {
-            networkCallback = callback
-            scheduleRuntimeUrlRefresh()
-        }
-    }
-
-    private fun scheduleRuntimeUrlRefresh() {
-        networkUrlRefreshJob?.cancel()
-        networkUrlRefreshJob = scope.launch {
-            delay(NETWORK_URL_REFRESH_DEBOUNCE_MS)
-            refreshRuntimeUrls()
-        }
-    }
-
-    private fun refreshRuntimeUrls(force: Boolean = false) {
-        val networkAddresses = RuntimeNetworkAddressResolver.resolve(context)
-        var endpointChanged = false
-        _runtimeState.update { state ->
-            val localUrl = buildLocalUrl(state.port, state.token)
-            val lanUrl = buildLanUrl(networkAddresses.ipv4, state.port, state.token)
-            val lanIpv6Url = buildLanIpv6Url(
-                networkAddresses.ipv6,
-                state.port,
-                state.token,
-                state.listenMode
-            )
-            if (!force &&
-                state.localUrl == localUrl &&
-                state.lanUrl == lanUrl &&
-                state.lanIpv6Url == lanIpv6Url
-            ) {
-                state
-            } else {
-                endpointChanged = force ||
-                    state.lanUrl != lanUrl ||
-                    state.lanIpv6Url != lanIpv6Url
-                state.copy(
-                    localUrl = localUrl,
-                    lanUrl = lanUrl,
-                    lanIpv6Url = lanIpv6Url
-                )
-            }
-        }
-        // 普通模式由 :node 前台服务自行监听网络事件；Root 模式没有前台服务，
-        // 因此在应用进程仍存活时用同一个系统网络事件同步一次通知。
-        val state = _runtimeState.value
-        if (endpointChanged &&
-            state.runMode == RunMode.Root &&
-            state.status == ServiceStatus.Running
-        ) {
-            RootRuntimeNotificationManager.show(
-                context = context,
-                text = state.statusMessage.orEmpty(),
-                endpoint = state.lanUrl
-            )
-        }
-    }
-
-    private fun ensureNormalWorkDirWatcher() {
-        val projectDir = RuntimePaths.normalProjectDir(context)
-        val projectPath = projectDir.absolutePath
-        val currentWatcher = hotReloadWatcher
-        if (currentWatcher != null && currentWatcher.rootPath == projectPath) {
-            return
-        }
-
-        currentWatcher?.stop()
-        hotReloadWatcher = null
-
-        if (!normalRuntimeProfile().hotReloadEnabled) {
-            return
-        }
-
-        if (!projectDir.exists() || !projectDir.isDirectory) {
-            return
-        }
-
-        val watcher = WorkDirHotReloadWatcher(projectDir) { changedPath ->
-            val normalized = normalizeHotReloadPath(changedPath)
-            if (!shouldRestartOnNormalPathChange(normalized)) {
-                return@WorkDirHotReloadWatcher
-            }
-            scheduleHotReload("检测到工作目录关键变更：$normalized")
-        }
-        watcher.start()
-        hotReloadWatcher = watcher
-    }
-
-    private fun normalizeHotReloadPath(path: String): String {
-        return path.trim()
-            .replace('\\', '/')
-            .trimStart('/')
-    }
-
-    private fun shouldRestartOnNormalPathChange(path: String): Boolean {
-        if (path.isBlank()) return false
-        val normalized = path.lowercase()
-
-        if (normalized in NORMAL_RESTART_CRITICAL_FILES) {
-            return true
-        }
-        if (NORMAL_RESTART_SKIP_PREFIXES.any { prefix ->
-                normalized == prefix.removeSuffix("/") || normalized.startsWith(prefix)
-            }) {
-            // 核心目录与 config 变更由 Node 进程内热重载处理，避免整服务重启。
-            return false
-        }
-
-        // 其余工作目录变更默认不触发服务重启，避免普通模式频繁抖动。
-        return false
-    }
-
-    private fun stopNormalWorkDirWatcher() {
-        hotReloadWatcher?.stop()
-        hotReloadWatcher = null
-    }
-
-    private fun stopWorkDirHotReload() {
-        stopNormalWorkDirWatcher()
-        cancelRootFingerprintCheck()
-        hotReloadJob?.cancel()
-        hotReloadJob = null
-        pendingHotReloadReason = null
-        rootWorkDirFingerprint = null
-        lastRootFingerprintCheckAtMs = 0L
-    }
-
-    private fun cancelRootFingerprintCheck() {
-        rootFingerprintCheckJob?.cancel()
-        rootFingerprintCheckJob = null
-    }
-
-    private fun scheduleRootFingerprintCheck() {
-        val runningJob = rootFingerprintCheckJob
-        if (runningJob != null && runningJob.isActive) return
-        val job = scope.launch {
-            try {
-                checkRootWorkDirFingerprint()
-            } finally {
-                if (rootFingerprintCheckJob === coroutineContext[Job]) {
-                    rootFingerprintCheckJob = null
-                }
-            }
-        }
-        rootFingerprintCheckJob = job
-    }
-
-    private fun checkRootWorkDirFingerprint() {
-        val now = System.currentTimeMillis()
-        if (now - lastRootFingerprintCheckAtMs < ROOT_FINGERPRINT_CHECK_INTERVAL_MS) {
-            return
-        }
-        lastRootFingerprintCheckAtMs = now
-
-        val fingerprint = readRootWorkDirFingerprint() ?: return
-        val previous = rootWorkDirFingerprint
-        rootWorkDirFingerprint = fingerprint
-
-        if (previous != null && previous != fingerprint) {
-            scheduleHotReload("检测到 Root 工作目录变更")
-        }
-    }
-
-    private fun scheduleHotReload(reason: String) {
-        val now = System.currentTimeMillis()
-        if (now < hotReloadSuppressUntilMs) return
-        if (now - lastHotReloadAtMs < HOT_RELOAD_MIN_INTERVAL_MS) return
-        val snapshot = _runtimeState.value
-        if (snapshot.status != ServiceStatus.Running) return
-        if (snapshot.runMode == RunMode.Normal && !normalRuntimeProfile().hotReloadEnabled) return
-
-        pendingHotReloadReason = reason
-        hotReloadJob?.cancel()
-        hotReloadJob = scope.launch {
-            delay(HOT_RELOAD_DEBOUNCE_MS)
-            val trigger = pendingHotReloadReason ?: return@launch
-            pendingHotReloadReason = null
-
-            operationMutex.withLock {
-                val snapshot = _runtimeState.value
-                if (snapshot.status != ServiceStatus.Running) return@withLock
-
-                val nowLocked = System.currentTimeMillis()
-                if (nowLocked < hotReloadSuppressUntilMs) return@withLock
-                if (nowLocked - lastHotReloadAtMs < HOT_RELOAD_MIN_INTERVAL_MS) return@withLock
-                lastHotReloadAtMs = nowLocked
-                hotReloadSuppressUntilMs = nowLocked + 5000L
-
-                addLog(LogLevel.Info, "$trigger，正在热更新服务")
-                if (snapshot.runMode != RunMode.Normal) {
-                    // Root 模式直接基于 Root 工作目录重启，不再用普通目录覆盖 Root 目录。
-                }
-                restartServiceLocked()
-            }
-        }
-    }
-
-    private fun readRootWorkDirFingerprint(): String? {
-        val dir = RuntimePaths.rootProjectDir(context).absolutePath
-        val script = """
-            DIR=${shellQuote(dir)}
-            if [ ! -d "${'$'}DIR" ]; then
-              echo "missing"
-              exit 0
-            fi
-            find "${'$'}DIR" \
-              \( -path "${'$'}DIR/logs" -o -path "${'$'}DIR/logs/*" -o -path "${'$'}DIR/.cache" -o -path "${'$'}DIR/.cache/*" -o -path "${'$'}DIR/node_modules" -o -path "${'$'}DIR/node_modules/*" \) -prune \
-              -o -type f -print 2>/dev/null | while IFS= read -r F; do
-                S=${'$'}(stat -c '%Y:%s' "${'$'}F" 2>/dev/null || toybox stat -c '%Y:%s' "${'$'}F" 2>/dev/null || echo '0:0')
-                echo "${'$'}S:${'$'}F"
-              done | sort | cksum | awk '{print "${'$'}1:${'$'}2"}'
-        """.trimIndent()
-        val result = RootShell.exec(script, timeoutMs = 4500L)
-        if (!result.ok) return null
-        return result.stdout.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }
-    }
-
-    private inner class WorkDirHotReloadWatcher(
-        rootDir: File,
-        private val onChanged: (String) -> Unit
-    ) {
-        val rootPath: String = rootDir.absolutePath
-        private val rootCanonical = runCatching { rootDir.canonicalFile }.getOrElse { rootDir }
-        private val observers = WatcherRegistry<FileObserver> { it.stopWatching() }
-        private val mask = FileObserver.CLOSE_WRITE or
-            FileObserver.MODIFY or
-            FileObserver.ATTRIB or
-            FileObserver.CREATE or
-            FileObserver.MOVED_TO or
-            FileObserver.MOVED_FROM or
-            FileObserver.DELETE or
-            FileObserver.DELETE_SELF or
-            FileObserver.MOVE_SELF
-
-        fun start() {
-            watchRecursively(rootCanonical)
-        }
-
-        fun stop() {
-            observers.stop()
-        }
-
-        private fun createFileObserver(path: String, onEvent: (Int, String?) -> Unit): FileObserver {
-            val watchFile = File(path)
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                object : FileObserver(watchFile, mask) {
-                    override fun onEvent(event: Int, relativePath: String?) {
-                        onEvent.invoke(event, relativePath)
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                object : FileObserver(path, mask) {
-                    override fun onEvent(event: Int, relativePath: String?) {
-                        onEvent.invoke(event, relativePath)
-                    }
-                }
-            }
-        }
-
-        private fun watchRecursively(dir: File) {
-            if (observers.isStopped || !dir.exists() || !dir.isDirectory || shouldIgnore(dir)) return
-            val key = runCatching { dir.canonicalPath }.getOrElse { dir.absolutePath }
-            val registered = observers.register(key) {
-                val observer = createFileObserver(key) { event, path ->
-                    if (observers.isStopped) return@createFileObserver
-                    val target = if (path.isNullOrBlank()) {
-                        File(key)
-                    } else {
-                        File(key, path)
-                    }
-                    if (shouldIgnore(target)) return@createFileObserver
-
-                    if ((event and (FileObserver.CREATE or FileObserver.MOVED_TO)) != 0 && target.isDirectory) {
-                        watchRecursively(target)
-                    }
-
-                    val rel = toRelative(target).ifBlank { target.name }
-                    onChanged(rel)
-
-                    if (event and (FileObserver.DELETE_SELF or FileObserver.MOVE_SELF) != 0) {
-                        observers.remove(key)
-                    }
-                }
-
-                try { observer.startWatching() } catch (error: Exception) {
-                    runCatching { observer.stopWatching() }
-                    throw error
-                }
-                observer
-            }
-            if (!registered) return
-            dir.listFiles()?.filter { it.isDirectory }?.forEach { child ->
-                watchRecursively(child)
-            }
-        }
-
-        private fun toRelative(target: File): String {
-            return runCatching {
-                target.canonicalFile.relativeTo(rootCanonical).path.replace('\\', '/')
-            }.getOrElse {
-                target.name
-            }
-        }
-
-        private fun shouldIgnore(target: File): Boolean {
-            val rel = toRelative(target)
-            if (rel == "." || rel.isBlank()) return false
-            return rel == ".app_version" ||
-                rel.startsWith("config/") ||
-                rel == "config" ||
-                rel.startsWith("danmu_api_stable/") ||
-                rel == "danmu_api_stable" ||
-                rel.startsWith("danmu_api_dev/") ||
-                rel == "danmu_api_dev" ||
-                rel.startsWith("danmu_api_custom/") ||
-                rel == "danmu_api_custom" ||
-                rel.startsWith("logs/") ||
-                rel == "logs" ||
-                rel.startsWith(".cache/") ||
-                rel == ".cache" ||
-                rel.startsWith("node_modules/") ||
-                rel == "node_modules"
-        }
-    }
-
-    private fun shellQuote(s: String): String {
-        return "'" + s.replace("'", "'\"'\"'") + "'"
-    }
-
-    private fun ensureRuntimeStartedAt(mode: RunMode, forceNew: Boolean): Long {
-        val current = readRuntimeStartedAt()
-        val fromNormalHealth = if (!forceNew) {
-            recoverNormalRuntimeStartedAtFromHealth(_runtimeState.value.port)
-        } else {
-            null
-        }
-        val fromRootProcess = if (mode == RunMode.Root) {
-            RootRuntimeController.getProcessStartedAtMs(context)
-        } else {
-            null
-        }
-        val fromRootPidFile = if (mode == RunMode.Root) {
-            RootRuntimeController.getPidFileLastModified(context)
-        } else {
-            null
-        }
-
-        val startedAt = selectRuntimeStartedAtAnchor(
-            mode = mode,
-            current = current,
-            forceNew = forceNew,
-            normalHealthStartedAt = fromNormalHealth,
-            rootProcessStartedAt = fromRootProcess,
-            rootPidFileModifiedAt = fromRootPidFile,
-            nowMs = System.currentTimeMillis()
-        )
-        saveRuntimeStartedAt(startedAt)
-        return startedAt
-    }
-
-    private fun recoverNormalRuntimeStartedAtFromHealth(port: Int): Long? {
-        return calculateStartedAtFromUptime(
-            nowMs = System.currentTimeMillis(),
-            uptimeSec = readNormalHealthUptimeSeconds(port)
-        )
-    }
-
-    private fun readNormalHealthUptimeSeconds(port: Int): Long? {
-        if (port !in 1..65535) return null
-        var connection: HttpURLConnection? = null
-        return try {
-            connection = (URL(RuntimeApiUrls.local(port, path = "__health")).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 450
-                readTimeout = 700
-                requestMethod = "GET"
-            }
-            if (connection.responseCode !in 200..299) return null
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            parseHealthUptimeSeconds(body)
-        } catch (_: Exception) {
-            null
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
-    private fun readRuntimeStartedAt(): Long {
-        return prefs.getLong(KEY_RUNTIME_STARTED_AT_MS, 0L)
-    }
-
-    private fun saveRuntimeStartedAt(startedAt: Long) {
-        prefs.edit { putLong(KEY_RUNTIME_STARTED_AT_MS, startedAt) }
-    }
-
-    private fun clearRuntimeStartedAt() {
-        prefs.edit { remove(KEY_RUNTIME_STARTED_AT_MS) }
-    }
-
-    private fun uptimeSecondsFrom(startedAtMs: Long): Long {
-        return ((System.currentTimeMillis() - startedAtMs).coerceAtLeast(0L)) / 1000L
-    }
-
-    private fun isPortOpen(port: Int): Boolean {
-        return PortProbe.isOpen(port = port, timeoutMs = 450)
-    }
-
-    private suspend fun waitForPort(port: Int, wantOpen: Boolean, timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val open = isPortOpen(port)
-            if (open == wantOpen) return true
-            delay(160)
-        }
-        return false
-    }
-
-    private fun isNormalRuntimeStopped(port: Int): Boolean {
-        return !isNormalProcessRunning() && !isPortOpen(port)
-    }
-
-    private fun isNormalRestartStopCompleted(oldPort: Int): Boolean {
-        return isNormalRestartTeardownComplete(
-            serviceRunning = isNormalServiceRunning(),
-            portOpen = isPortOpen(oldPort)
-        )
-    }
-
-    private suspend fun waitForRestartStopCompletion(
-        mode: RunMode,
-        oldPort: Int,
-        timeoutMs: Long
-    ): Boolean {
-        if (mode != RunMode.Normal) {
-            return waitForRuntimeStopped(mode, oldPort, timeoutMs)
-        }
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (isNormalRestartStopCompleted(oldPort)) {
-                return true
-            }
-            delay(180)
-        }
-        return isNormalRestartStopCompleted(oldPort)
-    }
-
-    private suspend fun waitForRuntimeStopped(mode: RunMode, oldPort: Int, timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val stopped = when (mode) {
-                RunMode.Normal -> isNormalRuntimeStopped(oldPort)
-                RunMode.Root -> !RootRuntimeController.isRunning(context, oldPort)
-            }
-            if (stopped) return true
-            delay(180)
-        }
-        return when (mode) {
-            RunMode.Normal -> isNormalRuntimeStopped(oldPort)
-            RunMode.Root -> !RootRuntimeController.isRunning(context, oldPort)
-        }
-    }
-
-    private suspend fun waitForNormalProcessReclaimed(expectedPid: Int, timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (NodeService.recoveryCandidatePid(context) != expectedPid) return true
-            delay(180)
-        }
-        return NodeService.recoveryCandidatePid(context) != expectedPid
-    }
-
-    @Suppress("DEPRECATION")
-    private fun isNormalServiceRunning(): Boolean {
-        return runCatching {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return false
-            am.getRunningServices(Int.MAX_VALUE)
-                .any { it.service.className == NodeService::class.java.name }
-        }.getOrElse { false }
-    }
-
-    private fun isNormalProcessRunning(): Boolean {
-        return NodeService.isProcessRunning(context)
-    }
-
-    private fun isNormalRuntimeReachable(port: Int): Boolean {
-        return isPortOpen(port) && isRuntimeOwnedByApp(port, RunMode.Normal)
-    }
-
-    private fun isRuntimePortActive(state: RuntimeState): Boolean {
-        return when (state.runMode) {
-            RunMode.Normal -> isPortOpen(state.port)
-            RunMode.Root -> RootRuntimeController.isRunning(context, state.port)
-        }
-    }
-
-    private fun isRootRuntimeOwnedByApp(port: Int): Boolean {
-        return RootRuntimeController.isRuntimeOwnedByAppPassive(context, port)
-    }
-
-    private fun isRuntimeOwnedByApp(port: Int, mode: RunMode): Boolean {
-        return isRuntimeOwnershipOwned(readRuntimeOwnership(port, mode))
-    }
-
-    private fun readRuntimeOwnership(port: Int, mode: RunMode): RuntimeOwnership {
-        if (port !in 1..65535) return RuntimeOwnership.Foreign
-        val expectedIdentity = RuntimeIdentityStore.ensureInstanceId(context).trim()
-        val expectedHome = RuntimePaths.projectDir(context, mode).absolutePath
-        val body = readRuntimeHealthBody(port) ?: return RuntimeOwnership.Unknown
-        return determineRuntimeOwnershipFromHealth(
-            body = body,
-            expectedIdentity = expectedIdentity,
-            expectedHome = expectedHome
-        )
-    }
-
-    private fun readRuntimeHealthBody(port: Int): String? {
-        var connection: HttpURLConnection? = null
-        return try {
-            connection = (URL(RuntimeApiUrls.local(port, path = "__health")).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 450
-                readTimeout = 700
-                requestMethod = "GET"
-            }
-            if (connection.responseCode !in 200..299) return null
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        } catch (_: Exception) {
-            null
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
-    private fun buildLocalUrl(port: Int, token: String): String {
-        return RuntimeNetworkAddressResolver.buildHttpUrl("127.0.0.1", port, token)
-    }
-
-    private fun buildLanUrl(ip: String, port: Int, token: String): String {
-        return RuntimeNetworkAddressResolver.buildHttpUrl(ip, port, token)
-    }
-
-    private fun buildLanIpv6Url(
-        ip: String,
-        port: Int,
-        token: String,
-        listenMode: RuntimeListenMode
-    ): String {
-        if (listenMode != RuntimeListenMode.DualStack) return ""
-        return RuntimeNetworkAddressResolver.buildHttpUrl(ip, port, token)
+        logController.addLog(level, message)
     }
 }

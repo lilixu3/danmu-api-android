@@ -729,7 +729,7 @@ class NodeService : Service() {
 
     private fun readPortFromEnvFile(): Int {
         return runCatching {
-            val envFile = File(NodeProjectManager.projectDir(this), "config/.env")
+            val envFile = File(NodeProjectManager.normalProjectDir(this), "config/.env")
             DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["DANMU_API_PORT"]
                 ?.trim()?.toIntOrNull() ?: 0
         }.getOrDefault(0)
@@ -989,7 +989,7 @@ class NodeService : Service() {
 
     private fun readTokenFromEnvFile(): String {
         return try {
-            val envFile = java.io.File(NodeProjectManager.projectDir(this), "config/.env")
+            val envFile = java.io.File(NodeProjectManager.normalProjectDir(this), "config/.env")
             if (!envFile.exists()) return ""
             DotEnvCodec.parse(envFile.readText(Charsets.UTF_8))["TOKEN"]?.trim().orEmpty()
         } catch (e: Exception) {

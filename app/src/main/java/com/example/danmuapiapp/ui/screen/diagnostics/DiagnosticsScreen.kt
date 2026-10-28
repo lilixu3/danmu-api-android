@@ -1,7 +1,6 @@
 package com.example.danmuapiapp.ui.screen.diagnostics
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -49,6 +48,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.ui.component.AppGlassSurface
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import java.io.File
@@ -69,9 +69,9 @@ fun DiagnosticsScreen(
                 output.write(state.report.toByteArray(Charsets.UTF_8))
             } ?: error("无法写入文件")
         }.onSuccess {
-            Toast.makeText(context, "诊断报告已保存", Toast.LENGTH_SHORT).show()
+            AppToast.success("诊断报告已保存")
         }.onFailure {
-            Toast.makeText(context, "保存失败：${it.message}", Toast.LENGTH_SHORT).show()
+            AppToast.error("保存失败：${it.message}")
         }
     }
 
@@ -218,6 +218,6 @@ private fun shareDiagnosticReport(context: android.content.Context, fileName: St
         }
         context.startActivity(Intent.createChooser(intent, "分享诊断报告"))
     }.onFailure {
-        Toast.makeText(context, "分享失败：${it.message}", Toast.LENGTH_SHORT).show()
+        AppToast.error("分享失败：${it.message}")
     }
 }

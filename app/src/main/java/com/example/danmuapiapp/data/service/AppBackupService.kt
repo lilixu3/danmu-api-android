@@ -4,11 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.danmuapiapp.BuildConfig
 import com.example.danmuapiapp.data.util.DotEnvCodec
-import com.example.danmuapiapp.data.util.ShellUtils.shellQuote
-import com.example.danmuapiapp.domain.model.RunMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import javax.inject.Inject
@@ -65,7 +62,9 @@ private data class AppBackupBundle(
     val appPreferences: List<BackupPreferenceFile> = emptyList(),
     val corePreferences: List<BackupPreferenceFile> = emptyList(),
     val coreInventory: List<CoreInventoryEntry> = emptyList(),
-    val accessRules: String? = null
+    val accessRules: String? = null,
+    val originMode: String = "",
+    val originProject: String = ""
 )
 
 data class AppBackupPreview(
@@ -131,7 +130,9 @@ internal object AppBackupCodec {
 
 @Singleton
 class AppBackupService @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val runtimeData: RuntimeDataAccess,
+    private val storage: RuntimeStorageGateway
 ) {
     companion object {
         private const val CORE_SOURCE_METADATA = ".danmuapiapp-core-source.json"
@@ -179,31 +180,34 @@ class AppBackupService @Inject constructor(
         }
     }
 
-    fun createBackup(
-        sections: Set<AppBackupSection>,
-        envContent: String
+    suspend fun createBackup(
+        sections: Set<AppBackupSection>
     ): Result<String> = runCatching {
-        require(sections.isNotEmpty()) { "请至少选择一个备份类别" }
-        val bundle = AppBackupBundle(
-            createdAtMs = System.currentTimeMillis(),
-            appVersion = BuildConfig.VERSION_NAME,
-            sections = sections.sortedBy { it.ordinal },
-            environment = if (AppBackupSection.Environment in sections) {
-                BackupEnvironmentPolicy.exportValues(envContent)
-            } else null,
-            favorites = if (AppBackupSection.Favorites in sections) {
-                FavoriteCacheStore.readCurrent(context).getOrThrow().content
-            } else null,
-            appPreferences = if (AppBackupSection.AppSettings in sections) {
-                readPreferenceFiles(APP_PREFS)
-            } else emptyList(),
-            corePreferences = if (AppBackupSection.CoreSources in sections) {
-                readPreferenceFiles(CORE_PREFS)
-            } else emptyList(),
-            coreInventory = if (AppBackupSection.CoreSources in sections) readCoreInventory() else emptyList(),
-            accessRules = if (AppBackupSection.AccessRules in sections) readAccessRules() else null
-        )
-        AppBackupCodec.encode(bundle)
+        runtimeData.withOffline { target ->
+            require(sections.isNotEmpty()) { "请至少选择一个备份类别" }
+            val bundle = AppBackupBundle(
+                createdAtMs = System.currentTimeMillis(),
+                appVersion = BuildConfig.VERSION_NAME,
+                sections = sections.sortedBy { it.ordinal },
+                originMode = target.mode.key,
+                originProject = target.projectDir.absolutePath,
+                environment = if (AppBackupSection.Environment in sections) {
+                    BackupEnvironmentPolicy.exportValues(storage.readText(target, "config/.env").orEmpty())
+                } else null,
+                favorites = if (AppBackupSection.Favorites in sections) {
+                    FavoriteCacheStore.read(context, target.mode, target.projectDir).getOrThrow().content
+                } else null,
+                appPreferences = if (AppBackupSection.AppSettings in sections) {
+                    readPreferenceFiles(APP_PREFS)
+                } else emptyList(),
+                corePreferences = if (AppBackupSection.CoreSources in sections) {
+                    readPreferenceFiles(CORE_PREFS)
+                } else emptyList(),
+                coreInventory = if (AppBackupSection.CoreSources in sections) readCoreInventory(target) else emptyList(),
+                accessRules = if (AppBackupSection.AccessRules in sections) readAccessRules(target) else null
+            )
+            AppBackupCodec.encode(bundle)
+        }
     }
 
     fun inspect(raw: String): Result<AppBackupPreview> = runCatching {
@@ -213,98 +217,99 @@ class AppBackupService @Inject constructor(
 
     suspend fun restore(
         raw: String,
-        selectedSections: Set<AppBackupSection>,
-        currentEnvContent: String,
-        environmentWriter: suspend (String) -> Result<String>
+        selectedSections: Set<AppBackupSection>
     ): Result<AppBackupRestoreResult> = runCatching {
-        val bundle = AppBackupCodec.decode(raw) as AppBackupBundle
-        val available = bundle.sections.toSet()
-        val selected = selectedSections.intersect(available)
-        require(selected.isNotEmpty()) { "请至少选择一个恢复类别" }
+        runtimeData.transition {
+            val target = runtimeData.capture()
+            val bundle = AppBackupCodec.decode(raw) as AppBackupBundle
+            val available = bundle.sections.toSet()
+            val selected = selectedSections.intersect(available)
+            require(selected.isNotEmpty()) { "请至少选择一个恢复类别" }
 
-        val validatedFavorite = if (AppBackupSection.Favorites in selected) {
-            bundle.favorites?.let(FavoriteCacheStore::snapshotOf)
-                ?: throw IOException("备份中缺少收藏数据")
-        } else null
-        if (AppBackupSection.AccessRules in selected && bundle.accessRules != null) {
-            Json.parseToJsonElement(bundle.accessRules).jsonObject
-        }
-        if (AppBackupSection.AppSettings in selected) {
-            validatePreferenceFiles(bundle.appPreferences, APP_PREFS)
-        }
-        if (AppBackupSection.CoreSources in selected) {
-            validatePreferenceFiles(bundle.corePreferences, CORE_PREFS)
-        }
-
-        val mergedEnv = if (AppBackupSection.Environment in selected) {
-            BackupEnvironmentPolicy.merge(currentEnvContent, bundle.environment.orEmpty())
-        } else null
-
-        val previousAppPreferences = if (AppBackupSection.AppSettings in selected) {
-            readPreferenceFiles(APP_PREFS)
-        } else emptyList()
-        val previousCorePreferences = if (AppBackupSection.CoreSources in selected) {
-            readPreferenceFiles(CORE_PREFS)
-        } else emptyList()
-        val previousFavorite = if (validatedFavorite != null) {
-            FavoriteCacheStore.readCurrent(context).getOrThrow()
-        } else null
-        val previousAccessRules = if (AppBackupSection.AccessRules in selected) {
-            readAccessRules()
-        } else null
-
-        try {
-            if (mergedEnv != null) {
-                environmentWriter(mergedEnv).getOrThrow()
+            val validatedFavorite = if (AppBackupSection.Favorites in selected) {
+                bundle.favorites?.let(FavoriteCacheStore::snapshotOf)
+                    ?: throw IOException("备份中缺少收藏数据")
+            } else null
+            if (AppBackupSection.AccessRules in selected && bundle.accessRules != null) {
+                Json.parseToJsonElement(bundle.accessRules).jsonObject
             }
             if (AppBackupSection.AppSettings in selected) {
-                restorePreferenceFiles(bundle.appPreferences, APP_PREFS)
+                validatePreferenceFiles(bundle.appPreferences, APP_PREFS)
             }
             if (AppBackupSection.CoreSources in selected) {
-                restorePreferenceFiles(bundle.corePreferences, CORE_PREFS)
+                validatePreferenceFiles(bundle.corePreferences, CORE_PREFS)
             }
-            if (validatedFavorite != null) {
-                FavoriteCacheStore.writeCurrent(context, validatedFavorite.content).getOrThrow()
-            }
-            if (AppBackupSection.AccessRules in selected) {
-                writeAccessRules(bundle.accessRules)
-            }
-        } catch (restoreError: Throwable) {
-            val rollbackErrors = mutableListOf<Throwable>()
-            suspend fun rollback(block: suspend () -> Unit) {
-                try {
-                    block()
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (rollbackError: Throwable) {
-                    rollbackErrors.add(rollbackError)
-                }
-            }
-            // Restore preferences first so an environment rollback targets the original run mode.
-            if (previousAppPreferences.isNotEmpty()) {
-                rollback { restorePreferenceFiles(previousAppPreferences, APP_PREFS) }
-            }
-            if (previousCorePreferences.isNotEmpty()) {
-                rollback { restorePreferenceFiles(previousCorePreferences, CORE_PREFS) }
-            }
-            if (previousFavorite != null) {
-                rollback { FavoriteCacheStore.writeCurrent(context, previousFavorite.content).getOrThrow() }
-            }
-            if (AppBackupSection.AccessRules in selected) {
-                rollback { writeAccessRules(previousAccessRules) }
-            }
-            if (mergedEnv != null) {
-                rollback { environmentWriter(currentEnvContent).getOrThrow() }
-            }
-            rollbackErrors.forEach(restoreError::addSuppressed)
-            throw restoreError
-        }
 
-        AppBackupRestoreResult(
-            restoredSections = selected,
-            mergedEnvironment = mergedEnv,
-            favoriteCount = validatedFavorite?.count
-        )
+            val previousEnv = if (AppBackupSection.Environment in selected) storage.readText(target, "config/.env") else null
+            val mergedEnv = if (AppBackupSection.Environment in selected) {
+                BackupEnvironmentPolicy.merge(previousEnv.orEmpty(), bundle.environment.orEmpty())
+            } else null
+
+            val previousAppPreferences = if (AppBackupSection.AppSettings in selected) {
+                readPreferenceFiles(APP_PREFS)
+            } else emptyList()
+            val previousCorePreferences = if (AppBackupSection.CoreSources in selected) {
+                readPreferenceFiles(CORE_PREFS)
+            } else emptyList()
+            val previousFavorite = if (validatedFavorite != null) {
+                FavoriteCacheStore.read(context, target.mode, target.projectDir).getOrThrow()
+            } else null
+            val previousAccessRules = if (AppBackupSection.AccessRules in selected) {
+                readAccessRules(target)
+            } else null
+
+            try {
+                if (mergedEnv != null) {
+                    storage.writeText(target, "config/.env", mergedEnv)
+                }
+                if (AppBackupSection.AppSettings in selected) {
+                    restorePreferenceFiles(bundle.appPreferences, APP_PREFS)
+                }
+                if (AppBackupSection.CoreSources in selected) {
+                    restorePreferenceFiles(bundle.corePreferences, CORE_PREFS)
+                }
+                if (validatedFavorite != null) {
+                    FavoriteCacheStore.write(context, target.mode, validatedFavorite.content, target.projectDir).getOrThrow()
+                }
+                if (AppBackupSection.AccessRules in selected) {
+                    writeAccessRules(target, bundle.accessRules)
+                }
+            } catch (restoreError: Throwable) {
+                val rollbackErrors = mutableListOf<Throwable>()
+                suspend fun rollback(block: suspend () -> Unit) {
+                    try {
+                        block()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (rollbackError: Throwable) {
+                        rollbackErrors.add(rollbackError)
+                    }
+                }
+                if (previousAppPreferences.isNotEmpty()) {
+                    rollback { restorePreferenceFiles(previousAppPreferences, APP_PREFS) }
+                }
+                if (previousCorePreferences.isNotEmpty()) {
+                    rollback { restorePreferenceFiles(previousCorePreferences, CORE_PREFS) }
+                }
+                if (previousFavorite != null) {
+                    rollback { FavoriteCacheStore.write(context, target.mode, previousFavorite.content, target.projectDir).getOrThrow() }
+                }
+                if (AppBackupSection.AccessRules in selected) {
+                    rollback { writeAccessRules(target, previousAccessRules) }
+                }
+                if (mergedEnv != null) {
+                    rollback { storage.writeText(target, "config/.env", previousEnv) }
+                }
+                rollbackErrors.forEach(restoreError::addSuppressed)
+                throw restoreError
+            }
+
+            AppBackupRestoreResult(
+                restoredSections = selected,
+                mergedEnvironment = mergedEnv,
+                favoriteCount = validatedFavorite?.count
+            )
+        }
     }
 
     private fun readPreferenceFiles(
@@ -386,96 +391,29 @@ class AppBackupService @Inject constructor(
         }
     }
 
-    private fun readCoreInventory(): List<CoreInventoryEntry> {
-        val projectDir = RuntimePaths.normalProjectDir(context)
+    private fun readCoreInventory(target: RuntimeDataContext): List<CoreInventoryEntry> {
         return listOf("stable", "dev", "custom").map { key ->
-            val directory = File(projectDir, "danmu_api_$key")
+            val base = "danmu_api_$key"
+            val layout = listOf("", "/danmu_api", "/danmu-api").firstOrNull {
+                storage.isFile(target, "$base$it/worker.js")
+            }.orEmpty()
+            val globals = listOf("configs/globals.js", "config/globals.js", "globals.js")
+                .firstNotNullOfOrNull { storage.readText(target, "$base$layout/$it") }
+            val packageText = storage.readText(target, "$base$layout/package.json")
             CoreInventoryEntry(
                 variantKey = key,
-                installed = NodeProjectManager.hasValidCore(directory),
-                version = NodeProjectManager.readCoreVersion(directory),
-                sourceMetadata = File(directory, CORE_SOURCE_METADATA).takeIf { it.isFile }
-                    ?.readText(Charsets.UTF_8)
+                installed = globals != null && storage.isFile(target, "$base$layout/worker.js"),
+                version = globals?.let(CoreVersionParser::extractSourceVersion)
+                    ?: packageText?.let(CoreVersionParser::extractPackageVersion),
+                sourceMetadata = storage.readText(target, "$base/$CORE_SOURCE_METADATA")
             )
         }
     }
 
-    private fun readAccessRules(): String? {
-        val mode = RuntimePaths.currentRunMode(context)
-        val target = File(RuntimePaths.projectDir(context, mode), ACCESS_RULES_PATH)
-        if (mode == RunMode.Normal) {
-            return target.takeIf { it.isFile }?.readText(Charsets.UTF_8)
-        }
+    private fun readAccessRules(target: RuntimeDataContext): String? = storage.readText(target, ACCESS_RULES_PATH)
 
-        val temporary = File.createTempFile("access-rules-read-", ".json", context.cacheDir)
-        runCatching { temporary.delete() }
-        try {
-            val script = """
-                SRC=${shellQuote(target.absolutePath)}
-                DST=${shellQuote(temporary.absolutePath)}
-                [ -f "${'$'}SRC" ] || exit 44
-                cat "${'$'}SRC" > "${'$'}DST" || exit 2
-                chmod 0644 "${'$'}DST" || exit 3
-            """.trimIndent()
-            val result = RootShell.exec(script, timeoutMs = 8_000L)
-            if (result.exitCode == 44) return null
-            if (!result.ok) throw IOException(result.stderr.ifBlank { "无法读取 Root 访问规则" })
-            return temporary.readText(Charsets.UTF_8)
-        } finally {
-            runCatching { temporary.delete() }
-        }
-    }
-
-    private fun writeAccessRules(content: String?) {
-        val mode = RuntimePaths.currentRunMode(context)
-        val target = File(RuntimePaths.projectDir(context, mode), ACCESS_RULES_PATH)
-        if (mode == RunMode.Root) {
-            writeRootAccessRules(target, content)
-            return
-        }
-        if (content == null) {
-            if (target.exists() && !target.delete()) throw IOException("无法清除现有访问规则")
-            return
-        }
-        target.parentFile?.mkdirs()
-        val temporary = File(target.parentFile, "${target.name}.restore.tmp")
-        temporary.writeText(content, Charsets.UTF_8)
-        if (target.exists() && !target.delete()) throw IOException("无法替换访问规则")
-        if (!temporary.renameTo(target)) {
-            temporary.copyTo(target, overwrite = true)
-            temporary.delete()
-        }
-    }
-
-    private fun writeRootAccessRules(target: File, content: String?) {
-        if (content == null) {
-            val result = RootShell.exec(
-                "rm -f -- ${shellQuote(target.absolutePath)}",
-                timeoutMs = 8_000L
-            )
-            if (!result.ok) throw IOException(result.stderr.ifBlank { "无法清除 Root 访问规则" })
-            return
-        }
-
-        val source = File.createTempFile("access-rules-write-", ".json", context.cacheDir)
-        try {
-            source.writeText(content, Charsets.UTF_8)
-            val temporaryPath = "${target.absolutePath}.restore.tmp"
-            val script = """
-                SRC=${shellQuote(source.absolutePath)}
-                DST=${shellQuote(target.absolutePath)}
-                TMP=${shellQuote(temporaryPath)}
-                mkdir -p "${'$'}(dirname "${'$'}DST")" || exit 2
-                cat "${'$'}SRC" > "${'$'}TMP" || exit 3
-                chmod 0644 "${'$'}TMP" || exit 4
-                mv -f "${'$'}TMP" "${'$'}DST" || exit 5
-            """.trimIndent()
-            val result = RootShell.exec(script, timeoutMs = 8_000L)
-            if (!result.ok) throw IOException(result.stderr.ifBlank { "无法写入 Root 访问规则" })
-        } finally {
-            runCatching { source.delete() }
-        }
-    }
+    private fun writeAccessRules(target: RuntimeDataContext, content: String?) =
+        storage.writeText(target, ACCESS_RULES_PATH, content)
 
 }
 

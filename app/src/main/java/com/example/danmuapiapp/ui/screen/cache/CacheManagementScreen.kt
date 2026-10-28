@@ -1,6 +1,7 @@
 package com.example.danmuapiapp.ui.screen.cache
 
-import com.example.danmuapiapp.ui.component.AppSnackbarHost
+import com.example.danmuapiapp.ui.component.AppToast
+
 
 import com.example.danmuapiapp.ui.component.AppDialog
 import com.example.danmuapiapp.ui.component.AppDialogStyle
@@ -66,16 +67,14 @@ fun CacheManagementScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(viewModel.message) {
         viewModel.message?.let {
-            snackbarHostState.showSnackbar(it)
+            AppToast.show(it)
             viewModel.dismissMessage()
         }
     }
 
     Scaffold(
-        snackbarHost = { AppSnackbarHost(snackbarHostState) },
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
@@ -156,6 +155,28 @@ fun CacheManagementScreen(
 
                 if (stats.isAvailable) {
                     item(key = "stats") { CacheStatsRow(stats = stats) }
+                }
+
+                if (!adminState.isAdminMode) {
+                    item(key = "admin-required") {
+                        AppGlassSurface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    "番剧缓存详情和清理缓存需要管理员模式，请求记录仍可正常查看。",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                AppGlassButton(onClick = onOpenAdminMode) {
+                                    Text(if (adminState.hasAdminTokenConfigured) "开启管理员模式" else "配置管理员密码")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item(key = "clear-heading") {
@@ -299,7 +320,6 @@ fun CacheManagementScreen(
         )
     }
 }
-
 @Composable
 private fun CacheStatsRow(stats: CacheStats) {
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
@@ -338,7 +358,6 @@ private fun CacheStatsRow(stats: CacheStats) {
         }
     }
 }
-
 @Composable
 private fun StatCell(label: String, value: String) {
     Column(
@@ -464,18 +483,5 @@ private fun CacheEntryCard(entry: CacheEntry) {
                 )
             }
         }
-    }
-}
-
-fun formatBytes(bytes: Long): String {
-    if (bytes <= 0L) return "0 B"
-    val kb = 1024.0
-    val mb = kb * 1024
-    val gb = mb * 1024
-    return when {
-        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
-        bytes >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytes / mb)
-        bytes >= kb -> String.format(Locale.getDefault(), "%.1f KB", bytes / kb)
-        else -> "$bytes B"
     }
 }

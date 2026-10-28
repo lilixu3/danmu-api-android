@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.data.repository
 
+import com.example.danmuapiapp.domain.model.LocalDanmuResourceKey
 import com.example.danmuapiapp.domain.model.LocalDanmuType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -31,6 +31,7 @@ import com.example.danmuapiapp.domain.repository.RuntimeRepository
 import com.example.danmuapiapp.domain.repository.SettingsRepository
 import com.example.danmuapiapp.ui.DanmuApiApp
 import com.example.danmuapiapp.ui.compat.CompatModeActivity
+import com.example.danmuapiapp.ui.component.AppToast
 import com.example.danmuapiapp.ui.theme.DanmuApiTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -130,10 +131,17 @@ class MainActivity : ComponentActivity() {
         updateChecker.onAppResume()
         appForegroundUpdateChecker.onAppResume()
         appForegroundAnnouncementChecker.onAppResume()
-        appUpdateService.tryResumePendingInstall(this)
+        when (val result = appUpdateService.tryResumePendingInstall(this)) {
+            AppUpdateService.ResumeInstallResult.Launched,
+            AppUpdateService.ResumeInstallResult.NoPendingInstall -> Unit
+            AppUpdateService.ResumeInstallResult.NeedUnknownSourcePermission ->
+                AppToast.warning("请先允许安装未知应用，授权后返回将自动继续安装")
+            is AppUpdateService.ResumeInstallResult.Failed -> AppToast.error(result.message)
+        }
     }
 
     override fun onStop() {
+        AppToast.dismiss()
         runtimeRepository.setAppForeground(false)
         super.onStop()
     }

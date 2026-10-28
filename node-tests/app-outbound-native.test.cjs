@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {NativeTransport,startNativeOutbound}=require('../app/src/main/assets/nodejs-project/app-outbound-native.js');
+const {NativeTransport,startNativeOutbound,dialH3}=require('../app/src/main/assets/nodejs-project/app-outbound-native.js');
 const {waitFor}=require('../app/src/main/assets/nodejs-project/app-outbound-dns.js');
 const config={enabled:true,sources:['bahamut','tmdb'],httpVersion:'auto',connectTimeoutMs:1000};
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -97,4 +97,148 @@ test('replacing a GOAWAY session waits for its active response to finish',async(
   first.release();assert.equal(first.session.closed,true);assert.equal(second.session.closed,false);
   second.release();
  }finally{transport.close();}
+});
+
+function h3Fixture({connectError,connectGate,opened=Promise.resolve({protocol:'h3',echAccepted:true})}={}) {
+ const endpoints=[],sessions=[];
+ class QuicEndpoint {
+  constructor(options){this.options=options;this.closeCalls=0;endpoints.push(this);}
+  async close(){this.closeCalls++;}
+ }
+ const quic={QuicEndpoint,async connect(address,options){
+  const endpoint=options.endpoint instanceof QuicEndpoint?options.endpoint:new QuicEndpoint(options.endpoint);
+  if(connectError)throw connectError;
+  const closed=Promise.withResolvers();
+  const session={opened,closed:closed.promise,destroyed:false,closing:false,
+   get endpoint(){return this.destroyed?null:endpoint;},
+   destroy(error){if(this.destroyed)return;this.destroyed=true;if(error)closed.reject(error);else closed.resolve();},
+  };
+  sessions.push(session);
+  await connectGate;
+  return session;
+ }};
+ return {quic,endpoints,sessions,dial:signal=>dialH3(quic,'api.tmdb.org','8.8.8.8',{},signal||new AbortController().signal)};
+}
+const nextTurn=()=>new Promise(resolve=>setImmediate(resolve));
+
+for(const failed of [false,true])test(`H3 releases its endpoint when the peer closes ${failed?'with an error':'normally'}`,async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();
+ fixture.sessions[0].destroy(failed?new Error('peer disconnected'):undefined);
+ await nextTurn();
+ assert.equal(connection.alive(),false);
+ assert.equal(fixture.sessions[0].endpoint,null);
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+ connection.close();connection.close();
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+});
+
+test('H3 releases its endpoint when connect fails before returning a session',async()=>{
+ const error=new Error('connect failed');const fixture=h3Fixture({connectError:error});
+ await assert.rejects(fixture.dial(),error);
+ assert.equal(fixture.sessions.length,0);
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+});
+
+test('H3 releases its endpoint when the handshake destroys the session',async()=>{
+ const handshake=Promise.withResolvers();const fixture=h3Fixture({opened:handshake.promise});
+ const pending=fixture.dial();await nextTurn();
+ const error=new Error('handshake timed out');
+ fixture.sessions[0].destroy(error);handshake.reject(error);
+ await assert.rejects(pending,error);
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+});
+
+test('H3 cancellation before dial does not allocate an endpoint',async()=>{
+ const fixture=h3Fixture();const controller=new AbortController();controller.abort();
+ await assert.rejects(fixture.dial(controller.signal),{name:'AbortError'});
+ assert.equal(fixture.endpoints.length,0);
+});
+
+test('H3 cancellation while connect is pending closes the endpoint and the late session',async()=>{
+ const gate=Promise.withResolvers();const fixture=h3Fixture({connectGate:gate.promise});
+ const controller=new AbortController();const pending=fixture.dial(controller.signal);
+ await nextTurn();controller.abort(new Error('dial cancelled'));gate.resolve();
+ await assert.rejects(pending,/dial cancelled/);
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+ assert.equal(fixture.sessions[0].destroyed,true);
+});
+
+test('H3 handshake cancellation releases the endpoint once',async()=>{
+ const fixture=h3Fixture({opened:new Promise(()=>{})});const controller=new AbortController();
+ const pending=fixture.dial(controller.signal);await nextTurn();
+ controller.abort(new Error('handshake cancelled'));
+ await assert.rejects(pending,/handshake cancelled/);
+ assert.equal(fixture.sessions[0].destroyed,true);
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+});
+
+test('H3 detaches the dial signal after opening and closes explicitly only once',async()=>{
+ const fixture=h3Fixture();const controller=new AbortController();const connection=await fixture.dial(controller.signal);
+ controller.abort();assert.equal(connection.alive(),true);
+ assert.equal(fixture.endpoints[0].closeCalls,0);
+ connection.close();connection.close();await nextTurn();
+ assert.equal(fixture.endpoints[0].closeCalls,1);
+ assert.equal(fixture.sessions[0].destroyed,true);
+});
+
+function h3Stream() {
+ const closed=Promise.withResolvers();
+ return {closed:closed.promise,destroyed:false,destroyError:undefined,
+  destroy(error){if(this.destroyed)return;this.destroyed=true;this.destroyError=error;if(error)closed.reject(error);else closed.resolve();},
+ };
+}
+
+test('H3 destroys a stream delivered after request cancellation without unhandled rejections',async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();const creation=Promise.withResolvers();
+ fixture.sessions[0].createBidirectionalStream=()=>creation.promise;
+ const controller=new AbortController();const error=new Error('request cancelled during stream creation');
+ const pending=connection.request(new URL('https://api.tmdb.org/'),'GET',{},Buffer.alloc(0),controller.signal,{});
+ controller.abort(error);await assert.rejects(pending,error);
+ const stream=h3Stream();creation.resolve(stream);await nextTurn();
+ assert.equal(stream.destroyed,true);assert.equal(stream.destroyError,error);
+ assert.equal(connection.alive(),true);connection.close();
+});
+
+test('H3 handles stream creation failure delivered after request cancellation',async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();const creation=Promise.withResolvers();
+ fixture.sessions[0].createBidirectionalStream=()=>creation.promise;
+ const controller=new AbortController();
+ const pending=connection.request(new URL('https://api.tmdb.org/'),'GET',{},Buffer.alloc(0),controller.signal,{});
+ controller.abort(new Error('cancel before creation fails'));await assert.rejects(pending,/cancel before creation fails/);
+ creation.reject(new Error('late stream creation failure'));await nextTurn();
+ assert.equal(connection.alive(),true);connection.close();
+});
+
+test('H3 cancellation before headers destroys only the request stream',async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();const stream=h3Stream();
+ fixture.sessions[0].createBidirectionalStream=async()=>stream;
+ const controller=new AbortController();
+ const pending=connection.request(new URL('https://api.tmdb.org/'),'GET',{},Buffer.alloc(0),controller.signal,{});
+ await nextTurn();controller.abort(new Error('cancel before headers'));
+ await assert.rejects(pending,/cancel before headers/);
+ assert.equal(stream.destroyed,true);assert.equal(connection.alive(),true);connection.close();
+});
+
+test('H3 handles a stream closing before response headers',async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();const stream=h3Stream();
+ fixture.sessions[0].createBidirectionalStream=async()=>stream;
+ const pending=connection.request(new URL('https://api.tmdb.org/'),'GET',{},Buffer.alloc(0),new AbortController().signal,{});
+ await nextTurn();stream.destroy(new Error('stream failed before headers'));
+ await assert.rejects(pending,/stream failed before headers/);
+ assert.equal(connection.alive(),true);connection.close();
+});
+
+test('H3 sends one request and keeps the session available after a successful response',async()=>{
+ const fixture=h3Fixture();const connection=await fixture.dial();let requests=0;
+ fixture.sessions[0].createBidirectionalStream=async options=>{
+  requests++;assert.equal(options.headers[':method'],'POST');assert.equal(options.body.toString(),'one body');
+  const stream=h3Stream();stream[Symbol.asyncIterator]=async function*(){yield [Buffer.from('reply')];};
+  options.onheaders({':status':'201','content-type':'text/plain'});return stream;
+ };
+ let body='',ended=false;
+ const downstream={writeHead(status,headers){assert.equal(status,201);assert.equal(headers['content-type'],'text/plain');},
+  write(part){body+=part;return true;},end(){ended=true;}};
+ await connection.request(new URL('https://api.tmdb.org/'),'POST',{},Buffer.from('one body'),new AbortController().signal,downstream);
+ assert.equal(body,'reply');assert.equal(ended,true);assert.equal(requests,1);
+ assert.equal(connection.alive(),true);assert.equal(fixture.endpoints[0].closeCalls,0);connection.close();
 });

@@ -36,7 +36,8 @@ internal object LocalDanmuMetadataResolver {
         Regex("(?i)(?<![A-Z0-9])SEASON\\s*0*(\\d{1,2})(?!\\d)"),
         Regex("(?<!\\d)(\\d{1,2})\\s*[xX]\\s*\\d{2,3}(?!\\d)")
     )
-    private val movieRegex = Regex("(?i)(剧场版|劇場版|电影|電影|movie|film)")
+    private val movieRegex = Regex("(?i)(剧场版|劇場版|电影|電影|(?<![a-z])(?:movies?|films?)(?![a-z]))")
+    private val tvRegex = Regex("(?i)(电视剧|電視劇|番剧|番劇|连续剧|連續劇|(?<![a-z])(?:tv|series)(?![a-z]))")
     private val trailingGroupRegex = Regex("\\s+-\\s*[A-Za-z0-9_]{2,24}\\s*$")
     private val sourceSuffixRegex = Regex("(?i)[_\\-@](?:bilibili\\d*|tencent|youku|iqiyi|mango|mgtv|sohu|renren|hanjutv|dandan|bahamut|animeko|xigua|migu|maiduidui|aiyifan|hongguo|custom)\\s*$")
 
@@ -51,7 +52,8 @@ internal object LocalDanmuMetadataResolver {
     )
 
     private val rootFolderNames = setOf(
-        "弹幕下载", "弹幕", "danmaku", "danmu", "download", "downloads", "下载"
+        "弹幕下载", "弹幕", "danmaku", "danmu", "download", "downloads", "下载",
+        "电影", "電影", "movies", "movie", "films", "film", "电视剧", "電視劇", "tv", "series"
     )
 
     fun resolve(
@@ -77,15 +79,15 @@ internal object LocalDanmuMetadataResolver {
         val titleParts = splitTitleAndSeason(record.animeTitle)
         val title = titleParts.first.ifBlank { cleanShowTitle(record.animeTitle) }
         val year = extractYear(record.animeTitle) ?: extractYear(fileName)
-        val type = inferType("${record.animeTitle} $fileName")
+        val type = LocalDanmuType.fromWire(record.mediaType)?.takeIf { it != LocalDanmuType.Unknown }?.wire
+            ?: inferType("${record.animeTitle} $fileName $relativePath", extractEpisode(fileName, null))
         val season = titleParts.second
             ?: extractSeason(record.animeTitle)
             ?: extractSeason(relativePath)
             ?: if (type == LocalDanmuType.Movie.wire) null else 1
         val explicitEpisode = record.episodeNo.takeIf { it > 0 }
             ?: extractEpisode(fileName, season)
-        val episode = explicitEpisode
-            ?: if (type == LocalDanmuType.Movie.wire) null else 1
+        val episode = if (type == LocalDanmuType.Movie.wire) null else explicitEpisode
         return ResolvedLocalDanmuMetadata(
             title = title.ifBlank { "未命名" },
             year = year,
@@ -174,7 +176,7 @@ internal object LocalDanmuMetadataResolver {
         val titleParts = splitTitleAndSeason(title)
         val cleanTitle = titleParts.first.ifBlank { title }
 
-        val searchText = listOf(normalizedRelative, normalizedFile, archiveName.orEmpty()).joinToString(" ")
+        val searchText = listOf(normalizedRelative, normalizedFile, archiveName.orEmpty(), contextName.orEmpty()).joinToString(" ")
         val year = extractYear(showFolder.orEmpty())
             ?: extractYear(normalizedFile)
             ?: extractYear(archiveName.orEmpty())
@@ -186,9 +188,8 @@ internal object LocalDanmuMetadataResolver {
             ?: extractSeason(archiveName.orEmpty())
             ?: extractSeason(contextName.orEmpty())
         val explicitEpisode = templateEpisode ?: extractEpisode(normalizedFile, season)
-        val episode = explicitEpisode
-            ?: if (inferType(searchText) == LocalDanmuType.Movie.wire) null else 1
-        val type = inferType(searchText)
+        val type = inferType(searchText, explicitEpisode, season)
+        val episode = if (type == LocalDanmuType.Movie.wire) null else explicitEpisode
 
         val notes = buildList {
             if (showFolder != null && folderTitle.isNotBlank()) add("剧名来自目录")
@@ -197,11 +198,13 @@ internal object LocalDanmuMetadataResolver {
             if (folderSeason != null) add("季来自目录")
             if (year == null) add("未识别到年份，需要手动选择")
             if (title == "未命名") add("未识别到剧名，需要手动填写")
-            if (explicitEpisode == null) add("未识别到集数，默认第 1 集，请确认")
+            if (type.isBlank()) add("未确定类型，请选择电影或电视剧")
+            if (type == LocalDanmuType.Tv.wire && explicitEpisode == null) add("未识别到集数，需要确认")
         }.distinct()
 
         val confidence = when {
-            cleanTitle == "未命名" || episode == null -> LocalDanmuParseConfidence.Low
+            cleanTitle == "未命名" || type.isBlank() -> LocalDanmuParseConfidence.Low
+            type == LocalDanmuType.Movie.wire && year != null -> LocalDanmuParseConfidence.High
             showFolder != null && templateEpisode != null -> LocalDanmuParseConfidence.High
             templatePrefix != null && templateEpisode != null -> LocalDanmuParseConfidence.High
             year != null && explicitEpisode != null -> LocalDanmuParseConfidence.High
@@ -216,9 +219,9 @@ internal object LocalDanmuMetadataResolver {
             else -> 1
         }
         val safeEpisode = when {
-            safeType == LocalDanmuType.Movie.wire -> episode
+            safeType != LocalDanmuType.Tv.wire -> null
             episode != null && episode > 0 -> episode
-            else -> 1
+            else -> null
         }
 
         return ResolvedLocalDanmuMetadata(
@@ -311,12 +314,12 @@ internal object LocalDanmuMetadataResolver {
             .matches(value)
     }
 
-    private fun inferType(text: String): String {
+    private fun inferType(text: String, episode: Int? = null, season: Int? = null): String {
         return if (movieRegex.containsMatchIn(text)) {
             LocalDanmuType.Movie.wire
-        } else {
+        } else if (tvRegex.containsMatchIn(text) || episode != null || season != null) {
             LocalDanmuType.Tv.wire
-        }
+        } else LocalDanmuType.Unknown.wire
     }
 
     private fun extractSeasonOnly(raw: String): Int? {

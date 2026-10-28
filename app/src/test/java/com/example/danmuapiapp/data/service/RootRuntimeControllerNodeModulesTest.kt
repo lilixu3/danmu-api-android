@@ -294,6 +294,10 @@ class RootRuntimeControllerNodeModulesTest {
 
             srcProject.resolve("main.js").writeText("new-main\n")
             srcProject.resolve("android-server.js").writeText("new-server\n")
+            srcProject.resolve("server").mkdirs()
+            srcProject.resolve("server/api.js").writeText("new-api\n")
+            srcProject.resolve("app-runtime-assets.json").writeText("""["main.js","android-server.js","server/api.js"]""")
+            dstProject.resolve("app-runtime-assets.json").writeText("""["main.js"]""")
             srcProject.resolve(".app_version").writeText("new-version\n")
             srcProject.resolve("node_modules/node-fetch").mkdirs()
             srcProject.resolve("node_modules/node-fetch/package.json").writeText("src-dep\n")
@@ -311,14 +315,25 @@ class RootRuntimeControllerNodeModulesTest {
 
             val script = RootRuntimeController.buildRootProjectIncrementalSyncShell(
                 srcProjectPath = srcProject.absolutePath,
-                dstProjectPath = dstProject.absolutePath
+                dstProjectPath = dstProject.absolutePath,
+                managedPaths = listOf("app-runtime-assets.json", "main.js", "android-server.js", "server/api.js")
             )
 
             assertFalse(script.contains(".tmp_app_sync"))
-            assertFalse(script.contains("SRC/."))
+            assertFalse(script.contains("for FILE in"))
             assertEquals(0, runShell(script))
             assertEquals("new-main\n", dstProject.resolve("main.js").readText())
             assertEquals("new-server\n", dstProject.resolve("android-server.js").readText())
+            assertEquals("new-api\n", dstProject.resolve("server/api.js").readText())
+            assertEquals(
+                srcProject.resolve("app-runtime-assets.json").readText(),
+                dstProject.resolve("app-runtime-assets.json").readText()
+            )
+            assertEquals(0, runShell(script))
+            assertEquals(
+                srcProject.resolve("app-runtime-assets.json").readText(),
+                dstProject.resolve("app-runtime-assets.json").readText()
+            )
             assertEquals("new-version\n", dstProject.resolve(".app_version").readText())
             assertEquals("dst-dep\n", dstProject.resolve("node_modules/existing/package.json").readText())
             assertEquals("dst-core\n", dstProject.resolve("danmu_api_stable/worker.js").readText())
@@ -333,7 +348,8 @@ class RootRuntimeControllerNodeModulesTest {
     fun `Root hot permission normalization avoids recursive node_modules and core scan`() {
         val hotScript = RootRuntimeController.buildRootProjectPermissionNormalizeShell(
             rootProjectPath = "/data/adb/danmuapi_runtime/test/nodejs-project",
-            fullScan = false
+            fullScan = false,
+            managedPaths = listOf("main.js", "package-lock.json")
         )
         val fullScript = RootRuntimeController.buildRootProjectPermissionNormalizeShell(
             rootProjectPath = "/data/adb/danmuapi_runtime/test/nodejs-project",

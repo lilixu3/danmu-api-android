@@ -1,5 +1,7 @@
 package com.example.danmuapiapp.ui.screen.apitest
 
+import com.example.danmuapiapp.domain.model.DanmuDownloadRecord
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -46,5 +48,37 @@ class ManualUrlDanmuSelectionFactoryTest {
         assertEquals("URL", selection.anime.sourceLabel)
         assertEquals("URL 直达集", selection.episode.title)
         assertEquals(1, selection.episode.episodeNumber)
+    }
+
+    @Test
+    fun `downloaded URL selection remains eligible for automatic local import after persistence`() {
+        val selection = buildManualUrlDanmuSelection("https://www.bilibili.com/video/BVtest?p=2", null)
+        val record = DanmuDownloadRecord(animeTitle = selection.anime.title,
+            episodeTitle = selection.episode.title, episodeId = selection.episode.episodeId,
+            episodeNo = selection.episode.episodeNumber, source = selection.episode.source,
+            format = "xml", status = "success")
+        val restored = Json.decodeFromString<DanmuDownloadRecord>(Json.encodeToString(DanmuDownloadRecord.serializer(), record))
+        assertTrue(restored.episodeId < 0)
+        assertTrue(restored.canAutoImportToLocal)
+    }
+
+    @Test
+    fun `resolved pages carry distinct IDs and playback links into manual selection`() {
+        val metadata = UrlDanmuMetadata(title = "康斯坦丁", posterUrl = "https://site.test/current.jpg",
+            platformLabel = "哔哩哔哩", canonicalUrl = "https://www.bilibili.com/video/BVtest?p=2",
+            selectedEpisodeId = "22", episodesComplete = true,
+            episodes = listOf(UrlDanmuEpisode("11", "上部", "https://www.bilibili.com/video/BVtest?p=1", 1, "P1"),
+                UrlDanmuEpisode("22", "下部", "https://www.bilibili.com/video/BVtest?p=2", 2, "P2")))
+        val short = buildManualUrlDanmuSelection("https://b23.tv/test", metadata)
+        val long = buildManualUrlDanmuSelection(metadata.canonicalUrl, metadata)
+        assertEquals(short.anime.animeId, long.anime.animeId)
+        assertEquals(2, short.anime.episodeCount)
+        assertEquals(2, short.anime.directEpisodes.size)
+        assertEquals(2, short.anime.directEpisodes.map { it.episodeId }.distinct().size)
+        assertEquals("下部", short.episode.title)
+        assertEquals("https://www.bilibili.com/video/BVtest?p=2", short.episode.directUrl)
+        assertEquals(short.episode.directUrl, short.episode.sourceUrl)
+        assertEquals(short.episode, buildManualUrlEpisodeCandidate(short.anime))
+        assertEquals("", short.anime.directMetadataNotice)
     }
 }

@@ -15,7 +15,9 @@ data class DownloadAnimeCandidate(
     val episodeLabel: String = "",
     val directUrl: String = "",
     val resolvedEpisodeTitle: String = "",
-    val typeDescription: String = ""
+    val typeDescription: String = "",
+    val directEpisodes: List<DownloadEpisodeCandidate> = emptyList(),
+    val directMetadataNotice: String = ""
 )
 
 data class DownloadEpisodeCandidate(
