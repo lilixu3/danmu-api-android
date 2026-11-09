@@ -35,7 +35,7 @@ test('unsupported runtime fails closed and disabling restores ordinary fetch',as
  const runtime=createAppOutboundRuntime({configPath,startBackend:config=>startNativeOutbound(config,{capabilities:{ech:false}})});
  try {
   await runtime.start();assert.equal(runtime.snapshot().status,'failed');
-  await assert.rejects(fetch('https://api.gamer.com.tw/no-network'),/Node 26.*OpenSSL 4/);
+  await assert.rejects(fetch('https://api.gamer.com.tw/no-network'),/Node .*OpenSSL 4/);
   fs.writeFileSync(configPath,JSON.stringify({enabled:false}));await runtime.refresh();assert.equal(runtime.snapshot().status,'off');
  }finally{await runtime.stop();fs.rmSync(dir,{recursive:true,force:true});}
 });

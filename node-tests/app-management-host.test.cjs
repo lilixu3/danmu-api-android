@@ -14,7 +14,10 @@ async function freePort() {
   const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-for (const worker of [false, true]) test(`shared configuration API hot updates and browser deep links (${worker ? 'Worker' : 'direct'})`, { timeout: 25000 }, async () => {
+for (const [worker, adminToken] of [
+  [false, 'administrator'], [false, 'administrator+@:=,%test'],
+  [true, 'administrator'], [true, 'administrator+@:=,%test'],
+]) test(`shared configuration API hot updates and browser deep links (${worker ? 'Worker' : 'direct'}, ${adminToken === 'administrator' ? 'plain' : 'special-character'} token)`, { timeout: 25000 }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'danmu-management-host-'));
   let child, output = '';
   try {
@@ -22,7 +25,7 @@ for (const worker of [false, true]) test(`shared configuration API hot updates a
     fs.symlinkSync(path.join(runtimeRoot, 'node_modules'), path.join(directory, 'node_modules'));
     fs.mkdirSync(path.join(directory, 'config'));
     const envFile = path.join(directory, 'config', '.env');
-    fs.writeFileSync(envFile, `TOKEN=user\nADMIN_TOKEN=administrator\nDANMU_API_WORKER=${worker}\nDANMU_API_HOT_RELOAD=false\nSOURCE_ORDER=old\n`);
+    fs.writeFileSync(envFile, `TOKEN=user\nADMIN_TOKEN=${adminToken}\nDANMU_API_WORKER=${worker}\nDANMU_API_HOT_RELOAD=false\nSOURCE_ORDER=old\n`);
     const core = path.join(directory, 'danmu_api_stable'); fs.mkdirSync(core);
     fs.writeFileSync(path.join(core, 'package.json'), '{"type":"module"}');
     fs.writeFileSync(path.join(core, 'worker.js'), `export function handleRequest(req, env) {
@@ -47,20 +50,27 @@ for (const worker of [false, true]) test(`shared configuration API hot updates a
       return fetch(base + '/' + token + '/api/env/set', { method:'POST', headers:{'content-type':'application/json', ...(origin ? {origin} : {})}, body: JSON.stringify({key, value}) });
     }
     assert.equal((await set('user', 'SOURCE_ORDER', 'evil')).status, 403);
-    assert.equal((await set('administrator', 'SOURCE_ORDER', 'evil', 'https://evil.invalid')).status, 403);
-    assert.equal((await set('administrator', '../evil', 'value')).status, 400);
-    const saved = await set('administrator', 'SOURCE_ORDER', 'bahamut,tmdb', base.replace('http:', 'https:'));
+    assert.equal((await set(adminToken, 'SOURCE_ORDER', 'evil', 'https://evil.invalid')).status, 403);
+    assert.equal((await set(encodeURIComponent(adminToken), 'SOURCE_ORDER', 'evil', 'https://evil.invalid')).status, 403);
+    assert.match(fs.readFileSync(envFile, 'utf8'), /SOURCE_ORDER=old/);
+    assert.equal((await set(adminToken, '../evil', 'value', base)).status, 400);
+    const saved = await set(adminToken, 'SOURCE_ORDER', 'bahamut,tmdb', base);
     assert.equal(saved.status, 200); assert.equal((await saved.json()).success, true);
     assert.match(fs.readFileSync(envFile, 'utf8'), /SOURCE_ORDER="bahamut,tmdb"/);
-    const config = await (await fetch(base + '/administrator/api/config')).json();
-    assert.equal(config.originalEnvVars.SOURCE_ORDER, 'bahamut,tmdb');
+    const encodedSaved = await set(encodeURIComponent(adminToken), 'SOURCE_ORDER', 'tmdb,bahamut', base.replace('http:', 'https:'));
+    assert.equal(encodedSaved.status, 200); assert.equal((await encodedSaved.json()).success, true);
+    const config = await (await fetch(base + '/' + adminToken + '/api/config')).json();
+    assert.equal(config.originalEnvVars.SOURCE_ORDER, 'tmdb,bahamut');
     assert.equal(child.exitCode, null);
-    const html = await (await fetch(base + '/administrator?app_section=env')).text();
+    const html = await (await fetch(base + '/' + adminToken + '?app_section=env')).text();
     assert.match(html, /switchSection\('env'\)/);
     assert.doesNotMatch(html, /administrator/);
     const normal = await (await fetch(base + '/user')).text();
     assert.doesNotMatch(normal, /data-danmu-app-section/);
-    const removed = await fetch(base + '/administrator/api/env/del', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({key:'SOURCE_ORDER'})});
+    const added = await fetch(base + '/' + adminToken + '/api/env/add', {method:'POST', headers:{'content-type':'application/json', origin:base}, body: JSON.stringify({key:'SOURCE_ORDER', value:'restored'})});
+    assert.equal((await added.json()).success, true);
+    assert.match(fs.readFileSync(envFile, 'utf8'), /SOURCE_ORDER="restored"/);
+    const removed = await fetch(base + '/' + encodeURIComponent(adminToken) + '/api/env/del', {method:'POST', headers:{'content-type':'application/json', origin:base}, body: JSON.stringify({key:'SOURCE_ORDER'})});
     assert.equal((await removed.json()).success, true);
     assert.doesNotMatch(fs.readFileSync(envFile, 'utf8'), /SOURCE_ORDER/);
   } finally {

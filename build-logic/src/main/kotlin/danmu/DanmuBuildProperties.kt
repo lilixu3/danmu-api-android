@@ -22,9 +22,9 @@ fun Project.danmuIsTermuxHost(): Boolean = System.getenv("TERMUX_VERSION") != nu
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-fun Project.danmuDefaultVersionName(): String = "1.0.5.117"
+fun Project.danmuDefaultVersionName(): String = "1.0.5.118"
 
-fun Project.danmuDefaultVersionCode(): Int = 214
+fun Project.danmuDefaultVersionCode(): Int = 215
 
 fun Project.danmuVersionNameOverride(): String? =
     findProperty("versionName")?.toString()?.trim()?.takeIf { it.isNotEmpty() }
@@ -116,6 +116,12 @@ data class DanmuSigning(
 
 fun Project.danmuSigning(): DanmuSigning? {
     val localProps = danmuLocalProperties()
+    val projectSigningProps = Properties().apply {
+        val propsFile = rootProject.file(".signing/signing.properties")
+        if (propsFile.exists()) {
+            propsFile.inputStream().use { load(it) }
+        }
+    }
     val legacyProjectDir = listOf(
         System.getenv("DANMU_LEGACY_PROJECT_DIR")?.trim()?.takeIf { it.isNotEmpty() },
         (findProperty("legacyProjectDir") as? String)?.trim()?.takeIf { it.isNotEmpty() },
@@ -140,6 +146,8 @@ fun Project.danmuSigning(): DanmuSigning? {
         propKeys.forEach { key ->
             val gradleValue = (findProperty(key) as? String)?.trim().orEmpty()
             if (gradleValue.isNotBlank()) return gradleValue
+            val projectValue = projectSigningProps.getProperty(key)?.trim().orEmpty()
+            if (projectValue.isNotBlank()) return projectValue
             val localValue = localProps.getProperty(key)?.trim().orEmpty()
             if (localValue.isNotBlank()) return localValue
             val legacyValue = legacyLocalProps.getProperty(key)?.trim().orEmpty()
@@ -155,11 +163,15 @@ fun Project.danmuSigning(): DanmuSigning? {
         propKeys = listOf("keystore.path")
     )
     val defaultLegacyKeystore = legacyProjectDir?.resolve("danmuapi-ci.jks")
+    val defaultProjectKeystore = rootProject.file(".signing/danmuapi.jks")
     val defaultPrimaryKeystore = rootProject.file("danmuapi-ci.jks")
     val fallbackKeystore = rootProject.file("keystore.jks")
     val resolvedStoreFile = sequenceOf(
-        configuredStorePath?.let { file(it) },
+        configuredStorePath?.let { path ->
+            rootProject.file(path).takeIf(File::isFile) ?: file(path)
+        },
         defaultLegacyKeystore,
+        defaultProjectKeystore,
         defaultPrimaryKeystore,
         fallbackKeystore
     ).filterNotNull().firstOrNull { isUsableKeystore(it) }

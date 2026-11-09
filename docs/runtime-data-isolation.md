@@ -38,7 +38,7 @@ node --test node-tests/runtime-data-context.test.cjs
 ./gradlew :app:testDebugUnitTest :app:assembleRelease --console=plain
 ```
 
-Release 的兼容性检查需要与内嵌运行时相同主版本的 Node。当前为 Node 26.12.1；可通过 `DANMU_TARGET_NODE` 或 `-PtargetNodeExecutable=绝对路径` 指定，不应关闭检查来绕过版本不匹配。
+Release 的兼容性检查需要与内嵌运行时相同主版本的 Node。当前为 Node 27.0.0（上游 v27.0.0-alpha.0.0.0）；可通过 `DANMU_TARGET_NODE` 或 `-PtargetNodeExecutable=绝对路径` 指定，不应关闭检查来绕过版本不匹配。
 
 Termux 上长时间复用 2 GB Gradle 进程，可能在三个 ABI 打包时出现 Java heap space。可以为本次命令使用 `--no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'`，不必修改项目的全局构建配置。
 

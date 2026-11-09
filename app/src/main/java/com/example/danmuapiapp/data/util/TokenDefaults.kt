@@ -14,7 +14,7 @@ object TokenDefaults {
 
     private const val TOKEN_KEY = "token"
     private const val TOKEN_ENV_KEY = "TOKEN"
-    private const val ASSET_ENV_PATH = "nodejs-project/config/.env"
+    private const val ASSET_ENV_PATH = "nodejs-project/config/env.example"
     private const val FALLBACK_DEFAULT_TOKEN = "87654321"
 
     fun resolveTokenFromPrefs(

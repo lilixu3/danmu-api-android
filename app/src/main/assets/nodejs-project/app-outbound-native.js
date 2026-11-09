@@ -203,7 +203,7 @@ class NativeTransport {
   close() {this.stopper.abort();this.resolver.close();for(const state of this.states.values())clearTimeout(state.timer);for(const session of this.sessions)session.close();this.sessions.clear();this.states.clear();}
 }
 async function startNativeOutbound(config,{transport,capabilities=nativeCapabilities()}={}) {
-  if(!transport && (!capabilities.ech || !capabilities.quic))throw new Error('增强直连需要支持 ECH/H3 的 Node 26 + OpenSSL 4 运行时');
+  if(!transport && (!capabilities.ech || !capabilities.quic))throw new Error('增强直连需要支持 ECH/H3 的 Node + OpenSSL 4 运行时');
   transport??=new NativeTransport(config,{capabilities});
   const token=randomBytes(32).toString('hex'),expected=Buffer.from(token),controllers=new Set();
   const server=http.createServer(async(local,response)=>{

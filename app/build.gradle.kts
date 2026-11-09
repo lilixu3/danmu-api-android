@@ -9,6 +9,7 @@ import danmu.danmuSigning
 import danmu.danmuTestMissingRuntimePackage
 import danmu.danmuVersionCode
 import danmu.danmuVersionName
+import org.gradle.api.GradleException
 
 plugins {
     alias(libs.plugins.android.application)
@@ -36,6 +37,15 @@ val testMissingRuntimePackage = danmuTestMissingRuntimePackage()
 val missingRuntimeTestAssetsDir = danmuMissingRuntimeTestAssetsDir()
 val signing = danmuSigning()
 val useProjectSigning = signing != null
+val needsProjectSigning = gradle.startParameter.taskNames.any { task ->
+    val normalized = task.lowercase()
+    normalized.contains("assemble") || normalized.contains("bundle") || normalized.contains("package")
+}
+if (needsProjectSigning && signing == null) {
+    throw GradleException(
+        "缺少项目签名：请确认 .signing/danmuapi.jks 与 .signing/signing.properties 存在且配置完整。"
+    )
+}
 
 
 android {

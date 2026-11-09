@@ -17,11 +17,11 @@ internal object RuntimeDependencyPackProtocol {
     const val INSTALLED_MANIFEST_FILE = ".danmuapiapp-runtime-pack.json"
     const val LEGACY_INSTALLED_LOCK_FILE = ".danmuapiapp-runtime-lock.json"
     const val RUNTIME_PROTOCOL = 2
-    const val EMBEDDED_NODE_MAJOR = 26
+    const val EMBEDDED_NODE_MAJOR = 27
     // The current signed public pack is labelled Node 24, but contains only JS.
-    // Its exact archive passed the Node 26 core dependency smoke (dan-any,
+    // Its exact archive passed the Node 27 core dependency smoke (dan-any,
     // OpenCC and compressed/Bilibili parsing). This exception cannot accept a
-    // future Node 24 pack: new archives must declare Node 26. Signature, serial,
+    // future Node 24 pack: new archives must declare Node 27. Signature, serial,
     // archive SHA-256 and the existing native-file rejection still apply.
     internal const val VERIFIED_NODE24_JS_PACK = "4be12e7971f079cd357496974113342f6839919a247e24b4fee69a594301c8a7"
     fun acceptsNodeVersion(nodeMajor: Int, artifactSha256: String): Boolean =

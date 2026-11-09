@@ -4,10 +4,11 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.example.danmuapiapp.data.network.GithubConnectivityProbe
-import com.example.danmuapiapp.data.repository.useCancellableResponse
+import com.example.danmuapiapp.data.repository.executeCancellable
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
+import com.example.danmuapiapp.data.util.localPathCandidates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -24,19 +25,28 @@ data class SourceProbeResult(val source: String,val status: String,val connected
 }
 object SourceProbeService {
     private val client by lazy {OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).callTimeout(30,TimeUnit.SECONDS).build()}
-    private fun request(context: Context,source: String? = null): Request {
+    private fun request(context: Context, tokenPath: String, source: String? = null): Request {
         val access=RuntimeApiAccessResolver.resolve(context,context.getSharedPreferences("runtime",Context.MODE_PRIVATE),9321)
-        val url=RuntimeApiUrls.local(access.port,access.tokenPaths.firstOrNull().orEmpty(),"__source-probe")
+        val url=RuntimeApiUrls.local(access.port,tokenPath,"__source-probe")
         return Request.Builder().url(if(source==null)url else "$url?source=${java.net.URLEncoder.encode(source,"UTF-8")}")
             .applyRuntimeApiAuth(access).apply {if(source!=null)post(ByteArray(0).toRequestBody())}.build()
     }
-    suspend fun catalog(context: Context): ProxySourceCatalog = withContext(Dispatchers.IO) {
-        client.newCall(request(context)).useCancellableResponse {response ->
-            check(response.isSuccessful) {"无法读取来源，请先启动服务并确认管理权限"}
-            val o=JSONObject(response.body.string())
-            fun list(key: String): List<String> {val a=o.optJSONArray(key) ?: return emptyList();return (0 until a.length()).map {a.getString(it)}}
-            ProxySourceCatalog(list("sources"),list("enabled").toSet())
+    private suspend fun requestJson(context: Context, source: String? = null): JSONObject {
+        val access=RuntimeApiAccessResolver.resolve(context,context.getSharedPreferences("runtime",Context.MODE_PRIVATE),9321)
+        var lastFailure="无法连接本机服务"
+        for(tokenPath in access.localPathCandidates()) {
+            client.newCall(request(context,tokenPath,source)).executeCancellable().use { response ->
+                if(response.isSuccessful) return JSONObject(response.body.string())
+                lastFailure="探测未完成：HTTP ${response.code}"
+                if(response.code !in setOf(401,403,404)) check(false) {lastFailure}
+            }
         }
+        error(lastFailure)
+    }
+    suspend fun catalog(context: Context): ProxySourceCatalog = withContext(Dispatchers.IO) {
+        val o=requestJson(context)
+        fun list(key: String): List<String> {val a=o.optJSONArray(key) ?: return emptyList();return (0 until a.length()).map {a.getString(it)}}
+        ProxySourceCatalog(list("sources"),list("enabled").toSet())
     }
     fun externalNetwork(context: Context): String = runCatching {
         val manager=context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -50,11 +60,7 @@ object SourceProbeService {
         return probe(context, source).connectivityResult()
     }
     suspend fun probe(context: Context,source: String): SourceProbeResult = withContext(Dispatchers.IO) {
-        client.newCall(request(context,source)).useCancellableResponse {response ->
-            check(response.isSuccessful) {"探测未完成：HTTP ${response.code}"}
-            val o=JSONObject(response.body.string())
-            decodeSourceProbeResult(source, o, externalNetwork(context))
-        }
+        decodeSourceProbeResult(source, requestJson(context,source), externalNetwork(context))
     }
 }
 

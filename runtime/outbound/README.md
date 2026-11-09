@@ -8,7 +8,7 @@
 承接，复用既有 `fetch`、`https.request`、node-fetch 与 Worker 接入。回环适配器
 仍使用随机端口和随机 token，但服务端位于宿主 Node 进程内，不再启动子进程。
 
-- 需要本仓库对应的 Node 26.11.1 / OpenSSL 4 运行时，同时具备
+- 需要本仓库对应的 Node 27 alpha / OpenSSL 4.1 运行时，同时具备
   `tls.ECH_SUPPORTED` 和 `node:quic`；JNI/Root 启动参数启用 `--experimental-quic`。
   仅 OpenSSL 版本升级、Node 24 的 H3 能力，都不能满足 ECH 要求。
 - 巴哈姆特、弹弹play 与 Animeko 的既有精确域名策略保留。要求 ECH 的域名在
@@ -65,7 +65,7 @@ node --test node-tests/*.test.cjs
 ./gradlew :app:assembleDebug
 ```
 
-关闭代理后，使用对应的 Node 26 CLI 验证真实来源；并发模式同时测试五个来源：
+关闭代理后，使用对应的 Node 27 CLI 验证真实来源；并发模式同时测试五个来源：
 
 ```sh
 node --experimental-quic scripts/smoke-native-outbound.cjs auto

@@ -204,6 +204,7 @@ object NodeProjectManager {
                 hasRequiredRuntimeDependencyFiles(nodeModulesDir) &&
                 hasCurrentOutboundHostAssets(context, targetDir)
             ) {
+                RuntimeEnvDefaults.ensure(context, targetDir)
                 ensureRuntimeDirs(targetDir)
                 ensureOptionalRuntimeDependencies(context, targetDir)
                 migrateAllCoreLayouts(targetDir)
@@ -221,6 +222,7 @@ object NodeProjectManager {
                 preserveExistingRuntimeEnv = projectAlreadyExists,
                 preserveExistingNodeModules = preserveBundledNodeModules
             )
+            RuntimeEnvDefaults.ensure(context, targetDir)
             versionFile.writeText(currentVersion)
             if (!entryFile.exists()) {
                 throw IllegalStateException("工作目录不可用，缺少 main.js：${targetDir.absolutePath}")
@@ -260,6 +262,7 @@ object NodeProjectManager {
     ) {
         val prefs = context.getSharedPreferences("runtime", Context.MODE_PRIVATE)
         val envFile = File(targetProjectDir, "config/.env")
+        RuntimeEnvDefaults.ensure(context, targetProjectDir)
         envFile.parentFile?.mkdirs()
 
         val lines = if (envFile.exists()) {

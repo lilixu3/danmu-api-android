@@ -40,3 +40,21 @@ internal fun Request.Builder.applyRuntimeApiAuth(access: RuntimeApiAccess): Requ
     }
     return this
 }
+
+/**
+ * Loopback control endpoints remain reachable without a path Token.
+ *
+ * Runtime scripts only strip the Token path when it exactly matches process.env.TOKEN.
+ * A service started without TOKEN therefore returns 404 for the Token-prefixed internal
+ * route while the bare route still works. Keep the Token path first for consistency, then
+ * let the caller fall back to the bare route after a prefix-mismatch response.
+ */
+internal fun RuntimeApiAccess.localPathCandidates(): List<String> {
+    val paths = linkedSetOf<String>()
+    tokenPaths.forEach { rawPath ->
+        val token = rawPath.trim().trim('/')
+        if (token.isNotEmpty()) paths += "/$token"
+    }
+    paths += ""
+    return paths.toList()
+}

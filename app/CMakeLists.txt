@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22.1)
 set(ANDROID_STL "none" CACHE STRING "Use the source-built STL" FORCE)
 project("danmuapi-native")
 
-# Node 26.11 headers 要求 C++20；16KB 页对齐与固定 lite libnode.so 一致
+# Node 27 headers 要求 C++20；16KB 页对齐与固定 lite libnode.so 一致
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -6,10 +6,15 @@ const crypto = require('crypto');
 
 function routeForAdmin(pathname, adminToken) {
   if (!adminToken) return null;
-  const prefix = `/${encodeURIComponent(adminToken)}/api/env/`;
-  if (!pathname.startsWith(prefix)) return null;
-  const action = pathname.slice(prefix.length);
-  return ['set', 'add', 'del'].includes(action) ? action : null;
+  const match = /^\/([^/]+)\/api\/env\/(set|add|del)$/.exec(pathname);
+  if (!match || match[0] !== pathname) return null;
+  const [, requestToken, action] = match;
+  // The core UI uses raw tokens. Compare first to preserve literal '%' sequences,
+  // then decode once for encoded clients; '+' in a path must stay a plus sign.
+  if (requestToken === adminToken) return action;
+  try {
+    return decodeURIComponent(requestToken) === adminToken ? action : null;
+  } catch { return null; }
 }
 
 function isManagementOriginAllowed(origin, requestHost) {

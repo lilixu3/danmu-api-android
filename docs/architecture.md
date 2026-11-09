@@ -110,6 +110,10 @@ Node 服务按职责拆分，入口只负责组合装配：
 - 入口与运行时：`android-server.js`（组合装配）、`main.js`、`server-worker-runtime.js`、
   `worker-proxy.js`、`runtime-polyfills.js`、`startup-failure.js`。
 - 配置与日志：`app-config-runtime.js`、`app-runtime-context.js`、`app-server-logging.js`。
+- 默认环境：`config/env.example` 当前同步自 `huangxd-/danmu_api@9fa67ad5` 的
+  `config/.env.example`。APK 资源不能可靠打包点文件，因此资产使用非隐藏文件名；
+  `RuntimeEnvDefaults` 首次把它写成 `config/.env`，升级时按模板 SHA-256 只补充缺失键，
+  不覆盖用户已有值、空值、未知项或显式注释掉的键。
 - 访问控制与路由：`app-access-control.js`、`app-http-routes.js`、`app-management.js`。
 - 弹幕与代理：`app-danmaku-cache.js`、`app-proxy-helper.js`、`app-proxy-routing.js`、
   `app-series-refresh.js`、`app-url-metadata.js`、`app-source-probe.js`、

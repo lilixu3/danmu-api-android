@@ -5,6 +5,7 @@ import com.example.danmuapiapp.data.repository.useCancellableResponse
 import com.example.danmuapiapp.data.util.RuntimeApiAccessResolver
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.data.util.applyRuntimeApiAuth
+import com.example.danmuapiapp.data.util.localPathCandidates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,14 +28,23 @@ object NetworkRuntimeStatus {
             }}
             val expected=hash.digest().joinToString("") {"%02x".format(it)}
             val access=RuntimeApiAccessResolver.resolve(context,context.getSharedPreferences("runtime",Context.MODE_PRIVATE),9321)
-            val request=Request.Builder().url(RuntimeApiUrls.local(access.port,access.tokenPaths.firstOrNull().orEmpty(),"__health")).applyRuntimeApiAuth(access).build()
-            client.newCall(request).useCancellableResponse {response ->
-                if(!response.isSuccessful) return@useCancellableResponse "服务尚未连接；来源线路会在服务启动后使用。"
-                val health=JSONObject(response.body.string())
-                if(networkRuntimeNeedsRestart(expected,health.optString("networkRuntimeFingerprint")))
-                    "服务仍在使用旧版运行脚本。请在首页停止后重新启动服务，让新版网络与下载逻辑生效。"
-                else null
+            for (tokenPath in access.localPathCandidates()) {
+                val request=Request.Builder().url(RuntimeApiUrls.local(access.port,tokenPath,"__health")).applyRuntimeApiAuth(access).build()
+                var tryBarePath=false
+                val notice=client.newCall(request).useCancellableResponse {response ->
+                    if(!response.isSuccessful) {
+                        tryBarePath=response.code in setOf(401,403,404)
+                        return@useCancellableResponse if(tryBarePath) null
+                        else "服务尚未连接；来源线路会在服务启动后使用。"
+                    }
+                    val health=JSONObject(response.body.string())
+                    if(networkRuntimeNeedsRestart(expected,health.optString("networkRuntimeFingerprint")))
+                        "服务仍在使用旧版运行脚本。请在首页停止后重新启动服务，让新版网络与下载逻辑生效。"
+                    else null
+                }
+                if(!tryBarePath) return@withContext notice
             }
+            "服务尚未连接；来源线路会在服务启动后使用。"
         } catch(cancel: CancellationException) {throw cancel}
         catch(_:Exception) {"服务尚未连接；来源线路会在服务启动后使用。"}
     }

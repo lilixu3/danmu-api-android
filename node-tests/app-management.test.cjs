@@ -8,10 +8,42 @@ const api = require('../app/src/main/assets/nodejs-project/app-management.js');
 
 test('admin route requires exact secret and known mutation action', () => {
   assert.equal(api.routeForAdmin('/admin/api/env/set', 'admin'), 'set');
-  for (const pathname of ['/user/api/env/set', '/api/env/set', '/admin-evil/api/env/set', '/admin/api/env/set/extra']) {
+  for (const pathname of ['/user/api/env/set', '/api/env/set', '/admin-evil/api/env/set',
+    '/admin/api/env/set/extra', '/prefix/admin/api/env/set', '//admin/api/env/set',
+    '/admin/api/env/set/', '/admin/api/env/set\n', '/admin/api/env/unknown']) {
     assert.equal(api.routeForAdmin(pathname, 'admin'), null);
   }
   assert.equal(api.routeForAdmin('//api/env/set', ''), null);
+});
+test('admin routes accept browser paths with raw or URL-encoded special-character tokens', () => {
+  for (const token of ['admin+test', 'admin@test', 'admin:test', 'admin,test',
+    'admin$test', 'admin;test', 'admin=test', 'admin%test', 'admin%2Btest', '管理员']) {
+    for (const action of ['set', 'add', 'del']) {
+      for (const pathToken of [token, encodeURIComponent(token)]) {
+        const pathname = new URL(`http://127.0.0.1:9321/${pathToken}/api/env/${action}`).pathname;
+        assert.equal(api.routeForAdmin(pathname, token), action, pathname);
+      }
+    }
+  }
+  assert.equal(api.routeForAdmin('/admin%2btest/api/env/set', 'admin+test'), 'set');
+  assert.equal(api.routeForAdmin('/admin%2Fpart%3F%23/api/env/set', 'admin/part?#'), 'set');
+});
+test('admin token decoding preserves plus signs and never decodes twice', () => {
+  for (const [pathname, token] of [
+    ['/admin+test/api/env/set', 'admin test'],
+    ['/admin%20test/api/env/set', 'admin+test'],
+    ['/admin%252Btest/api/env/set', 'admin+test'],
+    ['/admin%2540test/api/env/set', 'admin@test'],
+    ['/admin%2Bwrong/api/env/set', 'admin+test'],
+    ['/ADMIN%2Btest/api/env/set', 'admin+test'],
+  ]) assert.equal(api.routeForAdmin(pathname, token), null, pathname);
+});
+test('literal percent tokens remain valid and malformed encoding cannot authorize another token', () => {
+  for (const token of ['admin%', 'admin%2', 'admin%ZZ', 'admin%C3%28']) {
+    assert.equal(api.routeForAdmin(`/${token}/api/env/set`, token), 'set');
+    assert.equal(api.routeForAdmin(`/${encodeURIComponent(token)}/api/env/set`, token), 'set');
+    assert.equal(api.routeForAdmin(`/${token}/api/env/set`, 'administrator'), null);
+  }
 });
 test('origin validation supports TLS termination while rejecting other hosts and ports', () => {
   for (const [origin, host] of [
