@@ -213,11 +213,15 @@ async function loadWorker() {
   const workerPath = path.join(projectDir, variantDir, 'worker.js');
   const workerUrl = pathToFileURL(workerPath).href;
   const mod = await import(workerUrl);
-  if (!mod?.handleRequest) {
-    throw new Error('worker.js missing handleRequest export');
+  const coreHandler = typeof mod.handleRequestWithTrace === 'function' ? mod.handleRequestWithTrace : mod.handleRequest;
+  if (typeof coreHandler !== 'function') {
+    throw new Error('worker.js missing request handler');
   }
-  await require('./app-proxy-routing.js').bindCoreSourceContext(path.join(projectDir, variantDir));
-  handleRequest = require('./app-series-refresh.js').wrapSeriesRefresh(require('./app-url-metadata.js').wrapUrlMetadata(mod.handleRequest, path.join(projectDir, variantDir)), path.join(projectDir, variantDir));
+  const coreDir = path.join(projectDir, variantDir);
+  await require('./app-proxy-routing.js').bindCoreSourceContext(coreDir);
+  handleRequest = require('./app-url-metadata.js').wrapUrlMetadata(
+    require('./app-series-refresh.js').wrapSeriesRefresh(coreHandler, coreDir, mod.handleRequestWithTrace && mod.handleRequest),
+    coreDir);
   for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
     try {
       const globalsUrl = pathToFileURL(path.join(projectDir, variantDir, globalsRel)).href;

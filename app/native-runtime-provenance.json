@@ -6,25 +6,25 @@
   "source": {
     "kind": "release",
     "repository": "Celestials316/nodejs-mobile-app-lite",
-    "tag": "app-lite-v27.0.0-0",
-    "upstreamVersion": "27.0.0-alpha.0.0.0",
-    "upstreamCommit": "fe34c8eae5514797d6dc21a4bdec39c9913d9322",
-    "sourceCommit": "188f42548e654140d8a9669e36ae1c63dbb50635",
-    "sourceTree": "d146f2e11e1a54cd0de8df671e1f6daa8ae6b0a2",
-    "recipeCommit": "b5c366a9b2e1099f4ab3e8be9ed0a217cb2d2bd9",
-    "releaseUrl": "https://github.com/Celestials316/nodejs-mobile-app-lite/releases/tag/app-lite-v27.0.0-0",
-    "publishedAt": "2026-11-06T05:18:52Z",
+    "tag": "app-lite-v27.0.0-2",
+    "upstreamVersion": "27.0.0-alpha.0.1.1",
+    "upstreamCommit": "6c7c89331d062a47d6fe3d16b3c00e4a3145826d",
+    "sourceCommit": "38219b3ee591982dbabb3daf820fe2bfc110fa3b",
+    "sourceTree": "8004f883f142835b9a19a34020eb194fdbb35e95",
+    "recipeCommit": "b4ad429ee8f490edc2352add507f090fede83094",
+    "releaseUrl": "https://github.com/Celestials316/nodejs-mobile-app-lite/releases/tag/app-lite-v27.0.0-2",
+    "publishedAt": "2026-11-18T00:31:07Z",
     "prerelease": true,
-    "assetId": 716008271,
-    "localAssetName": "nodejs-mobile-android-app-lite-27.0.0-0.zip",
-    "artifactSize": 80034513,
-    "artifactSha256": "febecf35e7b5be8fe105a0b4561036c9584d8ef0bd4329f6f79ba8f565370446",
-    "url": "https://github.com/Celestials316/nodejs-mobile-app-lite/releases/download/app-lite-v27.0.0-0/nodejs-mobile-android-app-lite-27.0.0-0.zip"
+    "assetId": 761223401,
+    "localAssetName": "nodejs-mobile-android-app-lite-27.0.0-2.zip",
+    "artifactSize": 80200460,
+    "artifactSha256": "e92e9c1b272e2c4d9b3deb59b9014079fae666cb2789615989baab3536df9dd0",
+    "url": "https://github.com/Celestials316/nodejs-mobile-app-lite/releases/download/app-lite-v27.0.0-2/nodejs-mobile-android-app-lite-27.0.0-2.zip"
   },
   "files": {
-    "libnode/bin/arm64-v8a/libnode.so": "8cc5e0044969dfed7bcad79f6d77d82f623028de5dbc4587d02dd51b13badb4e",
-    "libnode/bin/armeabi-v7a/libnode.so": "b648eacbe3c641bf8bc89bef72c08e91c72e8ae1596fc59105be7ff2c148179e",
-    "libnode/bin/x86_64/libnode.so": "679a4868c9e1c6df1f9a84984c82b3a00821a6ed777367e4727b53cc78346539"
+    "libnode/bin/arm64-v8a/libnode.so": "d64ebdadf2081fd3c3671ac726ac7403f5ee5b0c476605080a943c595dd7c19a",
+    "libnode/bin/armeabi-v7a/libnode.so": "93d6d8eba33d2d32d21e773565caa131293e7cf9c8349a2f3009d195cdaf1ca1",
+    "libnode/bin/x86_64/libnode.so": "829758a06a67ee535dbf7e0b98a842e3666212c639debcb9cefdbc03d61a8050"
   },
   "headers": {
     "include/node/cppgc/allocation.h": "c7b31b3ead49d9ac495c481c98fcf805e8da19aff830a14954515f3de8656372",
@@ -34,7 +34,7 @@
     "include/node/cppgc/default-platform.h": "8b19c860a0a7a2fcb635f728831b10c3c2dd1870c5b3f35f76bcd61b8b600901",
     "include/node/cppgc/explicit-management.h": "fb2e8a714d47c96bd195c607f8b89014434e6bab7cc9de140d499453d85000e1",
     "include/node/cppgc/garbage-collected.h": "d8f031f6fc0b0fea3a32c5f9cfe2e423246898f5985316856c25d5c37b6f3b82",
-    "include/node/cppgc/heap-consistency.h": "0df4c398bbe23e984fc552ffc6193483d1766eaa99057e9e318a7d51b4c7d836",
+    "include/node/cppgc/heap-consistency.h": "96442dd6631f811b6b5ecbf22c6d06414517aaa3434f70a7692d22942984a31b",
     "include/node/cppgc/heap-handle.h": "29e12945e9bc2b6382e97d1527b19d858e54c75149a09107c29bffa53f3c8ad9",
     "include/node/cppgc/heap-state.h": "9e4ac38fc7e351a3138c3c99e5ea6a09e61e6ddd8b02b4fc2e48100199e9dadc",
     "include/node/cppgc/heap-statistics.h": "cca7a1c2d5aec04b3029055444a77701590592cafcd3efb9ebdab0f8395d531c",
@@ -80,7 +80,7 @@
     "include/node/node_api_types.h": "a25356630d3058f0a0c8937d9f297e9471e037fda58c2696d8a505c2bd99cb00",
     "include/node/node_buffer.h": "42db024cf1ae62db1a9a23477ee9927e9b7ed04999bd4498371b144962a31525",
     "include/node/node_object_wrap.h": "63a35ea28341467eae8968d4b696b23b7740d0167797246ab214804ec7d5c6cd",
-    "include/node/node_version.h": "1bdccdd03c04bc3594e45f4e9f0845b5932740efab43ef95b7a1b3f28fae0977",
+    "include/node/node_version.h": "9582a733a08159ed653dd1b9a9270774e6e54f36f9734de86c2e66cbd194cd6e",
     "include/node/uv/aix.h": "bed77e4cf6c06f1224e681cbe607eff04713ca0c1e1f4a102e6a6565ee3f02aa",
     "include/node/uv/bsd.h": "963533ff4b16f72a204a8c760896a857c54d0ac50570f1793e3bef1f2ae8b35f",
     "include/node/uv/darwin.h": "222b6dd3ce67cfbb735b14b1662f065fc23570d6969acf463b39d946b7590d8c",
@@ -154,13 +154,13 @@
     "include/node/v8-value-serializer.h": "2b697998b27edfd367f1cfa4bec081ff7d0fb54c4d75a32d2da7f25551282247",
     "include/node/v8-value.h": "d15543ebc41d6e772d8b24cb5ed7be620e4a3ea64327e938cd3dc668a04fe163",
     "include/node/v8-version-string.h": "d8ee8253ba981ec63c37ce44c242ae349029bfd1a0534bfc0a8a4b30d4cded06",
-    "include/node/v8-version.h": "5b02a4eaae20af76fbf71ecb0afe64f85f7aee5286dc63e0c6b36f978baf8db8",
+    "include/node/v8-version.h": "91fa4ff40f7cd93e1a5a8ad35a827b21d3633cfa2458ed26d487c38db5134d60",
     "include/node/v8-wasm-trap-handler-posix.h": "869c55adee0889469706f2c4f4f4ebf3b306413f262b02ce69ad1d9d8b9af07d",
     "include/node/v8-wasm-trap-handler-win.h": "95ac127b38204e0619eca07aab0968d8ef7659058d4515bd5180600d8ac1593d",
     "include/node/v8-wasm.h": "563b04cca7b8d2cd296f590404f20c6b3fe27a56e0b17cd69294313a5b3da97e",
     "include/node/v8-weak-callback-info.h": "ffe109dcb5b0364c7d0653470c845f01c10573e6a5ab369f4dc7a0ccedc689d8",
     "include/node/v8.h": "e27a005daa45f342845ffb9b33409686c380b1d5a97f46f3ab4749517a213d25",
-    "include/node/v8config.h": "f01019e7923c5ed64b64ae1b31f6b9e6e9ef1a9b725e3db95503306274620ba3"
+    "include/node/v8config.h": "574d21bbe0e8f2c67071d41e7889630a350aff345abcb8783eea2c7093f98f40"
   },
   "jniBridgeSource": "app/src/main/cpp/native-lib.cpp",
   "jniBridgeSourceSha256": "26059a1d4c4911930e9114d4ef12535ede3290836e13edcc0aecd93d0039a084",
@@ -393,11 +393,11 @@
     }
   },
   "validation": {
-    "runtime": "27.0.0-0",
+    "runtime": "27.0.0-2",
     "state": "validated",
     "runtimeArchive": {
-      "bytes": 80034513,
-      "sha256": "febecf35e7b5be8fe105a0b4561036c9584d8ef0bd4329f6f79ba8f565370446",
+      "bytes": 80200460,
+      "sha256": "e92e9c1b272e2c4d9b3deb59b9014079fae666cb2789615989baab3536df9dd0",
       "result": "passed"
     },
     "nativeRuntimeInputs": "passed, all three ABIs",
@@ -441,18 +441,18 @@
       }
     },
     "embeddedNodeLauncher": {
-      "path": "node27-host/node27",
-      "nodeVersion": "27.0.0-alpha.0.0.0",
+      "path": "app/build/runtime-upgrade-27.0.0-2/node27",
+      "nodeVersion": "27.0.0-alpha.0.1.1",
       "opensslVersion": "4.1.0",
       "icuVersion": "78.3",
-      "v8Version": "15.6.75.25-node.10"
+      "v8Version": "15.6.75.50-node.14"
     },
     "embeddedNodeRegression": {
-      "version": "27.0.0-alpha.0.0.0",
-      "passed": 229,
+      "version": "27.0.0-alpha.0.1.1",
+      "passed": 234,
       "failed": 0,
       "skipped": 0,
-      "note": "Pinned embedded major 27. Target reports v27.0.0-alpha.0.0.0 while node.version is 27.0.0; the repository gate accepts a same-major runtime and records the difference."
+      "note": "The pinned 27.0.0-2 arm64 libnode.so was launched through a fresh test launcher and ran the complete node-tests suite."
     },
     "androidUnitTests": {
       "suites": 239,
@@ -481,17 +481,19 @@
     },
     "devicePageSize": 4096,
     "releaseBuild": {
-      "builtAt": "2026-11-06",
-      "versionName": "1.0.5.117",
-      "versionCode": 214,
+      "builtAt": "2026-11-18",
+      "versionName": "1.0.5.118",
+      "versionCode": 215,
       "result": "passed",
       "jvmHeap": "3g",
       "maxWorkers": 1,
-      "targetNodeExecutable": "node27-host/node27",
+      "targetNodeExecutable": "app/build/runtime-upgrade-27.0.0-2/node27",
       "checks": [
         "verifyNativeRuntimeArchive passed",
         "verifyNativeRuntimeInputs passed",
-        "verifyEmbeddedNodeCompatibility passed with the embedded Node 27 launcher",
+        "verifyEmbeddedNodeCompatibility passed with the exact 27.0.0-alpha.0.1.1 launcher",
+        "All 234 node-tests passed on the new embedded runtime",
+        "The RELRO gate accepts safe page padding while rejecting writable overlap",
         "verifyFrpcReleaseKernels passed for all three ABIs",
         "verifyPackagedNodeModulesRelease passed for all three APKs",
         "releaseCheck passed",
@@ -502,52 +504,35 @@
     "releaseApks": {
       "arm64-v8a": {
         "file": "app/build/outputs/apk/release/app-arm64-v8a-release.apk",
-        "bytes": 40194442,
-        "sha256": "e96486992c9ae5fee864af02ec4b3f11033591e913b528bf58207fed78fbbdbf",
+        "bytes": 40235198,
+        "sha256": "e51c74907e752f1303205f0d3bff9376cd5d12037de2ba58e79238bba2fe94ee",
         "signature": "verified, APK Signature Scheme v2",
-        "versionName": "1.0.5.117",
-        "versionCode": 214,
+        "versionName": "1.0.5.118",
+        "versionCode": 215,
         "elfAndZipAlignment": "passed",
         "compatibilityLimits": []
       },
       "armeabi-v7a": {
         "file": "app/build/outputs/apk/release/app-armeabi-v7a-release.apk",
-        "bytes": 39337846,
-        "sha256": "aba44afbab32af354481251044b585a037f65b6ed835dd2eb54099e53900d36c",
+        "bytes": 39389750,
+        "sha256": "f30d413efb91a0f5548041f6fc4245200c33c6764068de02c08d4cd00c0a475c",
         "signature": "verified, APK Signature Scheme v2",
-        "versionName": "1.0.5.117",
-        "versionCode": 214,
+        "versionName": "1.0.5.118",
+        "versionCode": 215,
         "elfAndZipAlignment": "passed",
         "compatibilityLimits": []
       },
       "x86_64": {
         "file": "app/build/outputs/apk/release/app-x86_64-release.apk",
-        "bytes": 42252820,
-        "sha256": "2e73e95e66acd66de86d1a280123900b959c05f799f5d12149f10056e9eaf7be",
+        "bytes": 42326388,
+        "sha256": "4cf65eff4eb4f327f8d7464ed9399dfc57b2cd2f904fdaf1818d116da50e49b4",
         "signature": "verified, APK Signature Scheme v2",
-        "versionName": "1.0.5.117",
-        "versionCode": 214,
+        "versionName": "1.0.5.118",
+        "versionCode": 215,
         "elfAndZipAlignment": "passed",
         "compatibilityLimits": [
           "Pinned static x86_64 frpc supports 4 KB kernels; experimental x86_64 16 KB page-size emulation is not supported."
         ]
-      }
-    },
-    "debugApks": {
-      "arm64-v8a": {
-        "file": "app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
-        "bytes": 72012672,
-        "sha256": "9e147485cd65711d8117f2469506729d7840b3d2f559f1bc64e5adf1f948cbbe"
-      },
-      "armeabi-v7a": {
-        "file": "app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk",
-        "bytes": 64760996,
-        "sha256": "b48f1d5051d1d2347ca5acb2dd8a999181a671e21d6bb715256e8d08773662d7"
-      },
-      "x86_64": {
-        "file": "app/build/outputs/apk/debug/app-x86_64-debug.apk",
-        "bytes": 67436775,
-        "sha256": "08ba95a508f077f696c7f155bd263e5adc800c151f129a7cd42cf7de4d1cc921"
       }
     },
     "packagedAssetConsistency": {
@@ -557,17 +542,17 @@
         "armeabi-v7a",
         "x86_64"
       ],
-      "nodeVersion": "27.0.0-alpha.0.0.0"
+      "nodeVersion": "27.0.0-alpha.0.1.1"
     },
     "notes": [
       "These APKs were built and signed locally with the existing project certificate; no commit, tag, push or GitHub release was created.",
-      "The final APK was not installed for an on-device JNI/source-probe smoke in this run; the actual embedded Node 27 arm64 launcher, JNI/APK audits and all repository regressions passed."
+      "The final APK was not installed for an on-device JNI/source-probe smoke in this run; the exact embedded Node 27.0.0-2 arm64 runtime, JNI/APK audits and all repository regressions passed."
     ]
   },
   "appReleaseValidation": {
     "versionName": "1.0.5.118",
     "versionCode": 215,
-    "verifiedAt": "2026-11-09T16:07:50.583655+00:00",
+    "verifiedAt": "2026-11-18T01:39:50Z",
     "result": "verifyAll and releaseCheck passed; no tasks excluded",
     "androidUnitTests": {
       "app": {
@@ -601,35 +586,35 @@
     },
     "systemNodeTests": 234,
     "embeddedNodeTests": 234,
-    "embeddedNodeVersion": "27.0.0-alpha.0.0.0",
-    "signature": "All three APKs match the published v1.0.5.117 project certificate.",
+    "embeddedNodeVersion": "27.0.0-alpha.0.1.1",
+    "signature": "All three APKs use project certificate SHA-256 ae053276d05dbeb4b4f1f3ec2698d81fa2655ca2eef07aef87c5a5ccd5f96cd0.",
     "runtimeAssetsVerifiedPerApk": 28,
     "envTemplateVerified": true,
     "apks": {
       "armeabi-v7a": {
-        "file": "dist/v1.0.5.118/app-1.0.5.118-215-armeabi-v7a.apk",
-        "bytes": 39337950,
-        "sha256": "37549789244a15e53f2af92e380214d4299d80e61cbdf1ad06e25bb7702ce486",
+        "file": "dist/v1.0.5.118/runtime-27.0.0-2/app-1.0.5.118-215-node27.0.0-2-armeabi-v7a.apk",
+        "bytes": 39389750,
+        "sha256": "f30d413efb91a0f5548041f6fc4245200c33c6764068de02c08d4cd00c0a475c",
         "zipAlignment": "passed",
         "compatibilityLimits": []
       },
       "x86_64": {
-        "file": "dist/v1.0.5.118/app-1.0.5.118-215-x86_64.apk",
-        "bytes": 42252924,
-        "sha256": "48ad81875a938b3f378b4314bd9f3e631df9f7e9af6d5e9b6c3a020fbd132445",
+        "file": "dist/v1.0.5.118/runtime-27.0.0-2/app-1.0.5.118-215-node27.0.0-2-x86_64.apk",
+        "bytes": 42326388,
+        "sha256": "4cf65eff4eb4f327f8d7464ed9399dfc57b2cd2f904fdaf1818d116da50e49b4",
         "zipAlignment": "passed",
         "compatibilityLimits": [
           "Pinned static x86_64 frpc supports 4 KB kernels; experimental x86_64 16 KB page-size emulation is not supported."
         ]
       },
       "arm64-v8a": {
-        "file": "dist/v1.0.5.118/app-1.0.5.118-215-arm64-v8a.apk",
-        "bytes": 40194546,
-        "sha256": "9ccc5c8fa60c595659c052c2fcdc0865a8fd6d6a56a36f8bedf7e8da7059cc04",
+        "file": "dist/v1.0.5.118/runtime-27.0.0-2/app-1.0.5.118-215-node27.0.0-2-arm64-v8a.apk",
+        "bytes": 40235198,
+        "sha256": "e51c74907e752f1303205f0d3bff9376cd5d12037de2ba58e79238bba2fe94ee",
         "zipAlignment": "passed",
         "compatibilityLimits": []
       }
     },
-    "deviceValidation": "The user confirmed the debug APK resolves issue #49. Release APKs passed automated build and packaging checks; they were not installed by the release process."
+    "deviceValidation": "The exact new Node runtime passed all Node regressions and compatibility smokes. Release APKs passed build, signature and embedded-library checks; the release process did not install them on a device."
   }
 }

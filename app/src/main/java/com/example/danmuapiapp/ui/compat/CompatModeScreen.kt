@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import com.example.danmuapiapp.data.util.RemoteMapping
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -116,6 +117,7 @@ internal fun CompatModeScreen(
     onRefreshLogs: () -> Unit,
     onRefreshConfig: () -> Unit,
     onAdminLogin: (String) -> Unit,
+    onRefreshMapping: suspend (RemoteMapping, String) -> Int,
     onSaveConfig: (CompatConfigEntry, String, Boolean) -> Unit
 ) {
     var page by rememberSaveable { mutableStateOf(CompatPage.Home) }
@@ -183,7 +185,7 @@ internal fun CompatModeScreen(
                             CompatLogsPage(logs, uiState.runtimeState, onRefreshLogs,
                                 listStates[page.ordinal], Modifier.weight(1f).fillMaxWidth())
                         } else if (page == CompatPage.Config) {
-                            CompatConfigPage(management, uiState.runtimeState, onRefreshConfig, onAdminLogin, onSaveConfig,
+                            CompatConfigPage(management, uiState.runtimeState, onRefreshConfig, onAdminLogin, onSaveConfig, onRefreshMapping,
                                 listStates[page.ordinal], Modifier.weight(1f).fillMaxWidth())
                         } else if (page == CompatPage.Settings) {
                             CompatSettingsPane(uiState, proxyPickerState, actions, busy,

@@ -47,50 +47,86 @@ internal fun parseAnimeCandidates(raw: String): List<DownloadAnimeCandidate> {
     return out.distinctBy { it.animeId }
 }
 
-internal fun parseEpisodeCandidates(raw: String, fallbackSource: String = ""): List<DownloadEpisodeCandidate> {
-    val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
-    val bangumi = root.optJSONObject("bangumi")
-        ?: root.optJSONObject("data")
-        ?: JSONObject()
-    val episodes = bangumi.optJSONArray("episodes")
-        ?: root.optJSONArray("episodes")
-        ?: JSONArray()
+// Same precedence as the core's numeric /search/episodes filter.
+private val titleNumberPatterns = listOf(
+    Regex("""第(\d+)[集话回]"""),
+    Regex("""[Ee][Pp]?(\d+)"""),
+    Regex("""(?:^|\s)(\d+)(?:\s|$)""")
+)
 
-    val out = ArrayList<DownloadEpisodeCandidate>(episodes.length())
-    for (i in 0 until episodes.length()) {
-        val item = episodes.optJSONObject(i) ?: continue
-        val episodeId = readLong(item, "episodeId", "id", "cid")
-        if (episodeId <= 0L) continue
-        val number = readInt(item, "episodeNumber", "number", "sort", "index")
-            .takeIf { it > 0 } ?: (i + 1)
-        val rawTitle = readString(item, "episodeTitle", "title", "name")
-        val parsedSource = parseSource(rawTitle)
-        val source = if (parsedSource == "unknown") {
-            fallbackSource.ifBlank { "unknown" }
-        } else {
-            parsedSource
+private fun titleEpisodeNumber(title: String): Int? {
+    for (pattern in titleNumberPatterns) {
+        val number = pattern.find(title)?.groupValues?.get(1) ?: continue
+        return number.toIntOrNull()?.takeIf { it > 0 }
+    }
+    return null
+}
+
+private fun <K> readNumberedEpisodes(
+    raw: String,
+    distinctKey: (DownloadEpisodeCandidate) -> K
+): List<DownloadEpisodeCandidate> {
+    val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
+    val bangumi = root.optJSONObject("bangumi") ?: root.optJSONObject("data")
+    val episodes = bangumi?.optJSONArray("episodes") ?: root.optJSONArray("episodes") ?: return emptyList()
+    val rows = buildList {
+        for (index in 0 until episodes.length()) {
+            val item = episodes.optJSONObject(index) ?: continue
+            val id = readLong(item, "episodeId", "id", "cid")
+            if (id <= 0) continue
+            val number = readInt(item, "episodeNumber", "number", "sort", "index").takeIf { it > 0 } ?: (index + 1)
+            val title = readString(item, "episodeTitle", "title", "name")
+            add(DownloadEpisodeCandidate(id, number, title, readString(item, "source"),
+                sourceUrl = readString(item, "url", "sourceUrl")) to titleEpisodeNumber(title))
         }
-        val title = stripSourceTag(rawTitle).ifBlank { "第${number}集" }
-        out += DownloadEpisodeCandidate(
-            episodeId = episodeId,
-            episodeNumber = number,
-            title = title,
-            source = source,
-            sourceUrl = readString(item, "url", "sourceUrl")
+    }
+    val counts = rows.mapNotNull { it.second }.groupingBy { it }.eachCount()
+    val numbered = rows.map { (episode, explicit) ->
+        val unique = explicit?.takeIf { counts[it] == 1 }
+        episode.copy(episodeNumber = unique ?: episode.episodeNumber) to (unique != null)
+    }
+    // A fallback sequence number can coincide with a real title number. Jump to the real one first.
+    return numbered.distinctBy { distinctKey(it.first) }.sortedWith(compareBy<Pair<DownloadEpisodeCandidate, Boolean>> { it.first.episodeNumber }
+        .thenByDescending { it.second }.thenBy { it.first.episodeId }).map { it.first }
+}
+
+internal fun parsePushEpisodeCandidates(raw: String): List<DownloadEpisodeCandidate> =
+    readNumberedEpisodes(raw) { it.episodeId }.map {
+        it.copy(title = it.title.ifBlank { "第${it.episodeNumber}集" }, source = it.source.ifBlank { "unknown" })
+    }
+
+internal fun parseEpisodeCandidates(raw: String, fallbackSource: String = ""): List<DownloadEpisodeCandidate> =
+    readNumberedEpisodes(raw) { episode ->
+        val title = stripSourceTag(episode.title).ifBlank { "第${episode.episodeNumber}集" }
+        val titleKey = normalizeEpisodeTitleForMatch(title)
+        if (titleKey.isBlank()) "id-${episode.episodeId}" else "${episode.episodeNumber}|$titleKey"
+    }.map { episode ->
+        val tag = parseSource(episode.title)
+        episode.copy(
+            title = stripSourceTag(episode.title).ifBlank { "第${episode.episodeNumber}集" },
+            source = if (tag != "unknown") tag else episode.source.ifBlank { fallbackSource.ifBlank { "unknown" } }
         )
     }
-    val dedupByEpisode = LinkedHashMap<String, DownloadEpisodeCandidate>(out.size)
-    out.forEach { episode ->
-        val titleKey = normalizeEpisodeTitleForMatch(episode.title)
-        val key = if (titleKey.isNotBlank()) {
-            "${episode.episodeNumber}|$titleKey"
-        } else {
-            "id-${episode.episodeId}"
-        }
-        dedupByEpisode.putIfAbsent(key, episode)
+
+// Old queue/history entries can contain a filtered list position alongside the actual title.
+internal class SavedEpisodeLookup(episodes: List<DownloadEpisodeCandidate>) {
+    private val byNumber = episodes.groupBy { it.episodeNumber }
+    private val byTitle = episodes.groupBy { normalizeEpisodeTitleForMatch(it.title) }
+    private val byTitleNumber = episodes.groupBy { titleEpisodeNumber(it.title) }
+
+    private fun uniqueTitleMatch(title: String) =
+        titleEpisodeNumber(title)?.let { byTitleNumber[it]?.singleOrNull() }
+
+    fun numberFor(title: String, storedNumber: Int): Int = uniqueTitleMatch(title)?.episodeNumber ?: storedNumber
+
+    fun find(title: String, storedNumber: Int, id: Long): DownloadEpisodeCandidate? {
+        uniqueTitleMatch(title)?.let { return it }
+        val titleKey = normalizeEpisodeTitleForMatch(title)
+        val exactTitles = if (titleKey.isBlank()) emptyList() else byTitle[titleKey].orEmpty()
+        val candidates = if (storedNumber > 0) byNumber[storedNumber].orEmpty() else emptyList()
+        return candidates.firstOrNull { it in exactTitles } ?: candidates.firstOrNull { it.episodeId == id }
+            ?: candidates.firstOrNull() ?: exactTitles.singleOrNull()
     }
-    return dedupByEpisode.values
-        .sortedWith(compareBy<DownloadEpisodeCandidate> { it.episodeNumber }.thenBy { it.episodeId })
 }
 
 internal fun buildInitialEpisodeStates(
@@ -108,6 +144,9 @@ internal fun buildInitialEpisodeStates(
     val filteredRecords = recordsSnapshot.filter { record ->
         animeKey.isBlank() || animeIdentityMatches(record.animeTitle, record.animeId, animeTitle, animeId)
     }
+    val lookup = SavedEpisodeLookup(episodes)
+    val recordEpisodes = filteredRecords.associateWith { lookup.find(it.episodeTitle, it.episodeNo, it.episodeId) }
+    val taskEpisodes = filteredQueue.associateWith { lookup.find(it.episodeTitle, it.episodeNo, it.episodeId) }
     val stateMap = LinkedHashMap<Long, EpisodeDownloadUiState>(episodes.size)
     episodes.forEach { episode ->
         val sourceKey = canonicalSourceKey(episode.source)
@@ -116,7 +155,7 @@ internal fun buildInitialEpisodeStates(
             .asSequence()
             .filter { record ->
                 val sourceMatches = historySourceMatches(episode.source, record.source)
-                val numberMatches = record.episodeNo > 0 && record.episodeNo == episode.episodeNumber
+                val numberMatches = record.episodeNo > 0 && recordEpisodes[record] == episode
                 val idMatches = record.episodeId > 0L && record.episodeId == episode.episodeId
                 val titleMatches = titleKey.isNotBlank() &&
                     normalizeEpisodeTitleForMatch(record.episodeTitle) == titleKey
@@ -133,7 +172,7 @@ internal fun buildInitialEpisodeStates(
             .asSequence()
             .filter { task ->
                 val sourceMatches = sourceKey == "unknown" || canonicalSourceKey(task.source) == sourceKey
-                val numberMatches = task.episodeNo == episode.episodeNumber
+                val numberMatches = taskEpisodes[task] == episode
                 val idMatches = task.episodeId == episode.episodeId
                 val titleMatches = titleKey.isNotBlank() &&
                     normalizeEpisodeTitleForMatch(task.episodeTitle) == titleKey
@@ -235,17 +274,11 @@ internal fun pickEpisodeForTask(
     } else {
         episodes.filter { canonicalSourceKey(it.source) == taskSource }
     }
-    val taskTitleKey = normalizeEpisodeTitleForMatch(task.episodeTitle)
     val pool = if (sameSourceEpisodes.isNotEmpty()) sameSourceEpisodes else episodes
-    pool.firstOrNull { it.episodeNumber == task.episodeNo }?.let { return it }
-    if (taskTitleKey.isNotBlank()) {
-        pool.firstOrNull { normalizeEpisodeTitleForMatch(it.title) == taskTitleKey }?.let { return it }
+    fun findIn(candidates: List<DownloadEpisodeCandidate>): DownloadEpisodeCandidate? {
+        return SavedEpisodeLookup(candidates).find(task.episodeTitle, task.episodeNo, task.episodeId)
     }
-    episodes.firstOrNull { it.episodeNumber == task.episodeNo }?.let { return it }
-    if (taskTitleKey.isNotBlank()) {
-        episodes.firstOrNull { normalizeEpisodeTitleForMatch(it.title) == taskTitleKey }?.let { return it }
-    }
-    return null
+    return findIn(pool) ?: if (pool !== episodes) findIn(episodes) else null
 }
 
 internal fun ensureHttpPrefix(url: String): String {

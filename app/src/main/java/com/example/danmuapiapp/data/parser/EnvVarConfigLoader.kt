@@ -31,10 +31,10 @@ object EnvVarConfigLoader {
         "vod.json",
     )
 
-    fun loadCatalog(context: Context): List<EnvVarDef> {
+    fun loadCatalog(context: Context, env: Map<String, String> = emptyMap()): List<EnvVarDef> {
         val variant = selectedVariant(context)
         val content = readEnvsJs(context, variant) ?: return emptyList()
-        return runCatching { parseCatalogContent(content) }.getOrElse { emptyList() }
+        return runCatching { parseCatalogContent(content, env) }.getOrElse { emptyList() }
     }
 
     fun loadDefaultValues(context: Context): Map<String, String> {
@@ -128,7 +128,7 @@ object EnvVarConfigLoader {
         return if (result.ok) result.stdout else null
     }
 
-    internal fun parseCatalogContent(content: String): List<EnvVarDef> {
+    internal fun parseCatalogContent(content: String, env: Map<String, String> = emptyMap()): List<EnvVarDef> {
         val allowedSources = extractStaticArray(content, "ALLOWED_SOURCES")
         val allowedPlatforms = extractStaticArray(content, "ALLOWED_PLATFORMS")
         val vodPlatforms = extractStaticArray(content, "VOD_ALLOWED_PLATFORMS")
@@ -140,6 +140,7 @@ object EnvVarConfigLoader {
             "this.VOD_ALLOWED_PLATFORMS" to vodPlatforms,
             "this.MERGE_ALLOWED_SOURCES" to mergeSources,
             "danAnyFormats" to DAN_ANY_OUTPUT_FORMATS,
+            "platformOptions" to titlePlatformOptions(allowedPlatforms, mergeSources, env),
         )
 
         val start = content.indexOf("const envVarConfig")
@@ -185,6 +186,37 @@ object EnvVarConfigLoader {
             EnvVarDef(key, category, type, desc, options, min, max, inferSensitive(key))
         }
     }
+
+    /** Mirrors the core's platformOptions in Envs.load, including configured groups in declaration order. */
+    private fun titlePlatformOptions(
+        platforms: List<String>,
+        mergeSources: List<String>,
+        env: Map<String, String>,
+    ): List<String> = buildSet {
+        addAll(platforms)
+
+        fun addGroup(parts: List<String>) {
+            val normalized = parts.map { part ->
+                when (val source = part.trim().lowercase()) {
+                    "tencent" -> "qq"
+                    "iqiyi" -> "qiyi"
+                    "bilibili" -> "bilibili1"
+                    else -> source
+                }
+            }
+            if (normalized.isNotEmpty() && normalized.all { it in platforms }) {
+                add(normalized.distinct().joinToString("&"))
+            }
+        }
+
+        for (group in env["MERGE_SOURCE_PAIRS"].orEmpty().split(',', ';')) {
+            val sources = group.split('&').map(String::trim).filter(String::isNotEmpty)
+            if (sources.firstOrNull() in mergeSources) addGroup(sources.filter { it in mergeSources })
+        }
+        for (group in env["PLATFORM_ORDER"].orEmpty().split(',')) {
+            addGroup(group.split('&', '＆'))
+        }
+    }.toList()
 
     private fun inferSensitive(key: String): Boolean {
         val u = key.uppercase()

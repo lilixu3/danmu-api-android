@@ -17,7 +17,7 @@ data class RequestRecordFilter(
 data class RequestInsights(
     val total: Int = 0,
     val failureRatePercent: Int = 0,
-    val p95DurationMs: Long = 0L,
+    val p95DurationMs: Long? = null,
     val uniqueClients: Int = 0,
     val slowCount: Int = 0,
     val topFailureEndpoint: String? = null,
@@ -50,16 +50,16 @@ internal object RequestRecordInsights {
     fun summarize(records: List<RequestRecord>): RequestInsights {
         if (records.isEmpty()) return RequestInsights()
         val failures = records.filterNot { it.success }
-        val durations = records.map { it.durationMs.coerceAtLeast(0L) }.sorted()
-        val p95Index = (ceil(durations.size * 0.95).toInt() - 1).coerceIn(durations.indices)
+        val durations = records.mapNotNull { it.durationMs }.sorted()
+        val p95Index = ceil(durations.size * 0.95).toInt() - 1
         val failureGroups = failures.groupingBy { endpoint(it.url) }.eachCount()
         val topFailure = failureGroups.maxByOrNull { it.value }
         return RequestInsights(
             total = records.size,
             failureRatePercent = ((failures.size * 100.0) / records.size).toInt(),
-            p95DurationMs = durations[p95Index],
+            p95DurationMs = durations.getOrNull(p95Index),
             uniqueClients = records.mapNotNull(::clientIp).distinct().size,
-            slowCount = records.count { it.durationMs >= 2_000L },
+            slowCount = durations.count { it >= 2_000L },
             topFailureEndpoint = topFailure?.key?.takeIf { it.isNotBlank() },
             topFailureCount = topFailure?.value ?: 0
         )

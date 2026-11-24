@@ -2,6 +2,7 @@ package com.example.danmuapiapp.ui.screen.config
 
 import com.example.danmuapiapp.data.network.newOutboundCall
 
+import com.example.danmuapiapp.data.util.RemoteMapping
 import android.content.Context
 import com.example.danmuapiapp.data.util.RuntimeTokenNormalizer
 import com.example.danmuapiapp.data.util.TokenDefaults
@@ -112,6 +113,13 @@ class ConfigViewModel @Inject constructor(
             val data = root.optJSONArray("data") ?: JSONArray()
             data.toAnimeCacheItems()
         }
+    }
+
+    internal suspend fun refreshRemoteMapping(mapping: RemoteMapping, savedUrl: String): Int {
+        check(adminSessionRepository.sessionState.value.isAdminMode) { "请先进入管理员模式" }
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        return mapping.refresh(httpClient, prefs.getInt("port", DEFAULT_PORT),
+            adminSessionRepository.currentAdminTokenOrNull(), savedUrl)
     }
 
     fun getEnvFilePath(): String = envConfigRepo.getEnvFilePath()

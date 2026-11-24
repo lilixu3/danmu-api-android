@@ -1,5 +1,8 @@
 package com.example.danmuapiapp.ui.compat
 
+import com.example.danmuapiapp.data.util.RemoteMapping
+import com.example.danmuapiapp.ui.screen.config.KEY_AUTO_MATCH_MAPPING_TABLE
+import com.example.danmuapiapp.ui.screen.config.validateAutoMatchMappingTable
 import com.example.danmuapiapp.data.util.DotEnvCodec
 import com.example.danmuapiapp.data.util.RuntimeApiUrls
 import com.example.danmuapiapp.domain.model.*
@@ -65,6 +68,9 @@ internal fun parseCompatConfig(root: JSONObject, explicit: Map<String, String>, 
 }
 
 internal fun validateCompatConfigValue(def: EnvVarDef, value: String): String? {
+    if (def.key == KEY_AUTO_MATCH_MAPPING_TABLE) {
+        return validateAutoMatchMappingTable(value, def.options).takeUnless { it.valid }?.message
+    }
     return when (def.type) {
         EnvType.BOOLEAN -> if (value !in listOf("true", "false")) "请选择开启或关闭" else null
         EnvType.NUMBER -> {
@@ -96,6 +102,13 @@ internal class CompatManagementController(
         .readTimeout(6, TimeUnit.SECONDS).callTimeout(8, TimeUnit.SECONDS).build()
     init {
         scope.launch { graph.adminSessionRepository.sessionState.collect { admin -> _state.update { it.copy(admin = admin) } } }
+    }
+
+    suspend fun refreshRemoteMapping(mapping: RemoteMapping, savedUrl: String): Int {
+        check(graph.adminSessionRepository.sessionState.value.isAdminMode) { "请先进入管理员模式" }
+        val runtime = graph.runtimeRepository.runtimeState.value
+        check(runtime.status == ServiceStatus.Running) { "请先启动核心服务" }
+        return mapping.refresh(graph.httpClient, runtime.port, graph.adminSessionRepository.currentAdminTokenOrNull(), savedUrl)
     }
 
     fun refresh() {

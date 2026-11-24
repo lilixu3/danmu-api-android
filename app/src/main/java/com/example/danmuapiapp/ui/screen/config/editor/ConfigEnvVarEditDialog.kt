@@ -18,6 +18,11 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 import com.example.danmuapiapp.domain.model.EnvType
 import com.example.danmuapiapp.domain.model.EnvVarDef
+import com.example.danmuapiapp.data.util.RemoteMapping
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
@@ -27,6 +32,7 @@ internal fun EnvVarEditDialog(
     categoryLabel: String,
     onSave: (String) -> Unit,
     onDismiss: () -> Unit,
+    onRefreshMapping: suspend (RemoteMapping, String) -> Int,
     onGenerateBiliQr: suspend () -> Result<BilibiliQrGenerateResult>,
     onPollBiliQr: suspend (String) -> Result<BilibiliQrPollResult>,
     onVerifyBiliCookie: suspend (String) -> Result<BilibiliCookieVerifyResult>,
@@ -36,6 +42,7 @@ internal fun EnvVarEditDialog(
     onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     var value by remember(def.key, currentValue) { mutableStateOf(currentValue) }
+    val draft = remember(def.key, currentValue) { ConfigEntryDraft() }
     var showPassword by remember(def.key) { mutableStateOf(false) }
 
     val normalizedKey = remember(def.key) { def.key.trim().uppercase(Locale.getDefault()) }
@@ -62,10 +69,9 @@ internal fun EnvVarEditDialog(
                 ReadonlyInfoRow("值类型", envTypeLabel(def.type))
 
                 val handledSpecial = when (normalizedKey) {
-                    // 与核心自带前端一致：只对 COLOR_POOL 等少数变量做专用界面，
-                    // 其余变量一律按 type 走通用控件（来源/平台/映射表都不再特判）。
                     KEY_COLOR_POOL -> {
                         ColorPoolEditor(
+                            draft = draft,
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it }
@@ -100,6 +106,7 @@ internal fun EnvVarEditDialog(
 
                     KEY_CUSTOM_MERGE_RULES -> {
                         CompactCustomMergeRulesEditor(
+                            draft = draft,
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it },
@@ -111,6 +118,7 @@ internal fun EnvVarEditDialog(
 
                     KEY_DANMU_OFFSET -> {
                         CompactDanmuOffsetEditor(
+                            draft = draft,
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it },
@@ -174,6 +182,7 @@ internal fun EnvVarEditDialog(
                         )
 
                         EnvType.MULTI_SELECT -> StableMultiSelectValueEditor(
+                            draft = draft,
                             envKey = def.key,
                             def = def,
                             value = value,
@@ -181,14 +190,17 @@ internal fun EnvVarEditDialog(
                             onFetchRecentAnimeCache = onFetchRecentAnimeCache
                         )
 
-                        EnvType.MAP -> StableMapValueEditor(
-                            envKey = def.key,
-                            value = value,
-                            onValueChange = { value = it },
-                            onFetchRecentAnimeCache = onFetchRecentAnimeCache
-                        )
+                        EnvType.MAP -> key(def.key, currentValue) {
+                            StableMapValueEditor(
+                                def = def,
+                                value = value,
+                                onValueChange = { value = it },
+                                onFetchRecentAnimeCache = onFetchRecentAnimeCache
+                            )
+                        }
 
                         EnvType.COLOR_LIST -> ColorListEditor(
+                            draft = draft,
                             rememberKey = def.key,
                             value = value,
                             onValueChange = { value = it },
@@ -205,6 +217,11 @@ internal fun EnvVarEditDialog(
                         )
                     }
                 }
+                if (!autoMatchValidation.valid) {
+                    Text(autoMatchValidation.message, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                RemoteMappingRefreshAction(def.key, currentValue, value, onRefreshMapping)
                 ReadonlyInfoRow("描述", def.description.ifBlank { "—" })
             }
         },
@@ -214,14 +231,47 @@ internal fun EnvVarEditDialog(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 AppGlassButton(
-                    onClick = { onSave(value) },
-                    enabled = autoMatchValidation.valid,
+                    onClick = { draft.valueForSave(value)?.let(onSave) },
+                    enabled = autoMatchValidation.valid && draft.valueForSave(value) != null,
                     modifier = Modifier.weight(1f)
                 ) { Text("保存") }
                 AppGlassButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("取消") }
             }
         }
     )
+}
+
+@Composable
+internal fun RemoteMappingRefreshAction(
+    key: String,
+    savedUrl: String,
+    value: String,
+    onRefresh: suspend (RemoteMapping, String) -> Int
+) {
+    val mapping = RemoteMapping.entries.find { it.key == key } ?: return
+    val scope = rememberCoroutineScope()
+    var refreshing by remember(key) { mutableStateOf(false) }
+    var message by remember(key, savedUrl) { mutableStateOf("") }
+    val saved = value.isNotBlank() && value.trim() == savedUrl.trim()
+    OutlinedButton(enabled = saved && !refreshing, onClick = {
+        refreshing = true
+        message = ""
+        scope.launch {
+            try {
+                val count = onRefresh(mapping, savedUrl)
+                val time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+                message = "$time 已更新 $count 条规则"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                message = e.localizedMessage ?: "无法连接核心"
+            } finally {
+                refreshing = false
+            }
+        }
+    }) { Text(if (refreshing) "更新中…" else "立即更新") }
+    val status = if (saved) message else "请先保存映射表地址，再立即更新。"
+    if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

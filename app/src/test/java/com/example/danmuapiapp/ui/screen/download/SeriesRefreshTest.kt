@@ -22,6 +22,19 @@ class SeriesRefreshTest {
     @Test fun `changed episode IDs still match successful downloads by episode number`() {
         assertTrue(missingDownloadedEpisodes(listOf(DownloadEpisodeCandidate(9999, 1, "第一集", "tencent")), listOf(record())).isEmpty())
     }
+    @Test fun overlappingFallbackNumberDoesNotHideTheOtherEpisode() {
+        val episodes = listOf(
+            DownloadEpisodeCandidate(30L, 3, "第3集", "tencent"),
+            DownloadEpisodeCandidate(40L, 3, "幕后花絮", "tencent")
+        )
+        val old = record(3).copy(episodeNo = 2)
+        assertEquals(listOf(40L), missingDownloadedEpisodes(episodes, listOf(old)).map { it.episodeId })
+    }
+    @Test fun oldSequenceNumberDoesNotHideTheWrongEpisode() {
+        val episodes = (1..3).map { DownloadEpisodeCandidate(300L + it, it, "第${it}集", "tencent") }
+        val old = record(3).copy(episodeNo = 2)
+        assertEquals(listOf(1, 2), missingDownloadedEpisodes(episodes, listOf(old)).map { it.episodeNumber })
+    }
     @Test fun `source lock rejects another platform`() {
         assertFalse(seriesCandidateMatches(candidate(source = "iqiyi", title = "测试剧(2023)【电视剧】from iqiyi"), record()))
         assertTrue(seriesCandidateMatches(candidate(source = "qq", title = "测试剧(2023)【电视剧】from qq"), record()))

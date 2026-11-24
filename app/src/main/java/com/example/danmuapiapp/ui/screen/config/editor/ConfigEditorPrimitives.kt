@@ -50,16 +50,9 @@ internal fun SimpleQuickAppendEditor(
     minLines: Int = 3,
     maxLines: Int = 8,
     quickTitle: String = "快速添加",
-    quickContent: @Composable (appendRule: (String, String) -> Unit, closePanel: () -> Unit) -> Unit,
+    quickContent: @Composable (closePanel: () -> Unit) -> Unit,
 ) {
     var showQuick by remember(rememberKey) { mutableStateOf(false) }
-
-    fun appendRule(rule: String, separator: String) {
-        val cleanRule = rule.trim()
-        if (cleanRule.isBlank()) return
-        onValueChange(appendSegment(value, cleanRule, separator))
-        showQuick = false
-    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -86,7 +79,7 @@ internal fun SimpleQuickAppendEditor(
                 Text(addButtonText)
             }
             Text(
-                "可直接手写；快速添加只负责生成一条并追加到输入框。",
+                "填好规则后可直接保存，也可写入输入框后继续添加。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -114,7 +107,7 @@ internal fun SimpleQuickAppendEditor(
                             Icon(Icons.Rounded.Close, "关闭")
                         }
                     }
-                    quickContent(::appendRule) { showQuick = false }
+                    quickContent { showQuick = false }
                 }
             }
         }
@@ -163,10 +156,11 @@ internal fun OptionAssistChips(
 internal fun QuickActionRow(
     onAppend: () -> Unit,
     appendLabel: String = "写入输入框",
+    enabled: Boolean,
     onCancel: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        AppGlassButton(onClick = onAppend) { Text(appendLabel) }
+        AppGlassButton(onClick = onAppend, enabled = enabled) { Text(appendLabel) }
         AppGlassButton(onClick = onCancel) { Text("取消") }
     }
 }

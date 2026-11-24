@@ -60,4 +60,24 @@ class EnvVarConfigLoaderTest {
 
         assertEquals(listOf("qiyi", "qq", "youku"), definition.options)
     }
+
+    @Test
+    fun `按剧来源随当前核心平台和配置的合并组合更新`() {
+        val source = """
+            static ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'qq', 'renren', 'hanjutv', 'custom'];
+            static MERGE_ALLOWED_SOURCES = ['iqiyi', 'bilibili', 'tencent', 'renren', 'hanjutv'];
+            const envVarConfig = {
+              'TITLE_PLATFORM_MAP': { category: 'match', type: 'map', options: platformOptions }
+            };
+        """.trimIndent()
+        val configured = mapOf(
+            "MERGE_SOURCE_PAIRS" to "bilibili&iqiyi;renren&obsolete&hanjutv;unknown&tencent;renren",
+            "PLATFORM_ORDER" to "custom ＆ tencent,bilibili1&qiyi,qiyi&unknown"
+        )
+        val platforms = listOf("qiyi", "bilibili1", "qq", "renren", "hanjutv", "custom")
+        val def = EnvVarConfigLoader.parseCatalogContent(source, configured).single()
+        assertEquals(EnvType.MAP, def.type)
+        assertEquals(platforms + listOf("bilibili1&qiyi", "renren&hanjutv", "custom&qq"), def.options)
+        assertEquals(platforms, EnvVarConfigLoader.parseCatalogContent(source).single().options)
+    }
 }

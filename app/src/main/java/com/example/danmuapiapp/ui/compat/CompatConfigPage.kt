@@ -1,5 +1,6 @@
 package com.example.danmuapiapp.ui.compat
 
+import com.example.danmuapiapp.data.util.RemoteMapping
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +29,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.danmuapiapp.domain.model.*
 import com.example.danmuapiapp.ui.component.remoteFocusHighlight
+import com.example.danmuapiapp.ui.screen.config.RemoteMappingRefreshAction
+import com.example.danmuapiapp.ui.screen.config.ConfigEntryDraft
+import com.example.danmuapiapp.ui.screen.config.CompactCustomMergeRulesEditor
+import com.example.danmuapiapp.ui.screen.config.KEY_CUSTOM_MERGE_RULES
+import com.example.danmuapiapp.ui.screen.config.StableMapValueEditor
+import com.example.danmuapiapp.ui.screen.config.configValuePreview
 import java.util.UUID
 
 private fun compatCategoryLabel(category: String): String = when (category) {
@@ -39,6 +46,7 @@ private fun compatCategoryLabel(category: String): String = when (category) {
 @Composable
 internal fun CompatConfigPage(state: CompatManagementState, runtime: RuntimeState,
     onRefresh: () -> Unit, onLogin: (String) -> Unit, onSave: (CompatConfigEntry, String, Boolean) -> Unit,
+    onRefreshMapping: suspend (RemoteMapping, String) -> Int,
     listState: LazyListState, modifier: Modifier = Modifier) {
     var search by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("") }
@@ -111,7 +119,7 @@ internal fun CompatConfigPage(state: CompatManagementState, runtime: RuntimeStat
         }
     }
     val entry = state.entries.firstOrNull { it.definition.key == editorKey }
-    if (entry != null) CompatConfigEditor(entry, state.saving, state.saveSequence, state.error, { editorKey = null }, onSave)
+    if (entry != null) CompatConfigEditor(entry, state.saving, state.saveSequence, state.error, { editorKey = null }, onSave, onRefreshMapping)
     if (showCategories) CompatDialog("配置分类", { showCategories = false }, "完成", { showCategories = false }) {
         (listOf("") + categories).forEach { item -> CompatButton(if (item.isBlank()) "全部配置" else compatCategoryLabel(item),
             { category = item; showCategories = false }, Modifier.fillMaxWidth(),
@@ -170,13 +178,15 @@ private fun CompatConfigRow(entry: CompatConfigEntry, enabled: Boolean, onClick:
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(entry.definition.key, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                CompatBadge(if (entry.configured) "已配置" else "默认值",
-                    if (entry.configured) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (entry.value.isNotBlank()) {
+                    CompatBadge(if (entry.configured) "已配置" else "默认值",
+                        if (entry.configured) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }
             Text(entry.definition.description, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(if (entry.definition.sensitive && entry.value.isNotBlank()) "••••••••" else entry.value.ifBlank { "（空）" },
+            Text(configValuePreview(entry.value, entry.definition.sensitive),
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -185,9 +195,10 @@ private fun CompatConfigRow(entry: CompatConfigEntry, enabled: Boolean, onClick:
 
 @Composable
 private fun CompatConfigEditor(entry: CompatConfigEntry, busy: Boolean, saveSequence: Int, error: String, onDismiss: () -> Unit,
-    onSave: (CompatConfigEntry, String, Boolean) -> Unit) {
+    onSave: (CompatConfigEntry, String, Boolean) -> Unit, onRefreshMapping: suspend (RemoteMapping, String) -> Int) {
     val def = entry.definition
     var value by remember(def.key) { mutableStateOf(entry.value) }
+    val draft = remember(def.key) { ConfigEntryDraft() }
     var visible by remember { mutableStateOf(false) }
     var submittedSequence by remember(def.key) { mutableIntStateOf(saveSequence) }
     var pendingSave by remember { mutableStateOf(false) }
@@ -198,8 +209,13 @@ private fun CompatConfigEditor(entry: CompatConfigEntry, busy: Boolean, saveSequ
         }
     }
     val invalid = validateCompatConfigValue(def, value)
-    CompatDialog("编辑 ${def.key}", onDismiss, "保存", { submittedSequence = saveSequence; pendingSave = true; onSave(entry, value, false) },
-        confirmEnabled = !busy && invalid == null) {
+    CompatDialog("编辑 ${def.key}", onDismiss, "保存", {
+        draft.valueForSave(value)?.let { complete ->
+            submittedSequence = saveSequence
+            pendingSave = true
+            onSave(entry, complete, false)
+        }
+    }, confirmEnabled = !busy && invalid == null && draft.valueForSave(value) != null) {
         Text(def.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         when (def.type) {
             EnvType.BOOLEAN -> CompatActions {
@@ -220,9 +236,13 @@ private fun CompatConfigEditor(entry: CompatConfigEntry, busy: Boolean, saveSequ
                 }
                 CompatValueField(value, { value = it }, def, visible, { visible = !visible })
             }
-            else -> CompatValueField(value, { value = it }, def, visible, { visible = !visible })
+            EnvType.MAP -> StableMapValueEditor(def, value, onValueChange = { value = it })
+            else -> if (def.key == KEY_CUSTOM_MERGE_RULES) {
+                CompactCustomMergeRulesEditor(def.key, value, onValueChange = { value = it }, options = def.options, draft = draft)
+            } else CompatValueField(value, { value = it }, def, visible, { visible = !visible })
         }
         if (error.isNotBlank() && !busy) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        RemoteMappingRefreshAction(def.key, entry.value, value, onRefreshMapping)
         if (invalid != null) Text(invalid, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         if (entry.configured) CompatButton("恢复默认值", {
             submittedSequence = saveSequence; pendingSave = true; onSave(entry, "", true)

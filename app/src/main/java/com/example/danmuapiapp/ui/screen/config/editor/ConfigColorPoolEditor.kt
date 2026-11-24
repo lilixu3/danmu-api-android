@@ -63,7 +63,9 @@ internal fun ColorPoolEditor(
     rememberKey: String,
     value: String,
     onValueChange: (String) -> Unit,
+    draft: ConfigEntryDraft,
 ) {
+    var colorEdited by remember(rememberKey) { mutableStateOf(false) }
     var hue by remember(rememberKey) { mutableStateOf(0f) }
     var lightness by remember(rememberKey) { mutableStateOf(50f) }
     var batchVisible by remember(rememberKey) { mutableStateOf(false) }
@@ -72,7 +74,13 @@ internal fun ColorPoolEditor(
 
     val colors = remember(value) { parseColorList(value) }
     val previewColor = remember(hue, lightness) { hslToDecimal(hue, 100f, lightness) }
-    val batchColors = remember(batchInput) { parseColorList(batchInput) }
+    val batchColors = remember(batchInput) { parseColorBatch(batchInput) }
+    if (colorEdited || (batchVisible && batchInput.isNotBlank())) {
+        val additions = batchColors?.let { batch ->
+            listOfNotNull(previewColor.takeIf { colorEdited }) + batch
+        }
+        draft.IncludeOnSave(additions?.let { appendColorsToRaw(value, it) })
+    }
     val previewCompose = remember(previewColor) { Color(0xFF000000.toInt() or (previewColor and 0xFFFFFF)) }
 
     fun emit(next: List<Int>) {
@@ -142,7 +150,7 @@ internal fun ColorPoolEditor(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    HueWheel(hue = hue, color = previewColor, onHueChange = { hue = it })
+                    HueWheel(hue = hue, color = previewColor, onHueChange = { hue = it; colorEdited = true })
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -170,7 +178,7 @@ internal fun ColorPoolEditor(
                         )
                         Slider(
                             value = lightness,
-                            onValueChange = { lightness = it },
+                            onValueChange = { lightness = it; colorEdited = true },
                             valueRange = 10f..100f
                         )
                     }
@@ -180,7 +188,7 @@ internal fun ColorPoolEditor(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AppGlassButton(
-                        onClick = { emit(colors + (previewColor and 0xFFFFFF)) },
+                        onClick = { emit(colors + previewColor); colorEdited = false },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Rounded.Add, null, modifier = Modifier.size(17.dp))
@@ -223,52 +231,32 @@ internal fun ColorPoolEditor(
     }
 
     if (batchVisible) {
-        AppDialog(
-            onDismissRequest = { batchVisible = false },
-            style = AppDialogStyle.Form,
-            tone = AppDialogTone.Brand,
-            title = { Text("批量添加颜色") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = batchInput,
-                        onValueChange = { batchInput = it },
-                        label = { Text("颜色列表") },
-                        placeholder = { Text("#FFFFFF, FF6699, 16777215\n支持逗号、空格、换行") },
-                        singleLine = false,
-                        minLines = 3,
-                        maxLines = 6,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (batchColors.isNotEmpty()) {
-                        Text(
-                            "预览：${batchColors.size} 个颜色",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        ColorPreviewChips(batchColors, maxCount = 24)
-                    }
-                }
-            },
-            confirmButton = {
-                AppGlassButton(
-                    onClick = {
-                        if (batchColors.isNotEmpty()) emit(colors + batchColors)
-                        batchInput = ""
-                        batchVisible = false
-                    },
-                    enabled = batchColors.isNotEmpty()
-                ) { Text("添加") }
-            },
-            dismissButton = {
-                AppGlassButton(
-                    onClick = {
-                        batchInput = ""
-                        batchVisible = false
-                    }
-                ) { Text("取消") }
-            }
+        OutlinedTextField(
+            value = batchInput,
+            onValueChange = { batchInput = it },
+            label = { Text("批量添加颜色") },
+            placeholder = { Text("#FFFFFF, FF6699, 16777215") },
+            minLines = 2,
+            maxLines = 6,
+            isError = batchColors == null,
+            modifier = Modifier.fillMaxWidth()
         )
+        if (batchColors == null) {
+            Text("请输入有效的 HEX 或十进制颜色值。", color = MaterialTheme.colorScheme.error)
+        } else if (batchColors.isNotEmpty()) {
+            ColorPreviewChips(batchColors, maxCount = 24)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppGlassButton(
+                onClick = {
+                    emit(colors + batchColors.orEmpty())
+                    batchInput = ""
+                    batchVisible = false
+                },
+                enabled = !batchColors.isNullOrEmpty()
+            ) { Text("添加") }
+            AppGlassButton(onClick = { batchInput = ""; batchVisible = false }) { Text("取消") }
+        }
     }
 
     if (resetVisible) {
@@ -281,6 +269,9 @@ internal fun ColorPoolEditor(
             confirmButton = {
                 AppGlassButton(
                     onClick = {
+                        colorEdited = false
+                        batchInput = ""
+                        batchVisible = false
                         emit(emptyList())
                         resetVisible = false
                     }

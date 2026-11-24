@@ -17,6 +17,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal fun configValuePreview(value: String?, sensitive: Boolean): String = when {
+    value.isNullOrBlank() -> "未设置"
+    sensitive -> "••••••••"
+    else -> value
+}
+
 internal fun parseCookieSnapshot(rawCookie: String): CookieSnapshot {
     val map = LinkedHashMap<String, String>()
     rawCookie.split(';').forEach { segment ->

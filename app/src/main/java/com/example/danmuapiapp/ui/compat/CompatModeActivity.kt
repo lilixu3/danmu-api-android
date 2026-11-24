@@ -183,6 +183,7 @@ class CompatModeActivity : ComponentActivity() {
                         onRefreshLogs = compatViewModel::refreshLogs,
                         onRefreshConfig = compatViewModel.managementController::refresh,
                         onAdminLogin = compatViewModel.managementController::login,
+                        onRefreshMapping = compatViewModel.managementController::refreshRemoteMapping,
                         onSaveConfig = compatViewModel.managementController::save,
                         proxyPickerState = CompatProxyPickerState(
                             currentLabel = compatViewModel.currentProxyLabel(),

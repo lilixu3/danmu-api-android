@@ -205,7 +205,9 @@ interface SettingsRepository {
 
 interface RequestRecordRepository {
     val records: StateFlow<List<RequestRecord>>
+    val todayRequestCount: StateFlow<Int?>
     suspend fun refreshFromService()
+    suspend fun fetchTraceDetail(requestId: String): Result<RequestTraceDetail>
     fun addRecord(record: RequestRecord)
     fun clearRecords()
 }

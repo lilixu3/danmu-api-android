@@ -47,7 +47,7 @@ fun sha256(file: File): String {
 /**
  * 16KB 页对齐门禁：Android 15+ 的 16KB 内核设备（仅 64 位 ABI）要求
  * 可执行段按 16KB 对齐加载；armeabi-v7a 不存在 16KB 内核，仅需 ≥4KB。
- * 解析 ELF program header 校验 PT_LOAD 对齐/偏移与 GNU_RELRO 末尾，覆盖上游
+ * 解析 ELF program header 校验 PT_LOAD 对齐/偏移与 GNU_RELRO 安全范围，覆盖上游
  * libnode.so / libc++_shared.so 与本地编译的 libnative-lib.so，
  * 防止任一环节的对齐回归静默进入 APK。
  */
@@ -94,30 +94,48 @@ fun assertElfLoadAlignment(file: File, relativePath: String = file.relativeTo(pr
 
         val minRequired = if (ELF_16K_REQUIRED_ABIS.any { "/$it/" in "/$relativePath" }) 16384L else 4096L
         var sawLoad = false
+        val writableRanges = mutableListOf<Pair<Long, Long>>()
+        val relroRanges = mutableListOf<Pair<Long, Long>>()
         for (i in 0 until phnum) {
             val base = phoff + i * phentsize
             val kind = u32At(base)
             if (kind == 0x6474e552L) {
                 val address = if (is64) u64At(base + 16) else u32At(base + 8)
                 val size = if (is64) u64At(base + 40) else u32At(base + 20)
-                if ((address + size) % minRequired != 0L) {
-                    throw GradleException("$relativePath 的 GNU_RELRO 末尾未按 ${minRequired}B 页对齐")
-                }
+                relroRanges += address to address + size
             }
             if (kind != 1L) continue
             sawLoad = true
             val align = if (is64) u64At(base + 48) else u32At(base + 28)
             val offset = if (is64) u64At(base + 8) else u32At(base + 4)
             val address = if (is64) u64At(base + 16) else u32At(base + 8)
+            val memorySize = if (is64) u64At(base + 40) else u32At(base + 20)
+            val flags = if (is64) u32At(base + 4) else u32At(base + 24)
             if (align < minRequired || offset % minRequired != address % minRequired) {
                 throw GradleException(
                     "$relativePath 的 PT_LOAD 对齐为 ${align}B，低于 ${minRequired}B 页要求" +
                         "（${if (minRequired == 16384L) "16KB 内核设备无法加载" else "文件异常"}）"
                 )
             }
+            if (flags and 2L != 0L) writableRanges += address to address + memorySize
         }
         if (!sawLoad) throw GradleException("ELF 缺少 PT_LOAD 段：${file.name}")
 
+        // Bionic 会把 RELRO 向下/向上取整到页边界。链接器可能留下页内只读填充，
+        // 只要取整后的保护范围不覆盖 RELRO 之外的可写数据就是合法的。
+        relroRanges.forEach { (start, end) ->
+            val lower = start / minRequired * minRequired
+            val upper = (end + minRequired - 1) / minRequired * minRequired
+            writableRanges.forEach { (begin, finish) ->
+                val overlapsBefore = maxOf(begin, lower) < minOf(finish, start)
+                val overlapsAfter = maxOf(begin, end) < minOf(finish, upper)
+                if (overlapsBefore || overlapsAfter) {
+                    throw GradleException(
+                        "$relativePath 的 GNU_RELRO 取整到 ${minRequired}B 页后覆盖了其外的可写数据"
+                    )
+                }
+            }
+        }
     }
 }
 

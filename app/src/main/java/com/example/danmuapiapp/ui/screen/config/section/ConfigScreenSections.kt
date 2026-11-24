@@ -295,23 +295,15 @@ internal fun EnvVarCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (currentValue != null) {
-                    Text(
-                        if (def.sensitive) "••••••••" else currentValue.take(60),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                } else {
-                    Text(
-                        "未设置",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
+                Text(
+                    configValuePreview(currentValue, def.sensitive).take(60),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (currentValue.isNullOrBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        else MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
             }
             if (enabled && currentValue != null) {
                 // 与核心前端一致：清除入口在列表项右侧（弹窗里只有保存/取消）。

@@ -23,6 +23,7 @@ import com.example.danmuapiapp.ui.screen.apitest.FavoriteScheduleDraft
 import com.example.danmuapiapp.ui.screen.apitest.FavoriteSupportState
 import com.example.danmuapiapp.ui.screen.download.DownloadAnimeCandidate
 import com.example.danmuapiapp.ui.screen.download.DownloadEpisodeCandidate
+import com.example.danmuapiapp.ui.screen.download.parsePushEpisodeCandidates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -482,7 +483,7 @@ class PushDanmuViewModel @Inject constructor(
             result.fold(
                 onSuccess = { (code, body) ->
                     if (code in 200..299) {
-                        episodeCandidates = withContext(Dispatchers.Default) { parseEpisodeCandidates(body) }
+                        episodeCandidates = withContext(Dispatchers.Default) { parsePushEpisodeCandidates(body) }
                     } else {
                         episodeCandidates = emptyList()
                         errorMessage = "加载剧集失败：HTTP $code"
@@ -681,36 +682,6 @@ class PushDanmuViewModel @Inject constructor(
             )
         }
         return out.distinctBy { it.animeId }
-    }
-
-    private fun parseEpisodeCandidates(raw: String): List<DownloadEpisodeCandidate> {
-        val root = runCatching { JSONObject(raw) }.getOrElse { return emptyList() }
-        val bangumi = root.optJSONObject("bangumi")
-            ?: root.optJSONObject("data")
-            ?: JSONObject()
-
-        val episodes = bangumi.optJSONArray("episodes")
-            ?: root.optJSONArray("episodes")
-            ?: JSONArray()
-
-        val out = ArrayList<DownloadEpisodeCandidate>(episodes.length())
-        for (i in 0 until episodes.length()) {
-            val item = episodes.optJSONObject(i) ?: continue
-            val episodeId = readLong(item, "episodeId", "id", "cid")
-            if (episodeId <= 0L) continue
-            val number = readInt(item, "episodeNumber", "number", "sort", "index")
-                .takeIf { it > 0 } ?: (i + 1)
-            val title = readString(item, "episodeTitle", "title", "name")
-            out += DownloadEpisodeCandidate(
-                episodeId = episodeId,
-                episodeNumber = number,
-                title = title.ifBlank { "第${number}集" },
-                source = readString(item, "source").ifBlank { "unknown" }
-            )
-        }
-        return out
-            .distinctBy { it.episodeId }
-            .sortedWith(compareBy<DownloadEpisodeCandidate> { it.episodeNumber }.thenBy { it.episodeId })
     }
 
     private fun normalizeBaseUrl(baseUrl: String): String? {

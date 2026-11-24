@@ -1,6 +1,5 @@
 package com.example.danmuapiapp.ui.screen.config
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,7 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.danmuapiapp.ui.component.AppGlassSurface
 import com.example.danmuapiapp.ui.component.liquid.AppGlassButton
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
@@ -131,7 +129,7 @@ internal fun StableSelectValueEditor(
     }
 }
 
-private data class StableMapRow(
+internal data class StableMapRow(
     val left: String = "",
     val right: String = "",
 )
@@ -165,70 +163,154 @@ private fun serializeStableMapRows(rows: List<StableMapRow>): String {
     }.joinToString(";")
 }
 
+internal fun parseTitlePlatformRows(raw: String): List<StableMapRow> {
+    val mappings = linkedMapOf<String, String>()
+    for (entry in raw.split(';', '\r', '\n')) {
+        val arrow = entry.indexOf("->")
+        if (arrow < 0) continue
+        val title = entry.substring(0, arrow).trim()
+        val source = entry.substring(arrow + 2).trim()
+        if (title.isNotEmpty() && source.isNotEmpty()) mappings[title] = source
+    }
+    return mappings.map { (title, source) -> StableMapRow(title, source) }
+}
+
+internal fun serializeTitlePlatformRows(rows: List<StableMapRow>): String =
+    rows.filter { it.left.isNotBlank() && it.right.isNotBlank() }
+        .associate { it.left.trim() to it.right.trim() }
+        .entries.joinToString(";") { (title, source) -> "$title->$source" }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MatchSourceDropdown(
+    value: String,
+    options: List<String>,
+    modifier: Modifier,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("来源", maxLines = 1)
+                    Icon(
+                        if (expanded) Icons.Rounded.ArrowDropUp else Icons.Rounded.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            },
+            placeholder = { Text("请选择", maxLines = 1) },
+            readOnly = true,
+            singleLine = true,
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded, onDismissRequest = { expanded = false }, matchAnchorWidth = false) {
+            // Keep existing rules editable when a configured group has since been removed.
+            val choices = (listOf("") + options + value).distinct()
+            choices.forEach { option ->
+                DropdownMenuItem(text = { Text(option.ifBlank { "选择匹配来源" }) }, onClick = {
+                    onSelect(option)
+                    expanded = false
+                })
+            }
+        }
+    }
+}
+
 @Composable
 internal fun StableMapValueEditor(
-    envKey: String,
+    def: EnvVarDef,
     value: String,
     onValueChange: (String) -> Unit,
-    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
+    onFetchRecentAnimeCache: (suspend () -> Result<List<AnimeCacheItem>>)? = null,
 ) {
-    var rows by remember(value) { mutableStateOf(parseStableMapRows(value)) }
-    var bulkText by remember(value) { mutableStateOf(value) }
+    val titlePlatformMap = def.key == KEY_TITLE_PLATFORM_MAP
+    fun parseRows(text: String) =
+        if (titlePlatformMap) parseTitlePlatformRows(text) else parseStableMapRows(text)
 
-    fun syncRows(next: List<StableMapRow>, updateBulk: Boolean = true) {
+    var rows by remember(def.key) { mutableStateOf(parseRows(value)) }
+    var bulkText by remember(def.key) { mutableStateOf(value) }
+
+    fun syncRows(next: List<StableMapRow>) {
         rows = next
-        val text = serializeStableMapRows(next)
-        if (updateBulk) bulkText = text
-        onValueChange(text)
+        bulkText = if (titlePlatformMap) serializeTitlePlatformRows(next) else serializeStableMapRows(next)
+        onValueChange(bulkText)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("映射配置", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(
             value = bulkText,
-            onValueChange = { bulkText = it },
-            placeholder = { Text("原值->映射值;原值2->映射值2") },
+            onValueChange = { text ->
+                bulkText = text
+                rows = parseRows(text)
+                onValueChange(if (titlePlatformMap) serializeTitlePlatformRows(rows) else text)
+            },
+            placeholder = { Text(if (titlePlatformMap) "宝珠->imgo;航海王->dandan&bilibili1" else "原值->映射值;原值2->映射值2") },
             singleLine = false,
             minLines = 4,
             maxLines = 6,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         )
-        AppGlassButton(onClick = { syncRows(parseStableMapRows(bulkText)) }) {
+        AppGlassButton(onClick = { syncRows(parseRows(bulkText)) }) {
             Text("解析并更新列表")
         }
+        if (def.key == KEY_AUTO_MATCH_MAPPING_TABLE && value.isNotBlank()) {
+            val validation = remember(value, def.options) { validateAutoMatchMappingTable(value, def.options) }
+            if (validation.valid) {
+                var filename by remember(def.key) { mutableStateOf("") }
+                val preview = remember(value, filename, def.options) { previewAutoMatchMapping(value, filename, def.options) }
+                OutlinedTextField(
+                    value = filename,
+                    onValueChange = { filename = it },
+                    label = { Text("文件名预览（可选）") },
+                    placeholder = { Text("例如 灵笼.S00E01.mkv") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (filename.isNotBlank()) {
+                    Text(preview?.let { "${it.sourceLabel} → ${it.targetLabel}" } ?: "未匹配到规则",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         rows.forEachIndexed { index, row ->
-            AppGlassSurface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("映射 ${index + 1}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                        AppGlassIconButton(onClick = {
-                            val next = rows.filterIndexed { i, _ -> i != index }
-                            syncRows(if (next.isEmpty()) listOf(StableMapRow()) else next)
-                        }) { Icon(Icons.Rounded.DeleteOutline, "删除") }
+                OutlinedTextField(
+                    value = row.left,
+                    onValueChange = { syncRows(rows.replace(index, row.copy(left = it))) },
+                    label = { Text(if (titlePlatformMap) "剧名" else "原始值", maxLines = 1) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                )
+                Text("→", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (titlePlatformMap && def.options.isNotEmpty()) {
+                    MatchSourceDropdown(row.right, def.options, Modifier.weight(1f)) { source ->
+                        syncRows(rows.replace(index, row.copy(right = source)))
                     }
-                    OutlinedTextField(
-                        value = row.left,
-                        onValueChange = { syncRows(rows.replace(index, row.copy(left = it))) },
-                        label = { Text("原始值") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                } else {
                     OutlinedTextField(
                         value = row.right,
                         onValueChange = { syncRows(rows.replace(index, row.copy(right = it))) },
-                        label = { Text("映射值") },
+                        label = { Text(if (titlePlatformMap) "来源" else "映射值", maxLines = 1) },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.weight(1f)
                     )
                 }
+                AppGlassIconButton(onClick = {
+                    syncRows(rows.filterIndexed { i, _ -> i != index })
+                }) { Icon(Icons.Rounded.DeleteOutline, "删除第 ${index + 1} 条映射") }
             }
         }
         Row(
@@ -238,12 +320,14 @@ internal fun StableMapValueEditor(
         ) {
             AppGlassButton(onClick = { syncRows(rows + StableMapRow()) }) { Text("添加映射项") }
             // 与核心前端一致：「查看最近数据」放在「添加映射项」同一行的右侧。
-            RecentDataToggle(
-                rememberKey = envKey,
-                currentKey = envKey,
-                onFetchRecentAnimeCache = onFetchRecentAnimeCache,
-                compact = true
-            )
+            if (onFetchRecentAnimeCache != null) {
+                RecentDataToggle(
+                    rememberKey = def.key,
+                    currentKey = def.key,
+                    onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                    compact = true
+                )
+            }
         }
     }
 }

@@ -45,17 +45,17 @@ internal fun missingDownloadedEpisodes(
     availableRecordIds: Set<Long> = records.map { it.id }.toSet()
 ): List<DownloadEpisodeCandidate> {
     val downloaded = records.filter { it.statusEnum() == DownloadRecordStatus.Success && it.id in availableRecordIds }
-    val numbers = downloaded.mapNotNull { record ->
-        record.episodeNo.takeIf { it > 0 } ?: DownloadLocalImportPlanner.metadata(record).let {
+    val lookup = SavedEpisodeLookup(episodes)
+    val downloadedIds = downloaded.mapNotNull { record ->
+        val number = record.episodeNo.takeIf { it > 0 } ?: DownloadLocalImportPlanner.metadata(record).let {
             it.episode.takeIf { _ -> it.notes.none { note -> "未识别到集数" in note } }
         }
+        lookup.find(record.episodeTitle, number ?: 0, record.episodeId)?.episodeId
     }.toSet()
-    return episodes.filter { episode ->
-        if (episode.episodeNumber > 0) episode.episodeNumber !in numbers
-        else downloaded.none { record ->
-            (episode.episodeId > 0 && record.episodeId == episode.episodeId) ||
-                (episode.title.isNotBlank() && normalizeEpisodeTitleForMatch(episode.title) == normalizeEpisodeTitleForMatch(record.episodeTitle))
-        }
+    val savedIds = downloaded.map { it.episodeId }.toSet()
+    return episodes.filterNot { episode ->
+        episode.episodeId in downloadedIds ||
+            (episode.episodeNumber <= 0 && episode.episodeId > 0 && episode.episodeId in savedIds)
     }
 }
 
@@ -105,8 +105,9 @@ class SeriesRefreshService @Inject constructor(private val client: OkHttpClient)
                 ), record)) error("详情属于其他剧集或本地弹幕，已跳过")
             val episodes = parseEpisodeCandidates(raw, candidate.sourceLabel.ifBlank { extractSourceFromAnimeTitle(candidate.title) })
             if (episodes.isEmpty()) error("集列表为空")
+            val lookup = SavedEpisodeLookup(episodes)
             val knownLastEpisode = records.filter { it.statusEnum() == DownloadRecordStatus.Success }
-                .maxOfOrNull { it.episodeNo } ?: 0
+                .maxOfOrNull { lookup.numberFor(it.episodeTitle, it.episodeNo) } ?: 0
             if (knownLastEpisode > (episodes.maxOfOrNull { it.episodeNumber } ?: 0)) {
                 error("源端返回的集列表少于已有下载记录，可能尚未更新完整，请稍后重试")
             }

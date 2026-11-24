@@ -253,10 +253,12 @@ async function _loadHandleRequestForVariant(options = {}) {
       workerUrl.searchParams.set('v', String(reloadTag));
     }
     const mod = await import(workerUrl.href);
-    if (!mod?.handleRequest) {
-      throw new Error(`worker.js missing export: handleRequest (variant=${variantKey})`);
+    const coreHandler = typeof mod.handleRequestWithTrace === 'function' ? mod.handleRequestWithTrace : mod.handleRequest;
+    if (typeof coreHandler !== 'function') {
+      throw new Error(`worker.js missing request handler (variant=${variantKey})`);
     }
-    await require('./app-proxy-routing.js').bindCoreSourceContext(path.join(__dirname, i.dir));
+    const coreDir = path.join(__dirname, i.dir);
+    await require('./app-proxy-routing.js').bindCoreSourceContext(coreDir);
     let coreGlobals = null;
     for (const globalsRel of ['configs/globals.js', 'config/globals.js']) {
       try {
@@ -272,8 +274,9 @@ async function _loadHandleRequestForVariant(options = {}) {
       }
     }
     return {
-      handler: _wrapDirectFavoritePersistence(require('./app-series-refresh.js').wrapSeriesRefresh(
-        require('./app-url-metadata.js').wrapUrlMetadata(mod.handleRequest, path.join(__dirname, i.dir)), path.join(__dirname, i.dir))),
+      handler: _wrapDirectFavoritePersistence(require('./app-url-metadata.js').wrapUrlMetadata(
+        require('./app-series-refresh.js').wrapSeriesRefresh(coreHandler, coreDir, mod.handleRequestWithTrace && mod.handleRequest),
+        coreDir)),
       info: i,
       variantKey,
       coreGlobals,

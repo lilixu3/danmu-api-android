@@ -28,10 +28,17 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassIconButton
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 import com.example.danmuapiapp.domain.model.EnvVarDef
 
+internal fun appendStagedSourceGroup(value: String, staged: List<String>): String {
+    val group = staged.joinToString("&")
+    val selected = parseCsvTokens(value)
+    return if (group.isEmpty() || group in selected) value else (selected + group).joinToString(",")
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StableMultiSelectValueEditor(
     envKey: String,
+    draft: ConfigEntryDraft,
     def: EnvVarDef,
     value: String,
     onValueChange: (String) -> Unit,
@@ -96,7 +103,7 @@ internal fun StableMultiSelectValueEditor(
                 Text(
                     when {
                         mergeMode && isMergePairs ->
-                            "合并模式：点选多个源进暂存组，点 ✓ 加入输入框（组内第一个为主源）"
+                            "合并模式：第一个来源为主源。可直接保存，或点 ✓ 后继续添加下一组"
                         mergeMode ->
                             "合并模式：可组合成 a&b 这样的合并组一起返回"
                         isMergePairs ->
@@ -115,6 +122,8 @@ internal fun StableMultiSelectValueEditor(
         }
 
         if (supportsMerge && mergeMode) {
+            val withGroup = appendStagedSourceGroup(value, staging)
+            if (staging.isNotEmpty()) draft.IncludeOnSave(withGroup)
             Text(
                 "暂存组（点下方可选源加入，长按可拖动调序）",
                 style = MaterialTheme.typography.labelLarge,
@@ -133,7 +142,7 @@ internal fun StableMultiSelectValueEditor(
                 ) {
                     DraggableTagFlow(
                         tags = staging,
-                        emptyHint = "点下方可选源加入暂存组，再点右侧 ✓ 加入输入框",
+                        emptyHint = "点选下方来源，然后保存或继续添加下一组",
                         showSeparator = true,
                         modifier = Modifier
                             .weight(1f)
@@ -150,13 +159,8 @@ internal fun StableMultiSelectValueEditor(
                     )
                     AppGlassIconButton(
                         onClick = {
-                            if (staging.isNotEmpty()) {
-                                val group = staging.joinToString("&")
-                                if (group !in selected) {
-                                    onValueChange((selected + group).joinToString(","))
-                                }
-                                staging = emptyList()
-                            }
+                            onValueChange(withGroup)
+                            staging = emptyList()
                         },
                         enabled = staging.isNotEmpty(),
                         size = 34.dp

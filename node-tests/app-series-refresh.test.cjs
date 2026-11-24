@@ -92,13 +92,65 @@ test('concurrent refreshes keep detail maps isolated', async t => {
   assert.equal(bodies[1].appBangumis[0].detail.bangumi.animeTitle, 'Second from tencent');
 });
 
+test('refresh keeps slow source work, fallback and denial in the originating trace', async t => {
+  const directory = fixture(t, `
+    import { currentTrace } from '../utils/pipeline-trace.js';
+    export async function searchAnime(url, a, b, details, c, forceRefresh) {
+      const trace = currentTrace();
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (!forceRefresh || trace.clientIp !== url.searchParams.get('keyword')) throw Error('wrong request');
+      return Response.json({success:true, animes:[{animeId:42, source:'fixture'}]});
+    }
+    export async function getBangumi() { return Response.json({bangumi:{episodes:[]}}); }
+  `);
+  fs.mkdirSync(path.join(directory, 'utils'));
+  fs.mkdirSync(path.join(directory, 'configs'));
+  fs.writeFileSync(path.join(directory, 'configs/globals.js'), 'export const Globals = {reqRecords:[]};');
+  fs.writeFileSync(path.join(directory, 'utils/pipeline-trace.js'), `
+    import { AsyncLocalStorage } from 'node:async_hooks';
+    const storage = new AsyncLocalStorage();
+    export const retained = [];
+    export const createTrace = (method, path, clientIp) => ({id:clientIp, clientIp, startedAt:Date.now(), steps:[]});
+    export const currentTrace = () => storage.getStore();
+    export const runWithTrace = (trace, fn) => storage.run(trace, fn);
+    export function traceStep(name, start, detail) { currentTrace().steps.push({name, ...detail}); }
+    export function finishTrace(trace, keep) { if (keep) retained.push(trace); }
+  `);
+  const { pathToFileURL } = require('node:url');
+  const { retained, currentTrace } = await import(pathToFileURL(path.join(directory, 'utils/pipeline-trace.js')));
+  const { Globals } = await import(pathToFileURL(path.join(directory, 'configs/globals.js')));
+  const handle = wrapSeriesRefresh(() => assert.fail('traced twice'), directory, () => {
+    const trace = currentTrace();
+    if (trace.clientIp === 'denied') return Response.json({}, {status:403});
+    Globals.reqRecords.push({requestId:trace.id});
+    return cached();
+  });
+  const run = (ip, keyword) => handle(new Request('http://localhost/api/v2/search/anime?app_refresh=1&keyword=' + keyword), {}, 'node', ip);
+  const [first, second, fallback, denied] = await Promise.all([
+    run('first','first'), run('second','second'), run('fallback','other'), run('denied','denied')
+  ]);
+  assert.equal((await first.json()).appRefreshFresh, true);
+  assert.equal((await second.json()).appRefreshFresh, true);
+  assert.equal((await fallback.json()).appRefreshFresh, false);
+  assert.equal(denied.status, 403);
+  assert.deepEqual(retained.map(t => t.id).sort(), ['fallback', 'first', 'second']);
+  for (const trace of retained) {
+    assert.equal(trace.statusCode, 200);
+    assert.equal(trace.steps[0].status, trace.id === 'fallback' ? 'fail' : 'ok');
+    if (trace.id !== 'fallback') assert.equal(trace.steps[1].outputs.count, 1);
+    const record = Globals.reqRecords.find(r => r.requestId === trace.id);
+    assert.equal(record.statusCode, 200);
+    assert.ok(record.durationMs >= 15);
+  }
+});
+
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function freePort() {
   const server = net.createServer();
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
-for (const worker of [false, true]) test(`fresh searches use the loaded core and retain authentication (${worker ? 'Worker' : 'direct'})`, {timeout:25000}, async () => {
+for (const worker of [false, true]) test(`fresh searches use the core trace entry and retain authentication (${worker ? 'Worker' : 'direct'})`, {timeout:25000}, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'danmu-fresh-series-host-'));
   let child, output = '';
   try {
@@ -110,7 +162,10 @@ for (const worker of [false, true]) test(`fresh searches use the loaded core and
     const core = path.join(directory, 'danmu_api_stable');
     fs.mkdirSync(path.join(core, 'apis'), {recursive:true});
     fs.writeFileSync(path.join(core, 'package.json'), '{"type":"module"}');
-    fs.writeFileSync(path.join(core, 'worker.js'), `export function handleRequest(req) {
+    fs.writeFileSync(path.join(core, 'worker.js'), `export function handleRequest() {
+      throw new Error('Host bypassed the core trace entry');
+    }
+    export function handleRequestWithTrace(req) {
       if (!new URL(req.url).pathname.startsWith('/user/')) return Response.json({success:false},{status:401});
       return Response.json({success:true,animes:[{animeId:42,animeTitle:'Show from tencent',source:'tencent'}]});
     }`);

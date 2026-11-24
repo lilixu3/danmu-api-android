@@ -1,6 +1,6 @@
 # Node 27 App lite + OpenSSL 4.1.0（ECH/H3）。
-# Celestials316/nodejs-mobile-app-lite Release app-lite-v27.0.0-0，源码树 d146f2e1。
+# Celestials316/nodejs-mobile-app-lite Release app-lite-v27.0.0-2，源码树 8004f883。
 # JNI 与 C++ 运行库由本次构建从源码重编，全部使用 16 KB ELF 对齐。
-8cc5e0044969dfed7bcad79f6d77d82f623028de5dbc4587d02dd51b13badb4e  libnode/bin/arm64-v8a/libnode.so
-b648eacbe3c641bf8bc89bef72c08e91c72e8ae1596fc59105be7ff2c148179e  libnode/bin/armeabi-v7a/libnode.so
-679a4868c9e1c6df1f9a84984c82b3a00821a6ed777367e4727b53cc78346539  libnode/bin/x86_64/libnode.so
+d64ebdadf2081fd3c3671ac726ac7403f5ee5b0c476605080a943c595dd7c19a  libnode/bin/arm64-v8a/libnode.so
+93d6d8eba33d2d32d21e773565caa131293e7cf9c8349a2f3009d195cdaf1ca1  libnode/bin/armeabi-v7a/libnode.so
+829758a06a67ee535dbf7e0b98a842e3666212c639debcb9cefdbc03d61a8050  libnode/bin/x86_64/libnode.so

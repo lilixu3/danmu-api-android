@@ -21,6 +21,16 @@ class AutoMatchMappingModelsTest {
     }
 
     @Test
+    fun `特别篇支持来源零季和文件名预览`() {
+        val rule = "灵笼 S00E01->灵笼 S01E07"
+        assertTrue(validateAutoMatchMappingTable(rule).valid)
+        assertEquals(rule, serializeAutoMatchMappingDrafts(parseAutoMatchMappingDrafts(rule)))
+        assertEquals("灵笼 S01E08", previewAutoMatchMapping(rule, "灵笼.S00E02.mkv")?.targetLabel)
+        assertFalse(validateAutoMatchMappingTable("灵笼 S01E01->灵笼 S00E07").valid)
+        assertFalse(validateAutoMatchMappingTable("灵笼 S00E00->灵笼 S01E07").valid)
+    }
+
+    @Test
     fun `范围长度和平台都会在保存前校验`() {
         val badRange = validateAutoMatchMappingTable(
             "永生 S05E02~03->永生 S01E58~60",

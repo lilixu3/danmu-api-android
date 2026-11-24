@@ -22,9 +22,9 @@ fun Project.danmuIsTermuxHost(): Boolean = System.getenv("TERMUX_VERSION") != nu
     (System.getenv("PREFIX")?.contains("com.termux") == true)
 
 // 支持工作流通过 -PversionName/-PversionCode 覆盖版本
-fun Project.danmuDefaultVersionName(): String = "1.0.5.118"
+fun Project.danmuDefaultVersionName(): String = "1.0.5.119"
 
-fun Project.danmuDefaultVersionCode(): Int = 215
+fun Project.danmuDefaultVersionCode(): Int = 216
 
 fun Project.danmuVersionNameOverride(): String? =
     findProperty("versionName")?.toString()?.trim()?.takeIf { it.isNotEmpty() }

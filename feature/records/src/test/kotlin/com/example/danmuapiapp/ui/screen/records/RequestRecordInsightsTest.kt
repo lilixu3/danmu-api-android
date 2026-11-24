@@ -40,6 +40,15 @@ class RequestRecordInsightsTest {
     }
 
     @Test
+    fun missingDurationsAreExcludedAndMeasuredZeroIsKept() {
+        val unknown = RequestRecord()
+        assertEquals(null, RequestRecordInsights.summarize(listOf(unknown)).p95DurationMs)
+        val records = List(30) { unknown } + unknown.copy(durationMs = 0L)
+        assertEquals(0L, RequestRecordInsights.summarize(records).p95DurationMs)
+        assertEquals(80L, RequestRecordInsights.summarize(records + unknown.copy(durationMs = 80L)).p95DurationMs)
+    }
+
+    @Test
     fun summarizeDoesNotCountMaskedClientAddress() {
         val records = listOf(
             record(1, "/api/a", true, "***"),

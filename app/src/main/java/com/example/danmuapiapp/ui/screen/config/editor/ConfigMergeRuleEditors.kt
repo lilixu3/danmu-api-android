@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -31,13 +30,15 @@ import com.example.danmuapiapp.ui.component.liquid.AppGlassAssistChip
 import com.example.danmuapiapp.ui.component.liquid.AppGlassFilterChip
 import com.example.danmuapiapp.domain.model.AnimeCacheItem
 
+private val mergeEntityPattern = Regex(".+@[a-zA-Z0-9_&]+")
+
 private fun normalizeMergeEntity(raw: String): String {
     return raw.trim()
         .replace('，', ',')
         .replace("＠", "@")
 }
 
-private fun buildCustomMergeRuleFromEntities(
+internal fun buildCustomMergeRuleFromEntities(
     action: String,
     entityA: String,
     entityB: String,
@@ -45,7 +46,7 @@ private fun buildCustomMergeRuleFromEntities(
 ): String {
     val a = normalizeMergeEntity(entityA)
     val b = normalizeMergeEntity(entityB)
-    if (a.isBlank() || b.isBlank() || !a.contains('@') || !b.contains('@')) return ""
+    if (!mergeEntityPattern.matches(a) || !mergeEntityPattern.matches(b)) return ""
     val connector = if (action == "block") " × " else " -> "
     val routes = routesRaw.trim()
     return if (action == "merge" && routes.isNotBlank()) "$a$connector$b | $routes" else "$a$connector$b"
@@ -66,7 +67,7 @@ private fun appendSourceToMergeEntity(raw: String, source: String): String {
     return "$text&$cleanSource"
 }
 
-private fun buildTimelineRule(
+internal fun buildTimelineRule(
     title: String,
     season: String,
     episode: String,
@@ -76,7 +77,7 @@ private fun buildTimelineRule(
 ): String {
     val cleanTitle = title.trim()
     val cleanOffset = offset.trim()
-    if (cleanTitle.isBlank() || cleanOffset.isBlank()) return ""
+    if (cleanTitle.isBlank() || cleanOffset.toDoubleOrNull()?.isFinite() != true) return ""
     val path = buildList {
         add(cleanTitle)
         formatIndexedSegment("S", season).takeIf { it.isNotBlank() }?.let { add(it) }
@@ -92,7 +93,8 @@ internal fun CompactCustomMergeRulesEditor(
     value: String,
     onValueChange: (String) -> Unit,
     options: List<String>,
-    onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
+    draft: ConfigEntryDraft,
+    onFetchRecentAnimeCache: (suspend () -> Result<List<AnimeCacheItem>>)? = null,
 ) {
     var showBuilder by remember(rememberKey) { mutableStateOf(false) }
     var action by remember(rememberKey) { mutableStateOf("merge") }
@@ -103,10 +105,11 @@ internal fun CompactCustomMergeRulesEditor(
     val sourceOptions = remember(options) { options.map { it.trim() }.filter { it.isNotBlank() }.distinct() }
     val preview = buildCustomMergeRuleFromEntities(action, secondaryEntity, primaryEntity, routesRaw)
 
-    fun appendRule(rule: String) {
-        val cleanRule = rule.trim()
-        if (cleanRule.isBlank()) return
-        onValueChange(appendSegment(value, cleanRule, "; "))
+    val withRule = preview.takeIf(String::isNotBlank)?.let { appendSegment(value, it, "; ") }
+    val hasInput = secondaryEntity.isNotBlank() || primaryEntity.isNotBlank() || routesRaw.isNotBlank()
+    if (hasInput) draft.IncludeOnSave(withRule)
+
+    fun clearRule() {
         secondaryEntity = ""
         primaryEntity = ""
         routesRaw = ""
@@ -117,6 +120,7 @@ internal fun CompactCustomMergeRulesEditor(
         val cleanSource = normalizeSource(source)
         val entity = if (cleanTitle.isBlank() || cleanSource.isBlank()) "" else "$cleanTitle@$cleanSource"
         if (entity.isBlank()) return
+        showBuilder = true
         if (role == "prim" || role == "b") {
             primaryEntity = entity
             focusedEntity = "primary"
@@ -144,15 +148,20 @@ internal fun CompactCustomMergeRulesEditor(
             AppGlassButton(onClick = { showBuilder = !showBuilder }) {
                 Text(if (showBuilder) "收起规则表单" else "添加规则")
             }
-            RecentDataToggle(
-                rememberKey = rememberKey,
-                currentKey = KEY_CUSTOM_MERGE_RULES,
-                onFetchRecentAnimeCache = onFetchRecentAnimeCache,
-                onFillMergeEntity = ::fillFromCache,
-                compact = true
-            )
+            if (onFetchRecentAnimeCache != null) {
+                RecentDataToggle(
+                    rememberKey = rememberKey,
+                    currentKey = KEY_CUSTOM_MERGE_RULES,
+                    onFetchRecentAnimeCache = onFetchRecentAnimeCache,
+                    onFillMergeEntity = ::fillFromCache,
+                    compact = true
+                )
+            }
         }
 
+        if (hasInput && withRule == null) {
+            Text("请补全副源和主源的“剧名@来源”。", color = MaterialTheme.colorScheme.error)
+        }
         if (showBuilder) {
             AppGlassSurface(
                 shape = RoundedCornerShape(14.dp),
@@ -161,40 +170,37 @@ internal fun CompactCustomMergeRulesEditor(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppGlassFilterChip(selected = action == "merge", onClick = { action = "merge" }, label = { Text("合并") })
+                        AppGlassFilterChip(selected = action == "block", onClick = { action = "block" }, label = { Text("阻断") })
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         OutlinedTextField(
                             value = secondaryEntity,
                             onValueChange = { secondaryEntity = it },
-                            label = { Text("副源实体（副源剧名@源）") },
-                            placeholder = { Text("例: 我推的孩子/S01@bahamut") },
+                            label = { Text("副源", maxLines = 1) },
+                            placeholder = { Text("剧名@源", maxLines = 1) },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
+                            modifier = Modifier.weight(1f)
                                 .onFocusChanged { if (it.isFocused) focusedEntity = "secondary" }
                         )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("关系", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            AppGlassFilterChip(
-                                selected = action == "merge",
-                                onClick = { action = if (action == "merge") "block" else "merge" },
-                                label = { Text(if (action == "merge") "->" else "×") }
-                            )
-                            Text(if (action == "merge") "合并" else "阻断", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        }
+                        Text(if (action == "merge") "→" else "×", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedTextField(
+                            value = primaryEntity,
+                            onValueChange = { primaryEntity = it },
+                            label = { Text("主源", maxLines = 1) },
+                            placeholder = { Text("剧名@源", maxLines = 1) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                                .onFocusChanged { if (it.isFocused) focusedEntity = "primary" }
+                        )
                     }
-
-                    OutlinedTextField(
-                        value = primaryEntity,
-                        onValueChange = { primaryEntity = it },
-                        label = { Text("主源实体（主源剧名@源）") },
-                        placeholder = { Text("例: 我推的孩子/S03@dandan") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { if (it.isFocused) focusedEntity = "primary" }
-                    )
 
                     if (action == "merge") {
                         OutlinedTextField(
@@ -244,10 +250,13 @@ internal fun CompactCustomMergeRulesEditor(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        AppGlassButton(onClick = { showBuilder = false }, modifier = Modifier.weight(1f)) { Text("取消") }
+                        AppGlassButton(onClick = { clearRule(); showBuilder = false }, modifier = Modifier.weight(1f)) { Text("取消") }
                         AppGlassButton(
-                            onClick = { appendRule(preview) },
-                            enabled = preview.isNotBlank(),
+                            onClick = {
+                                withRule?.let(onValueChange)
+                                clearRule()
+                            },
+                            enabled = withRule != null,
                             modifier = Modifier.weight(1f)
                         ) { Text("确认添加") }
                     }
@@ -263,6 +272,7 @@ internal fun CompactDanmuOffsetEditor(
     value: String,
     onValueChange: (String) -> Unit,
     options: List<String>,
+    draft: ConfigEntryDraft,
     onFetchRecentAnimeCache: suspend () -> Result<List<AnimeCacheItem>>,
 ) {
     SimpleQuickAppendEditor(
@@ -276,13 +286,19 @@ internal fun CompactDanmuOffsetEditor(
         minLines = 3,
         maxLines = 8,
         quickTitle = "添加偏移规则"
-    ) { appendRule, closePanel ->
+    ) { closePanel ->
         var title by remember(rememberKey) { mutableStateOf("") }
         var season by remember(rememberKey) { mutableStateOf("") }
         var episode by remember(rememberKey) { mutableStateOf("") }
         var sourcesRaw by remember(rememberKey) { mutableStateOf("all") }
         var offset by remember(rememberKey) { mutableStateOf("") }
         var percent by remember(rememberKey) { mutableStateOf(false) }
+
+        val rule = buildTimelineRule(title, season, episode, sourcesRaw, offset, percent)
+        val withRule = rule.takeIf(String::isNotBlank)?.let { appendSegment(value, it, ",") }
+        val hasInput = title.isNotBlank() || offset.isNotBlank() || season.isNotBlank() ||
+            episode.isNotBlank() || sourcesRaw != "all" || percent
+        if (hasInput) draft.IncludeOnSave(withRule)
 
         SimpleField(title, { title = it }, "剧名", "例如：孤独摇滚")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -322,8 +338,15 @@ internal fun CompactDanmuOffsetEditor(
                 if (cleanSource.isNotBlank()) sourcesRaw = cleanSource
             }
         )
+        if (hasInput && withRule == null) {
+            Text("请填写剧名和有效的偏移秒数。", color = MaterialTheme.colorScheme.error)
+        }
         QuickActionRow(
-            onAppend = { appendRule(buildTimelineRule(title, season, episode, sourcesRaw, offset, percent), ",") },
+            onAppend = {
+                withRule?.let(onValueChange)
+                closePanel()
+            },
+            enabled = withRule != null,
             onCancel = closePanel
         )
     }

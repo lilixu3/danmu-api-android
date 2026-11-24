@@ -59,6 +59,12 @@ object ApiTestCatalog {
                     label = "动漫名称",
                     required = true,
                     placeholder = "示例：凡人修仙传"
+                ),
+                ApiParamConfig(
+                    name = "episode",
+                    label = "集数（可选）",
+                    placeholder = "例如 3 或 movie",
+                    helper = "留空返回全部剧集，输入 movie 筛选电影。"
                 )
             )
         ),

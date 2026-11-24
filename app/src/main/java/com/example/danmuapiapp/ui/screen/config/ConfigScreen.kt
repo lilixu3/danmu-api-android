@@ -69,6 +69,7 @@ internal const val KEY_CUSTOM_MERGE_RULES = "CUSTOM_MERGE_RULES"
 internal const val KEY_DANMU_OFFSET = "DANMU_OFFSET"
 internal const val KEY_MATCH_PLATFORM_RULES = "MATCH_PLATFORM_RULES"
 internal const val KEY_PLATFORM_ORDER = "PLATFORM_ORDER"
+internal const val KEY_TITLE_PLATFORM_MAP = "TITLE_PLATFORM_MAP"
 internal const val KEY_TITLE_MAPPING_TABLE = "TITLE_MAPPING_TABLE"
 internal const val KEY_AUTO_MATCH_MAPPING_TABLE = "AUTO_MATCH_MAPPING_TABLE"
 internal const val KEY_TITLE_PLATFORM_OFFSET_TABLE = "TITLE_PLATFORM_OFFSET_TABLE"
@@ -130,7 +131,7 @@ fun ConfigScreen(
     }
 
     val grouped = remember(filteredCatalog) { filteredCatalog.groupBy { it.category } }
-    val configuredCount = envVars.size
+    val configuredCount = filteredCatalog.count { !envVars[it.key].isNullOrBlank() }
     val totalCount = filteredCatalog.size
     var adminRequiredPrompt by remember { mutableStateOf<AdminModeRequiredPrompt?>(null) }
     var pendingDeleteVar by remember { mutableStateOf<EnvVarDef?>(null) }
@@ -149,16 +150,18 @@ fun ConfigScreen(
         "other" to "其他"
     )
 
-    if (editingVar != null && adminState.isAdminMode) {
+    val selectedDef = editingVar?.let { selected -> catalog.firstOrNull { it.key == selected.key } ?: selected }
+    if (selectedDef != null && adminState.isAdminMode) {
         EnvVarEditDialog(
-            def = editingVar!!,
-            currentValue = envVars[editingVar!!.key] ?: "",
-            categoryLabel = categoryLabels[editingVar!!.category] ?: editingVar!!.category,
+            def = selectedDef,
+            currentValue = envVars[selectedDef.key].orEmpty(),
+            categoryLabel = categoryLabels[selectedDef.category] ?: selectedDef.category,
             onSave = { value ->
-                viewModel.setValue(editingVar!!.key, value)
+                viewModel.setValue(selectedDef.key, value)
                 viewModel.closeEditor()
             },
             onDismiss = { viewModel.closeEditor() },
+            onRefreshMapping = viewModel::refreshRemoteMapping,
             onGenerateBiliQr = { viewModel.generateBilibiliQr() },
             onPollBiliQr = { key -> viewModel.pollBilibiliQr(key) },
             onVerifyBiliCookie = { cookie -> viewModel.verifyBilibiliCookie(cookie) },

@@ -88,7 +88,7 @@ class EnvConfigRepositoryImpl @Inject constructor(
                 _rawContent.value = text
                 _envVars.value = effectiveEnv
                 _loadedEnvVars.value = effectiveEnv
-                _catalog.value = runCatching { EnvVarConfigLoader.loadCatalog(context) }
+                _catalog.value = runCatching { EnvVarConfigLoader.loadCatalog(context, effectiveEnv) }
                     .getOrElse {
                         Log.w(TAG, "加载环境变量目录失败", it)
                         emptyList()

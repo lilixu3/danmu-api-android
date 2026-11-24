@@ -214,8 +214,18 @@ data class RequestRecord(
     val method: String = "GET",
     val url: String = "",
     val statusCode: Int? = null,
-    val durationMs: Long = 0L,
+    val durationMs: Long? = null,
     val success: Boolean = false,
     val errorMessage: String? = null,
-    val responseSnippet: String? = null
+    val responseSnippet: String? = null,
+    val requestId: String? = null,
+    val fileNameMatch: FileNameMatchSummary? = null
+)
+
+@Serializable
+data class FileNameMatchSummary(
+    val fileName: String,
+    val fileHash: String?,
+    val fileSize: Long?,
+    val videoDuration: Long?
 )

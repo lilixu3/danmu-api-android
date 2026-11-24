@@ -52,8 +52,8 @@ internal fun parseAutoMatchMappingDrafts(raw: String): List<AutoMatchMappingDraf
         }
         val sourceRaw = MappingTableCodec.unescape(rule.substring(0, arrow)).trim()
         val targetRaw = MappingTableCodec.unescape(rule.substring(arrow + 2)).trim()
-        val source = parseAutoMatchSide(sourceRaw, allowPlatform = false)
-        val target = parseAutoMatchSide(targetRaw, allowPlatform = true)
+        val source = parseAutoMatchSide(sourceRaw, targetSide = false)
+        val target = parseAutoMatchSide(targetRaw, targetSide = true)
         AutoMatchMappingDraft(
             sourceTitle = source?.title ?: sourceRaw,
             sourceSeason = source?.season?.toString() ?: "",
@@ -106,11 +106,11 @@ internal fun validateAutoMatchMappingTable(
         }
         val source = parseAutoMatchSide(
             MappingTableCodec.unescape(text.substring(0, arrow)),
-            allowPlatform = false
+            targetSide = false
         ) ?: return invalidRule(index, "来源季集格式无效")
         val target = parseAutoMatchSide(
             MappingTableCodec.unescape(text.substring(arrow + 2)),
-            allowPlatform = true
+            targetSide = true
         ) ?: return invalidRule(index, "目标季集格式无效")
         val sourceBounded = source.endEpisode != null
         val targetBounded = target.endEpisode != null
@@ -146,11 +146,11 @@ internal fun previewAutoMatchMapping(
         val arrow = MappingTableCodec.findArrow(text) ?: return@mapIndexedNotNull null
         val source = parseAutoMatchSide(
             MappingTableCodec.unescape(text.substring(0, arrow)),
-            allowPlatform = false
+            targetSide = false
         ) ?: return@mapIndexedNotNull null
         val target = parseAutoMatchSide(
             MappingTableCodec.unescape(text.substring(arrow + 2)),
-            allowPlatform = true
+            targetSide = true
         ) ?: return@mapIndexedNotNull null
         if (normalizeAutoMatchTitle(source.title) != normalizeAutoMatchTitle(input.title)) {
             return@mapIndexedNotNull null
@@ -175,10 +175,10 @@ internal fun previewAutoMatchMapping(
     )
 }
 
-private fun parseAutoMatchSide(raw: String, allowPlatform: Boolean): ParsedAutoMatchSide? {
+private fun parseAutoMatchSide(raw: String, targetSide: Boolean): ParsedAutoMatchSide? {
     var text = raw.trim()
     var platform = ""
-    if (allowPlatform) {
+    if (targetSide) {
         val match = AUTO_MATCH_PLATFORM_REGEX.find(text)
         if (match != null && match.range.last == text.lastIndex) {
             platform = match.groupValues[1].lowercase(Locale.ROOT)
@@ -190,7 +190,7 @@ private fun parseAutoMatchSide(raw: String, allowPlatform: Boolean): ParsedAutoM
     val season = match.groupValues[2].toIntOrNull() ?: return null
     val start = match.groupValues[3].toIntOrNull() ?: return null
     val end = match.groupValues[4].takeIf { it.isNotBlank() }?.toIntOrNull()
-    if (title.isBlank() || season < 1 || start < 1 || (end != null && end < start)) return null
+    if (title.isBlank() || (targetSide && season == 0) || start < 1 || (end != null && end < start)) return null
     return ParsedAutoMatchSide(title, season, start, end, platform)
 }
 
@@ -202,7 +202,7 @@ private fun parsePreviewFileName(raw: String): ParsedAutoMatchSide? {
     val title = leaf.substring(0, match.range.first)
         .replace(Regex("[._]+"), " ")
         .trim(' ', '-', '[', '(', '_', '.')
-    if (title.isBlank() || season < 1 || episode < 1) return null
+    if (title.isBlank() || episode < 1) return null
     return ParsedAutoMatchSide(title, season, episode, null)
 }
 
@@ -212,7 +212,7 @@ private fun serializeAutoMatchSide(
     startEpisode: String,
     endEpisode: String
 ): String {
-    val seasonText = season.toIntOrNull()?.takeIf { it > 0 }?.toString()?.padStart(2, '0') ?: season.trim()
+    val seasonText = season.toIntOrNull()?.takeIf { it >= 0 }?.toString()?.padStart(2, '0') ?: season.trim()
     val startText = startEpisode.toIntOrNull()?.takeIf { it > 0 }?.toString()?.padStart(2, '0')
         ?: startEpisode.trim()
     val endText = endEpisode.toIntOrNull()?.takeIf { it > 0 }?.toString()?.padStart(2, '0')

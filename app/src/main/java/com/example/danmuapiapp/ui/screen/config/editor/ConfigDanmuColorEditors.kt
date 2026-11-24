@@ -75,10 +75,16 @@ private fun parseColorToken(raw: String): Int? {
     return value.takeIf { it in 0..0xFFFFFF }
 }
 
-internal fun parseColorList(raw: String): List<Int> {
-    return raw.split(Regex("[,;\\s，、]+"))
-        .mapNotNull { parseColorToken(it) }
-}
+private val colorSeparators = Regex("[,;\\s，、]+")
+
+internal fun parseColorList(raw: String): List<Int> =
+    raw.split(colorSeparators).mapNotNull { token ->
+        // Saved pools use decimal integers, including three- and six-digit values.
+        token.toIntOrNull()?.takeIf { it in 0..0xFFFFFF } ?: parseColorToken(token)
+    }
+
+internal fun parseColorBatch(raw: String): List<Int>? =
+    raw.split(colorSeparators).filter(String::isNotBlank).map { parseColorToken(it) ?: return null }
 
 internal fun colorHex(color: Int): String {
     return "#" + (color and 0xFFFFFF).toString(16).padStart(6, '0').uppercase(Locale.getDefault())
@@ -88,7 +94,7 @@ private fun colorCompose(color: Int): Color {
     return Color(0xFF000000.toInt() or (color and 0xFFFFFF))
 }
 
-private fun appendColorsToRaw(current: String, colors: List<Int>): String {
+internal fun appendColorsToRaw(current: String, colors: List<Int>): String {
     val cleanColors = colors.filter { it in 0..0xFFFFFF }
     if (cleanColors.isEmpty()) return current
     val currentMode = current.trim().lowercase(Locale.getDefault())
@@ -191,8 +197,10 @@ internal fun ColorListEditor(
     onValueChange: (String) -> Unit,
     title: String,
     envKey: String,
+    draft: ConfigEntryDraft,
 ) {
     var panel by remember(rememberKey) { mutableStateOf("none") }
+    var colorEdited by remember(rememberKey) { mutableStateOf(false) }
     var colorInput by remember(rememberKey) { mutableStateOf("#FFFFFF") }
     var batchInput by remember(rememberKey) { mutableStateOf("") }
     var hue by remember(rememberKey) { mutableStateOf(0f) }
@@ -204,7 +212,28 @@ internal fun ColorListEditor(
     val rawMode = value.trim().lowercase(Locale.ROOT)
     val wheelColor = remember(hue, lightness) { hslToDecimal(hue, 100f, lightness) }
     val selectedColor = parseColorToken(colorInput)
-    val batchColors = remember(batchInput) { parseColorList(batchInput) }
+    val batchColors = remember(batchInput) { parseColorBatch(batchInput) }
+    val editingBatch = panel == "batch" && batchInput.isNotBlank()
+    val editingSingle = panel == "color" && colorEdited
+    val pending = when {
+        editingBatch -> batchColors
+        editingSingle -> selectedColor?.let(::listOf)
+        else -> emptyList()
+    }
+    val withPending = pending?.let { appendColorsToRaw(value, it) }
+    if (editingBatch || editingSingle) draft.IncludeOnSave(withPending)
+
+    fun changePanel(next: String) {
+        panel = next
+        colorEdited = false
+        batchInput = ""
+    }
+
+    fun selectWheelColor() {
+        colorInput = colorHex(hslToDecimal(hue, 100f, lightness))
+        colorEdited = true
+    }
+
     val modeSummary = when {
         isConvertColor && (rawMode.isBlank() || rawMode == "default") -> "当前：default，不转换弹幕颜色。"
         isConvertColor && rawMode == "white" -> "当前：white，全部弹幕转白色。"
@@ -232,9 +261,9 @@ internal fun ColorListEditor(
 
         if (isConvertColor) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                AppGlassFilterChip(selected = rawMode.isBlank() || rawMode == "default", onClick = { onValueChange("default"); panel = "none" }, label = { Text("default") })
-                AppGlassFilterChip(selected = rawMode == "white", onClick = { onValueChange("white"); panel = "none" }, label = { Text("white") })
-                AppGlassFilterChip(selected = rawMode == "color", onClick = { onValueChange("color"); panel = "none" }, label = { Text("color") })
+                AppGlassFilterChip(selected = rawMode.isBlank() || rawMode == "default", onClick = { onValueChange("default"); changePanel("none") }, label = { Text("default") })
+                AppGlassFilterChip(selected = rawMode == "white", onClick = { onValueChange("white"); changePanel("none") }, label = { Text("white") })
+                AppGlassFilterChip(selected = rawMode == "color", onClick = { onValueChange("color"); changePanel("none") }, label = { Text("color") })
             }
         }
 
@@ -257,14 +286,18 @@ internal fun ColorListEditor(
         }
 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AppGlassButton(onClick = { panel = if (panel == "color") "none" else "color" }) {
+            AppGlassButton(onClick = { changePanel(if (panel == "color") "none" else "color") }) {
                 Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.size(6.dp))
                 Text(if (panel == "color") "收起颜色盘" else "颜色盘")
             }
             AppGlassButton(onClick = { appendColors(listOf(Random.nextInt(0x1000000))) }) { Text("随机添加") }
-            AppGlassButton(onClick = { panel = if (panel == "batch") "none" else "batch" }) { Text("批量添加") }
-            AppGlassButton(onClick = { onValueChange(if (isConvertColor) "default" else "") }) { Text("恢复默认") }
+            AppGlassButton(onClick = { changePanel(if (panel == "batch") "none" else "batch") }) { Text("批量添加") }
+            AppGlassButton(onClick = { changePanel("none"); onValueChange(if (isConvertColor) "default" else "") }) { Text("恢复默认") }
+        }
+
+        if (withPending == null) {
+            Text("请输入有效的 HEX 或十进制颜色值。", color = MaterialTheme.colorScheme.error)
         }
 
         if (panel == "color") {
@@ -277,15 +310,15 @@ internal fun ColorListEditor(
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("颜色盘", style = MaterialTheme.typography.labelLarge)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        HueWheel(hue = hue, color = wheelColor, onHueChange = { hue = it })
+                        HueWheel(hue = hue, color = wheelColor, onHueChange = { hue = it; selectWheelColor() })
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ColorDot(wheelColor, modifier = Modifier.size(34.dp))
                                 Text(colorHex(wheelColor), style = MaterialTheme.typography.bodyMedium)
                             }
                             Text("亮度", style = MaterialTheme.typography.labelMedium)
-                            Slider(value = lightness, onValueChange = { lightness = it }, valueRange = 10f..90f)
-                            AppGlassButton(onClick = { appendColors(listOf(wheelColor)); colorInput = colorHex(wheelColor) }) { Text("添加当前颜色") }
+                            Slider(value = lightness, onValueChange = { lightness = it; selectWheelColor() }, valueRange = 10f..90f)
+                            AppGlassButton(onClick = { appendColors(listOf(wheelColor)); colorInput = colorHex(wheelColor); colorEdited = false }) { Text("添加当前颜色") }
                         }
                     }
 
@@ -293,7 +326,7 @@ internal fun ColorListEditor(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         QuickColorPalette.forEach { preset ->
                             AppGlassAssistChip(
-                                onClick = { colorInput = colorHex(preset); appendColors(listOf(preset)) },
+                                onClick = { colorInput = colorHex(preset); colorEdited = false; appendColors(listOf(preset)) },
                                 leadingIcon = { ColorDot(preset) },
                                 label = { Text(colorHex(preset)) }
                             )
@@ -304,7 +337,8 @@ internal fun ColorListEditor(
                         ColorDot(selectedColor ?: wheelColor, modifier = Modifier.size(28.dp))
                         OutlinedTextField(
                             value = colorInput,
-                            onValueChange = { colorInput = it },
+                            onValueChange = { colorInput = it; colorEdited = it.isNotBlank() },
+                            isError = editingSingle && selectedColor == null,
                             label = { Text("HEX / 十进制") },
                             placeholder = { Text("#FF6699 或 16737945") },
                             singleLine = true,
@@ -313,8 +347,14 @@ internal fun ColorListEditor(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        AppGlassButton(onClick = { selectedColor?.let { appendColors(listOf(it)) } }, enabled = selectedColor != null) { Text("添加输入颜色") }
-                        AppGlassButton(onClick = { panel = "none" }) { Text("完成") }
+                        AppGlassButton(onClick = { selectedColor?.let { appendColors(listOf(it)); colorEdited = false } }, enabled = selectedColor != null) { Text("添加输入颜色") }
+                        AppGlassButton(
+                            onClick = {
+                                if (editingSingle) withPending?.let(onValueChange)
+                                changePanel("none")
+                            },
+                            enabled = withPending != null
+                        ) { Text("完成") }
                     }
                 }
             }
@@ -340,20 +380,19 @@ internal fun ColorListEditor(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (batchColors.isNotEmpty()) {
+                    if (!batchColors.isNullOrEmpty()) {
                         Text("预览：${batchColors.size} 个颜色", style = MaterialTheme.typography.bodySmall)
                         ColorPreviewChips(batchColors, maxCount = 20)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         AppGlassButton(
                             onClick = {
-                                appendColors(batchColors)
-                                batchInput = ""
-                                panel = "none"
+                                withPending?.let(onValueChange)
+                                changePanel("none")
                             },
-                            enabled = batchColors.isNotEmpty()
+                            enabled = !batchColors.isNullOrEmpty()
                         ) { Text("确认添加") }
-                        AppGlassButton(onClick = { panel = "none" }) { Text("取消") }
+                        AppGlassButton(onClick = { changePanel("none") }) { Text("取消") }
                     }
                 }
             }
